@@ -1349,6 +1349,8 @@ function CodeWorkspace(props) {
 }
 
 function DocumentWorkspace(props) {
+  const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
+
   return (
     <section className="workspace-grid">
       <div className="left-column">
@@ -1462,7 +1464,16 @@ function DocumentWorkspace(props) {
             </div>
           </div>
           <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
-          <textarea value={props.question} onChange={(event) => props.setQuestion(event.target.value)} placeholder="업로드한 문서에서 확인할 내용을 질문하세요." />
+          <div className="question-guide">
+            <strong>{activeAnswerModeGuide.title}</strong>
+            <p>{activeAnswerModeGuide.description}</p>
+            <ul>
+              {activeAnswerModeGuide.tips.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+          <textarea value={props.question} onChange={(event) => props.setQuestion(event.target.value)} placeholder={activeAnswerModeGuide.placeholder} />
           <div className="action-row">
             <button disabled={!props.question || props.loading('ask')}>
               {props.loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
@@ -2287,6 +2298,52 @@ function getSourceLabel(type) {
 
 function getAnswerModeLabel(mode) {
   return answerModes.find((item) => item.value === mode)?.label || '질문 답변';
+}
+
+function getAnswerModeGuide(mode) {
+  const guides = {
+    qa: {
+      title: '질문 답변 예시',
+      description: '인덱싱된 문서 전체에서 관련 근거를 찾고, 질문에 맞는 자연어 답변을 받을 때 사용합니다.',
+      placeholder: '예: 기간제 단시간 파견 근로자 차별예방을 위해 뭐가 개선되는거야?',
+      tips: [
+        '규정명, 파일명, 주제어처럼 알고 있는 단서를 같이 적으면 관련 문서를 더 잘 찾습니다.',
+        '“왜?”, “어떻게?”, “무엇이 달라져?”처럼 설명형 질문에 적합합니다.',
+        '답변 아래의 신뢰도, 진단, 근거 문서를 함께 확인하세요.',
+      ],
+    },
+    summary: {
+      title: '요약 질문 예시',
+      description: '문서나 주제를 핵심 요점 중심으로 짧게 정리받을 때 사용합니다.',
+      placeholder: '예: 기간제·단시간·파견 근로자 차별 예방 가이드라인을 핵심만 요약해줘.',
+      tips: [
+        '특정 문서를 요약하려면 문서명이나 파일명을 질문에 포함하세요.',
+        '“핵심만”, “실무자가 볼 내용”, “결정해야 할 사항”처럼 요약 관점을 적으면 좋습니다.',
+        '여러 문서가 있으면 현재 공간의 문서 전체에서 관련 근거를 찾아 요약합니다.',
+      ],
+    },
+    table: {
+      title: '표 추출 질문 예시',
+      description: '표, 엑셀, 항목 목록, 비교 내용, 인원수나 건수 같은 집계 정보를 구조화할 때 사용합니다.',
+      placeholder: '예: 육아기단축근로 대상자는 총 몇 명이고 부서별로 몇 명인지 표로 정리해줘.',
+      tips: [
+        '“총 몇 명”, “부서별”, “항목별”, “표로 정리”처럼 원하는 구조를 직접 적으세요.',
+        '엑셀이나 CSV 집계 질문은 가능한 경우 서버가 전체 청크를 기준으로 계산합니다.',
+        'PDF 표는 추출 품질에 따라 행과 열이 깨질 수 있으니 근거 내용을 같이 확인하세요.',
+      ],
+    },
+    quote: {
+      title: '원문 인용 질문 예시',
+      description: '규정, 지침, 계약 문구처럼 실제 문서 표현을 짧게 확인하고 싶을 때 사용합니다.',
+      placeholder: '예: 차별적 처우 금지와 관련된 원문 근거 문구를 인용해서 보여줘.',
+      tips: [
+        '법령, 규정, 가이드라인 문구를 확인할 때 가장 적합합니다.',
+        '“그대로 인용”, “원문 문구”, “근거 조항”처럼 요청하면 인용 중심으로 답합니다.',
+        '긴 문서 전체 복사보다 관련 짧은 발췌와 출처 확인에 맞춰져 있습니다.',
+      ],
+    },
+  };
+  return guides[mode] || guides.qa;
 }
 
 function getCodeModeLabel(mode) {
