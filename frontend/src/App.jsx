@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bot,
@@ -154,6 +154,9 @@ function App() {
   const [codeModalOpen, setCodeModalOpen] = useState(false);
 
   const [webUrl, setWebUrl] = useState('');
+  const [webRecursive, setWebRecursive] = useState(true);
+  const [webMaxDepth, setWebMaxDepth] = useState(2);
+  const [webMaxPages, setWebMaxPages] = useState(30);
   const [file, setFile] = useState(null);
   const [query, setQuery] = useState('');
   const [question, setQuestion] = useState('');
@@ -384,7 +387,13 @@ function App() {
     await run('web', async () => {
       await request('/api/sources/web', {
         method: 'POST',
-        json: { url: webUrl, spaceId: activeSpaceId },
+        json: {
+          url: webUrl,
+          spaceId: activeSpaceId,
+          recursive: webRecursive,
+          maxDepth: Number(webMaxDepth),
+          maxPages: Number(webMaxPages),
+        },
       });
       setWebUrl('');
       await refreshDocuments();
@@ -798,6 +807,12 @@ function App() {
           <DocumentWorkspace
             webUrl={webUrl}
             setWebUrl={setWebUrl}
+            webRecursive={webRecursive}
+            setWebRecursive={setWebRecursive}
+            webMaxDepth={webMaxDepth}
+            setWebMaxDepth={setWebMaxDepth}
+            webMaxPages={webMaxPages}
+            setWebMaxPages={setWebMaxPages}
             file={file}
             setFile={setFile}
             ingestWeb={ingestWeb}
@@ -1278,7 +1293,7 @@ function CodeWorkspace(props) {
                   )}
                 </div>
               )}
-              <p>{codeAnswer.answer}</p>
+              <MarkdownAnswer text={codeAnswer.answer} />
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
           )}
@@ -1353,6 +1368,36 @@ function DocumentWorkspace(props) {
                 {props.loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
                 인덱싱
               </button>
+            </div>
+            <label className="checkbox-row" htmlFor="web-recursive">
+              <input id="web-recursive" type="checkbox" checked={props.webRecursive} onChange={(event) => props.setWebRecursive(event.target.checked)} />
+              <span>시작 URL의 하위 경로를 재귀 수집</span>
+            </label>
+            <div className="form-grid two">
+              <div className="stack">
+                <label htmlFor="web-max-depth">깊이</label>
+                <input
+                  id="web-max-depth"
+                  type="number"
+                  min="0"
+                  max="2"
+                  value={props.webMaxDepth}
+                  disabled={!props.webRecursive}
+                  onChange={(event) => props.setWebMaxDepth(event.target.value)}
+                />
+              </div>
+              <div className="stack">
+                <label htmlFor="web-max-pages">최대 페이지</label>
+                <input
+                  id="web-max-pages"
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={props.webMaxPages}
+                  disabled={!props.webRecursive}
+                  onChange={(event) => props.setWebMaxPages(event.target.value)}
+                />
+              </div>
             </div>
           </form>
           <form className="stack" onSubmit={props.ingestFile}>
@@ -1431,7 +1476,19 @@ function DocumentWorkspace(props) {
                 <strong>답변</strong>
               </div>
               <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
-              <p>{props.answer.answer}</p>
+              {(props.answer.confidence || props.answer.diagnostics?.length > 0) && (
+                <div className={`confidence-strip confidence-${confidenceClass(props.answer.confidence)}`}>
+                  {props.answer.confidence && <strong>신뢰도 {props.answer.confidence}</strong>}
+                  {props.answer.diagnostics?.length > 0 && (
+                    <ul>
+                      {props.answer.diagnostics.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <MarkdownAnswer text={props.answer.answer} />
               <EvidenceList evidence={props.answer.evidence} />
             </div>
           )}
@@ -1803,6 +1860,129 @@ function ResultList({ results, title }) {
       {!results.length && <p className="empty">{title}가 없습니다.</p>}
     </div>
   );
+}
+
+function MarkdownAnswer({ text = '' }) {
+  const blocks = parseMarkdownBlocks(text);
+  return (
+    <div className="markdown-answer">
+      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+    </div>
+  );
+}
+
+function parseMarkdownBlocks(text = '') {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const blocks = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!line.trim()) {
+      continue;
+    }
+    if (line.trim().startsWith('```')) {
+      const language = line.trim().slice(3).trim();
+      const codeLines = [];
+      index++;
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index]);
+        index++;
+      }
+      blocks.push({ type: 'code', language, text: codeLines.join('\n') });
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: 'heading', level: heading[1].length, text: heading[2].trim() });
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, '').trim());
+        index++;
+      }
+      index--;
+      blocks.push({ type: 'ul', items });
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, '').trim());
+        index++;
+      }
+      index--;
+      blocks.push({ type: 'ol', items });
+      continue;
+    }
+
+    const paragraph = [line.trim()];
+    while (index + 1 < lines.length
+      && lines[index + 1].trim()
+      && !lines[index + 1].trim().startsWith('```')
+      && !/^(#{1,4})\s+/.test(lines[index + 1])
+      && !/^\s*[-*]\s+/.test(lines[index + 1])
+      && !/^\s*\d+\.\s+/.test(lines[index + 1])) {
+      paragraph.push(lines[index + 1].trim());
+      index++;
+    }
+    blocks.push({ type: 'p', text: paragraph.join(' ') });
+  }
+  return blocks.length ? blocks : [{ type: 'p', text: '' }];
+}
+
+function renderMarkdownBlock(block, index) {
+  if (block.type === 'code') {
+    return (
+      <pre className="markdown-code" key={index}>
+        {block.language && <span className="markdown-code-lang">{block.language}</span>}
+        <code>{block.text}</code>
+      </pre>
+    );
+  }
+  if (block.type === 'heading') {
+    const HeadingTag = block.level <= 2 ? 'h3' : 'h4';
+    return <HeadingTag key={index}>{renderInlineMarkdown(block.text, `h-${index}`)}</HeadingTag>;
+  }
+  if (block.type === 'ul') {
+    return (
+      <ul key={index}>
+        {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item, `u-${index}-${itemIndex}`)}</li>)}
+      </ul>
+    );
+  }
+  if (block.type === 'ol') {
+    return (
+      <ol key={index}>
+        {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item, `o-${index}-${itemIndex}`)}</li>)}
+      </ol>
+    );
+  }
+  return <p key={index}>{renderInlineMarkdown(block.text, `p-${index}`)}</p>;
+}
+
+function renderInlineMarkdown(text = '', keyPrefix = 'md') {
+  const parts = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match;
+  let partIndex = 0;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(<Fragment key={`${keyPrefix}-t-${partIndex++}`}>{text.slice(lastIndex, match.index)}</Fragment>);
+    }
+    const token = match[0];
+    if (token.startsWith('`')) {
+      parts.push(<code key={`${keyPrefix}-c-${partIndex++}`}>{token.slice(1, -1)}</code>);
+    } else {
+      parts.push(<strong key={`${keyPrefix}-b-${partIndex++}`}>{token.slice(2, -2)}</strong>);
+    }
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(<Fragment key={`${keyPrefix}-t-${partIndex++}`}>{text.slice(lastIndex)}</Fragment>);
+  }
+  return parts;
 }
 
 function EvidenceList({ evidence = [] }) {
@@ -2203,7 +2383,7 @@ function jobPercent(job) {
 function getProgressMessage(busy) {
   if (!busy) return '';
   if (busy === 'login') return '로그인 중입니다.';
-  if (busy === 'web') return '웹 페이지를 추출하고 임베딩하는 중입니다.';
+  if (busy === 'web') return '웹 페이지를 수집하고 임베딩하는 중입니다.';
   if (busy === 'file') return '파일 텍스트를 추출하고 임베딩하는 중입니다.';
   if (busy === 'ask' || busy === 'code-ask') return '근거 검색 후 답변을 생성하는 중입니다.';
   if (busy === 'search' || busy === 'code-search') return '검색 결과를 가져오는 중입니다.';

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -36,7 +37,12 @@ public class WebPageExtractor {
     }
 
     public ExtractedDocument extract(UUID sourceId, String url) {
+        return fetchPage(sourceId, url).document();
+    }
+
+    public FetchedPage fetchPage(UUID sourceId, String url) {
         URI uri = URI.create(url);
+        requireHttpScheme(uri);
         String host = requireHost(uri);
         boolean allowedDomain = isAllowedDomain(host);
         if (!allowedDomain) {
@@ -61,10 +67,16 @@ public class WebPageExtractor {
                     .execute();
             int statusCode = response.statusCode();
             Document doc = response.parse();
+            doc.setBaseUri(url);
+            List<URI> links = extractLinks(doc);
 
-            doc.select("script, style, noscript, svg, canvas").remove();
+            String canonicalUrl = canonicalUrl(doc, url);
+            String heading = firstHeading(doc);
+
+            doc.select("script, style, noscript, svg, canvas, nav, footer, form").remove();
             String title = doc.title() == null || doc.title().isBlank() ? url : doc.title();
-            String content = doc.body() == null ? "" : doc.body().text();
+            String bodyText = doc.body() == null ? "" : doc.body().text();
+            String content = webContentHeader(title, url, heading) + bodyText;
             String images = doc.select("img[src]").stream()
                     .map(element -> element.absUrl("src"))
                     .filter(value -> !value.isBlank())
@@ -76,19 +88,37 @@ public class WebPageExtractor {
                 content = content + "\n\nImage URLs:\n" + images;
             }
 
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("host", uri.getHost());
+            metadata.put("canonicalUrl", canonicalUrl);
+            metadata.put("heading", heading);
+            metadata.put("bodyTextLength", bodyText.length());
+
             ExtractedDocument extracted = new ExtractedDocument(
                     title,
                     url,
                     "text/html",
                     content,
-                    Map.of("host", uri.getHost())
+                    metadata
             );
             audit(sourceId, url, host, true, robotsAllowed, statusCode, true,
-                    "Fetched one page. Page limit per request: " + properties.getCrawler().getMaxPagesPerRequest());
-            return extracted;
+                    "Fetched page.");
+            return new FetchedPage(uri, extracted, links, host, robotsAllowed, statusCode);
         } catch (Exception ex) {
             audit(sourceId, url, host, true, robotsAllowed, null, false, ex.getMessage());
             throw new IllegalArgumentException("Could not crawl URL: " + ex.getMessage(), ex);
+        }
+    }
+
+    public void auditSkipped(UUID sourceId, URI uri, String message) {
+        String host = requireHost(uri);
+        audit(sourceId, uri.toString(), host, true, null, null, false, message);
+    }
+
+    private void requireHttpScheme(URI uri) {
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new IllegalArgumentException("URL must use http or https.");
         }
     }
 
@@ -98,6 +128,48 @@ public class WebPageExtractor {
             throw new IllegalArgumentException("URL must include a host.");
         }
         return host.toLowerCase(Locale.ROOT);
+    }
+
+    private List<URI> extractLinks(Document doc) {
+        return doc.select("a[href]").stream()
+                .map(element -> element.absUrl("href"))
+                .filter(value -> !value.isBlank())
+                .map(this::toUriOrNull)
+                .filter(uri -> uri != null)
+                .toList();
+    }
+
+    private URI toUriOrNull(String value) {
+        try {
+            return URI.create(value);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private String canonicalUrl(Document doc, String fallbackUrl) {
+        var canonical = doc.selectFirst("link[rel=canonical]");
+        if (canonical == null) {
+            return fallbackUrl;
+        }
+        String href = canonical.absUrl("href");
+        return href == null || href.isBlank() ? fallbackUrl : href;
+    }
+
+    private String firstHeading(Document doc) {
+        var heading = doc.selectFirst("h1, h2");
+        return heading == null ? "" : heading.text();
+    }
+
+    private String webContentHeader(String title, String url, String heading) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Page title: ").append(title).append("\n");
+        builder.append("URL: ").append(url).append("\n");
+        if (heading != null && !heading.isBlank()) {
+            builder.append("Heading: ").append(heading).append("\n");
+        }
+        builder.append("\n");
+        return builder.toString();
     }
 
     private boolean isAllowedDomain(String host) {
@@ -173,6 +245,16 @@ public class WebPageExtractor {
             String message
     ) {
         repository.createCrawlAuditLog(sourceId, url, host, allowedDomain, robotsAllowed, statusCode, success, message);
+    }
+
+    public record FetchedPage(
+            URI uri,
+            ExtractedDocument document,
+            List<URI> links,
+            String host,
+            Boolean robotsAllowed,
+            Integer statusCode
+    ) {
     }
 
     private record RobotsRule(String path, boolean allow) {

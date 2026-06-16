@@ -20,7 +20,9 @@ learnbot:
     allowed-domains: ${LEARNBOT_CRAWLER_ALLOWED_DOMAINS:example.com}
     timeout-seconds: ${LEARNBOT_CRAWLER_TIMEOUT_SECONDS:15}
     rate-limit-millis: ${LEARNBOT_CRAWLER_RATE_LIMIT_MILLIS:1000}
-    max-pages-per-request: ${LEARNBOT_CRAWLER_MAX_PAGES_PER_REQUEST:1}
+    max-pages-per-request: ${LEARNBOT_CRAWLER_MAX_PAGES_PER_REQUEST:30}
+    max-depth: ${LEARNBOT_CRAWLER_MAX_DEPTH:2}
+    min-content-chars: ${LEARNBOT_CRAWLER_MIN_CONTENT_CHARS:200}
     respect-robots-txt: ${LEARNBOT_CRAWLER_RESPECT_ROBOTS_TXT:true}
   chunking:
     size: ${LEARNBOT_CHUNK_SIZE:1200}

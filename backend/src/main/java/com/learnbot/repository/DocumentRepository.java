@@ -136,6 +136,15 @@ public class DocumentRepository {
                 """, new MapSqlParameterSource().addValue("sourceId", sourceId));
     }
 
+    public int countDocumentsForSource(UUID sourceId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM documents
+                WHERE source_id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), Integer.class);
+        return count == null ? 0 : count;
+    }
+
     public void createSourceObject(UUID sourceId, StoredObject object) {
         jdbc.update("""
                 INSERT INTO source_objects (id, source_id, bucket, object_key, original_filename, content_type, size_bytes)
@@ -266,7 +275,7 @@ public class DocumentRepository {
                 FROM crawl_audit_logs
                 WHERE source_id = :sourceId
                 ORDER BY started_at DESC
-                LIMIT 10
+                LIMIT 100
                 """, new MapSqlParameterSource().addValue("sourceId", sourceId), (rs, rowNum) -> new CrawlAuditSummary(
                 rs.getObject("id", UUID.class),
                 rs.getString("url"),
@@ -336,7 +345,12 @@ public class DocumentRepository {
                        d.content_type,
                        c.chunk_index,
                        c.content,
-                       ts_rank(c.search_vector, plainto_tsquery('simple', :query)) AS score
+                       (
+                         ts_rank(c.search_vector, plainto_tsquery('simple', :query)) +
+                         CASE WHEN d.title ILIKE :likeQuery THEN 0.30 ELSE 0 END +
+                         CASE WHEN d.source_uri ILIKE :likeQuery THEN 0.14 ELSE 0 END +
+                         CASE WHEN c.content ILIKE :likeQuery THEN 0.10 ELSE 0 END
+                       ) AS score
                 FROM document_chunks c
                 JOIN documents d ON d.id = c.document_id
                 JOIN data_sources s ON s.id = d.source_id
@@ -345,7 +359,12 @@ public class DocumentRepository {
                   AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
                   AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
-                  AND (c.search_vector @@ plainto_tsquery('simple', :query) OR c.content ILIKE :likeQuery)
+                  AND (
+                    c.search_vector @@ plainto_tsquery('simple', :query)
+                    OR c.content ILIKE :likeQuery
+                    OR d.title ILIKE :likeQuery
+                    OR d.source_uri ILIKE :likeQuery
+                  )
                 ORDER BY score DESC
                 LIMIT :limit
                 """, params, this::mapSearchResult);

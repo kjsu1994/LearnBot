@@ -94,7 +94,13 @@ public class LearnBotProperties {
         private long rateLimitMillis = 1000;
 
         @Min(1)
-        private int maxPagesPerRequest = 1;
+        private int maxPagesPerRequest = 30;
+
+        @Min(0)
+        private int maxDepth = 2;
+
+        @Min(0)
+        private int minContentChars = 200;
 
         private boolean respectRobotsTxt = true;
 
@@ -128,6 +134,22 @@ public class LearnBotProperties {
 
         public void setMaxPagesPerRequest(int maxPagesPerRequest) {
             this.maxPagesPerRequest = maxPagesPerRequest;
+        }
+
+        public int getMaxDepth() {
+            return maxDepth;
+        }
+
+        public void setMaxDepth(int maxDepth) {
+            this.maxDepth = maxDepth;
+        }
+
+        public int getMinContentChars() {
+            return minContentChars;
+        }
+
+        public void setMinContentChars(int minContentChars) {
+            this.minContentChars = minContentChars;
         }
 
         public boolean isRespectRobotsTxt() {

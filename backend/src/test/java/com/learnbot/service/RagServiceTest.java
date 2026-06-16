@@ -49,6 +49,8 @@ class RagServiceTest {
         assertThat(response.answer()).contains("3명");
         assertThat(response.answer()).contains("[1]");
         assertThat(response.evidence()).hasSize(2);
+        assertThat(response.confidence()).isEqualTo("높음");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("서버가 문서 전체 청크를 기준으로 계산"));
     }
 
     @Test
@@ -75,6 +77,32 @@ class RagServiceTest {
 
         assertThat(response.answer()).contains("총 2명");
         assertThat(response.answer()).contains("계산 기준");
+        assertThat(response.confidence()).isEqualTo("높음");
+    }
+
+    @Test
+    void spreadsheetCountDoesNotDropFirstRowWhenHeaderIsMissing() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        UUID documentId = UUID.randomUUID();
+        String question = "총 몇명이야?";
+
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull()))
+                .thenReturn(List.of(searchResult(documentId, UUID.randomUUID(), 0, "육아기단축근로 대상자.xlsx")));
+        when(documentRepository.listDocumentChunks(documentId)).thenReturn(List.of(
+                chunk(0, """
+                        Sheet Sheet1 Row 8: C2=ROW()-1 | C3=VLOOKUP(D8,Sheet!A:N,6,FALSE) | C4=김환진 | C5=관세행정운영본부
+                        Sheet Sheet1 Row 9: C2=ROW()-1 | C3=VLOOKUP(D9,Sheet!A:N,6,FALSE) | C4=서세덕 | C5=관세행정운영본부
+                        """)
+        ));
+        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.answer()).contains("총 2명");
+        assertThat(response.answer()).contains("별도 헤더 행을 확정하지 않고");
     }
 
     @Test
@@ -125,6 +153,8 @@ class RagServiceTest {
         assertThat(response.answer()).contains("개선되는 핵심");
         assertThat(response.answer()).contains("임금");
         assertThat(response.answer()).contains("[1]");
+        assertThat(response.confidence()).isIn("높음", "보통");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {

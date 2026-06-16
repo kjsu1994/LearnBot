@@ -6,6 +6,9 @@ import java.util.UUID;
 
 public record WebIngestRequest(
         @NotBlank String url,
-        UUID spaceId
+        UUID spaceId,
+        Boolean recursive,
+        Integer maxDepth,
+        Integer maxPages
 ) {
 }

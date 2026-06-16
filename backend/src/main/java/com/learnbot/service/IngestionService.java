@@ -18,6 +18,7 @@ import java.util.UUID;
 public class IngestionService {
     private final DocumentRepository repository;
     private final WebPageExtractor webPageExtractor;
+    private final WebCrawler webCrawler;
     private final FileExtractor fileExtractor;
     private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
@@ -29,6 +30,7 @@ public class IngestionService {
     public IngestionService(
             DocumentRepository repository,
             WebPageExtractor webPageExtractor,
+            WebCrawler webCrawler,
             FileExtractor fileExtractor,
             ObjectStorageService objectStorageService,
             Chunker chunker,
@@ -39,6 +41,7 @@ public class IngestionService {
     ) {
         this.repository = repository;
         this.webPageExtractor = webPageExtractor;
+        this.webCrawler = webCrawler;
         this.fileExtractor = fileExtractor;
         this.objectStorageService = objectStorageService;
         this.chunker = chunker;
@@ -50,11 +53,29 @@ public class IngestionService {
 
     @Transactional
     public IngestResponse ingestWeb(AppUser user, UUID spaceId, String url) {
+        return ingestWeb(user, spaceId, url, false, null, null);
+    }
+
+    @Transactional
+    public IngestResponse ingestWeb(
+            AppUser user,
+            UUID spaceId,
+            String url,
+            Boolean recursive,
+            Integer maxDepth,
+            Integer maxPages
+    ) {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         UUID sourceId = repository.createSource(SourceType.WEB, url, url, resolvedSpaceId, user.id());
         try {
-            ExtractedDocument document = webPageExtractor.extract(sourceId, url);
-            IngestResponse response = index(sourceId, resolvedSpaceId, document);
+            WebDocuments documents = extractWebDocuments(sourceId, url, Boolean.TRUE.equals(recursive), maxDepth, maxPages);
+            IngestResponse response = indexAll(
+                    sourceId,
+                    resolvedSpaceId,
+                    documents.documents(),
+                    documents.pageCount(),
+                    documents.skippedCount()
+            );
             auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "Web document was indexed.");
             return response;
         } catch (RuntimeException ex) {
@@ -114,20 +135,29 @@ public class IngestionService {
         StoredSource source = repository.findSourceByDocumentId(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         repository.updateSourceStatus(source.id(), SourceStatus.INDEXING, null);
+        int previousDocumentCount = repository.countDocumentsForSource(source.id());
         repository.deleteDocumentsForSource(source.id());
 
         try {
-            ExtractedDocument document = switch (source.type()) {
-                case WEB -> webPageExtractor.extract(source.id(), source.location());
+            IngestResponse response = switch (source.type()) {
+                case WEB -> {
+                    WebDocuments documents = extractWebDocuments(
+                            source.id(),
+                            source.location(),
+                            previousDocumentCount > 1,
+                            null,
+                            null
+                    );
+                    yield indexAll(source.id(), summary.spaceId(), documents.documents(), documents.pageCount(), documents.skippedCount());
+                }
                 case FILE -> {
                     StoredObject object = repository.findSourceObject(source.id())
                             .orElseThrow(() -> new IllegalArgumentException(
                                     "Original file is not stored. Upload the file again before reindexing."
                             ));
-                    yield fileExtractor.extract(objectStorageService.load(object));
+                    yield index(source.id(), summary.spaceId(), fileExtractor.extract(objectStorageService.load(object)));
                 }
             };
-            IngestResponse response = index(source.id(), summary.spaceId(), document);
             auditService.log(user, "DOCUMENT_REINDEXED", "DOCUMENT", response.documentId(), summary.spaceId(), "Document was reindexed.");
             return response;
         } catch (RuntimeException ex) {
@@ -138,21 +168,81 @@ public class IngestionService {
     }
 
     private IngestResponse index(UUID sourceId, UUID spaceId, ExtractedDocument document) {
-        List<Chunk> chunks = chunker.split(document.content());
-        if (chunks.isEmpty()) {
-            throw new IllegalArgumentException("No extractable text was found.");
+        return indexAll(sourceId, spaceId, List.of(document), 1, 0);
+    }
+
+    private IngestResponse indexAll(
+            UUID sourceId,
+            UUID spaceId,
+            List<ExtractedDocument> documents,
+            int pageCount,
+            int skippedCount
+    ) {
+        UUID firstDocumentId = null;
+        int documentCount = 0;
+        int totalChunkCount = 0;
+
+        for (ExtractedDocument document : documents) {
+            List<Chunk> chunks = chunker.split(document.content());
+            if (chunks.isEmpty()) {
+                continue;
+            }
+
+            UUID documentId = repository.createDocument(
+                    sourceId,
+                    document.title(),
+                    document.sourceUri(),
+                    document.contentType(),
+                    document.metadata()
+            );
+            if (firstDocumentId == null) {
+                firstDocumentId = documentId;
+            }
+
+            List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
+            List<List<Double>> embeddings = ollamaClient.embed(chunkTexts);
+            validateEmbeddings(embeddings);
+            repository.addChunks(documentId, chunks, embeddings);
+            documentCount++;
+            totalChunkCount += chunks.size();
         }
 
-        UUID documentId = repository.createDocument(
+        if (documentCount == 0 || firstDocumentId == null) {
+            throw new IllegalArgumentException("No extractable text was found.");
+        }
+        repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
+        return new IngestResponse(
                 sourceId,
-                document.title(),
-                document.sourceUri(),
-                document.contentType(),
-                document.metadata()
+                firstDocumentId,
+                spaceId,
+                totalChunkCount,
+                SourceStatus.INDEXED.name(),
+                documentCount,
+                pageCount,
+                skippedCount
         );
+    }
 
-        List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
-        List<List<Double>> embeddings = ollamaClient.embed(chunkTexts);
+    private WebDocuments extractWebDocuments(
+            UUID sourceId,
+            String url,
+            boolean recursive,
+            Integer maxDepth,
+            Integer maxPages
+    ) {
+        if (!recursive) {
+            return new WebDocuments(List.of(webPageExtractor.extract(sourceId, url)), 1, 0);
+        }
+        WebCrawler.CrawlResult result = webCrawler.crawl(
+                sourceId,
+                url,
+                maxDepth == null ? properties.getCrawler().getMaxDepth() : maxDepth,
+                maxPages == null ? properties.getCrawler().getMaxPagesPerRequest() : maxPages
+        );
+        return new WebDocuments(result.documents(), result.fetchedCount(), result.skippedCount());
+    }
+
+    private void validateEmbeddings(List<List<Double>> embeddings) {
         for (List<Double> embedding : embeddings) {
             if (embedding.size() != properties.getEmbedding().getDimensions()) {
                 throw new IllegalArgumentException("Embedding dimension mismatch. Expected "
@@ -160,9 +250,8 @@ public class IngestionService {
                         + ". Recreate the vector column and reindex when changing embedding models.");
             }
         }
+    }
 
-        repository.addChunks(documentId, chunks, embeddings);
-        repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
-        return new IngestResponse(sourceId, documentId, spaceId, chunks.size(), SourceStatus.INDEXED.name());
+    private record WebDocuments(List<ExtractedDocument> documents, int pageCount, int skippedCount) {
     }
 }

@@ -7,6 +7,12 @@ public record IngestResponse(
         UUID documentId,
         UUID spaceId,
         int chunkCount,
-        String status
+        String status,
+        int documentCount,
+        int pageCount,
+        int skippedCount
 ) {
+    public IngestResponse(UUID sourceId, UUID documentId, UUID spaceId, int chunkCount, String status) {
+        this(sourceId, documentId, spaceId, chunkCount, status, 1, 1, 0);
+    }
 }

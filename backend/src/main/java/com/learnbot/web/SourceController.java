@@ -33,7 +33,14 @@ public class SourceController {
 
     @PostMapping("/sources/web")
     IngestResponse ingestWeb(@Valid @RequestBody WebIngestRequest request) {
-        return ingestionService.ingestWeb(currentUserProvider.currentUser(), request.spaceId(), request.url());
+        return ingestionService.ingestWeb(
+                currentUserProvider.currentUser(),
+                request.spaceId(),
+                request.url(),
+                request.recursive(),
+                request.maxDepth(),
+                request.maxPages()
+        );
     }
 
     @PostMapping("/sources/files")

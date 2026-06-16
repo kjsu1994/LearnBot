@@ -8,9 +8,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -103,39 +105,69 @@ public class CodeRagService {
             CodeQuestionMode questionMode,
             int limit
     ) {
-        if (questionMode != CodeQuestionMode.OVERVIEW) {
-            return searchService.search(repositoryId, question, limit, spaceIds, selectedSpaceId);
-        }
-
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
-        for (CodeSearchResult result : searchService.search(repositoryId, question, Math.min(30, limit + 8), spaceIds, selectedSpaceId)) {
+        int searchLimit = questionMode == CodeQuestionMode.OVERVIEW ? Math.min(30, limit + 12) : Math.min(30, limit + 8);
+        for (CodeSearchResult result : searchService.search(repositoryId, question, searchLimit, spaceIds, selectedSpaceId)) {
             merge(merged, result);
         }
-        for (String identifier : searchService.identifiersFrom(question)) {
+        List<String> identifiers = searchService.identifiersFrom(question);
+        for (String identifier : identifiers == null ? List.<String>of() : identifiers) {
             try {
                 var references = referenceService.findReferences(repositoryId, selectedSpaceId, spaceIds, identifier, 10);
                 for (CodeSearchResult definition : references.definitions()) {
-                    merge(merged, boost(definition, 0.28));
+                    merge(merged, boost(definition, questionMode == CodeQuestionMode.OVERVIEW ? 0.28 : 0.35));
                 }
                 for (CodeSearchResult reference : references.references()) {
-                    merge(merged, boost(reference, 0.12));
+                    merge(merged, boost(reference, questionMode == CodeQuestionMode.CALL_FLOW ? 0.22 : 0.12));
                 }
             } catch (IllegalArgumentException ignored) {
-                // Invalid symbol candidates should not block a natural-language overview answer.
+                // Invalid symbol candidates should not block a natural-language code answer.
             }
         }
         return merged.values().stream()
-                .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
+                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> answerRelevance(question, questionMode, result)).reversed())
                 .limit(limit)
                 .toList();
     }
 
     private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
         int limit = questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT;
-        return results.stream()
+        List<CodeSearchResult> ranked = results.stream()
                 .sorted(Comparator.comparingDouble((CodeSearchResult result) -> answerRelevance(question, questionMode, result)).reversed())
-                .limit(limit)
                 .toList();
+        if (questionMode == CodeQuestionMode.CALL_FLOW) {
+            return ranked.stream()
+                    .sorted(Comparator.comparingInt(this::flowRank).thenComparing(Comparator.comparingDouble(CodeSearchResult::score).reversed()))
+                    .limit(limit)
+                    .toList();
+        }
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT) {
+            return diverseByCategory(ranked, limit);
+        }
+        return ranked.stream().limit(limit).toList();
+    }
+
+    private List<CodeSearchResult> diverseByCategory(List<CodeSearchResult> ranked, int limit) {
+        Map<String, CodeSearchResult> selected = new LinkedHashMap<>();
+        Set<UUID> seenChunks = new HashSet<>();
+        for (CodeSearchResult result : ranked) {
+            String category = category(result);
+            if (!selected.containsKey(category) && seenChunks.add(result.chunkId())) {
+                selected.put(category, result);
+            }
+            if (selected.size() >= limit) {
+                break;
+            }
+        }
+        for (CodeSearchResult result : ranked) {
+            if (seenChunks.add(result.chunkId())) {
+                selected.putIfAbsent(result.chunkId().toString(), result);
+            }
+            if (selected.size() >= limit) {
+                break;
+            }
+        }
+        return selected.values().stream().limit(limit).toList();
     }
 
     private String buildContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {

@@ -63,6 +63,7 @@ public class CodeSearchService {
             return List.of();
         }
         int safeLimit = Math.max(1, Math.min(limit, 30));
+        int candidateLimit = Math.min(80, Math.max(safeLimit * 4, 24));
         List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
                 ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
                 : spaceIds;
@@ -70,12 +71,12 @@ public class CodeSearchService {
         List<String> expandedQueries = expandedQueries(safeQuery);
 
         for (String searchQuery : expandedQueries) {
-            for (CodeSearchResult result : repository.keywordSearch(repositoryId, searchQuery, safeLimit, safeSpaceIds, selectedSpaceId)) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, searchQuery, candidateLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, searchQuery.equalsIgnoreCase(safeQuery) ? result : boost(result, 0.06));
             }
         }
         for (String identifier : identifiersFrom(String.join(" ", expandedQueries))) {
-            for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(5, safeLimit / 2), safeSpaceIds, selectedSpaceId)) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(8, candidateLimit / 2), safeSpaceIds, selectedSpaceId)) {
                 merge(merged, boost(result, 0.18));
             }
         }
@@ -83,7 +84,7 @@ public class CodeSearchService {
         try {
             String semanticQuery = String.join(" ", expandedQueries);
             List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
-            for (CodeSearchResult result : repository.search(repositoryId, semanticQuery, embedding, safeLimit, safeSpaceIds, selectedSpaceId)) {
+            for (CodeSearchResult result : repository.search(repositoryId, semanticQuery, embedding, candidateLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
         } catch (RuntimeException ignored) {
@@ -91,10 +92,15 @@ public class CodeSearchService {
         }
 
         List<CodeSearchResult> ranked = merged.values().stream()
+                .map(result -> boost(result, rerankBoost(safeQuery, result)))
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
                 .limit(safeLimit)
                 .toList();
-        return expandRelated(repositoryId, ranked, safeLimit);
+        return expandRelated(repositoryId, ranked, safeLimit).stream()
+                .map(result -> boost(result, rerankBoost(safeQuery, result)))
+                .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
+                .limit(safeLimit)
+                .toList();
     }
 
     public List<String> expandedQueries(String query) {
@@ -168,6 +174,113 @@ public class CodeSearchService {
     private boolean isCommonWord(String value) {
         String lower = value.toLowerCase(Locale.ROOT);
         return lower.equals("public") || lower.equals("private") || lower.equals("class") || lower.equals("method");
+    }
+
+    private double rerankBoost(String query, CodeSearchResult result) {
+        List<String> terms = queryTerms(query);
+        if (terms.isEmpty()) {
+            return 0;
+        }
+
+        String path = normalizeCodeText(result.filePath());
+        String symbolText = normalizeCodeText(String.join(" ",
+                safe(result.symbolName()),
+                safe(result.className()),
+                safe(result.methodName()),
+                safe(result.controlName()),
+                safe(result.eventName())
+        ));
+        String content = normalizeCodeText(result.content());
+        double boost = 0;
+        int matchedTerms = 0;
+        for (String term : terms) {
+            boolean matched = false;
+            if (path.contains(term)) {
+                boost += 0.35;
+                matched = true;
+            }
+            if (symbolText.contains(term)) {
+                boost += 0.32;
+                matched = true;
+            }
+            if (content.contains(term)) {
+                boost += 0.08;
+                matched = true;
+            }
+            if (matched) {
+                matchedTerms++;
+            }
+        }
+        boost += Math.min(0.35, matchedTerms * 0.05);
+        if (isStructured(result.chunkType())) {
+            boost += 0.08;
+        }
+        if (isLoginQuestion(query) && (path.contains("auth") || path.contains("login") || symbolText.contains("login"))) {
+            boost += 0.35;
+        }
+        if (isLoginQuestion(query) && path.contains("git") && !path.contains("auth") && !path.contains("login")) {
+            boost -= 0.6;
+        }
+        return boost;
+    }
+
+    private List<String> queryTerms(String query) {
+        String normalized = normalizeCodeText(query);
+        List<String> terms = new ArrayList<>();
+        for (String token : normalized.split("\\s+")) {
+            if (token.length() >= 2 && !isQuestionStopWord(token)) {
+                terms.add(token);
+            }
+        }
+        if (isLoginQuestion(query)) {
+            terms.addAll(List.of("login", "signin", "auth", "authentication", "session", "token", "로그인", "인증"));
+        }
+        if (normalized.contains("인덱") || normalized.contains("index")) {
+            terms.addAll(List.of("index", "indexing", "repository", "chunk", "embedding", "인덱싱"));
+        }
+        if (normalized.contains("오류") || normalized.contains("실패") || normalized.contains("error")) {
+            terms.addAll(List.of("error", "exception", "failed", "failure", "오류", "실패"));
+        }
+        if (normalized.contains("관리자") || normalized.contains("admin")) {
+            terms.addAll(List.of("admin", "role", "authority", "audit", "관리자"));
+        }
+        return terms.stream()
+                .map(this::normalizeCodeText)
+                .filter(term -> term.length() >= 2 && !isQuestionStopWord(term))
+                .distinct()
+                .toList();
+    }
+
+    private boolean isLoginQuestion(String query) {
+        String normalized = normalizeCodeText(query);
+        return normalized.contains("로그인") || normalized.contains("login") || normalized.contains("signin");
+    }
+
+    private boolean isStructured(String chunkType) {
+        return "class".equals(chunkType)
+                || "method".equals(chunkType)
+                || "event_handler".equals(chunkType)
+                || "xaml_event".equals(chunkType)
+                || "xaml_view".equals(chunkType);
+    }
+
+    private boolean isQuestionStopWord(String term) {
+        return List.of("관련", "파일", "어디", "있어", "있나요", "어떻게", "동작", "설명", "위치", "찾아", "찾기", "코드")
+                .contains(term);
+    }
+
+    private String normalizeCodeText(String value) {
+        return value == null
+                ? ""
+                : value.replaceAll("([a-z])([A-Z])", "$1 $2")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{IsHangul}\\p{IsAlphabetic}\\p{IsDigit}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 
     private void merge(Map<UUID, CodeSearchResult> merged, CodeSearchResult result) {

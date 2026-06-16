@@ -59,13 +59,27 @@ public class RagService {
         int topK = isCountQuestion(question) ? Math.max(properties.getRag().getTopK(), 12) : properties.getRag().getTopK();
         List<SearchResult> citations = searchService.search(question, filter, topK, spaceIds, selectedSpaceId);
         if (citations.isEmpty()) {
-            return new AskResponse(answerMode.value(), "근거가 부족해 답변할 수 없습니다.", citations, List.of());
+            return new AskResponse(
+                    answerMode.value(),
+                    "근거가 부족해 답변할 수 없습니다.",
+                    citations,
+                    List.of(),
+                    "낮음",
+                    List.of("검색된 문서 근거가 없어 추측 답변을 생성하지 않았습니다.")
+            );
         }
 
         Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(question, citations);
         if (computedAnswer.isPresent()) {
             ComputedAnswer computed = computedAnswer.get();
-            return new AskResponse(answerMode.value(), computed.answer(), computed.citations(), buildEvidence(computed.citations()));
+            return new AskResponse(
+                    answerMode.value(),
+                    computed.answer(),
+                    computed.citations(),
+                    buildEvidence(computed.citations()),
+                    "높음",
+                    List.of("엑셀/CSV 집계값은 LLM이 아니라 서버가 문서 전체 청크를 기준으로 계산했습니다.")
+            );
         }
 
         String context = buildContext(question, citations);
@@ -78,15 +92,26 @@ public class RagService {
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
         String answer;
+        boolean llmUnavailable = false;
+        boolean answerRewritten = false;
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
         } catch (RuntimeException ex) {
             answer = fallbackAnswer(question, citations);
+            llmUnavailable = true;
         }
         if (isLowQualityAnswer(answer)) {
             answer = fallbackAnswer(question, citations);
+            answerRewritten = true;
         }
-        return new AskResponse(answerMode.value(), answer, citations, buildEvidence(citations));
+        return new AskResponse(
+                answerMode.value(),
+                answer,
+                citations,
+                buildEvidence(citations),
+                confidence(citations),
+                diagnostics(citations, llmUnavailable, answerRewritten)
+        );
     }
 
     private String buildContext(String question, List<SearchResult> results) {
@@ -285,17 +310,18 @@ public class RagService {
         List<SpreadsheetRow> orderedRows = rows.values().stream()
                 .sorted(Comparator.comparing(SpreadsheetRow::sheet).thenComparingInt(SpreadsheetRow::rowNumber))
                 .toList();
-        SpreadsheetRow header = orderedRows.stream()
+        Optional<SpreadsheetRow> header = orderedRows.stream()
                 .filter(this::looksLikeHeader)
-                .findFirst()
-                .orElse(orderedRows.get(0));
-        String nameColumn = findNameColumn(header);
+                .findFirst();
+        String nameColumn = header.map(this::findNameColumn).orElse(null);
 
         int count = 0;
         Integer minDataRow = null;
         Integer maxDataRow = null;
         for (SpreadsheetRow row : orderedRows) {
-            if (row.sheet().equals(header.sheet()) && row.rowNumber() == header.rowNumber()) {
+            if (header.isPresent()
+                    && row.sheet().equals(header.get().sheet())
+                    && row.rowNumber() == header.get().rowNumber()) {
                 continue;
             }
             if (!hasData(row, nameColumn)) {
@@ -307,7 +333,7 @@ public class RagService {
         }
 
         List<String> sheets = orderedRows.stream().map(SpreadsheetRow::sheet).distinct().toList();
-        return new SpreadsheetStats(count, orderedRows.size(), header.rowNumber(), minDataRow, maxDataRow, nameColumn, sheets);
+        return new SpreadsheetStats(count, orderedRows.size(), header.map(SpreadsheetRow::rowNumber).orElse(null), minDataRow, maxDataRow, nameColumn, sheets);
     }
 
     private Map<String, String> parseSpreadsheetFields(String fieldsText) {
@@ -414,7 +440,8 @@ public class RagService {
             CountEntry entry = entries.get(0);
             SpreadsheetStats stats = entry.stats();
             return entry.title() + " 기준으로 대상자는 총 " + stats.dataRowCount() + "명입니다. "
-                    + "계산 기준은 " + String.join(", ", stats.sheetNames()) + "의 " + stats.headerRowNumber() + "행을 헤더로 보고, "
+                    + "계산 기준은 " + String.join(", ", stats.sheetNames()) + "에서 "
+                    + headerText(stats)
                     + dataRangeText(stats) + "에서 " + columnText(stats.nameColumn()) + " 값이 있는 행을 센 것입니다. "
                     + "근거 청크는 [" + entry.startCitation() + "]부터 [" + entry.endCitation() + "]까지입니다.";
         }
@@ -494,6 +521,13 @@ public class RagService {
         return stats.minDataRow() + "~" + stats.maxDataRow() + "행";
     }
 
+    private String headerText(SpreadsheetStats stats) {
+        if (stats.headerRowNumber() == null) {
+            return "별도 헤더 행을 확정하지 않고 ";
+        }
+        return stats.headerRowNumber() + "행을 헤더로 보고, ";
+    }
+
     private String columnText(String nameColumn) {
         return nameColumn == null ? "값이 있는 행" : nameColumn + "(이름)";
     }
@@ -539,8 +573,47 @@ public class RagService {
         if (trimmed.startsWith("The chat LLM is unavailable")) {
             return true;
         }
+        if (!containsCitation(trimmed)) {
+            return true;
+        }
         boolean hasConcreteValue = trimmed.matches("(?s).*\\d+\\s*(명|건|개|행).*");
         return !hasConcreteValue && trimmed.length() < 12;
+    }
+
+    private boolean containsCitation(String answer) {
+        return answer != null && answer.matches("(?s).*\\[\\d+].*");
+    }
+
+    private String confidence(List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "낮음";
+        }
+        double topScore = results.get(0).score();
+        long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+        long citationCount = results.stream().filter(result -> safe(result.content()).length() >= 80).count();
+        if (topScore >= 0.65 && citationCount >= 3 && distinctDocuments <= 4) {
+            return "높음";
+        }
+        if (topScore >= 0.30 || citationCount >= 2) {
+            return "보통";
+        }
+        return "낮음";
+    }
+
+    private List<String> diagnostics(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+        List<String> notes = new ArrayList<>();
+        notes.add("검색된 문서 근거 " + results.size() + "개, 문서 " + distinctDocuments + "개를 답변 후보로 사용했습니다.");
+        if (llmUnavailable) {
+            notes.add("LLM 호출이 실패해 검색 근거 기반 fallback 답변을 반환했습니다.");
+        }
+        if (answerRewritten) {
+            notes.add("LLM 응답이 너무 짧거나 인용이 부족해, 검색 근거 기반 답변으로 대체했습니다.");
+        }
+        if ("낮음".equals(confidence(results))) {
+            notes.add("직접적인 근거 점수가 낮아 답변을 후보 수준으로 검토해야 합니다.");
+        }
+        return notes;
     }
 
     private String relevantExcerpt(String question, String content, int maxChars) {
