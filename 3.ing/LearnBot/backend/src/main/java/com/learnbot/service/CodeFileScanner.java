@@ -14,6 +14,9 @@ import java.util.stream.Stream;
 
 @Component
 public class CodeFileScanner {
+    private static final Set<String> SUPPORTED_EXTENSIONLESS_FILES = Set.of(
+            "readme", "license", "notice", "dockerfile", "makefile"
+    );
     private static final Set<String> EXCLUDED_DIRS = Set.of(
             ".git", "bin", "obj", ".vs", ".idea", ".gradle", "node_modules",
             "dist", "build", "target", "out", "vendor", "packages"
@@ -65,7 +68,8 @@ public class CodeFileScanner {
         if (EXCLUDED_EXTENSIONS.stream().anyMatch(name::endsWith)) {
             return false;
         }
-        return name.endsWith(".cs")
+        return SUPPORTED_EXTENSIONLESS_FILES.contains(name)
+                || name.endsWith(".cs")
                 || name.endsWith(".xaml")
                 || name.endsWith(".csproj")
                 || name.endsWith(".sln")
@@ -84,6 +88,7 @@ public class CodeFileScanner {
         if (name.endsWith(".csproj") || name.endsWith(".config") || name.endsWith(".xml")) return "xml";
         if (name.endsWith(".sln")) return "solution";
         if (name.endsWith(".md")) return "markdown";
+        if (SUPPORTED_EXTENSIONLESS_FILES.contains(name)) return "markdown";
         if (name.endsWith(".sql")) return "sql";
         if (name.endsWith(".yml") || name.endsWith(".yaml")) return "yaml";
         return "text";

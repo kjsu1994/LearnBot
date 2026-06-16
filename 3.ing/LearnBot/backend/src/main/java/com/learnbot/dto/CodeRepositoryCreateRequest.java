@@ -10,6 +10,7 @@ public record CodeRepositoryCreateRequest(
         @Pattern(regexp = "NONE|TOKEN", message = "authType must be NONE or TOKEN.")
         String authType,
         String username,
-        String token
+        String token,
+        Boolean storeToken
 ) {
 }

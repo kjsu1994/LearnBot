@@ -81,11 +81,19 @@ function App() {
     authType: 'NONE',
     username: '',
     token: '',
+    storeToken: false,
+  });
+  const [indexCredential, setIndexCredential] = useState({
+    username: '',
+    token: '',
+    storeToken: true,
   });
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('');
   const [codeQuestion, setCodeQuestion] = useState('');
   const [codeMode, setCodeMode] = useState('locate');
   const [codeAnswer, setCodeAnswer] = useState(null);
+  const [referenceSymbol, setReferenceSymbol] = useState('');
+  const [referenceResult, setReferenceResult] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
@@ -234,6 +242,7 @@ function App() {
           authType: repoForm.authType,
           username: repoForm.username,
           token: repoForm.token,
+          storeToken: repoForm.authType === 'TOKEN' && repoForm.storeToken,
         }),
       });
       await requireOk(response);
@@ -246,15 +255,25 @@ function App() {
 
   async function indexRepository(repositoryId) {
     await run(`repo-index-${repositoryId}`, async () => {
+      const targetRepository = repositories.find((repo) => repo.id === repositoryId);
+      const tokenRequired = targetRepository?.authType === 'TOKEN' && !targetRepository?.credentialStored;
+      if (tokenRequired && !indexCredential.token) {
+        setSelectedRepositoryId(repositoryId);
+        throw new Error('이 저장소는 토큰 인증이 필요합니다. 선택한 저장소의 재인덱싱 인증 정보를 입력하세요.');
+      }
       const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: repoForm.username,
-          token: repoForm.authType === 'TOKEN' ? repoForm.token : '',
+          username: indexCredential.username,
+          token: targetRepository?.authType === 'TOKEN' ? indexCredential.token : '',
+          storeToken: targetRepository?.authType === 'TOKEN' && indexCredential.storeToken,
         }),
       });
       await requireOk(response);
+      if (indexCredential.token) {
+        setIndexCredential((current) => ({ ...current, token: '' }));
+      }
       await refreshRepositories();
       await refreshJobs(repositoryId);
     });
@@ -295,6 +314,35 @@ function App() {
     });
   }
 
+  async function deleteRepository(repositoryId, name) {
+    if (!window.confirm(`'${name}' 저장소와 인덱싱 데이터를 삭제할까요?`)) return;
+    await run(`repo-delete-${repositoryId}`, async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}`, { method: 'DELETE' });
+      await requireOk(response);
+      setRepositories((current) => current.filter((repo) => repo.id !== repositoryId));
+      setJobs((current) => {
+        const next = { ...current };
+        delete next[repositoryId];
+        return next;
+      });
+      if (selectedRepositoryId === repositoryId) {
+        setSelectedRepositoryId('');
+        setCodeFiles([]);
+        setSelectedCodeFile(null);
+        setReferenceResult(null);
+      }
+      await refreshRepositories();
+    });
+  }
+
+  async function clearFailedJobs(repositoryId) {
+    await run(`repo-clear-jobs-${repositoryId}`, async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/jobs`, { method: 'DELETE' });
+      await requireOk(response);
+      await refreshJobs(repositoryId);
+    });
+  }
+
   async function openCodeFile(repositoryId, fileId, range = null) {
     await run(`code-file-${fileId}`, async () => {
       const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/files/${fileId}`);
@@ -319,6 +367,23 @@ function App() {
       });
       await requireOk(response);
       setCodeAnswer(await response.json());
+    });
+  }
+
+  async function findReferences(event) {
+    event.preventDefault();
+    await run('code-references', async () => {
+      const response = await fetch(`${apiBase}/api/code/references`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repositoryId: selectedRepositoryId || null,
+          symbol: referenceSymbol,
+          limit: 24,
+        }),
+      });
+      await requireOk(response);
+      setReferenceResult(await response.json());
     });
   }
 
@@ -460,6 +525,8 @@ function App() {
           <CodeWorkspace
             repoForm={repoForm}
             setRepoForm={setRepoForm}
+            indexCredential={indexCredential}
+            setIndexCredential={setIndexCredential}
             repositories={repositories}
             selectedRepositoryId={selectedRepositoryId}
             setSelectedRepositoryId={setSelectedRepositoryId}
@@ -474,14 +541,20 @@ function App() {
             codeMode={codeMode}
             setCodeMode={setCodeMode}
             codeAnswer={codeAnswer}
+            referenceSymbol={referenceSymbol}
+            setReferenceSymbol={setReferenceSymbol}
+            referenceResult={referenceResult}
             registerRepository={registerRepository}
             indexRepository={indexRepository}
             cancelIndex={cancelIndex}
+            deleteRepository={deleteRepository}
+            clearFailedJobs={clearFailedJobs}
             refreshJobs={refreshJobs}
             refreshCodeFiles={refreshCodeFiles}
             searchCodeFiles={searchCodeFiles}
             openCodeFile={openCodeFile}
             askCode={askCode}
+            findReferences={findReferences}
             loading={loading}
           />
         ) : (
@@ -532,6 +605,8 @@ function App() {
 function CodeWorkspace({
   repoForm,
   setRepoForm,
+  indexCredential,
+  setIndexCredential,
   repositories,
   selectedRepositoryId,
   setSelectedRepositoryId,
@@ -546,14 +621,20 @@ function CodeWorkspace({
   codeMode,
   setCodeMode,
   codeAnswer,
+  referenceSymbol,
+  setReferenceSymbol,
+  referenceResult,
   registerRepository,
   indexRepository,
   cancelIndex,
+  deleteRepository,
+  clearFailedJobs,
   refreshJobs,
   refreshCodeFiles,
   searchCodeFiles,
   openCodeFile,
   askCode,
+  findReferences,
   loading,
 }) {
   const selectedRepository = repositories.find((repo) => repo.id === selectedRepositoryId);
@@ -615,27 +696,38 @@ function CodeWorkspace({
               </button>
             </div>
             {repoForm.authType === 'TOKEN' && (
-              <div className="form-grid two">
-                <div className="stack">
-                  <label htmlFor="git-username">Username</label>
-                  <input
-                    id="git-username"
-                    value={repoForm.username}
-                    onChange={(event) => setRepoForm((current) => ({ ...current, username: event.target.value }))}
-                    placeholder="비워두면 oauth2"
-                  />
+              <>
+                <div className="form-grid two">
+                  <div className="stack">
+                    <label htmlFor="git-username">Username</label>
+                    <input
+                      id="git-username"
+                      value={repoForm.username}
+                      onChange={(event) => setRepoForm((current) => ({ ...current, username: event.target.value }))}
+                      placeholder="비워두면 oauth2"
+                    />
+                  </div>
+                  <div className="stack">
+                    <label htmlFor="git-token">Token</label>
+                    <input
+                      id="git-token"
+                      type="password"
+                      value={repoForm.token}
+                      onChange={(event) => setRepoForm((current) => ({ ...current, token: event.target.value }))}
+                      placeholder="저장하지 않으면 요청 때만 사용"
+                    />
+                  </div>
                 </div>
-                <div className="stack">
-                  <label htmlFor="git-token">Token</label>
+                <label className="checkbox-row" htmlFor="store-token">
                   <input
-                    id="git-token"
-                    type="password"
-                    value={repoForm.token}
-                    onChange={(event) => setRepoForm((current) => ({ ...current, token: event.target.value }))}
-                    placeholder="등록/색인 요청 때만 사용"
+                    id="store-token"
+                    type="checkbox"
+                    checked={repoForm.storeToken}
+                    onChange={(event) => setRepoForm((current) => ({ ...current, storeToken: event.target.checked }))}
                   />
-                </div>
-              </div>
+                  <span>토큰을 암호화해서 저장하고 다음 색인부터 재사용</span>
+                </label>
+              </>
             )}
             <div className="action-row">
               <button disabled={!repoForm.gitUrl || loading('repo-register')}>
@@ -667,6 +759,7 @@ function CodeWorkspace({
                   <div className="document-main">
                     <strong>{repo.name}</strong>
                     <small>{repo.gitUrl}</small>
+                    {repo.credentialStored && <small className="success-note">암호화된 Git 토큰 저장됨</small>}
                   </div>
                   <div className="document-meta">
                     <StatusBadge status={repo.status} />
@@ -683,6 +776,18 @@ function CodeWorkspace({
                       }}
                     >
                       <Info size={15} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="실패/취소 이력 정리"
+                      disabled={loading(`repo-clear-jobs-${repo.id}`)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        clearFailedJobs(repo.id);
+                      }}
+                    >
+                      {loading(`repo-clear-jobs-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                     </button>
                     {runningJob ? (
                       <button
@@ -711,6 +816,18 @@ function CodeWorkspace({
                         {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
                       </button>
                     )}
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      title="저장소 삭제"
+                      disabled={!!runningJob || loading(`repo-delete-${repo.id}`)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteRepository(repo.id, repo.name);
+                      }}
+                    >
+                      {loading(`repo-delete-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                    </button>
                   </div>
                   {latestJob && (
                     <div className="job-strip">
@@ -728,6 +845,52 @@ function CodeWorkspace({
             {repositories.length === 0 && <p className="empty">Git URL을 등록한 뒤 인덱싱 버튼을 누르세요.</p>}
           </div>
         </section>
+
+        {selectedRepository?.authType === 'TOKEN' && (
+          <section className="panel compact-auth-panel">
+            <div className="panel-title">
+              <GitPullRequest size={18} />
+              <div>
+                <h2>재인덱싱 인증</h2>
+                <p>
+                  {selectedRepository.credentialStored
+                    ? '저장된 토큰을 사용합니다. 새 토큰을 입력하면 다음 인덱싱 때 갱신할 수 있습니다.'
+                    : '이 저장소는 저장된 토큰이 없습니다. 인덱싱 전에 token을 입력하세요.'}
+                </p>
+              </div>
+            </div>
+            <div className="form-grid two">
+              <div className="stack">
+                <label htmlFor="index-username">Username</label>
+                <input
+                  id="index-username"
+                  value={indexCredential.username}
+                  onChange={(event) => setIndexCredential((current) => ({ ...current, username: event.target.value }))}
+                  placeholder="비워두면 oauth2"
+                />
+              </div>
+              <div className="stack">
+                <label htmlFor="index-token">Token</label>
+                <input
+                  id="index-token"
+                  type="password"
+                  value={indexCredential.token}
+                  onChange={(event) => setIndexCredential((current) => ({ ...current, token: event.target.value }))}
+                  placeholder={selectedRepository.credentialStored ? '새 토큰으로 갱신할 때만 입력' : '인덱싱에 사용할 token'}
+                />
+              </div>
+            </div>
+            <label className="checkbox-row" htmlFor="index-store-token">
+              <input
+                id="index-store-token"
+                type="checkbox"
+                checked={indexCredential.storeToken}
+                onChange={(event) => setIndexCredential((current) => ({ ...current, storeToken: event.target.checked }))}
+              />
+              <span>입력한 토큰을 암호화해서 저장</span>
+            </label>
+          </section>
+        )}
 
         <section className="panel file-browser-panel">
           <div className="panel-title">
@@ -831,6 +994,33 @@ function CodeWorkspace({
               <p>{codeAnswer.answer}</p>
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
+          )}
+        </form>
+
+        <form className="panel reference-panel" onSubmit={findReferences}>
+          <div className="panel-title">
+            <Search size={18} />
+            <div>
+              <h2>심볼 참조 찾기</h2>
+              <p>메서드, 클래스, 컨트롤 이름으로 정의와 사용 후보를 빠르게 좁힙니다.</p>
+            </div>
+          </div>
+          <div className="inline-control">
+            <input
+              value={referenceSymbol}
+              onChange={(event) => setReferenceSymbol(event.target.value)}
+              placeholder="InitializeComponent, SaveData, MainWindow..."
+            />
+            <button disabled={!referenceSymbol || loading('code-references')}>
+              {loading('code-references') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              찾기
+            </button>
+          </div>
+          {referenceResult && (
+            <CodeReferenceResults
+              result={referenceResult}
+              onOpenEvidence={openCodeFile}
+            />
           )}
         </form>
 
@@ -1164,6 +1354,52 @@ function CodeEvidenceList({ evidence, onOpenEvidence }) {
   );
 }
 
+function CodeReferenceResults({ result, onOpenEvidence }) {
+  const renderItems = (items) => (
+    <div className="evidence-list">
+      {items.map((item) => (
+        <article className="evidence-card code-evidence" key={item.chunkId}>
+          <div className="result-heading">
+            <strong>{item.filePath}:{item.lineStart}-{item.lineEnd}</strong>
+            <span>{formatScore(item.score)}</span>
+          </div>
+          <small>
+            {item.chunkType}
+            {item.className ? ` · ${item.className}` : ''}
+            {item.methodName ? `.${item.methodName}` : ''}
+            {item.controlName ? ` · ${item.controlName}` : ''}
+            {item.eventName ? ` · ${item.eventName}` : ''}
+          </small>
+          <p>{item.content}</p>
+          <div className="action-row">
+            <button
+              className="ghost-button compact-action"
+              type="button"
+              onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}
+            >
+              <FileCode2 size={14} />
+              파일 열기
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="reference-results">
+      <div className="reference-group">
+        <h3>{result.symbol} 정의 후보</h3>
+        {result.definitions?.length ? renderItems(result.definitions) : <p className="empty">정의 후보를 찾지 못했습니다.</p>}
+      </div>
+      <div className="reference-group">
+        <h3>{result.symbol} 사용 후보</h3>
+        {result.references?.length ? renderItems(result.references) : <p className="empty">사용 후보를 찾지 못했습니다.</p>}
+      </div>
+    </div>
+  );
+}
+
 function CodeFileViewer({ detail, highlightRange }) {
   if (!detail) {
     return (
@@ -1248,7 +1484,7 @@ function HelpPanel({ onClose }) {
         <div className="help-content">
           <section>
             <h3>1. 코드 저장소</h3>
-            <p>Git URL을 등록하고 인덱싱 버튼을 누르면 소스 파일을 구조 단위로 색인합니다. 토큰은 저장하지 않고 요청 시에만 사용합니다.</p>
+            <p>Git URL을 등록하고 인덱싱 버튼을 누르면 소스 파일을 구조 단위로 색인합니다. 토큰 저장을 체크한 경우에만 암호화해서 재사용합니다.</p>
           </section>
           <section>
             <h3>2. 코드 질문</h3>
@@ -1322,8 +1558,11 @@ function getProgressMessage(busy) {
   if (busy === 'repo-register') return 'Git 저장소를 등록하는 중입니다.';
   if (busy.startsWith('repo-index-')) return '백그라운드 인덱싱 작업을 시작하는 중입니다.';
   if (busy.startsWith('repo-cancel-')) return '인덱싱 취소를 요청하는 중입니다.';
+  if (busy.startsWith('repo-clear-jobs-')) return '실패/취소 인덱싱 이력을 정리하는 중입니다.';
+  if (busy.startsWith('repo-delete-')) return '저장소와 색인 데이터를 삭제하는 중입니다.';
   if (busy.startsWith('code-file-')) return '코드 파일을 불러오는 중입니다.';
   if (busy === 'code-ask') return '코드를 검색하고 로컬 모델 답변을 기다리는 중입니다.';
+  if (busy === 'code-references') return '심볼 정의와 사용 후보를 찾는 중입니다.';
   if (busy === 'web') return '웹 페이지를 가져와 텍스트를 추출하고 색인하는 중입니다.';
   if (busy === 'file') return '파일을 업로드하고 원본 저장 및 색인을 진행하는 중입니다.';
   if (busy === 'search') return '색인된 문서에서 관련 내용을 검색하는 중입니다.';

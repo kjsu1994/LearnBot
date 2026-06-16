@@ -59,6 +59,21 @@ docker compose exec -T postgres psql -U learnbot -d learnbot < learnbot-db.sql
 
 Git working copies can be recreated by reindexing registered repositories. MinIO data should be backed up separately if uploaded file originals must move with the database.
 
+If encrypted Git tokens are stored, keep the same `LEARNBOT_CODE_CREDENTIAL_SECRET` value when migrating the database. Changing that secret makes previously stored tokens unreadable; re-enter the token from the UI if that happens.
+
+## Code RAG
+
+Git repositories support public/no-auth and username/token authentication for HTTP(S), plus standard Git SSH URLs when the container has usable SSH credentials. Token storage is opt-in from the UI. Stored tokens are encrypted in PostgreSQL and reused for later manual indexing.
+
+Indexing is asynchronous and can be cancelled. Reindexing creates a new index version and only re-embeds changed files; unchanged files reuse existing chunk embeddings. A failed reindex does not replace the active index.
+
+The UI also provides:
+
+- repository deletion
+- failed/cancelled indexing history cleanup
+- source file browsing with line highlights
+- symbol reference lookup for method, class, control, and event names
+
 ## Model Changes
 
 Change models with environment variables:
@@ -94,9 +109,12 @@ The current v1 ingests one approved URL at a time. Web ingestion uses the allow 
 - `POST /api/rag/ask` with `{ "question": "...", "mode": "qa" }`
 - `POST /api/code/repositories` with `{ "gitUrl": "https://host/project.git", "branch": "main", "authType": "NONE" }`
 - `POST /api/code/repositories/{repositoryId}/index`
+- `DELETE /api/code/repositories/{repositoryId}`
+- `DELETE /api/code/repositories/{repositoryId}/jobs`
 - `POST /api/code/repositories/{repositoryId}/jobs/{jobId}/cancel`
 - `GET /api/code/repositories/{repositoryId}/jobs`
 - `GET /api/code/repositories/{repositoryId}/files`
 - `GET /api/code/repositories/{repositoryId}/files/{fileId}`
+- `POST /api/code/references` with `{ "repositoryId": "...", "symbol": "MainWindow" }`
 - `POST /api/code/search` with `{ "repositoryId": "...", "query": "..." }`
 - `POST /api/code/ask` with `{ "repositoryId": "...", "question": "...", "mode": "locate" }`

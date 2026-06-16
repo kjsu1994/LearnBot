@@ -9,6 +9,7 @@ public record CodeRepositoryCreatedResponse(
         String branch,
         String authType,
         String status,
-        String lastIndexedCommit
+        String lastIndexedCommit,
+        boolean credentialStored
 ) {
 }

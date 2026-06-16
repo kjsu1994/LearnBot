@@ -12,6 +12,7 @@ public record CodeRepositorySummary(
         String status,
         String lastIndexedCommit,
         String errorMessage,
+        boolean credentialStored,
         int activeFileCount,
         int activeChunkCount,
         OffsetDateTime createdAt,

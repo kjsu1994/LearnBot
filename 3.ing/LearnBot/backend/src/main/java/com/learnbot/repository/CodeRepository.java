@@ -8,8 +8,10 @@ import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.IndexingJobSummary;
+import com.learnbot.service.ActiveCodeFileSnapshot;
 import com.learnbot.service.CodeFileRecord;
 import com.learnbot.service.CodeRepositoryRecord;
+import com.learnbot.service.EncryptedGitCredential;
 import com.learnbot.service.ParsedCodeChunk;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -48,10 +50,43 @@ public class CodeRepository {
         return findRepository(id).orElseThrow();
     }
 
+    public void storeCredential(UUID repositoryId, EncryptedGitCredential credential) {
+        jdbc.update("""
+                UPDATE code_repositories
+                SET credential_username = :username,
+                    credential_token_iv = :iv,
+                    credential_token_ciphertext = :ciphertext,
+                    credential_updated_at = now(),
+                    updated_at = now()
+                WHERE id = :repositoryId
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("username", credential.username())
+                .addValue("iv", credential.iv())
+                .addValue("ciphertext", credential.ciphertext()));
+    }
+
+    public Optional<EncryptedGitCredential> findCredential(UUID repositoryId) {
+        List<EncryptedGitCredential> credentials = jdbc.query("""
+                SELECT credential_username, credential_token_iv, credential_token_ciphertext
+                FROM code_repositories
+                WHERE id = :repositoryId
+                  AND credential_token_iv IS NOT NULL
+                  AND credential_token_ciphertext IS NOT NULL
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), (rs, rowNum) ->
+                new EncryptedGitCredential(
+                        rs.getString("credential_username"),
+                        rs.getString("credential_token_iv"),
+                        rs.getString("credential_token_ciphertext")
+                ));
+        return credentials.stream().findFirst();
+    }
+
     public List<CodeRepositorySummary> listRepositories() {
         return jdbc.query("""
                 SELECT r.id, r.name, r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
                        r.error_message, r.created_at, r.updated_at,
+                       (r.credential_token_ciphertext IS NOT NULL) AS credential_stored,
                        COALESCE(f.active_file_count, 0) AS active_file_count,
                        COALESCE(c.active_chunk_count, 0) AS active_chunk_count
                 FROM code_repositories r
@@ -91,6 +126,27 @@ public class CodeRepository {
                 .addValue("repositoryId", repositoryId)
                 .addValue("status", status)
                 .addValue("errorMessage", errorMessage));
+    }
+
+    public void deleteRepository(UUID repositoryId) {
+        jdbc.update("""
+                DELETE FROM code_repositories
+                WHERE id = :repositoryId
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
+    }
+
+    public int deleteFailedJobHistory(UUID repositoryId) {
+        return jdbc.update("""
+                DELETE FROM indexing_jobs j
+                WHERE j.repository_id = :repositoryId
+                  AND j.status IN ('FAILED', 'CANCELLED')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM code_files f
+                    WHERE f.index_version = j.id
+                      AND f.active
+                  )
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
     }
 
     public void resetInterruptedJobs() {
@@ -228,6 +284,67 @@ public class CodeRepository {
                 .addValue("language", language)
                 .addValue("contentHash", contentHash));
         return fileId;
+    }
+
+    public Map<String, ActiveCodeFileSnapshot> listActiveFileSnapshots(UUID repositoryId) {
+        return jdbc.query("""
+                SELECT f.id, f.file_path, f.content_hash, COUNT(c.id) AS chunk_count
+                FROM code_files f
+                LEFT JOIN code_chunks c ON c.file_id = f.id AND c.active
+                WHERE f.repository_id = :repositoryId
+                  AND f.active
+                GROUP BY f.id
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), rs -> {
+            Map<String, ActiveCodeFileSnapshot> snapshots = new java.util.HashMap<>();
+            while (rs.next()) {
+                ActiveCodeFileSnapshot snapshot = new ActiveCodeFileSnapshot(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("file_path"),
+                        rs.getString("content_hash"),
+                        rs.getInt("chunk_count")
+                );
+                snapshots.put(snapshot.filePath(), snapshot);
+            }
+            return snapshots;
+        });
+    }
+
+    public UUID copyActiveFileToIndex(UUID repositoryId, UUID oldFileId, UUID newFileId, UUID indexVersion) {
+        int files = jdbc.update("""
+                INSERT INTO code_files (id, repository_id, index_version, file_path, language, content_hash, active)
+                SELECT :newFileId, repository_id, :indexVersion, file_path, language, content_hash, FALSE
+                FROM code_files
+                WHERE id = :oldFileId
+                  AND repository_id = :repositoryId
+                  AND active
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("oldFileId", oldFileId)
+                .addValue("newFileId", newFileId)
+                .addValue("indexVersion", indexVersion));
+        if (files == 0) {
+            throw new IllegalArgumentException("복사할 활성 코드 파일을 찾을 수 없습니다.");
+        }
+
+        jdbc.update("""
+                INSERT INTO code_chunks (
+                    id, repository_id, file_id, index_version, file_path, chunk_index, chunk_type,
+                    symbol_name, class_name, method_name, namespace_name, control_name, event_name,
+                    line_start, line_end, content, metadata, embedding, active
+                )
+                SELECT gen_random_uuid(), repository_id, :newFileId, :indexVersion, file_path, chunk_index, chunk_type,
+                       symbol_name, class_name, method_name, namespace_name, control_name, event_name,
+                       line_start, line_end, content, metadata, embedding, FALSE
+                FROM code_chunks
+                WHERE file_id = :oldFileId
+                  AND repository_id = :repositoryId
+                  AND active
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("oldFileId", oldFileId)
+                .addValue("newFileId", newFileId)
+                .addValue("indexVersion", indexVersion));
+        return newFileId;
     }
 
     public List<CodeFileSummary> listActiveFiles(UUID repositoryId, String query, int limit) {
@@ -434,6 +551,108 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("symbol", symbol)
+                .addValue("likeQuery", "%" + symbol + "%")
+                .addValue("limit", Math.max(1, Math.min(limit, 50)));
+
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       (
+                         CASE WHEN lower(c.symbol_name) = lower(:symbol) THEN 1.20 ELSE 0 END +
+                         CASE WHEN lower(c.method_name) = lower(:symbol) THEN 1.10 ELSE 0 END +
+                         CASE WHEN lower(c.class_name) = lower(:symbol) THEN 1.00 ELSE 0 END +
+                         CASE WHEN lower(c.control_name) = lower(:symbol) THEN 0.90 ELSE 0 END +
+                         CASE WHEN lower(c.event_name) = lower(:symbol) THEN 0.90 ELSE 0 END +
+                         CASE WHEN c.file_path ILIKE :likeQuery THEN 0.15 ELSE 0 END
+                       ) AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id
+                WHERE c.active
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                  AND (
+                    lower(c.symbol_name) = lower(:symbol)
+                    OR lower(c.method_name) = lower(:symbol)
+                    OR lower(c.class_name) = lower(:symbol)
+                    OR lower(c.control_name) = lower(:symbol)
+                    OR lower(c.event_name) = lower(:symbol)
+                    OR c.file_path ILIKE :likeQuery
+                  )
+                ORDER BY score DESC, c.file_path, c.line_start
+                LIMIT :limit
+                """, params, this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> findSymbolReferences(UUID repositoryId, String symbol, int limit) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("symbol", symbol)
+                .addValue("likeQuery", "%" + symbol + "%")
+                .addValue("limit", Math.max(1, Math.min(limit, 80)));
+
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       (
+                         CASE WHEN c.content ILIKE :likeQuery THEN 0.72 ELSE 0 END +
+                         CASE WHEN c.symbol_name ILIKE :likeQuery THEN 0.22 ELSE 0 END +
+                         CASE WHEN c.method_name ILIKE :likeQuery THEN 0.22 ELSE 0 END +
+                         CASE WHEN c.class_name ILIKE :likeQuery THEN 0.18 ELSE 0 END +
+                         CASE WHEN c.control_name ILIKE :likeQuery THEN 0.18 ELSE 0 END +
+                         CASE WHEN c.event_name ILIKE :likeQuery THEN 0.18 ELSE 0 END +
+                         CASE WHEN c.file_path ILIKE :likeQuery THEN 0.10 ELSE 0 END
+                       ) AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id
+                WHERE c.active
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                  AND (
+                    c.content ILIKE :likeQuery
+                    OR c.symbol_name ILIKE :likeQuery
+                    OR c.method_name ILIKE :likeQuery
+                    OR c.class_name ILIKE :likeQuery
+                    OR c.control_name ILIKE :likeQuery
+                    OR c.event_name ILIKE :likeQuery
+                    OR c.file_path ILIKE :likeQuery
+                  )
+                ORDER BY score DESC, c.file_path, c.line_start
+                LIMIT :limit
+                """, params, this::mapSearchResult);
+    }
+
     public List<CodeSearchResult> relatedChunks(UUID repositoryId, List<String> filePaths, int centerChunkIndex, int limit) {
         if (filePaths == null || filePaths.isEmpty()) {
             return List.of();
@@ -498,6 +717,7 @@ public class CodeRepository {
                 rs.getString("status"),
                 rs.getString("last_indexed_commit"),
                 rs.getString("error_message"),
+                rs.getBoolean("credential_stored"),
                 rs.getInt("active_file_count"),
                 rs.getInt("active_chunk_count"),
                 rs.getObject("created_at", OffsetDateTime.class),

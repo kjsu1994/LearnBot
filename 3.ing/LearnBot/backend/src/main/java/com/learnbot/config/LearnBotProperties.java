@@ -298,6 +298,9 @@ public class LearnBotProperties {
         @Min(1)
         private int indexThreads = 2;
 
+        @NotBlank
+        private String credentialSecret = "learnbot-local-dev-secret-change-me";
+
         public String getWorkspacePath() {
             return workspacePath;
         }
@@ -336,6 +339,14 @@ public class LearnBotProperties {
 
         public void setIndexThreads(int indexThreads) {
             this.indexThreads = indexThreads;
+        }
+
+        public String getCredentialSecret() {
+            return credentialSecret;
+        }
+
+        public void setCredentialSecret(String credentialSecret) {
+            this.credentialSecret = credentialSecret;
         }
     }
 }
