@@ -38,6 +38,8 @@ services:
     restart: unless-stopped
     ports:
       - "8083:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/client:ro
     depends_on:
       backend:
         condition: service_started
@@ -93,7 +95,7 @@ services:
     container_name: learnbot-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6380:6379"
 
   backend:
     container_name: learnbot-backend
