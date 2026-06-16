@@ -17,6 +17,7 @@ public class LearnBotProperties {
     private Ollama ollama = new Ollama();
     private Rag rag = new Rag();
     private Storage storage = new Storage();
+    private Code code = new Code();
 
     public Crawler getCrawler() {
         return crawler;
@@ -64,6 +65,14 @@ public class LearnBotProperties {
 
     public void setStorage(Storage storage) {
         this.storage = storage;
+    }
+
+    public Code getCode() {
+        return code;
+    }
+
+    public void setCode(Code code) {
+        this.code = code;
     }
 
     public static class Crawler {
@@ -270,6 +279,52 @@ public class LearnBotProperties {
 
         public void setRegion(String region) {
             this.region = region;
+        }
+    }
+
+    public static class Code {
+        @NotBlank
+        private String workspacePath = "/var/lib/learnbot/repos";
+
+        @Min(1)
+        private long maxFileBytes = 1_000_000;
+
+        @Min(1)
+        private int maxFiles = 5000;
+
+        @Min(1)
+        private int topK = 10;
+
+        public String getWorkspacePath() {
+            return workspacePath;
+        }
+
+        public void setWorkspacePath(String workspacePath) {
+            this.workspacePath = workspacePath;
+        }
+
+        public long getMaxFileBytes() {
+            return maxFileBytes;
+        }
+
+        public void setMaxFileBytes(long maxFileBytes) {
+            this.maxFileBytes = maxFileBytes;
+        }
+
+        public int getMaxFiles() {
+            return maxFiles;
+        }
+
+        public void setMaxFiles(int maxFiles) {
+            this.maxFiles = maxFiles;
+        }
+
+        public int getTopK() {
+            return topK;
+        }
+
+        public void setTopK(int topK) {
+            this.topK = topK;
         }
     }
 }

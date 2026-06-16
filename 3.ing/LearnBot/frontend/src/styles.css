@@ -17,6 +17,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -53,6 +54,7 @@ button:disabled {
 }
 
 input,
+select,
 textarea {
   background: #fff;
   border: 1px solid #ccd6d2;
@@ -70,6 +72,7 @@ textarea::placeholder {
 }
 
 input:focus,
+select:focus,
 textarea:focus,
 .file-picker:hover {
   border-color: #13715f;
@@ -241,6 +244,13 @@ h3 {
   justify-content: space-between;
 }
 
+.top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .topbar p,
 .panel-title p {
   color: #637079;
@@ -266,6 +276,32 @@ h3 {
 .ghost-button:hover:not(:disabled) {
   background: #eef5f1;
   border-color: #b9cbc4;
+}
+
+.view-tabs {
+  background: #e9efeb;
+  border: 1px solid #d6dfda;
+  border-radius: 8px;
+  display: inline-grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 160px));
+  padding: 4px;
+  width: fit-content;
+}
+
+.tab-button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #53616a;
+  min-height: 38px;
+}
+
+.tab-button:hover:not(:disabled),
+.tab-button.active {
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(24, 33, 42, 0.08);
+  color: #13715f;
 }
 
 .alert {
@@ -294,6 +330,10 @@ h3 {
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(320px, 0.92fr) minmax(420px, 1.35fr);
+}
+
+.workspace-grid.code-grid {
+  grid-template-columns: minmax(360px, 0.95fr) minmax(440px, 1.25fr);
 }
 
 .left-column,
@@ -344,6 +384,15 @@ h3 {
   color: #34424c;
   font-size: 13px;
   font-weight: 800;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.form-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .inline-control,
@@ -486,6 +535,21 @@ h3 {
   padding: 11px 12px;
 }
 
+.document-row.repo-row {
+  grid-template-rows: auto auto;
+}
+
+.repo-row .job-strip {
+  border-top: 1px solid #e5ece8;
+  color: #6d7a82;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding-top: 10px;
+}
+
 .document-row:hover,
 .document-row.selected {
   background: #f6faf7;
@@ -579,6 +643,14 @@ h3 {
   padding: 4px;
 }
 
+.auth-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.code-mode-control {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .mode-button {
   background: transparent;
   border: 0;
@@ -627,6 +699,11 @@ h3 {
   -webkit-line-clamp: 5;
 }
 
+.code-evidence p {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
 .detail-panel {
   align-self: start;
 }
@@ -666,6 +743,10 @@ h3 {
 .detail-box {
   display: grid;
   gap: 5px;
+}
+
+.compact-box {
+  background: #fbfcfb;
 }
 
 .detail-box span {
@@ -802,11 +883,13 @@ h3 {
   .topbar,
   .inline-control,
   .file-row,
-  .document-row {
+  .document-row,
+  .form-grid.two {
     grid-template-columns: 1fr;
   }
 
   .mode-control,
+  .code-mode-control,
   .detail-grid {
     grid-template-columns: 1fr;
   }
@@ -816,9 +899,15 @@ h3 {
   }
 
   .ghost-button,
+  .tab-button,
   .inline-control button,
   .file-row button,
   .action-row button {
+    width: 100%;
+  }
+
+  .top-actions,
+  .view-tabs {
     width: 100%;
   }
 

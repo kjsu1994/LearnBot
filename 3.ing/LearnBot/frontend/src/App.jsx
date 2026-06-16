@@ -3,9 +3,13 @@ import {
   Bot,
   CheckCircle2,
   CircleHelp,
+  Code2,
   Database,
+  FileCode2,
   FileSpreadsheet,
   FileUp,
+  GitBranch,
+  GitPullRequest,
   Globe,
   Info,
   Loader2,
@@ -40,8 +44,19 @@ const answerModes = [
   { value: 'quote', label: '원문 인용' },
 ];
 
+const codeModes = [
+  { value: 'locate', label: '기능 위치' },
+  { value: 'method', label: '메서드 설명' },
+  { value: 'flow', label: '호출 흐름' },
+  { value: 'ui_event', label: 'UI 이벤트' },
+  { value: 'impact', label: '영향 범위' },
+];
+
 function App() {
+  const [activeView, setActiveView] = useState('code');
   const [documents, setDocuments] = useState([]);
+  const [repositories, setRepositories] = useState([]);
+  const [jobs, setJobs] = useState({});
   const [webUrl, setWebUrl] = useState('');
   const [file, setFile] = useState(null);
   const [query, setQuery] = useState('');
@@ -51,12 +66,25 @@ function App() {
   const [answer, setAnswer] = useState(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [documentDetail, setDocumentDetail] = useState(null);
+  const [repoForm, setRepoForm] = useState({
+    gitUrl: '',
+    name: '',
+    branch: 'HEAD',
+    authType: 'NONE',
+    username: '',
+    token: '',
+  });
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState('');
+  const [codeQuestion, setCodeQuestion] = useState('');
+  const [codeMode, setCodeMode] = useState('locate');
+  const [codeAnswer, setCodeAnswer] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     refreshDocuments();
+    refreshRepositories();
   }, []);
 
   const indexedCount = useMemo(
@@ -64,11 +92,13 @@ function App() {
     [documents],
   );
 
-  const webCount = useMemo(
-    () => documents.filter((doc) => doc.sourceType === 'WEB').length,
-    [documents],
+  const indexedRepoCount = useMemo(
+    () => repositories.filter((repo) => repo.status === 'INDEXED').length,
+    [repositories],
   );
 
+  const codeChunkCount = repositories.reduce((sum, repo) => sum + Number(repo.activeChunkCount || 0), 0);
+  const webCount = documents.filter((doc) => doc.sourceType === 'WEB').length;
   const fileCount = documents.length - webCount;
   const latestDocuments = documents.slice(0, 8);
 
@@ -76,6 +106,17 @@ function App() {
     const response = await fetch(`${apiBase}/api/documents`);
     if (response.ok) {
       setDocuments(await response.json());
+    }
+  }
+
+  async function refreshRepositories() {
+    const response = await fetch(`${apiBase}/api/code/repositories`);
+    if (response.ok) {
+      const data = await response.json();
+      setRepositories(data);
+      if (!selectedRepositoryId && data.length) {
+        setSelectedRepositoryId(data[0].id);
+      }
     }
   }
 
@@ -108,7 +149,6 @@ function App() {
   async function ingestFile(event) {
     event.preventDefault();
     if (!file) return;
-
     await run('file', async () => {
       const body = new FormData();
       body.append('file', file);
@@ -146,10 +186,73 @@ function App() {
     });
   }
 
-  async function deleteDocument(documentId, title) {
-    if (!window.confirm(`'${title}' 문서를 삭제할까요?`)) {
-      return;
+  async function registerRepository(event) {
+    event.preventDefault();
+    await run('repo-register', async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gitUrl: repoForm.gitUrl,
+          name: repoForm.name,
+          branch: repoForm.branch,
+          authType: repoForm.authType,
+          username: repoForm.username,
+          token: repoForm.token,
+        }),
+      });
+      await requireOk(response);
+      const created = await response.json();
+      setSelectedRepositoryId(created.id);
+      setRepoForm((current) => ({ ...current, gitUrl: '', name: '' }));
+      await refreshRepositories();
+    });
+  }
+
+  async function indexRepository(repositoryId) {
+    await run(`repo-index-${repositoryId}`, async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: repoForm.username,
+          token: repoForm.authType === 'TOKEN' ? repoForm.token : '',
+        }),
+      });
+      await requireOk(response);
+      await refreshRepositories();
+      await refreshJobs(repositoryId);
+    });
+  }
+
+  async function refreshJobs(repositoryId) {
+    const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/jobs`);
+    if (response.ok) {
+      const data = await response.json();
+      setJobs((current) => ({ ...current, [repositoryId]: data }));
     }
+  }
+
+  async function askCode(event) {
+    event.preventDefault();
+    await run('code-ask', async () => {
+      const response = await fetch(`${apiBase}/api/code/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repositoryId: selectedRepositoryId || null,
+          question: codeQuestion,
+          mode: codeMode,
+          limit: 10,
+        }),
+      });
+      await requireOk(response);
+      setCodeAnswer(await response.json());
+    });
+  }
+
+  async function deleteDocument(documentId, title) {
+    if (!window.confirm(`'${title}' 문서를 삭제할까요?`)) return;
     await run(`delete-${documentId}`, async () => {
       const response = await fetch(`${apiBase}/api/documents/${documentId}`, { method: 'DELETE' });
       await requireOk(response);
@@ -197,27 +300,32 @@ function App() {
           </div>
           <div>
             <span>LearnBot</span>
-            <small>로컬 지식 작업공간</small>
+            <small>로컬 코드/문서 RAG</small>
           </div>
         </div>
 
         <div className="side-section">
-          <span className="section-label">문서 상태</span>
+          <span className="section-label">인덱스 상태</span>
           <div className="metric-grid">
             <div className="metric">
-              <strong>{documents.length}</strong>
-              <span>전체</span>
+              <strong>{indexedRepoCount}</strong>
+              <span>코드 저장소</span>
             </div>
             <div className="metric">
               <strong>{indexedCount}</strong>
-              <span>색인 완료</span>
+              <span>문서</span>
             </div>
           </div>
         </div>
 
         <div className="side-section">
-          <span className="section-label">소스</span>
+          <span className="section-label">데이터</span>
           <div className="source-stack">
+            <div>
+              <FileCode2 size={15} />
+              <span>코드 근거</span>
+              <strong>{codeChunkCount}</strong>
+            </div>
             <div>
               <Globe size={15} />
               <span>웹</span>
@@ -235,7 +343,7 @@ function App() {
           <span className="section-label">모델</span>
           <div>
             <small>답변</small>
-            <strong>gemma4:e2b</strong>
+            <strong>gemma4:e2b-it-qat</strong>
           </div>
           <div>
             <small>검색</small>
@@ -247,194 +355,83 @@ function App() {
       <section className="content">
         <header className="topbar">
           <div>
-            <span className="eyebrow">Local RAG</span>
-            <h1>지식 검색과 질문 답변</h1>
-            <p>승인된 웹 문서와 CSV/Excel 파일을 기준으로 답변합니다.</p>
+            <span className="eyebrow">Private Assistant</span>
+            <h1>코드와 문서를 근거로 답변합니다</h1>
+            <p>사내 Git 저장소와 업무 문서를 로컬에서 색인하고, 근거가 있는 답변만 생성합니다.</p>
           </div>
-          <button className="ghost-button" type="button" onClick={refreshDocuments}>
-            <Database size={16} />
-            새로고침
-          </button>
+          <div className="top-actions">
+            <button className="ghost-button" type="button" onClick={refreshRepositories}>
+              <GitPullRequest size={16} />
+              저장소 새로고침
+            </button>
+            <button className="ghost-button" type="button" onClick={refreshDocuments}>
+              <Database size={16} />
+              문서 새로고침
+            </button>
+          </div>
         </header>
+
+        <div className="view-tabs" aria-label="작업 영역">
+          <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('code')}>
+            <Code2 size={16} />
+            코드 RAG
+          </button>
+          <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('docs')}>
+            <Database size={16} />
+            문서 RAG
+          </button>
+        </div>
 
         {error && <div className="alert">{error}</div>}
         {progressMessage && <div className="progress-banner"><Loader2 className="spin" size={16} />{progressMessage}</div>}
 
-        <section className="workspace-grid">
-          <div className="left-column">
-            <section className="panel">
-              <div className="panel-title">
-                <Database size={18} />
-                <div>
-                  <h2>소스 추가</h2>
-                  <p>웹 URL 또는 표 파일을 색인합니다.</p>
-                </div>
-              </div>
-
-              <form className="stack" onSubmit={ingestWeb}>
-                <label htmlFor="web-url">웹 URL</label>
-                <div className="inline-control">
-                  <input
-                    id="web-url"
-                    value={webUrl}
-                    onChange={(event) => setWebUrl(event.target.value)}
-                    placeholder="https://example.com/docs"
-                  />
-                  <button disabled={!webUrl || loading('web')}>
-                    {loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
-                    색인
-                  </button>
-                </div>
-              </form>
-
-              <form className="stack" onSubmit={ingestFile}>
-                <label htmlFor="file-upload">CSV / Excel</label>
-                <div className="file-row">
-                  <label className="file-picker" htmlFor="file-upload">
-                    <FileUp size={16} />
-                    <span>{file ? file.name : '파일 선택'}</span>
-                  </label>
-                  <input
-                    id="file-upload"
-                    className="visually-hidden"
-                    type="file"
-                    accept=".csv,.xls,.xlsx"
-                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                  />
-                  <button disabled={!file || loading('file')}>
-                    {loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
-                    업로드
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            <section className="panel documents-panel">
-              <div className="panel-title">
-                <Database size={18} />
-                <div>
-                  <h2>문서 목록</h2>
-                  <p>{documents.length ? `최근 ${latestDocuments.length}개 문서` : '색인된 문서가 없습니다.'}</p>
-                </div>
-              </div>
-              <div className="document-list">
-                {latestDocuments.map((doc) => (
-                  <article
-                    className={doc.id === selectedDocumentId ? 'document-row selected' : 'document-row'}
-                    key={doc.id}
-                    onClick={() => loadDocumentDetail(doc.id)}
-                  >
-                    <div className="document-main">
-                      <strong>{doc.title}</strong>
-                      <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
-                    </div>
-                    <div className="document-meta">
-                      <StatusBadge status={doc.sourceStatus} />
-                      <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
-                    </div>
-                    <div className="document-actions">
-                      <button
-                        className="icon-button"
-                        type="button"
-                        title="재색인"
-                        disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          reindexDocument(doc.id);
-                        }}
-                      >
-                        {loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-                      </button>
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        title="삭제"
-                        disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteDocument(doc.id, doc.title);
-                        }}
-                      >
-                        {loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-                      </button>
-                    </div>
-                  </article>
-                ))}
-                {documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
-              </div>
-            </section>
-
-            <DocumentDetailPanel detail={documentDetail} loading={selectedDocumentId && loading(`detail-${selectedDocumentId}`)} />
-          </div>
-
-          <div className="right-column">
-            <form className="panel ask-panel" onSubmit={ask}>
-              <div className="panel-title">
-                <MessageSquare size={18} />
-                <div>
-                  <h2>질문하기</h2>
-                  <p>색인된 문서를 근거로 답변을 생성합니다.</p>
-                </div>
-              </div>
-              <div className="mode-control" aria-label="답변 모드">
-                {answerModes.map((mode) => (
-                  <button
-                    className={answerMode === mode.value ? 'mode-button active' : 'mode-button'}
-                    key={mode.value}
-                    type="button"
-                    onClick={() => setAnswerMode(mode.value)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="예: 업로드한 문서에서 재고가 없는 상품을 알려줘"
-              />
-              <div className="action-row">
-                <button disabled={!question || loading('ask')}>
-                  {loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
-                  {loading('ask') ? '모델 응답 대기 중' : '답변 생성'}
-                </button>
-              </div>
-              {answer && (
-                <div className="answer">
-                  <div className="answer-title">
-                    <CheckCircle2 size={16} />
-                    <strong>답변</strong>
-                  </div>
-                  <small className="answer-mode">{getAnswerModeLabel(answer.mode)} 모드</small>
-                  <p>{answer.answer}</p>
-                  <EvidenceList evidence={answer.evidence} />
-                </div>
-              )}
-            </form>
-
-            <form className="panel search-panel" onSubmit={search}>
-              <div className="panel-title">
-                <Search size={18} />
-                <div>
-                  <h2>검색</h2>
-                  <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
-                </div>
-              </div>
-              <div className="inline-control">
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="검색어를 입력하세요"
-                />
-                <button disabled={!query || loading('search')}>
-                  {loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-                  검색
-                </button>
-              </div>
-              <ResultList results={searchResults} title="검색 결과" />
-            </form>
-          </div>
-        </section>
+        {activeView === 'code' ? (
+          <CodeWorkspace
+            repoForm={repoForm}
+            setRepoForm={setRepoForm}
+            repositories={repositories}
+            selectedRepositoryId={selectedRepositoryId}
+            setSelectedRepositoryId={setSelectedRepositoryId}
+            jobs={jobs}
+            codeQuestion={codeQuestion}
+            setCodeQuestion={setCodeQuestion}
+            codeMode={codeMode}
+            setCodeMode={setCodeMode}
+            codeAnswer={codeAnswer}
+            registerRepository={registerRepository}
+            indexRepository={indexRepository}
+            refreshJobs={refreshJobs}
+            askCode={askCode}
+            loading={loading}
+          />
+        ) : (
+          <DocumentWorkspace
+            webUrl={webUrl}
+            setWebUrl={setWebUrl}
+            file={file}
+            setFile={setFile}
+            ingestWeb={ingestWeb}
+            ingestFile={ingestFile}
+            documents={documents}
+            latestDocuments={latestDocuments}
+            selectedDocumentId={selectedDocumentId}
+            loadDocumentDetail={loadDocumentDetail}
+            reindexDocument={reindexDocument}
+            deleteDocument={deleteDocument}
+            documentDetail={documentDetail}
+            answerMode={answerMode}
+            setAnswerMode={setAnswerMode}
+            question={question}
+            setQuestion={setQuestion}
+            ask={ask}
+            answer={answer}
+            query={query}
+            setQuery={setQuery}
+            search={search}
+            searchResults={searchResults}
+            loading={loading}
+          />
+        )}
       </section>
 
       <button
@@ -447,41 +444,432 @@ function App() {
         <CircleHelp size={22} />
       </button>
 
-      {helpOpen && (
-        <div className="help-backdrop" role="presentation" onClick={() => setHelpOpen(false)}>
-          <aside className="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
-            <div className="help-header">
-              <div>
-                <span className="eyebrow">Guide</span>
-                <h2 id="help-title">사용 방법</h2>
+      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+    </main>
+  );
+}
+
+function CodeWorkspace({
+  repoForm,
+  setRepoForm,
+  repositories,
+  selectedRepositoryId,
+  setSelectedRepositoryId,
+  jobs,
+  codeQuestion,
+  setCodeQuestion,
+  codeMode,
+  setCodeMode,
+  codeAnswer,
+  registerRepository,
+  indexRepository,
+  refreshJobs,
+  askCode,
+  loading,
+}) {
+  const selectedRepository = repositories.find((repo) => repo.id === selectedRepositoryId);
+
+  return (
+    <section className="workspace-grid code-grid">
+      <div className="left-column">
+        <section className="panel">
+          <div className="panel-title">
+            <GitBranch size={18} />
+            <div>
+              <h2>Git 저장소 등록</h2>
+              <p>사내 Git, GitHub, GitLab, Enterprise HTTP/HTTPS 주소를 등록합니다.</p>
+            </div>
+          </div>
+
+          <form className="stack" onSubmit={registerRepository}>
+            <label htmlFor="git-url">Git URL</label>
+            <input
+              id="git-url"
+              value={repoForm.gitUrl}
+              onChange={(event) => setRepoForm((current) => ({ ...current, gitUrl: event.target.value }))}
+              placeholder="http://192.168.1.146/Git/BRSE_Controller_WPF.git"
+            />
+            <div className="form-grid two">
+              <div className="stack">
+                <label htmlFor="repo-name">표시 이름</label>
+                <input
+                  id="repo-name"
+                  value={repoForm.name}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="BRSE Controller"
+                />
               </div>
-              <button className="icon-button" type="button" title="닫기" onClick={() => setHelpOpen(false)}>
-                <X size={16} />
+              <div className="stack">
+                <label htmlFor="repo-branch">Branch</label>
+                <input
+                  id="repo-branch"
+                  value={repoForm.branch}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, branch: event.target.value }))}
+                  placeholder="HEAD 또는 main"
+                />
+              </div>
+            </div>
+            <div className="mode-control auth-control" aria-label="Git 인증 방식">
+              <button
+                className={repoForm.authType === 'NONE' ? 'mode-button active' : 'mode-button'}
+                type="button"
+                onClick={() => setRepoForm((current) => ({ ...current, authType: 'NONE' }))}
+              >
+                인증 없음
+              </button>
+              <button
+                className={repoForm.authType === 'TOKEN' ? 'mode-button active' : 'mode-button'}
+                type="button"
+                onClick={() => setRepoForm((current) => ({ ...current, authType: 'TOKEN' }))}
+              >
+                토큰
               </button>
             </div>
-
-            <div className="help-content">
-              <section>
-                <h3>1. 문서 추가</h3>
-                <p>웹 URL은 허용 도메인만 색인됩니다. CSV, XLS, XLSX 파일은 업로드하면 원본이 MinIO에 저장되고 내용이 색인됩니다.</p>
-              </section>
-              <section>
-                <h3>2. 검색</h3>
-                <p>키워드를 입력하면 색인된 문서 조각 중 관련도가 높은 결과를 확인할 수 있습니다.</p>
-              </section>
-              <section>
-                <h3>3. 질문</h3>
-                <p>질문을 입력하면 검색된 문서 내용을 근거로 답변합니다. LLM이 실패하면 관련 근거 문서를 반환합니다.</p>
-              </section>
-              <section>
-                <h3>4. 관리</h3>
-                <p>문서 목록의 회전 아이콘은 재색인, 휴지통 아이콘은 삭제입니다. 파일 재색인은 저장된 원본 파일을 다시 사용합니다.</p>
-              </section>
+            {repoForm.authType === 'TOKEN' && (
+              <div className="form-grid two">
+                <div className="stack">
+                  <label htmlFor="git-username">Username</label>
+                  <input
+                    id="git-username"
+                    value={repoForm.username}
+                    onChange={(event) => setRepoForm((current) => ({ ...current, username: event.target.value }))}
+                    placeholder="비워두면 oauth2"
+                  />
+                </div>
+                <div className="stack">
+                  <label htmlFor="git-token">Token</label>
+                  <input
+                    id="git-token"
+                    type="password"
+                    value={repoForm.token}
+                    onChange={(event) => setRepoForm((current) => ({ ...current, token: event.target.value }))}
+                    placeholder="등록/색인 요청 때만 사용"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="action-row">
+              <button disabled={!repoForm.gitUrl || loading('repo-register')}>
+                {loading('repo-register') ? <Loader2 className="spin" size={16} /> : <GitBranch size={16} />}
+                저장소 등록
+              </button>
             </div>
-          </aside>
-        </div>
-      )}
-    </main>
+          </form>
+        </section>
+
+        <section className="panel documents-panel">
+          <div className="panel-title">
+            <FileCode2 size={18} />
+            <div>
+              <h2>저장소 목록</h2>
+              <p>{repositories.length ? `${repositories.length}개 저장소` : '등록된 코드 저장소가 없습니다.'}</p>
+            </div>
+          </div>
+          <div className="document-list">
+            {repositories.map((repo) => (
+              <article
+                className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'}
+                key={repo.id}
+                onClick={() => setSelectedRepositoryId(repo.id)}
+              >
+                <div className="document-main">
+                  <strong>{repo.name}</strong>
+                  <small>{repo.gitUrl}</small>
+                </div>
+                <div className="document-meta">
+                  <StatusBadge status={repo.status} />
+                  <small>{repo.branch} · {repo.activeFileCount} files · {repo.activeChunkCount} chunks</small>
+                </div>
+                <div className="document-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="작업 이력"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      refreshJobs(repo.id);
+                    }}
+                  >
+                    <Info size={15} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="인덱싱"
+                    disabled={loading(`repo-index-${repo.id}`)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      indexRepository(repo.id);
+                    }}
+                  >
+                    {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                  </button>
+                </div>
+                {!!jobs[repo.id]?.length && (
+                  <div className="job-strip">
+                    {jobs[repo.id].slice(0, 2).map((job) => (
+                      <span key={job.id}>
+                        {job.status} · {job.processedFiles}/{job.totalFiles} files · {job.totalChunks} chunks
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+            {repositories.length === 0 && <p className="empty">Git URL을 등록한 뒤 인덱싱 버튼을 누르세요.</p>}
+          </div>
+        </section>
+      </div>
+
+      <div className="right-column">
+        <form className="panel ask-panel" onSubmit={askCode}>
+          <div className="panel-title">
+            <MessageSquare size={18} />
+            <div>
+              <h2>코드에게 질문하기</h2>
+              <p>파일, 클래스, 메서드, UI 이벤트 흐름을 근거 코드와 함께 답변합니다.</p>
+            </div>
+          </div>
+
+          <div className="stack">
+            <label htmlFor="repo-select">질문 대상</label>
+            <select
+              id="repo-select"
+              value={selectedRepositoryId}
+              onChange={(event) => setSelectedRepositoryId(event.target.value)}
+            >
+              <option value="">전체 저장소</option>
+              {repositories.map((repo) => (
+                <option key={repo.id} value={repo.id}>{repo.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mode-control code-mode-control" aria-label="코드 질문 모드">
+            {codeModes.map((mode) => (
+              <button
+                className={codeMode === mode.value ? 'mode-button active' : 'mode-button'}
+                key={mode.value}
+                type="button"
+                onClick={() => setCodeMode(mode.value)}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+
+          <textarea
+            value={codeQuestion}
+            onChange={(event) => setCodeQuestion(event.target.value)}
+            placeholder="예: MainWindow.xaml의 버튼 클릭 이벤트는 어디서 처리돼?"
+          />
+          <div className="action-row">
+            <button disabled={!codeQuestion || loading('code-ask')}>
+              {loading('code-ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
+              {loading('code-ask') ? '코드 검색 및 답변 생성 중' : '코드 질문'}
+            </button>
+          </div>
+
+          {selectedRepository && (
+            <div className="detail-box compact-box">
+              <strong>{selectedRepository.name}</strong>
+              <small>{selectedRepository.lastIndexedCommit ? `commit ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : '아직 색인된 commit이 없습니다.'}</small>
+            </div>
+          )}
+
+          {codeAnswer && (
+            <div className="answer">
+              <div className="answer-title">
+                <CheckCircle2 size={16} />
+                <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
+              </div>
+              <p>{codeAnswer.answer}</p>
+              <CodeEvidenceList evidence={codeAnswer.evidence} />
+            </div>
+          )}
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function DocumentWorkspace(props) {
+  return (
+    <section className="workspace-grid">
+      <div className="left-column">
+        <section className="panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 소스 추가</h2>
+              <p>허용된 웹 URL 또는 CSV/Excel 파일을 색인합니다.</p>
+            </div>
+          </div>
+
+          <form className="stack" onSubmit={props.ingestWeb}>
+            <label htmlFor="web-url">웹 URL</label>
+            <div className="inline-control">
+              <input
+                id="web-url"
+                value={props.webUrl}
+                onChange={(event) => props.setWebUrl(event.target.value)}
+                placeholder="https://example.com/docs"
+              />
+              <button disabled={!props.webUrl || props.loading('web')}>
+                {props.loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+                색인
+              </button>
+            </div>
+          </form>
+
+          <form className="stack" onSubmit={props.ingestFile}>
+            <label htmlFor="file-upload">CSV / Excel</label>
+            <div className="file-row">
+              <label className="file-picker" htmlFor="file-upload">
+                <FileUp size={16} />
+                <span>{props.file ? props.file.name : '파일 선택'}</span>
+              </label>
+              <input
+                id="file-upload"
+                className="visually-hidden"
+                type="file"
+                accept=".csv,.xls,.xlsx"
+                onChange={(event) => props.setFile(event.target.files?.[0] ?? null)}
+              />
+              <button disabled={!props.file || props.loading('file')}>
+                {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
+                업로드
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="panel documents-panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 목록</h2>
+              <p>{props.documents.length ? `최근 ${props.latestDocuments.length}개 문서` : '색인된 문서가 없습니다.'}</p>
+            </div>
+          </div>
+          <div className="document-list">
+            {props.latestDocuments.map((doc) => (
+              <article
+                className={doc.id === props.selectedDocumentId ? 'document-row selected' : 'document-row'}
+                key={doc.id}
+                onClick={() => props.loadDocumentDetail(doc.id)}
+              >
+                <div className="document-main">
+                  <strong>{doc.title}</strong>
+                  <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
+                </div>
+                <div className="document-meta">
+                  <StatusBadge status={doc.sourceStatus} />
+                  <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
+                </div>
+                <div className="document-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="재색인"
+                    disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.reindexDocument(doc.id);
+                    }}
+                  >
+                    {props.loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    title="삭제"
+                    disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.deleteDocument(doc.id, doc.title);
+                    }}
+                  >
+                    {props.loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {props.documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
+          </div>
+        </section>
+
+        <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
+      </div>
+
+      <div className="right-column">
+        <form className="panel ask-panel" onSubmit={props.ask}>
+          <div className="panel-title">
+            <MessageSquare size={18} />
+            <div>
+              <h2>문서 질문하기</h2>
+              <p>색인된 문서를 근거로 답변을 생성합니다.</p>
+            </div>
+          </div>
+          <div className="mode-control" aria-label="답변 모드">
+            {answerModes.map((mode) => (
+              <button
+                className={props.answerMode === mode.value ? 'mode-button active' : 'mode-button'}
+                key={mode.value}
+                type="button"
+                onClick={() => props.setAnswerMode(mode.value)}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={props.question}
+            onChange={(event) => props.setQuestion(event.target.value)}
+            placeholder="업로드한 문서에서 찾고 싶은 내용을 질문하세요."
+          />
+          <div className="action-row">
+            <button disabled={!props.question || props.loading('ask')}>
+              {props.loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
+              {props.loading('ask') ? '모델 응답 대기 중' : '답변 생성'}
+            </button>
+          </div>
+          {props.answer && (
+            <div className="answer">
+              <div className="answer-title">
+                <CheckCircle2 size={16} />
+                <strong>답변</strong>
+              </div>
+              <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
+              <p>{props.answer.answer}</p>
+              <EvidenceList evidence={props.answer.evidence} />
+            </div>
+          )}
+        </form>
+
+        <form className="panel search-panel" onSubmit={props.search}>
+          <div className="panel-title">
+            <Search size={18} />
+            <div>
+              <h2>문서 검색</h2>
+              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
+            </div>
+          </div>
+          <div className="inline-control">
+            <input
+              value={props.query}
+              onChange={(event) => props.setQuery(event.target.value)}
+              placeholder="검색어를 입력하세요"
+            />
+            <button disabled={!props.query || props.loading('search')}>
+              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              검색
+            </button>
+          </div>
+          <ResultList results={props.searchResults} title="검색 결과" />
+        </form>
+      </div>
+    </section>
   );
 }
 
@@ -507,7 +895,7 @@ function DocumentDetailPanel({ detail, loading }) {
           <Info size={18} />
           <div>
             <h2>문서 상세</h2>
-            <p>문서 목록에서 항목을 선택하면 색인 내용과 원본 정보를 확인할 수 있습니다.</p>
+            <p>문서를 선택하면 색인 내용과 원본 저장 정보를 확인할 수 있습니다.</p>
           </div>
         </div>
       </section>
@@ -546,7 +934,7 @@ function DocumentDetailPanel({ detail, loading }) {
 
       {detail.storedObject && (
         <div className="detail-box">
-          <strong>원본 파일</strong>
+          <strong>MinIO 원본</strong>
           <span>{detail.storedObject.originalFilename}</span>
           <small>{detail.storedObject.bucket} · {detail.storedObject.contentType} · {formatBytes(detail.storedObject.sizeBytes)}</small>
         </div>
@@ -595,10 +983,34 @@ function EvidenceList({ evidence }) {
   );
 }
 
-function ResultList({ results, compact = false, title }) {
+function CodeEvidenceList({ evidence }) {
+  if (!evidence?.length) return null;
+  return (
+    <div className="evidence-list">
+      <h3>코드 근거</h3>
+      {evidence.map((item) => (
+        <article className="evidence-card code-evidence" key={`${item.chunkId}-${item.citationNumber}`}>
+          <div className="result-heading">
+            <strong>[{item.citationNumber}] {item.filePath}:{item.lineStart}-{item.lineEnd}</strong>
+            <span>{formatScore(item.score)}</span>
+          </div>
+          <small>
+            {item.chunkType}
+            {item.className ? ` · ${item.className}` : ''}
+            {item.methodName ? `.${item.methodName}` : ''}
+            {item.controlName ? ` · ${item.controlName}` : ''}
+          </small>
+          <p>{item.preview}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ResultList({ results, title }) {
   if (!results?.length) return null;
   return (
-    <div className={compact ? 'results compact' : 'results'}>
+    <div className="results">
       {title && <h3>{title}</h3>}
       {results.map((result, index) => (
         <article className="result" key={`${result.chunkId}-${index}`}>
@@ -607,15 +1019,56 @@ function ResultList({ results, compact = false, title }) {
             <span>{formatScore(result.score)}</span>
           </div>
           <small>{getSourceLabel(result.sourceType)} · chunk {result.chunkIndex + 1}</small>
-          {!compact && <p>{result.content}</p>}
+          <p>{result.content}</p>
         </article>
       ))}
     </div>
   );
 }
 
+function HelpPanel({ onClose }) {
+  return (
+    <div className="help-backdrop" role="presentation" onClick={onClose}>
+      <aside className="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
+        <div className="help-header">
+          <div>
+            <span className="eyebrow">Guide</span>
+            <h2 id="help-title">사용 방법</h2>
+          </div>
+          <button className="icon-button" type="button" title="닫기" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="help-content">
+          <section>
+            <h3>1. 코드 저장소</h3>
+            <p>Git URL을 등록하고 인덱싱 버튼을 누르면 소스 파일을 구조 단위로 색인합니다. 토큰은 저장하지 않고 요청 시에만 사용합니다.</p>
+          </section>
+          <section>
+            <h3>2. 코드 질문</h3>
+            <p>기능 위치, 메서드 설명, 호출 흐름, UI 이벤트, 영향 범위 중 하나를 선택하면 검색 의도가 좁아져 답변 품질이 좋아집니다.</p>
+          </section>
+          <section>
+            <h3>3. 근거 확인</h3>
+            <p>답변 아래에는 파일 경로와 라인 범위가 표시됩니다. 실제 유지보수 판단은 이 근거 코드를 먼저 확인하세요.</p>
+          </section>
+          <section>
+            <h3>4. 문서 RAG</h3>
+            <p>CSV, Excel 원본은 MinIO에 저장됩니다. 웹 문서는 허용 도메인과 robots.txt 정책을 통과한 경우에만 색인합니다.</p>
+          </section>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function getAnswerModeLabel(value) {
   return answerModes.find((mode) => mode.value === value)?.label ?? '질문 답변';
+}
+
+function getCodeModeLabel(value) {
+  return codeModes.find((mode) => mode.value === value)?.label ?? '기능 위치';
 }
 
 function StatusBadge({ status }) {
@@ -652,8 +1105,11 @@ function formatDate(value) {
 
 function getProgressMessage(busy) {
   if (!busy) return '';
+  if (busy === 'repo-register') return 'Git 저장소를 등록하는 중입니다.';
+  if (busy.startsWith('repo-index-')) return 'Git 저장소를 clone/pull하고 코드 chunk를 색인하는 중입니다.';
+  if (busy === 'code-ask') return '코드를 검색하고 로컬 모델 답변을 기다리는 중입니다.';
   if (busy === 'web') return '웹 페이지를 가져와 텍스트를 추출하고 색인하는 중입니다.';
-  if (busy === 'file') return '파일을 업로드하고 원본 저장 후 색인하는 중입니다.';
+  if (busy === 'file') return '파일을 업로드하고 원본 저장 및 색인을 진행하는 중입니다.';
   if (busy === 'search') return '색인된 문서에서 관련 내용을 검색하는 중입니다.';
   if (busy === 'ask') return '문서를 검색하고 로컬 모델 응답을 기다리는 중입니다.';
   if (busy.startsWith('reindex-')) return '원본 소스를 다시 읽고 문서를 재색인하는 중입니다.';

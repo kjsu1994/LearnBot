@@ -119,6 +119,7 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-learnbot}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-learnbot1234}
       S3_BUCKET: ${S3_BUCKET:-learnbot-raw}
+      LEARNBOT_CODE_WORKSPACE_PATH: /var/lib/learnbot/repos
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -130,8 +131,11 @@ services:
         condition: service_started
       minio:
         condition: service_started
+    volumes:
+      - code-repos:/var/lib/learnbot/repos
 
 volumes:
   postgres-data:
   ollama-data:
   minio-data:
+  code-repos:
