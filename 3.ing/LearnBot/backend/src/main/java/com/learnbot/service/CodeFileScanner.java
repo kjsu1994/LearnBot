@@ -15,7 +15,11 @@ import java.util.stream.Stream;
 @Component
 public class CodeFileScanner {
     private static final Set<String> SUPPORTED_EXTENSIONLESS_FILES = Set.of(
-            "readme", "license", "notice", "dockerfile", "makefile"
+            "readme", "license", "notice", "dockerfile", "makefile", "procfile"
+    );
+    private static final Set<String> EXCLUDED_FILENAMES = Set.of(
+            "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock",
+            "composer.lock", "poetry.lock", "go.sum", "cargo.lock"
     );
     private static final Set<String> EXCLUDED_DIRS = Set.of(
             ".git", "bin", "obj", ".vs", ".idea", ".gradle", "node_modules",
@@ -65,6 +69,9 @@ public class CodeFileScanner {
 
     private boolean isSupported(Path path) {
         String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (EXCLUDED_FILENAMES.contains(name) || name.endsWith(".min.js") || name.endsWith(".min.css")) {
+            return false;
+        }
         if (EXCLUDED_EXTENSIONS.stream().anyMatch(name::endsWith)) {
             return false;
         }
@@ -73,6 +80,28 @@ public class CodeFileScanner {
                 || name.endsWith(".xaml")
                 || name.endsWith(".csproj")
                 || name.endsWith(".sln")
+                || name.endsWith(".js")
+                || name.endsWith(".jsx")
+                || name.endsWith(".ts")
+                || name.endsWith(".tsx")
+                || name.endsWith(".java")
+                || name.endsWith(".py")
+                || name.endsWith(".go")
+                || name.endsWith(".rs")
+                || name.endsWith(".c")
+                || name.endsWith(".cc")
+                || name.endsWith(".cpp")
+                || name.endsWith(".h")
+                || name.endsWith(".hpp")
+                || name.endsWith(".kt")
+                || name.endsWith(".kts")
+                || name.endsWith(".php")
+                || name.endsWith(".rb")
+                || name.endsWith(".swift")
+                || name.endsWith(".html")
+                || name.endsWith(".css")
+                || name.endsWith(".scss")
+                || name.endsWith(".json")
                 || name.endsWith(".config")
                 || name.endsWith(".xml")
                 || name.endsWith(".md")
@@ -85,6 +114,21 @@ public class CodeFileScanner {
         String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
         if (name.endsWith(".cs")) return "csharp";
         if (name.endsWith(".xaml")) return "xaml";
+        if (name.endsWith(".js") || name.endsWith(".jsx")) return "javascript";
+        if (name.endsWith(".ts") || name.endsWith(".tsx")) return "typescript";
+        if (name.endsWith(".java")) return "java";
+        if (name.endsWith(".py")) return "python";
+        if (name.endsWith(".go")) return "go";
+        if (name.endsWith(".rs")) return "rust";
+        if (name.endsWith(".c") || name.endsWith(".cc") || name.endsWith(".cpp")
+                || name.endsWith(".h") || name.endsWith(".hpp")) return "cpp";
+        if (name.endsWith(".kt") || name.endsWith(".kts")) return "kotlin";
+        if (name.endsWith(".php")) return "php";
+        if (name.endsWith(".rb")) return "ruby";
+        if (name.endsWith(".swift")) return "swift";
+        if (name.endsWith(".html")) return "html";
+        if (name.endsWith(".css") || name.endsWith(".scss")) return "css";
+        if (name.endsWith(".json")) return "json";
         if (name.endsWith(".csproj") || name.endsWith(".config") || name.endsWith(".xml")) return "xml";
         if (name.endsWith(".sln")) return "solution";
         if (name.endsWith(".md")) return "markdown";

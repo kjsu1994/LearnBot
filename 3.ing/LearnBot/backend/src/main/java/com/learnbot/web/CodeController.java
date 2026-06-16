@@ -93,7 +93,7 @@ public class CodeController {
         GitAccessToken accessToken = request == null
                 ? new GitAccessToken(null, null)
                 : new GitAccessToken(request.username(), request.token());
-        return indexingService.startIndex(repositoryId, accessToken, request == null ? false : request.storeToken());
+        return indexingService.startIndex(repositoryId, accessToken, request != null && Boolean.TRUE.equals(request.storeToken()));
     }
 
     @DeleteMapping("/repositories/{repositoryId}")
