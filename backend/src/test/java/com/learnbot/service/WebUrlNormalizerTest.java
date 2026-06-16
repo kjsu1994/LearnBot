@@ -15,6 +15,12 @@ class WebUrlNormalizerTest {
     }
 
     @Test
+    void addsHttpsAndSlashWhenOnlyHostIsProvided() {
+        assertThat(normalizer.normalize("docky.co.kr"))
+                .isEqualTo("https://docky.co.kr/");
+    }
+
+    @Test
     void preservesHttpSchemeAndQuery() {
         assertThat(normalizer.normalize("http://Example.com:8080/docs?q=rag"))
                 .isEqualTo("http://example.com:8080/docs?q=rag");

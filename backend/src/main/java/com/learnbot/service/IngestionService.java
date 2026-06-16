@@ -145,9 +145,10 @@ public class IngestionService {
         try {
             IngestResponse response = switch (source.type()) {
                 case WEB -> {
+                    String normalizedUrl = webUrlNormalizer.normalize(source.location());
                     WebDocuments documents = extractWebDocuments(
                             source.id(),
-                            source.location(),
+                            normalizedUrl,
                             previousDocumentCount > 1,
                             null,
                             null

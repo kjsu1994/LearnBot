@@ -197,7 +197,7 @@ public class WebCrawler {
         try {
             return new URI(scheme, authority, path, query, null).normalize();
         } catch (URISyntaxException ex) {
-            throw new IllegalArgumentException("Invalid crawl URL: " + uri, ex);
+            throw new IllegalArgumentException("크롤링 URL 형식이 올바르지 않습니다: " + uri, ex);
         }
     }
 
@@ -228,7 +228,7 @@ public class WebCrawler {
     private String requireHost(URI uri) {
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("URL must include a host.");
+            throw new IllegalArgumentException("URL에 도메인 또는 호스트가 필요합니다. 예: https://example.com/docs");
         }
         return host.toLowerCase(Locale.ROOT);
     }

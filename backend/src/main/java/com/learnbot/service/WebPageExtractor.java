@@ -118,14 +118,14 @@ public class WebPageExtractor {
     private void requireHttpScheme(URI uri) {
         String scheme = uri.getScheme();
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
-            throw new IllegalArgumentException("URL must use http or https.");
+            throw new IllegalArgumentException("URL은 http 또는 https로 시작해야 합니다.");
         }
     }
 
     private String requireHost(URI uri) {
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("URL must include a host.");
+            throw new IllegalArgumentException("URL에 도메인 또는 호스트가 필요합니다. 예: https://example.com/docs");
         }
         return host.toLowerCase(Locale.ROOT);
     }

@@ -3,6 +3,8 @@ package com.learnbot.exception;
 import com.learnbot.security.ForbiddenException;
 import com.learnbot.security.UnauthorizedException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,6 +15,8 @@ import java.net.URI;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
     @ExceptionHandler(UnauthorizedException.class)
     ProblemDetail handleUnauthorized(UnauthorizedException ex, HttpServletRequest request) {
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
@@ -29,6 +33,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
+        log.warn("Bad request at {}: {} ({})", request.getRequestURI(), ex.getMessage(), ex.getClass().getSimpleName());
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         detail.setInstance(URI.create(request.getRequestURI()));
         return detail;
@@ -36,6 +41,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
+        log.warn("Invalid request payload at {}: {}", request.getRequestURI(), ex.getMessage());
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request payload.");
         detail.setInstance(URI.create(request.getRequestURI()));
         return detail;
