@@ -188,6 +188,9 @@ public class LearnBotProperties {
 
         private double temperature = 0.2;
 
+        @Min(512)
+        private int contextWindow = 4096;
+
         public String getBaseUrl() {
             return baseUrl;
         }
@@ -218,6 +221,14 @@ public class LearnBotProperties {
 
         public void setTemperature(double temperature) {
             this.temperature = temperature;
+        }
+
+        public int getContextWindow() {
+            return contextWindow;
+        }
+
+        public void setContextWindow(int contextWindow) {
+            this.contextWindow = contextWindow;
         }
     }
 

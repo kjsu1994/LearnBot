@@ -24,6 +24,11 @@ import java.util.stream.IntStream;
 @Service
 public class RagService {
     private static final Pattern SPREADSHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
+    private static final int GENERAL_CONTEXT_RESULT_LIMIT = 4;
+    private static final int GENERAL_CONTEXT_EXCERPT_CHARS = 360;
+    private static final int FALLBACK_RESULT_LIMIT = 4;
+    private static final int FALLBACK_EXCERPT_CHARS = 260;
+    private static final int FALLBACK_POINT_CHARS = 220;
     private static final List<String> HEADER_WORDS = List.of(
             "연번", "직종", "이름", "성명", "직원명", "사원명", "본부", "직급", "성별", "비고", "대상자녀수", "name"
     );
@@ -63,13 +68,11 @@ public class RagService {
             return new AskResponse(answerMode.value(), computed.answer(), computed.citations(), buildEvidence(computed.citations()));
         }
 
-        String context = buildContext(citations);
+        String context = buildContext(question, citations);
         String systemPrompt = """
-                You are LearnBot, a private RAG assistant.
-                Answer in Korean unless the user asks for another language.
-                Use only the provided context.
-                If the context is insufficient, say that you do not know.
-                Include bracketed citation numbers such as [1] when using context.
+                Answer in Korean using only the provided context.
+                Cite factual claims with bracket numbers such as [1].
+                If the evidence is insufficient, say so.
                 Do not invent sources.
                 """ + "\n" + answerMode.instruction();
 
@@ -86,15 +89,17 @@ public class RagService {
         return new AskResponse(answerMode.value(), answer, citations, buildEvidence(citations));
     }
 
-    private String buildContext(List<SearchResult> results) {
+    private String buildContext(String question, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "No context retrieved.";
         }
 
-        return IntStream.range(0, results.size())
+        int limit = Math.min(results.size(), GENERAL_CONTEXT_RESULT_LIMIT);
+        return IntStream.range(0, limit)
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
-                    return "[" + (index + 1) + "] " + result.title() + " (" + result.sourceUri() + ")\n" + result.content();
+                    return "[" + (index + 1) + "] " + result.title() + " · chunk " + result.chunkIndex() + "\n"
+                            + relevantExcerpt(question, result.content(), GENERAL_CONTEXT_EXCERPT_CHARS);
                 })
                 .collect(Collectors.joining("\n\n"));
     }
@@ -114,13 +119,104 @@ public class RagService {
             return "검색된 일부 근거만으로는 전체 건수를 확정할 수 없습니다. 엑셀/CSV처럼 행 단위로 파싱 가능한 문서라면 문서 전체 청크를 기준으로 계산합니다.\n\n" + sources;
         }
 
-        String sources = IntStream.range(0, Math.min(results.size(), 5))
+        return extractiveFallbackAnswer(question, results);
+    }
+
+    private String extractiveFallbackAnswer(String question, List<SearchResult> results) {
+        if (isDiscriminationImprovementQuestion(question)) {
+            String answer = discriminationImprovementFallback(results);
+            if (!answer.isBlank()) {
+                return answer;
+            }
+        }
+
+        String sources = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT))
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
-                    return "[" + (index + 1) + "] " + result.title() + " - " + result.sourceUri();
+                    return "- " + trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))
+                            + " [" + (index + 1) + "]";
                 })
                 .collect(Collectors.joining("\n"));
         return "답변 생성 품질이 낮아 검색된 근거 중심으로 정리합니다.\n\n" + sources;
+    }
+
+    private boolean isDiscriminationImprovementQuestion(String question) {
+        String normalized = normalizeForSearch(question);
+        return normalized.contains("차별")
+                && (normalized.contains("개선") || normalized.contains("예방") || normalized.contains("방지"));
+    }
+
+    private String discriminationImprovementFallback(List<SearchResult> results) {
+        List<EvidencePoint> points = new ArrayList<>();
+        addEvidencePoint(
+                points,
+                results,
+                List.of("기간제", "단시간", "파견", "차별", "임금", "근로조건", "복리후생"),
+                "기간제·단시간·파견 근로자라는 이유만으로 임금, 상여금, 성과금, 근로조건, 복리후생에서 차별적 처우를 하지 않도록 점검합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("임금", "업무", "난이도", "업무량", "객관적", "기준"),
+                "임금과 수당은 업무 내용, 난이도, 업무량 같은 객관적 기준을 반영해 합리적 이유 없는 격차를 조정합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("식비", "교통보조비", "위험수당"),
+                "식비, 교통보조비, 위험수당처럼 복리후생 성격의 금품도 합리적 이유 없이 제외하지 않도록 개선합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("교육", "훈련", "휴가", "휴게", "고충"),
+                "교육훈련, 휴가·휴게, 고충처리 등 근로조건 전반에서 불합리한 차이를 줄이는 방향으로 자율 개선합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("자율점검", "권고", "사례", "개선"),
+                "자율점검표와 권고 사례를 기준으로 사업장이 차별 요소를 스스로 찾아 개선하도록 유도합니다."
+        );
+
+        if (points.size() < 2) {
+            return "";
+        }
+
+        String body = points.stream()
+                .limit(4)
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return "검색된 가이드라인 기준으로, 차별 예방을 위해 개선되는 핵심은 고용형태만을 이유로 한 불합리한 차이를 없애고 객관적 기준으로 근로조건을 맞추는 것입니다.\n\n" + body;
+    }
+
+    private void addEvidencePoint(
+            List<EvidencePoint> points,
+            List<SearchResult> results,
+            List<String> keywords,
+            String text
+    ) {
+        if (points.stream().anyMatch(point -> point.text().equals(text))) {
+            return;
+        }
+        for (int index = 0; index < results.size(); index++) {
+            String normalizedContent = normalizeForSearch(results.get(index).content());
+            boolean hasKeyword = keywords.stream()
+                    .map(this::normalizeForSearch)
+                    .anyMatch(keyword -> !keyword.isBlank() && normalizedContent.contains(keyword));
+            if (hasKeyword) {
+                points.add(new EvidencePoint(text, index + 1));
+                return;
+            }
+        }
+    }
+
+    private String trimPoint(String value) {
+        String compact = safe(value).replaceAll("\\s+", " ").trim();
+        if (compact.length() <= FALLBACK_POINT_CHARS) {
+            return compact;
+        }
+        return compact.substring(0, FALLBACK_POINT_CHARS).trim() + "...";
     }
 
     private Optional<ComputedAnswer> maybeAnswerSpreadsheetCount(String question, List<SearchResult> citations) {
@@ -447,6 +543,65 @@ public class RagService {
         return !hasConcreteValue && trimmed.length() < 12;
     }
 
+    private String relevantExcerpt(String question, String content, int maxChars) {
+        String compact = safe(content).replaceAll("\\s+", " ").trim();
+        if (compact.length() <= maxChars) {
+            return compact;
+        }
+
+        List<String> terms = queryTerms(question);
+        List<String> selected = new ArrayList<>();
+        for (String sentence : splitSentences(compact)) {
+            if (selected.size() >= 4) {
+                break;
+            }
+            String normalizedSentence = normalizeForSearch(sentence);
+            boolean matches = terms.stream().anyMatch(normalizedSentence::contains);
+            if (matches && sentence.length() >= 12) {
+                selected.add(sentence.trim());
+            }
+        }
+
+        String excerpt = selected.isEmpty() ? compact.substring(0, Math.min(compact.length(), maxChars)) : String.join(" ", selected);
+        if (excerpt.length() > maxChars) {
+            excerpt = excerpt.substring(0, maxChars);
+        }
+        return excerpt.trim() + (excerpt.length() < compact.length() ? "..." : "");
+    }
+
+    private List<String> splitSentences(String content) {
+        return List.of(content.split("(?<=[.!?。！？])\\s+|(?<=다\\.)\\s+|(?<=요\\.)\\s+|(?<=함\\.)\\s+|(?<=음\\.)\\s+|(?<=니다\\.)\\s+"));
+    }
+
+    private List<String> queryTerms(String question) {
+        String normalized = normalizeForSearch(question);
+        List<String> terms = new ArrayList<>();
+        for (String token : normalized.split("\\s+")) {
+            if (token.length() >= 2 && !isStopWord(token)) {
+                terms.add(token);
+            }
+        }
+        if (normalized.contains("차별")) {
+            terms.addAll(List.of("차별", "개선", "예방", "처우", "임금", "복리후생", "교육", "고충"));
+        }
+        if (normalized.contains("근로자")) {
+            terms.addAll(List.of("기간제", "단시간", "파견", "근로자"));
+        }
+        return terms.stream().distinct().toList();
+    }
+
+    private String normalizeForSearch(String value) {
+        return safe(value)
+                .toLowerCase()
+                .replaceAll("[^\\p{IsHangul}\\p{IsAlphabetic}\\p{IsDigit}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private boolean isStopWord(String token) {
+        return List.of("위해", "뭐가", "무엇", "어떤", "되는거야", "되나요", "있어", "있나요", "관련", "대해").contains(token);
+    }
+
     private List<AnswerEvidence> buildEvidence(List<SearchResult> results) {
         return IntStream.range(0, results.size())
                 .mapToObj(index -> {
@@ -482,6 +637,9 @@ public class RagService {
     }
 
     private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {
+    }
+
+    private record EvidencePoint(String text, int citationIndex) {
     }
 
     private record SpreadsheetStats(

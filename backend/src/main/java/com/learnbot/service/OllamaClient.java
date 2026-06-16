@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +42,10 @@ public class OllamaClient {
     }
 
     public String chat(String systemPrompt, String userPrompt) {
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("temperature", properties.getOllama().getTemperature());
+        options.put("num_ctx", properties.getOllama().getContextWindow());
+
         ChatResponse response = webClient.post()
                 .uri("/api/chat")
                 .bodyValue(Map.of(
@@ -50,7 +55,7 @@ public class OllamaClient {
                                 Map.of("role", "system", "content", systemPrompt),
                                 Map.of("role", "user", "content", userPrompt)
                         ),
-                        "options", Map.of("temperature", properties.getOllama().getTemperature())
+                        "options", options
                 ))
                 .retrieve()
                 .bodyToMono(ChatResponse.class)

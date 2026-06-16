@@ -5,6 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($env:OLLAMA_CONTEXT_LENGTH) -or $env:OLLAMA_CONTEXT_LENGTH -eq "2048") {
+    $env:OLLAMA_CONTEXT_LENGTH = "4096"
+}
+
+if ([string]::IsNullOrWhiteSpace($env:LLM_CONTEXT_WINDOW)) {
+    $env:LLM_CONTEXT_WINDOW = $env:OLLAMA_CONTEXT_LENGTH
+}
+
 function Invoke-Compose {
     param(
         [string[]]$ComposeFiles
