@@ -26,7 +26,36 @@ import {
   X,
 } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import csharp from 'highlight.js/lib/languages/csharp';
+import css from 'highlight.js/lib/languages/css';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import markdown from 'highlight.js/lib/languages/markdown';
+import plaintext from 'highlight.js/lib/languages/plaintext';
+import powershell from 'highlight.js/lib/languages/powershell';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
+import 'highlight.js/styles/github-dark.css';
 import './styles.css';
+
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('csharp', csharp);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('plaintext', plaintext);
+hljs.registerLanguage('powershell', powershell);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('yaml', yaml);
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const tokenKey = 'runbot.session.token';
@@ -56,6 +85,7 @@ const answerModes = [
 ];
 
 const codeModes = [
+  { value: 'overview', label: '통합 질문' },
   { value: 'locate', label: '위치 찾기' },
   { value: 'method', label: '메서드 설명' },
   { value: 'flow', label: '호출 흐름' },
@@ -157,6 +187,7 @@ function App() {
   const [referenceResult, setReferenceResult] = useState(null);
 
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminSettings, setAdminSettings] = useState({ respectRobotsTxt: true });
   const [auditLogs, setAuditLogs] = useState([]);
   const [inviteForm, setInviteForm] = useState({
     email: '',
@@ -362,6 +393,7 @@ function App() {
 
   async function ingestFile(event) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!file) return;
     await run('file', async () => {
       const body = new FormData();
@@ -369,7 +401,7 @@ function App() {
       body.append('spaceId', activeSpaceId);
       await request('/api/sources/files', { method: 'POST', body });
       setFile(null);
-      event.currentTarget.reset();
+      form.reset();
       await refreshDocuments();
     });
   }
@@ -521,7 +553,7 @@ function App() {
           spaceId: activeSpaceId,
           question: codeQuestion,
           mode: codeMode,
-          limit: 10,
+          limit: codeMode === 'overview' ? 16 : 10,
         },
       });
       setCodeAnswer(data);
@@ -594,12 +626,25 @@ function App() {
   }
 
   async function refreshAdmin() {
-    const [users, logs] = await Promise.all([
+    const [users, logs, settings] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=80'),
+      request('/api/admin/settings'),
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
+    setAdminSettings(settings || { respectRobotsTxt: true });
+  }
+
+  async function updateAdminSettings(nextSettings) {
+    await run('admin-settings', async () => {
+      const settings = await request('/api/admin/settings', {
+        method: 'PATCH',
+        json: nextSettings,
+      });
+      setAdminSettings(settings || nextSettings);
+      await refreshAdmin();
+    });
   }
 
   async function createSpace(event) {
@@ -781,6 +826,7 @@ function App() {
         {activeView === 'admin' && user.role === 'ADMIN' && (
           <AdminWorkspace
             users={adminUsers}
+            adminSettings={adminSettings}
             spaces={spaces}
             selectedSpaceId={activeSpaceId}
             auditLogs={auditLogs}
@@ -790,6 +836,7 @@ function App() {
             setSpaceForm={setSpaceForm}
             createSpace={createSpace}
             inviteUser={inviteUser}
+            updateAdminSettings={updateAdminSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
           />
@@ -826,11 +873,11 @@ function LoginScreen({ onLogin, busy, error }) {
           <p className="login-copy">관리자가 초대한 계정으로 사내 위키, 코드, 문서 RAG 공간에 접속합니다.</p>
         </div>
         {error && <div className="alert">{error}</div>}
-        <form className="stack" onSubmit={submit}>
-          <label htmlFor="login-email">이메일</label>
-          <input id="login-email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" />
+        <form className="stack" onSubmit={submit} autoComplete="off">
+          <label htmlFor="login-email">ID</label>
+          <input id="login-email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" spellCheck="false" />
           <label htmlFor="login-password">비밀번호</label>
-          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" />
+          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
           <button disabled={!email || !password || busy}>
             {busy ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />}
             로그인
@@ -1219,6 +1266,18 @@ function CodeWorkspace(props) {
                 <CheckCircle2 size={16} />
                 <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
               </div>
+              {(codeAnswer.confidence || codeAnswer.diagnostics?.length > 0) && (
+                <div className={`confidence-strip confidence-${confidenceClass(codeAnswer.confidence)}`}>
+                  {codeAnswer.confidence && <strong>신뢰도 {codeAnswer.confidence}</strong>}
+                  {codeAnswer.diagnostics?.length > 0 && (
+                    <ul>
+                      {codeAnswer.diagnostics.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <p>{codeAnswer.answer}</p>
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
@@ -1354,7 +1413,7 @@ function DocumentWorkspace(props) {
             <MessageSquare size={18} />
             <div>
               <h2>문서에게 질문하기</h2>
-              <p>검색된 근거가 없으면 답변하지 않는 정책으로 RAG 신뢰성을 지킵니다.</p>
+              <p>현재 선택된 공간의 인덱싱 완료 문서 전체에서 근거를 찾아 답변합니다.</p>
             </div>
           </div>
           <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
@@ -1402,6 +1461,7 @@ function DocumentWorkspace(props) {
 
 function AdminWorkspace({
   users,
+  adminSettings,
   spaces,
   selectedSpaceId,
   auditLogs,
@@ -1411,12 +1471,43 @@ function AdminWorkspace({
   setSpaceForm,
   createSpace,
   inviteUser,
+  updateAdminSettings,
   refreshAdmin,
   loading,
 }) {
   return (
     <section className="workspace-grid">
       <div className="left-column">
+        <section className="panel">
+          <div className="panel-title">
+            <ShieldCheck size={18} />
+            <div>
+              <h2>크롤링 정책</h2>
+              <p>전체 사용자의 웹 인덱싱 정책을 관리합니다.</p>
+            </div>
+          </div>
+          <label className="switch-row" htmlFor="respect-robots">
+            <input
+              id="respect-robots"
+              type="checkbox"
+              checked={adminSettings?.respectRobotsTxt ?? true}
+              disabled={loading('admin-settings')}
+              onChange={(event) => updateAdminSettings({ respectRobotsTxt: event.target.checked })}
+            />
+            <span className="switch-track" aria-hidden="true">
+              <span />
+            </span>
+            <span>
+              <strong>robots.txt 정책 준수</strong>
+              <small>
+                {(adminSettings?.respectRobotsTxt ?? true)
+                  ? '켜짐 · robots.txt에서 차단한 URL은 인덱싱하지 않습니다.'
+                  : '꺼짐 · robots.txt에서 차단한 URL도 인덱싱을 진행합니다.'}
+              </small>
+            </span>
+          </label>
+        </section>
+
         <form className="panel" onSubmit={inviteUser}>
           <div className="panel-title">
             <UserPlus size={18} />
@@ -1802,11 +1893,69 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
   );
 }
 
+function highlightLanguage(filePath, language) {
+  const extension = String(filePath || '').toLowerCase().split('.').pop();
+  const normalized = String(language || '').toLowerCase();
+  const aliases = {
+    cs: 'csharp',
+    csharp: 'csharp',
+    java: 'java',
+    js: 'javascript',
+    jsx: 'javascript',
+    javascript: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    typescript: 'typescript',
+    xml: 'xml',
+    xaml: 'xml',
+    html: 'xml',
+    css: 'css',
+    sql: 'sql',
+    json: 'json',
+    yaml: 'yaml',
+    yml: 'yaml',
+    md: 'markdown',
+    markdown: 'markdown',
+    sh: 'bash',
+    bash: 'bash',
+    shell: 'bash',
+    ps1: 'powershell',
+    powershell: 'powershell',
+  };
+  return aliases[normalized] || aliases[extension] || 'plaintext';
+}
+
+function highlightedLineHtml(line, language) {
+  const value = line || ' ';
+  try {
+    if (hljs.getLanguage(language)) {
+      return hljs.highlight(value, { language, ignoreIllegals: true }).value;
+    }
+  } catch {
+    // Fall back to escaped plain text below.
+  }
+  return escapeHtml(value);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function CodeFileModal({ detail, highlightRange, loading, onClose }) {
   const highlightedLineRef = useRef(null);
   const lines = detail?.content ? detail.content.split(/\r?\n/) : [];
   const fileName = detail?.filePath?.split(/[\\/]/).pop() || 'code';
   const language = detail?.language || 'code';
+  const syntaxLanguage = highlightLanguage(detail?.filePath, language);
+  const renderedLines = useMemo(
+    () => lines.map((line) => highlightedLineHtml(line, syntaxLanguage)),
+    [detail?.content, syntaxLanguage]
+  );
   const chunkCount = detail?.chunks?.length || 0;
 
   useEffect(() => {
@@ -1875,7 +2024,7 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
                       ref={lineNumber === highlightRange?.start ? highlightedLineRef : null}
                     >
                       <span className="ide-line-number">{lineNumber}</span>
-                      <span className="ide-line-content">{line || ' '}</span>
+                      <span className="ide-line-content" dangerouslySetInnerHTML={{ __html: renderedLines[index] || '&nbsp;' }} />
                     </div>
                   );
                 })}
@@ -1966,6 +2115,16 @@ function getCodeModeLabel(mode) {
 
 function getCodeModeGuide(mode) {
   const guides = {
+    overview: {
+      title: '통합 질문 예시',
+      description: '검색, 위치 찾기, 정의/참조, 주변 코드 근거를 함께 사용해 기능의 위치와 동작을 자연어로 설명받을 때 사용합니다.',
+      placeholder: '예: 로그인 관련 파일이나 메서드가 어디 있고, 로그인 요청부터 세션 저장까지 어떻게 동작해?',
+      tips: [
+        '기능명, 화면명, 버튼명, 에러 문구처럼 사용자가 아는 단서를 자연어로 적어도 됩니다.',
+        '어디 있는지와 어떻게 동작하는지를 한 번에 물어보면 관련 파일과 처리 흐름을 함께 정리합니다.',
+        '답변의 신뢰도와 근거 부족 여부를 함께 확인하세요.',
+      ],
+    },
     locate: {
       title: '위치 찾기 질문 예시',
       description: '기능이나 화면이 어느 파일, 클래스, 메서드에 구현돼 있는지 찾을 때 사용합니다.',
@@ -2018,6 +2177,12 @@ function getCodeModeGuide(mode) {
     },
   };
   return guides[mode] || guides.locate;
+}
+
+function confidenceClass(value) {
+  if (value === '높음') return 'high';
+  if (value === '보통') return 'medium';
+  return 'low';
 }
 
 function formatDate(value) {

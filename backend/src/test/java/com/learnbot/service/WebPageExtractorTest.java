@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class WebPageExtractorTest {
     @Test
@@ -17,7 +18,9 @@ class WebPageExtractorTest {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getCrawler().setAllowedDomains(java.util.List.of("example.com"));
         DocumentRepository repository = mock(DocumentRepository.class);
-        WebPageExtractor extractor = new WebPageExtractor(properties, repository);
+        AdminSettingsService adminSettingsService = mock(AdminSettingsService.class);
+        when(adminSettingsService.isRespectRobotsTxt()).thenReturn(true);
+        WebPageExtractor extractor = new WebPageExtractor(properties, adminSettingsService, repository);
 
         assertThatThrownBy(() -> extractor.extract("https://not-allowed.test/page"))
                 .isInstanceOf(IllegalArgumentException.class)

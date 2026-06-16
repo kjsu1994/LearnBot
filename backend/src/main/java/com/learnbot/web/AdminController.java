@@ -1,6 +1,8 @@
 package com.learnbot.web;
 
 import com.learnbot.dto.AuditLogSummary;
+import com.learnbot.dto.AdminSettingsResponse;
+import com.learnbot.dto.AdminSettingsUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
 import com.learnbot.dto.SpaceCreateRequest;
 import com.learnbot.dto.SpaceMemberRequest;
@@ -8,11 +10,13 @@ import com.learnbot.dto.SpaceSummary;
 import com.learnbot.dto.UserSummary;
 import com.learnbot.repository.SecurityRepository;
 import com.learnbot.security.CurrentUserProvider;
+import com.learnbot.service.AdminSettingsService;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,17 +33,20 @@ import java.util.UUID;
 public class AdminController {
     private final AuthService authService;
     private final AuditService auditService;
+    private final AdminSettingsService adminSettingsService;
     private final SecurityRepository securityRepository;
     private final CurrentUserProvider currentUserProvider;
 
     public AdminController(
             AuthService authService,
             AuditService auditService,
+            AdminSettingsService adminSettingsService,
             SecurityRepository securityRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this.authService = authService;
         this.auditService = auditService;
+        this.adminSettingsService = adminSettingsService;
         this.securityRepository = securityRepository;
         this.currentUserProvider = currentUserProvider;
     }
@@ -87,5 +94,18 @@ public class AdminController {
     List<AuditLogSummary> auditLogs(@RequestParam(required = false) Integer limit) {
         authService.requireAdmin(currentUserProvider.currentUser());
         return auditService.list(limit);
+    }
+
+    @GetMapping("/settings")
+    AdminSettingsResponse settings() {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        return adminSettingsService.current();
+    }
+
+    @PatchMapping("/settings")
+    AdminSettingsResponse updateSettings(@Valid @RequestBody AdminSettingsUpdateRequest request) {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireAdmin(user);
+        return adminSettingsService.update(user, request.respectRobotsTxt());
     }
 }

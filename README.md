@@ -17,9 +17,19 @@ Uploaded source files are stored in MinIO. Git repositories are cloned into a Do
 From the project root:
 
 ```bash
-docker compose up -d postgres ollama
-docker compose --profile models up ollama-pull
-docker compose up --build
+docker compose up -d --build
+```
+
+On Windows, use the helper script if you want GPU acceleration with CPU fallback:
+
+```powershell
+.\scripts\up.ps1 -Build
+```
+
+The script uses `docker-compose.gpu.yml` when `nvidia-smi` is available and Docker can attach the GPU to the Ollama container. If GPU startup fails, it starts the normal CPU-compatible Compose stack instead. To force CPU mode:
+
+```powershell
+.\scripts\up.ps1 -Cpu -Build
 ```
 
 Open:
@@ -29,6 +39,13 @@ Open:
 - Ollama: http://localhost:11434
 - MinIO API: http://localhost:19000
 - MinIO Console: http://localhost:19001
+
+Check whether Ollama is using GPU while a model is loaded:
+
+```bash
+docker compose exec ollama ollama ps
+nvidia-smi
+```
 
 The Compose file uses the same production-style layout as the existing stack:
 

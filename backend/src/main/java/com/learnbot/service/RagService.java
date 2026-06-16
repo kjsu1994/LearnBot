@@ -3,22 +3,45 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
+import com.learnbot.repository.DocumentRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 public class RagService {
+    private static final Pattern SPREADSHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
+    private static final List<String> HEADER_WORDS = List.of(
+            "연번", "직종", "이름", "성명", "직원명", "사원명", "본부", "직급", "성별", "비고", "대상자녀수", "name"
+    );
+
     private final SearchService searchService;
     private final OllamaClient ollamaClient;
+    private final DocumentRepository documentRepository;
     private final LearnBotProperties properties;
 
-    public RagService(SearchService searchService, OllamaClient ollamaClient, LearnBotProperties properties) {
+    public RagService(
+            SearchService searchService,
+            OllamaClient ollamaClient,
+            DocumentRepository documentRepository,
+            LearnBotProperties properties
+    ) {
         this.searchService = searchService;
         this.ollamaClient = ollamaClient;
+        this.documentRepository = documentRepository;
         this.properties = properties;
     }
 
@@ -26,14 +49,21 @@ public class RagService {
         return ask(question, filter, mode, null, null);
     }
 
-    public AskResponse ask(String question, SearchFilter filter, String mode, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId) {
+    public AskResponse ask(String question, SearchFilter filter, String mode, List<UUID> spaceIds, UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
-        List<SearchResult> citations = searchService.search(question, filter, properties.getRag().getTopK(), spaceIds, selectedSpaceId);
+        int topK = isCountQuestion(question) ? Math.max(properties.getRag().getTopK(), 12) : properties.getRag().getTopK();
+        List<SearchResult> citations = searchService.search(question, filter, topK, spaceIds, selectedSpaceId);
         if (citations.isEmpty()) {
             return new AskResponse(answerMode.value(), "근거가 부족해 답변할 수 없습니다.", citations, List.of());
         }
-        String context = buildContext(citations);
 
+        Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(question, citations);
+        if (computedAnswer.isPresent()) {
+            ComputedAnswer computed = computedAnswer.get();
+            return new AskResponse(answerMode.value(), computed.answer(), computed.citations(), buildEvidence(computed.citations()));
+        }
+
+        String context = buildContext(citations);
         String systemPrompt = """
                 You are LearnBot, a private RAG assistant.
                 Answer in Korean unless the user asks for another language.
@@ -48,7 +78,10 @@ public class RagService {
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
         } catch (RuntimeException ex) {
-            answer = fallbackAnswer(citations);
+            answer = fallbackAnswer(question, citations);
+        }
+        if (isLowQualityAnswer(answer)) {
+            answer = fallbackAnswer(question, citations);
         }
         return new AskResponse(answerMode.value(), answer, citations, buildEvidence(citations));
     }
@@ -58,26 +91,364 @@ public class RagService {
             return "No context retrieved.";
         }
 
-        return results.stream()
-                .map(result -> "[" + (results.indexOf(result) + 1) + "] "
-                        + result.title() + " (" + result.sourceUri() + ")\n"
-                        + result.content())
+        return IntStream.range(0, results.size())
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "[" + (index + 1) + "] " + result.title() + " (" + result.sourceUri() + ")\n" + result.content();
+                })
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private String fallbackAnswer(List<SearchResult> results) {
+    private String fallbackAnswer(String question, List<SearchResult> results) {
         if (results.isEmpty()) {
-            return "The chat LLM is unavailable, and no supporting context was found.";
+            return "근거가 부족해 답변할 수 없습니다.";
         }
 
-        String sources = results.stream()
-                .map(result -> "[" + (results.indexOf(result) + 1) + "] " + result.title() + " - " + result.sourceUri())
+        if (isCountQuestion(question)) {
+            String sources = IntStream.range(0, Math.min(results.size(), 3))
+                    .mapToObj(index -> {
+                        SearchResult result = results.get(index);
+                        return "[" + (index + 1) + "] " + result.title() + " · chunk " + result.chunkIndex();
+                    })
+                    .collect(Collectors.joining("\n"));
+            return "검색된 일부 근거만으로는 전체 건수를 확정할 수 없습니다. 엑셀/CSV처럼 행 단위로 파싱 가능한 문서라면 문서 전체 청크를 기준으로 계산합니다.\n\n" + sources;
+        }
+
+        String sources = IntStream.range(0, Math.min(results.size(), 5))
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "[" + (index + 1) + "] " + result.title() + " - " + result.sourceUri();
+                })
                 .collect(Collectors.joining("\n"));
-        return "The chat LLM is unavailable, so only retrieved supporting context is returned.\n\n" + sources;
+        return "답변 생성 품질이 낮아 검색된 근거 중심으로 정리합니다.\n\n" + sources;
+    }
+
+    private Optional<ComputedAnswer> maybeAnswerSpreadsheetCount(String question, List<SearchResult> citations) {
+        if (!isCountQuestion(question)) {
+            return Optional.empty();
+        }
+
+        Map<UUID, SearchResult> spreadsheetDocuments = new LinkedHashMap<>();
+        for (SearchResult citation : citations) {
+            if (isSpreadsheet(citation)) {
+                spreadsheetDocuments.putIfAbsent(citation.documentId(), citation);
+            }
+        }
+        if (spreadsheetDocuments.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<CountEntry> entries = new ArrayList<>();
+        List<SearchResult> computedCitations = new ArrayList<>();
+        for (SearchResult source : spreadsheetDocuments.values()) {
+            List<DocumentChunkDetail> chunks = documentRepository.listDocumentChunks(source.documentId());
+            SpreadsheetStats stats = analyzeSpreadsheet(chunks);
+            if (stats.dataRowCount() <= 0) {
+                continue;
+            }
+
+            int startCitation = computedCitations.size() + 1;
+            List<SearchResult> evidence = toSearchResults(source, selectEvidenceChunks(chunks, stats));
+            computedCitations.addAll(evidence);
+            int endCitation = computedCitations.size();
+            entries.add(new CountEntry(source.title(), stats, startCitation, endCitation));
+        }
+
+        if (entries.isEmpty()) {
+            return Optional.empty();
+        }
+        String deterministicAnswer = buildCountAnswer(entries);
+        String answer = buildCountAnswerWithLlm(question, entries, computedCitations, deterministicAnswer);
+        return Optional.of(new ComputedAnswer(answer, computedCitations));
+    }
+
+    private SpreadsheetStats analyzeSpreadsheet(List<DocumentChunkDetail> chunks) {
+        Map<String, SpreadsheetRow> rows = new LinkedHashMap<>();
+        for (DocumentChunkDetail chunk : chunks) {
+            for (String line : safe(chunk.content()).split("\\R")) {
+                Matcher matcher = SPREADSHEET_ROW.matcher(line.trim());
+                if (!matcher.matches()) {
+                    continue;
+                }
+                String sheet = matcher.group(1).trim();
+                int rowNumber = Integer.parseInt(matcher.group(2));
+                Map<String, String> fields = parseSpreadsheetFields(matcher.group(3));
+                SpreadsheetRow row = new SpreadsheetRow(sheet, rowNumber, fields, line.trim());
+                String key = sheet + ":" + rowNumber;
+                SpreadsheetRow existing = rows.get(key);
+                if (existing == null || row.rawLine().length() > existing.rawLine().length()) {
+                    rows.put(key, row);
+                }
+            }
+        }
+
+        if (rows.isEmpty()) {
+            return new SpreadsheetStats(0, 0, null, null, null, null, List.of());
+        }
+
+        List<SpreadsheetRow> orderedRows = rows.values().stream()
+                .sorted(Comparator.comparing(SpreadsheetRow::sheet).thenComparingInt(SpreadsheetRow::rowNumber))
+                .toList();
+        SpreadsheetRow header = orderedRows.stream()
+                .filter(this::looksLikeHeader)
+                .findFirst()
+                .orElse(orderedRows.get(0));
+        String nameColumn = findNameColumn(header);
+
+        int count = 0;
+        Integer minDataRow = null;
+        Integer maxDataRow = null;
+        for (SpreadsheetRow row : orderedRows) {
+            if (row.sheet().equals(header.sheet()) && row.rowNumber() == header.rowNumber()) {
+                continue;
+            }
+            if (!hasData(row, nameColumn)) {
+                continue;
+            }
+            count++;
+            minDataRow = minDataRow == null ? row.rowNumber() : Math.min(minDataRow, row.rowNumber());
+            maxDataRow = maxDataRow == null ? row.rowNumber() : Math.max(maxDataRow, row.rowNumber());
+        }
+
+        List<String> sheets = orderedRows.stream().map(SpreadsheetRow::sheet).distinct().toList();
+        return new SpreadsheetStats(count, orderedRows.size(), header.rowNumber(), minDataRow, maxDataRow, nameColumn, sheets);
+    }
+
+    private Map<String, String> parseSpreadsheetFields(String fieldsText) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        for (String part : safe(fieldsText).split("\\s+\\|\\s+")) {
+            int equals = part.indexOf('=');
+            if (equals <= 0) {
+                continue;
+            }
+            String column = part.substring(0, equals).trim();
+            if (column.matches("C\\d+")) {
+                fields.put(column, part.substring(equals + 1).trim());
+            }
+        }
+        return fields;
+    }
+
+    private boolean looksLikeHeader(SpreadsheetRow row) {
+        int matches = 0;
+        for (String value : row.fields().values()) {
+            if (HEADER_WORDS.contains(normalizeHeader(value))) {
+                matches++;
+            }
+        }
+        return matches >= 2;
+    }
+
+    private String findNameColumn(SpreadsheetRow header) {
+        for (Map.Entry<String, String> field : header.fields().entrySet()) {
+            String value = normalizeHeader(field.getValue());
+            if (List.of("이름", "성명", "직원명", "사원명", "name").contains(value)) {
+                return field.getKey();
+            }
+        }
+        return null;
+    }
+
+    private boolean hasData(SpreadsheetRow row, String nameColumn) {
+        if (nameColumn != null) {
+            String value = safe(row.fields().get(nameColumn));
+            return !value.isBlank() && !isHeaderValue(value);
+        }
+        return row.fields().values().stream().anyMatch(value -> !safe(value).isBlank() && !isHeaderValue(value));
+    }
+
+    private boolean isHeaderValue(String value) {
+        return HEADER_WORDS.contains(normalizeHeader(value));
+    }
+
+    private String normalizeHeader(String value) {
+        return safe(value).replaceAll("\\s+", "").toLowerCase();
+    }
+
+    private List<DocumentChunkDetail> selectEvidenceChunks(List<DocumentChunkDetail> chunks, SpreadsheetStats stats) {
+        List<DocumentChunkDetail> ordered = chunks.stream()
+                .sorted(Comparator.comparingInt(DocumentChunkDetail::chunkIndex))
+                .toList();
+        if (ordered.size() <= 10) {
+            return ordered;
+        }
+
+        Map<UUID, DocumentChunkDetail> selected = new LinkedHashMap<>();
+        addChunk(selected, ordered.get(0));
+        for (DocumentChunkDetail chunk : ordered) {
+            if (containsRow(chunk, stats.headerRowNumber())
+                    || containsRow(chunk, stats.minDataRow())
+                    || containsRow(chunk, stats.maxDataRow())) {
+                addChunk(selected, chunk);
+            }
+        }
+        addChunk(selected, ordered.get(ordered.size() - 1));
+        return selected.values().stream()
+                .sorted(Comparator.comparingInt(DocumentChunkDetail::chunkIndex))
+                .limit(10)
+                .toList();
+    }
+
+    private void addChunk(Map<UUID, DocumentChunkDetail> selected, DocumentChunkDetail chunk) {
+        selected.putIfAbsent(chunk.id(), chunk);
+    }
+
+    private boolean containsRow(DocumentChunkDetail chunk, Integer rowNumber) {
+        return rowNumber != null && safe(chunk.content()).contains(" Row " + rowNumber + ":");
+    }
+
+    private List<SearchResult> toSearchResults(SearchResult source, List<DocumentChunkDetail> chunks) {
+        return chunks.stream()
+                .map(chunk -> new SearchResult(
+                        chunk.id(),
+                        source.documentId(),
+                        source.title(),
+                        source.sourceUri(),
+                        source.sourceType(),
+                        source.contentType(),
+                        chunk.chunkIndex(),
+                        chunk.content(),
+                        source.score()
+                ))
+                .toList();
+    }
+
+    private String buildCountAnswer(List<CountEntry> entries) {
+        if (entries.size() == 1) {
+            CountEntry entry = entries.get(0);
+            SpreadsheetStats stats = entry.stats();
+            return entry.title() + " 기준으로 대상자는 총 " + stats.dataRowCount() + "명입니다. "
+                    + "계산 기준은 " + String.join(", ", stats.sheetNames()) + "의 " + stats.headerRowNumber() + "행을 헤더로 보고, "
+                    + dataRangeText(stats) + "에서 " + columnText(stats.nameColumn()) + " 값이 있는 행을 센 것입니다. "
+                    + "근거 청크는 [" + entry.startCitation() + "]부터 [" + entry.endCitation() + "]까지입니다.";
+        }
+
+        int total = entries.stream().mapToInt(entry -> entry.stats().dataRowCount()).sum();
+        String details = entries.stream()
+                .map(entry -> "- " + entry.title() + ": " + entry.stats().dataRowCount()
+                        + "명 (근거 [" + entry.startCitation() + "]-[" + entry.endCitation() + "])")
+                .collect(Collectors.joining("\n"));
+        return "검색된 엑셀/CSV 문서 기준 총 대상자는 " + total + "명입니다.\n\n" + details;
+    }
+
+    private String buildCountAnswerWithLlm(
+            String question,
+            List<CountEntry> entries,
+            List<SearchResult> computedCitations,
+            String deterministicAnswer
+    ) {
+        int expectedTotal = entries.stream().mapToInt(entry -> entry.stats().dataRowCount()).sum();
+        String facts = entries.stream()
+                .map(entry -> {
+                    SpreadsheetStats stats = entry.stats();
+                    return "- " + entry.title()
+                            + ": count=" + stats.dataRowCount()
+                            + ", sheets=" + String.join(",", stats.sheetNames())
+                            + ", headerRow=" + stats.headerRowNumber()
+                            + ", dataRows=" + dataRangeText(stats)
+                            + ", countColumn=" + columnText(stats.nameColumn())
+                            + ", evidence=[" + entry.startCitation() + "]-[" + entry.endCitation() + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        String evidence = IntStream.range(0, Math.min(computedCitations.size(), 8))
+                .mapToObj(index -> {
+                    SearchResult citation = computedCitations.get(index);
+                    return "[" + (index + 1) + "] " + citation.title()
+                            + " chunk " + citation.chunkIndex()
+                            + "\n" + preview(citation.content());
+                })
+                .collect(Collectors.joining("\n\n"));
+
+        String systemPrompt = """
+                You are LearnBot, a private RAG assistant.
+                Answer in Korean.
+                The numeric facts below were computed deterministically by the server. Do not change the count.
+                Write a concise natural-language answer for the user.
+                Include the exact total count and a short explanation of the counting basis.
+                Cite evidence with bracket numbers like [1].
+                Use the same unit as the user when possible. For people use 명; for generic items use 개 or 건.
+                """;
+        String userPrompt = "Question:\n" + question
+                + "\n\nComputed facts:\nExpected total: " + expectedTotal
+                + "\n" + facts
+                + "\n\nEvidence previews:\n" + evidence;
+
+        try {
+            String answer = ollamaClient.chat(systemPrompt, userPrompt);
+            if (!isLowQualityAnswer(answer) && mentionsCount(answer, expectedTotal) && answer.contains("[")) {
+                return answer;
+            }
+        } catch (RuntimeException ignored) {
+            // Keep the deterministic answer when the LLM is unavailable.
+        }
+        return deterministicAnswer;
+    }
+
+    private boolean mentionsCount(String answer, int expectedTotal) {
+        return safe(answer).replace(",", "").contains(String.valueOf(expectedTotal));
+    }
+
+    private String dataRangeText(SpreadsheetStats stats) {
+        if (stats.minDataRow() == null || stats.maxDataRow() == null) {
+            return "데이터 행";
+        }
+        if (stats.minDataRow().equals(stats.maxDataRow())) {
+            return stats.minDataRow() + "행";
+        }
+        return stats.minDataRow() + "~" + stats.maxDataRow() + "행";
+    }
+
+    private String columnText(String nameColumn) {
+        return nameColumn == null ? "값이 있는 행" : nameColumn + "(이름)";
+    }
+
+    private boolean isCountQuestion(String question) {
+        String normalized = safe(question).replaceAll("\\s+", "").toLowerCase();
+        return normalized.contains("총몇")
+                || normalized.contains("몇명")
+                || normalized.contains("몇명이")
+                || normalized.contains("몇개")
+                || normalized.contains("몇개의")
+                || normalized.contains("인원")
+                || normalized.contains("대상자수")
+                || normalized.contains("총원")
+                || normalized.contains("몇건")
+                || normalized.contains("건수")
+                || normalized.contains("개수")
+                || normalized.contains("총개수")
+                || normalized.contains("총건수")
+                || normalized.contains("count")
+                || normalized.contains("total");
+    }
+
+    private boolean isSpreadsheet(SearchResult result) {
+        String contentType = safe(result.contentType()).toLowerCase();
+        String title = safe(result.title()).toLowerCase();
+        return contentType.contains("spreadsheet")
+                || contentType.contains("excel")
+                || contentType.contains("csv")
+                || title.endsWith(".xlsx")
+                || title.endsWith(".xls")
+                || title.endsWith(".csv");
+    }
+
+    private boolean isLowQualityAnswer(String answer) {
+        String trimmed = safe(answer).trim();
+        if (trimmed.isBlank()) {
+            return true;
+        }
+        if ("the".equalsIgnoreCase(trimmed) || "제".equals(trimmed)) {
+            return true;
+        }
+        if (trimmed.startsWith("The chat LLM is unavailable")) {
+            return true;
+        }
+        boolean hasConcreteValue = trimmed.matches("(?s).*\\d+\\s*(명|건|개|행).*");
+        return !hasConcreteValue && trimmed.length() < 12;
     }
 
     private List<AnswerEvidence> buildEvidence(List<SearchResult> results) {
-        return java.util.stream.IntStream.range(0, results.size())
+        return IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
                     return new AnswerEvidence(
@@ -101,6 +472,35 @@ public class RagService {
         }
         String compact = content.replaceAll("\\s+", " ").trim();
         return compact.length() <= 260 ? compact : compact.substring(0, 260) + "...";
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private record ComputedAnswer(String answer, List<SearchResult> citations) {
+    }
+
+    private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {
+    }
+
+    private record SpreadsheetStats(
+            int dataRowCount,
+            int labelledRowCount,
+            Integer headerRowNumber,
+            Integer minDataRow,
+            Integer maxDataRow,
+            String nameColumn,
+            List<String> sheetNames
+    ) {
+    }
+
+    private record SpreadsheetRow(
+            String sheet,
+            int rowNumber,
+            Map<String, String> fields,
+            String rawLine
+    ) {
     }
 
     private enum AnswerMode {

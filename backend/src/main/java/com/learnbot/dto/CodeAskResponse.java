@@ -5,6 +5,8 @@ import java.util.List;
 public record CodeAskResponse(
         String mode,
         String answer,
-        List<CodeEvidence> evidence
+        List<CodeEvidence> evidence,
+        String confidence,
+        List<String> diagnostics
 ) {
 }

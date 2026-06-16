@@ -18,6 +18,30 @@ import java.util.regex.Pattern;
 @Service
 public class CodeSearchService {
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}(?:\\.[A-Za-z0-9_]+)?");
+    private static final Map<String, List<String>> QUERY_ALIASES = Map.ofEntries(
+            Map.entry("로그인", List.of("login", "signin", "sign in", "auth", "authentication", "session", "token", "credential")),
+            Map.entry("login", List.of("로그인", "signin", "sign in", "auth", "authentication", "session", "token", "credential")),
+            Map.entry("인증", List.of("auth", "authentication", "authorization", "principal", "session", "token", "credential")),
+            Map.entry("auth", List.of("인증", "authentication", "authorization", "principal", "session", "token", "credential")),
+            Map.entry("사용자", List.of("user", "member", "account", "principal")),
+            Map.entry("권한", List.of("role", "permission", "authority", "authorization")),
+            Map.entry("세션", List.of("session", "cookie", "token", "auth")),
+            Map.entry("토큰", List.of("token", "jwt", "bearer", "credential")),
+            Map.entry("인덱싱", List.of("index", "indexing", "repository", "job", "chunk", "embedding")),
+            Map.entry("index", List.of("인덱싱", "indexing", "repository", "job", "chunk", "embedding")),
+            Map.entry("실패", List.of("fail", "failed", "failure", "error", "exception")),
+            Map.entry("error", List.of("실패", "fail", "failed", "failure", "exception")),
+            Map.entry("문서", List.of("document", "docs", "file", "source")),
+            Map.entry("저장소", List.of("repository", "repo", "git")),
+            Map.entry("검색", List.of("search", "query", "rag", "retrieval")),
+            Map.entry("호출", List.of("flow", "call", "handler", "service")),
+            Map.entry("화면", List.of("ui", "view", "page", "component", "controller")),
+            Map.entry("업로드", List.of("upload", "ingest", "file")),
+            Map.entry("관리자", List.of("admin", "audit", "user", "space")),
+            Map.entry("전체", List.of("application", "controller", "service", "repository", "config", "security", "frontend", "backend", "rag", "document", "index")),
+            Map.entry("뭐", List.of("application", "controller", "service", "repository", "config", "security", "frontend", "backend", "rag", "document", "index")),
+            Map.entry("코드", List.of("application", "controller", "service", "repository", "config", "security", "frontend", "backend", "rag", "document", "index"))
+    );
 
     private final CodeRepository repository;
     private final OllamaClient ollamaClient;
@@ -34,24 +58,32 @@ public class CodeSearchService {
     }
 
     public List<CodeSearchResult> search(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
+        String safeQuery = query == null ? "" : query.trim();
+        if (safeQuery.isBlank()) {
+            return List.of();
+        }
         int safeLimit = Math.max(1, Math.min(limit, 30));
         List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
                 ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
                 : spaceIds;
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        List<String> expandedQueries = expandedQueries(safeQuery);
 
-        for (CodeSearchResult result : repository.keywordSearch(repositoryId, query, safeLimit, safeSpaceIds, selectedSpaceId)) {
-            merge(merged, result);
+        for (String searchQuery : expandedQueries) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, searchQuery, safeLimit, safeSpaceIds, selectedSpaceId)) {
+                merge(merged, searchQuery.equalsIgnoreCase(safeQuery) ? result : boost(result, 0.06));
+            }
         }
-        for (String identifier : identifiers(query)) {
+        for (String identifier : identifiersFrom(String.join(" ", expandedQueries))) {
             for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(5, safeLimit / 2), safeSpaceIds, selectedSpaceId)) {
                 merge(merged, boost(result, 0.18));
             }
         }
 
         try {
-            List<Double> embedding = ollamaClient.embed(List.of(query)).get(0);
-            for (CodeSearchResult result : repository.search(repositoryId, query, embedding, safeLimit, safeSpaceIds, selectedSpaceId)) {
+            String semanticQuery = String.join(" ", expandedQueries);
+            List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+            for (CodeSearchResult result : repository.search(repositoryId, semanticQuery, embedding, safeLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
         } catch (RuntimeException ignored) {
@@ -63,6 +95,27 @@ public class CodeSearchService {
                 .limit(safeLimit)
                 .toList();
         return expandRelated(repositoryId, ranked, safeLimit);
+    }
+
+    public List<String> expandedQueries(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        String safeQuery = query.trim();
+        String lower = safeQuery.toLowerCase(Locale.ROOT);
+        List<String> values = new ArrayList<>();
+        values.add(safeQuery);
+        QUERY_ALIASES.forEach((trigger, aliases) -> {
+            if (lower.contains(trigger.toLowerCase(Locale.ROOT))) {
+                values.addAll(aliases);
+            }
+        });
+        return values.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(18)
+                .toList();
     }
 
     private List<CodeSearchResult> expandRelated(UUID repositoryId, List<CodeSearchResult> ranked, int limit) {
@@ -97,7 +150,7 @@ public class CodeSearchService {
         return paths;
     }
 
-    private List<String> identifiers(String query) {
+    public List<String> identifiersFrom(String query) {
         if (query == null || query.isBlank()) {
             return List.of();
         }

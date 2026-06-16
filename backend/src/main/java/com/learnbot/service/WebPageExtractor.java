@@ -20,12 +20,14 @@ import java.util.concurrent.ConcurrentMap;
 @Component
 public class WebPageExtractor {
     private final LearnBotProperties properties;
+    private final AdminSettingsService adminSettingsService;
     private final DocumentRepository repository;
     private final ConcurrentMap<String, Long> lastFetchByHost = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, RobotsRules> robotsCache = new ConcurrentHashMap<>();
 
-    public WebPageExtractor(LearnBotProperties properties, DocumentRepository repository) {
+    public WebPageExtractor(LearnBotProperties properties, AdminSettingsService adminSettingsService, DocumentRepository repository) {
         this.properties = properties;
+        this.adminSettingsService = adminSettingsService;
         this.repository = repository;
     }
 
@@ -43,7 +45,7 @@ public class WebPageExtractor {
         }
 
         Boolean robotsAllowed = null;
-        if (properties.getCrawler().isRespectRobotsTxt()) {
+        if (adminSettingsService.isRespectRobotsTxt()) {
             robotsAllowed = robotsAllows(uri);
             if (!robotsAllowed) {
                 audit(sourceId, url, host, true, false, null, false, "robots.txt disallows URL.");
