@@ -467,7 +467,7 @@ h3 {
   border-radius: 8px;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   min-height: 58px;
   padding: 11px 12px;
 }
@@ -491,6 +491,32 @@ h3 {
   justify-items: end;
 }
 
+.document-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.icon-button {
+  background: #f7faf8;
+  border-color: #d9e3de;
+  color: #34424c;
+  min-height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: #edf6f1;
+  border-color: #b9cbc4;
+  color: #13715f;
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: #fff1ef;
+  border-color: #f3b5ae;
+  color: #a0342a;
+}
+
 .status {
   border-radius: 999px;
   font-size: 12px;
@@ -503,6 +529,7 @@ h3 {
   color: #12633f;
 }
 
+.status-indexing,
 .status-processing,
 .status-pending {
   background: #fff2d7;
@@ -520,6 +547,73 @@ h3 {
   border-radius: 8px;
   padding: 18px;
   text-align: center;
+}
+
+.help-button {
+  border-radius: 999px;
+  bottom: 24px;
+  box-shadow: 0 14px 30px rgba(19, 113, 95, 0.28);
+  height: 52px;
+  padding: 0;
+  position: fixed;
+  right: 24px;
+  width: 52px;
+  z-index: 20;
+}
+
+.help-backdrop {
+  align-items: end;
+  background: rgba(17, 24, 32, 0.28);
+  display: flex;
+  inset: 0;
+  justify-content: end;
+  padding: 24px;
+  position: fixed;
+  z-index: 30;
+}
+
+.help-panel {
+  background: #fff;
+  border: 1px solid #dfe6e2;
+  border-radius: 8px;
+  box-shadow: 0 22px 60px rgba(17, 24, 32, 0.22);
+  display: grid;
+  gap: 18px;
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 420px;
+  overflow: auto;
+  padding: 18px;
+  width: min(420px, calc(100vw - 48px));
+}
+
+.help-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.help-content {
+  display: grid;
+  gap: 14px;
+}
+
+.help-content section {
+  border-top: 1px solid #edf1ef;
+  display: grid;
+  gap: 5px;
+  padding-top: 14px;
+}
+
+.help-content section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.help-content p {
+  color: #53616a;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .spin {
@@ -584,6 +678,24 @@ h3 {
     align-items: start;
     justify-items: start;
   }
+
+  .document-actions {
+    width: 100%;
+  }
+
+  .icon-button {
+    flex: 1;
+    width: auto;
+  }
+
+  .help-backdrop {
+    padding: 16px;
+  }
+
+  .help-panel {
+    max-height: calc(100vh - 32px);
+    width: calc(100vw - 32px);
+  }
 }
 
 @media (max-width: 520px) {
@@ -613,5 +725,12 @@ h3 {
 
   .result-heading span {
     justify-self: start;
+  }
+
+  .help-button {
+    bottom: 16px;
+    height: 48px;
+    right: 16px;
+    width: 48px;
   }
 }

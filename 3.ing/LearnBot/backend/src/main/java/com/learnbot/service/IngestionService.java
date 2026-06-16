@@ -18,6 +18,7 @@ public class IngestionService {
     private final DocumentRepository repository;
     private final WebPageExtractor webPageExtractor;
     private final FileExtractor fileExtractor;
+    private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
@@ -26,6 +27,7 @@ public class IngestionService {
             DocumentRepository repository,
             WebPageExtractor webPageExtractor,
             FileExtractor fileExtractor,
+            ObjectStorageService objectStorageService,
             Chunker chunker,
             OllamaClient ollamaClient,
             LearnBotProperties properties
@@ -33,6 +35,7 @@ public class IngestionService {
         this.repository = repository;
         this.webPageExtractor = webPageExtractor;
         this.fileExtractor = fileExtractor;
+        this.objectStorageService = objectStorageService;
         this.chunker = chunker;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
@@ -42,7 +45,7 @@ public class IngestionService {
     public IngestResponse ingestWeb(String url) {
         UUID sourceId = repository.createSource(SourceType.WEB, url, url);
         try {
-            ExtractedDocument document = webPageExtractor.extract(url);
+            ExtractedDocument document = webPageExtractor.extract(sourceId, url);
             return index(sourceId, document);
         } catch (RuntimeException ex) {
             repository.updateSourceStatus(sourceId, SourceStatus.FAILED, ex.getMessage());
@@ -55,6 +58,8 @@ public class IngestionService {
         String name = file.getOriginalFilename() == null ? "uploaded-file" : file.getOriginalFilename();
         UUID sourceId = repository.createSource(SourceType.FILE, name, name);
         try {
+            StoredObject storedObject = objectStorageService.store(sourceId, file);
+            repository.createSourceObject(sourceId, storedObject);
             ExtractedDocument document = fileExtractor.extract(file);
             return index(sourceId, document);
         } catch (RuntimeException ex) {
@@ -65,6 +70,41 @@ public class IngestionService {
 
     public List<DocumentSummary> listDocuments() {
         return repository.listDocuments();
+    }
+
+    @Transactional
+    public void deleteDocument(UUID documentId) {
+        StoredSource source = repository.findSourceByDocumentId(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
+        for (StoredObject object : repository.listSourceObjects(source.id())) {
+            objectStorageService.delete(object);
+        }
+        repository.deleteSource(source.id());
+    }
+
+    @Transactional
+    public IngestResponse reindexDocument(UUID documentId) {
+        StoredSource source = repository.findSourceByDocumentId(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
+        repository.updateSourceStatus(source.id(), SourceStatus.INDEXING, null);
+        repository.deleteDocumentsForSource(source.id());
+
+        try {
+            ExtractedDocument document = switch (source.type()) {
+                case WEB -> webPageExtractor.extract(source.id(), source.location());
+                case FILE -> {
+                    StoredObject object = repository.findSourceObject(source.id())
+                            .orElseThrow(() -> new IllegalArgumentException(
+                                    "Original file is not stored. Upload the file again before reindexing."
+                            ));
+                    yield fileExtractor.extract(objectStorageService.load(object));
+                }
+            };
+            return index(source.id(), document);
+        } catch (RuntimeException ex) {
+            repository.updateSourceStatus(source.id(), SourceStatus.FAILED, ex.getMessage());
+            throw ex;
+        }
     }
 
     private IngestResponse index(UUID sourceId, ExtractedDocument document) {

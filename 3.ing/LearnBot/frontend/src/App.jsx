@@ -2,13 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   CheckCircle2,
+  CircleHelp,
   Database,
   FileSpreadsheet,
   FileUp,
   Globe,
   Loader2,
   MessageSquare,
+  RefreshCw,
   Search,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
@@ -21,6 +25,7 @@ const sourceLabels = {
 };
 
 const statusLabels = {
+  INDEXING: '색인 중',
   INDEXED: '색인 완료',
   PENDING: '대기 중',
   FAILED: '실패',
@@ -37,6 +42,7 @@ function App() {
   const [answer, setAnswer] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     refreshDocuments();
@@ -126,6 +132,29 @@ function App() {
       });
       await requireOk(response);
       setAnswer(await response.json());
+    });
+  }
+
+  async function deleteDocument(documentId, title) {
+    if (!window.confirm(`'${title}' 문서를 삭제할까요?`)) {
+      return;
+    }
+    await run(`delete-${documentId}`, async () => {
+      const response = await fetch(`${apiBase}/api/documents/${documentId}`, { method: 'DELETE' });
+      await requireOk(response);
+      await refreshDocuments();
+      setSearchResults((current) => current.filter((result) => result.documentId !== documentId));
+      if (answer?.citations?.some((result) => result.documentId === documentId)) {
+        setAnswer(null);
+      }
+    });
+  }
+
+  async function reindexDocument(documentId) {
+    await run(`reindex-${documentId}`, async () => {
+      const response = await fetch(`${apiBase}/api/documents/${documentId}/reindex`, { method: 'POST' });
+      await requireOk(response);
+      await refreshDocuments();
     });
   }
 
@@ -270,6 +299,26 @@ function App() {
                       <StatusBadge status={doc.sourceStatus} />
                       <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
                     </div>
+                    <div className="document-actions">
+                      <button
+                        className="icon-button"
+                        type="button"
+                        title="재색인"
+                        disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
+                        onClick={() => reindexDocument(doc.id)}
+                      >
+                        {loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                      </button>
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        title="삭제"
+                        disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
+                        onClick={() => deleteDocument(doc.id, doc.title)}
+                      >
+                        {loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                      </button>
+                    </div>
                   </article>
                 ))}
                 {documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
@@ -333,6 +382,51 @@ function App() {
           </div>
         </section>
       </section>
+
+      <button
+        className="help-button"
+        type="button"
+        title="사용 방법"
+        aria-label="사용 방법"
+        onClick={() => setHelpOpen(true)}
+      >
+        <CircleHelp size={22} />
+      </button>
+
+      {helpOpen && (
+        <div className="help-backdrop" role="presentation" onClick={() => setHelpOpen(false)}>
+          <aside className="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
+            <div className="help-header">
+              <div>
+                <span className="eyebrow">Guide</span>
+                <h2 id="help-title">사용 방법</h2>
+              </div>
+              <button className="icon-button" type="button" title="닫기" onClick={() => setHelpOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="help-content">
+              <section>
+                <h3>1. 문서 추가</h3>
+                <p>웹 URL은 허용 도메인만 색인됩니다. CSV, XLS, XLSX 파일은 업로드하면 원본이 MinIO에 저장되고 내용이 색인됩니다.</p>
+              </section>
+              <section>
+                <h3>2. 검색</h3>
+                <p>키워드를 입력하면 색인된 문서 조각 중 관련도가 높은 결과를 확인할 수 있습니다.</p>
+              </section>
+              <section>
+                <h3>3. 질문</h3>
+                <p>질문을 입력하면 검색된 문서 내용을 근거로 답변합니다. LLM이 실패하면 관련 근거 문서를 반환합니다.</p>
+              </section>
+              <section>
+                <h3>4. 관리</h3>
+                <p>문서 목록의 회전 아이콘은 재색인, 휴지통 아이콘은 삭제입니다. 파일 재색인은 저장된 원본 파일을 다시 사용합니다.</p>
+              </section>
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }

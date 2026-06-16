@@ -16,6 +16,7 @@ public class LearnBotProperties {
     private Embedding embedding = new Embedding();
     private Ollama ollama = new Ollama();
     private Rag rag = new Rag();
+    private Storage storage = new Storage();
 
     public Crawler getCrawler() {
         return crawler;
@@ -57,11 +58,27 @@ public class LearnBotProperties {
         this.rag = rag;
     }
 
+    public Storage getStorage() {
+        return storage;
+    }
+
+    public void setStorage(Storage storage) {
+        this.storage = storage;
+    }
+
     public static class Crawler {
         private List<String> allowedDomains = new ArrayList<>(List.of("example.com"));
 
         @Min(1)
         private int timeoutSeconds = 15;
+
+        @Min(0)
+        private long rateLimitMillis = 1000;
+
+        @Min(1)
+        private int maxPagesPerRequest = 1;
+
+        private boolean respectRobotsTxt = true;
 
         public List<String> getAllowedDomains() {
             return allowedDomains;
@@ -77,6 +94,30 @@ public class LearnBotProperties {
 
         public void setTimeoutSeconds(int timeoutSeconds) {
             this.timeoutSeconds = timeoutSeconds;
+        }
+
+        public long getRateLimitMillis() {
+            return rateLimitMillis;
+        }
+
+        public void setRateLimitMillis(long rateLimitMillis) {
+            this.rateLimitMillis = rateLimitMillis;
+        }
+
+        public int getMaxPagesPerRequest() {
+            return maxPagesPerRequest;
+        }
+
+        public void setMaxPagesPerRequest(int maxPagesPerRequest) {
+            this.maxPagesPerRequest = maxPagesPerRequest;
+        }
+
+        public boolean isRespectRobotsTxt() {
+            return respectRobotsTxt;
+        }
+
+        public void setRespectRobotsTxt(boolean respectRobotsTxt) {
+            this.respectRobotsTxt = respectRobotsTxt;
         }
     }
 
@@ -172,6 +213,63 @@ public class LearnBotProperties {
 
         public void setTopK(int topK) {
             this.topK = topK;
+        }
+    }
+
+    public static class Storage {
+        @NotBlank
+        private String endpoint = "http://localhost:9000";
+
+        @NotBlank
+        private String accessKey = "learnbot";
+
+        @NotBlank
+        private String secretKey = "learnbot1234";
+
+        @NotBlank
+        private String bucket = "learnbot-raw";
+
+        @NotBlank
+        private String region = "us-east-1";
+
+        public String getEndpoint() {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        public String getAccessKey() {
+            return accessKey;
+        }
+
+        public void setAccessKey(String accessKey) {
+            this.accessKey = accessKey;
+        }
+
+        public String getSecretKey() {
+            return secretKey;
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey;
+        }
+
+        public String getBucket() {
+            return bucket;
+        }
+
+        public void setBucket(String bucket) {
+            this.bucket = bucket;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region;
         }
     }
 }

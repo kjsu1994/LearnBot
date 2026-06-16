@@ -19,6 +19,9 @@ learnbot:
   crawler:
     allowed-domains: ${LEARNBOT_CRAWLER_ALLOWED_DOMAINS:example.com}
     timeout-seconds: ${LEARNBOT_CRAWLER_TIMEOUT_SECONDS:15}
+    rate-limit-millis: ${LEARNBOT_CRAWLER_RATE_LIMIT_MILLIS:1000}
+    max-pages-per-request: ${LEARNBOT_CRAWLER_MAX_PAGES_PER_REQUEST:1}
+    respect-robots-txt: ${LEARNBOT_CRAWLER_RESPECT_ROBOTS_TXT:true}
   chunking:
     size: ${LEARNBOT_CHUNK_SIZE:1200}
     overlap: ${LEARNBOT_CHUNK_OVERLAP:150}
@@ -31,3 +34,9 @@ learnbot:
     temperature: ${LLM_TEMPERATURE:0.2}
   rag:
     top-k: ${RAG_TOP_K:6}
+  storage:
+    endpoint: ${S3_ENDPOINT:http://localhost:9000}
+    access-key: ${S3_ACCESS_KEY:learnbot}
+    secret-key: ${S3_SECRET_KEY:learnbot1234}
+    bucket: ${S3_BUCKET:learnbot-raw}
+    region: ${S3_REGION:us-east-1}

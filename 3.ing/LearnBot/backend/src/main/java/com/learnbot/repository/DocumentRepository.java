@@ -8,6 +8,8 @@ import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.service.Chunk;
+import com.learnbot.service.StoredObject;
+import com.learnbot.service.StoredSource;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -17,6 +19,7 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -83,6 +86,106 @@ public class DocumentRepository {
                 .addValue("sourceId", sourceId)
                 .addValue("status", status.name())
                 .addValue("errorMessage", errorMessage));
+    }
+
+    public Optional<StoredSource> findSource(UUID sourceId) {
+        List<StoredSource> sources = jdbc.query("""
+                SELECT id, type, name, location, status
+                FROM data_sources
+                WHERE id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), this::mapSource);
+        return sources.stream().findFirst();
+    }
+
+    public Optional<StoredSource> findSourceByDocumentId(UUID documentId) {
+        List<StoredSource> sources = jdbc.query("""
+                SELECT s.id, s.type, s.name, s.location, s.status
+                FROM data_sources s
+                JOIN documents d ON d.source_id = s.id
+                WHERE d.id = :documentId
+                """, new MapSqlParameterSource().addValue("documentId", documentId), this::mapSource);
+        return sources.stream().findFirst();
+    }
+
+    public void deleteSource(UUID sourceId) {
+        jdbc.update("""
+                DELETE FROM data_sources
+                WHERE id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId));
+    }
+
+    public void deleteDocumentsForSource(UUID sourceId) {
+        jdbc.update("""
+                DELETE FROM documents
+                WHERE source_id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId));
+    }
+
+    public void createSourceObject(UUID sourceId, StoredObject object) {
+        jdbc.update("""
+                INSERT INTO source_objects (id, source_id, bucket, object_key, original_filename, content_type, size_bytes)
+                VALUES (:id, :sourceId, :bucket, :objectKey, :originalFilename, :contentType, :sizeBytes)
+                ON CONFLICT (source_id) DO UPDATE
+                SET bucket = EXCLUDED.bucket,
+                    object_key = EXCLUDED.object_key,
+                    original_filename = EXCLUDED.original_filename,
+                    content_type = EXCLUDED.content_type,
+                    size_bytes = EXCLUDED.size_bytes,
+                    created_at = now()
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("sourceId", sourceId)
+                .addValue("bucket", object.bucket())
+                .addValue("objectKey", object.objectKey())
+                .addValue("originalFilename", object.originalFilename())
+                .addValue("contentType", object.contentType())
+                .addValue("sizeBytes", object.sizeBytes()));
+    }
+
+    public Optional<StoredObject> findSourceObject(UUID sourceId) {
+        List<StoredObject> objects = jdbc.query("""
+                SELECT bucket, object_key, original_filename, content_type, size_bytes
+                FROM source_objects
+                WHERE source_id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), this::mapStoredObject);
+        return objects.stream().findFirst();
+    }
+
+    public List<StoredObject> listSourceObjects(UUID sourceId) {
+        return jdbc.query("""
+                SELECT bucket, object_key, original_filename, content_type, size_bytes
+                FROM source_objects
+                WHERE source_id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), this::mapStoredObject);
+    }
+
+    public void createCrawlAuditLog(
+            UUID sourceId,
+            String url,
+            String host,
+            boolean allowedDomain,
+            Boolean robotsAllowed,
+            Integer statusCode,
+            boolean success,
+            String message
+    ) {
+        jdbc.update("""
+                INSERT INTO crawl_audit_logs (
+                    id, source_id, url, host, allowed_domain, robots_allowed, status_code, success, message
+                )
+                VALUES (
+                    :id, :sourceId, :url, :host, :allowedDomain, :robotsAllowed, :statusCode, :success, :message
+                )
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("sourceId", sourceId)
+                .addValue("url", url)
+                .addValue("host", host)
+                .addValue("allowedDomain", allowedDomain)
+                .addValue("robotsAllowed", robotsAllowed)
+                .addValue("statusCode", statusCode)
+                .addValue("success", success)
+                .addValue("message", message));
     }
 
     public List<DocumentSummary> listDocuments() {
@@ -175,6 +278,26 @@ public class DocumentRepository {
                 rs.getInt("chunk_index"),
                 rs.getString("content"),
                 rs.getDouble("score")
+        );
+    }
+
+    private StoredSource mapSource(ResultSet rs, int rowNum) throws SQLException {
+        return new StoredSource(
+                rs.getObject("id", UUID.class),
+                SourceType.valueOf(rs.getString("type")),
+                rs.getString("name"),
+                rs.getString("location"),
+                SourceStatus.valueOf(rs.getString("status"))
+        );
+    }
+
+    private StoredObject mapStoredObject(ResultSet rs, int rowNum) throws SQLException {
+        return new StoredObject(
+                rs.getString("bucket"),
+                rs.getString("object_key"),
+                rs.getString("original_filename"),
+                rs.getString("content_type"),
+                rs.getLong("size_bytes")
         );
     }
 
