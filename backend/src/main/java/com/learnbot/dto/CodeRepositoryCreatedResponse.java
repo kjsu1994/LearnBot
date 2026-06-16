@@ -4,6 +4,7 @@ import java.util.UUID;
 
 public record CodeRepositoryCreatedResponse(
         UUID id,
+        UUID spaceId,
         String name,
         String gitUrl,
         String branch,

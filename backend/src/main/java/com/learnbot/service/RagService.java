@@ -23,8 +23,15 @@ public class RagService {
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode) {
+        return ask(question, filter, mode, null, null);
+    }
+
+    public AskResponse ask(String question, SearchFilter filter, String mode, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
-        List<SearchResult> citations = searchService.search(question, filter, properties.getRag().getTopK());
+        List<SearchResult> citations = searchService.search(question, filter, properties.getRag().getTopK(), spaceIds, selectedSpaceId);
+        if (citations.isEmpty()) {
+            return new AskResponse(answerMode.value(), "근거가 부족해 답변할 수 없습니다.", citations, List.of());
+        }
         String context = buildContext(citations);
 
         String systemPrompt = """

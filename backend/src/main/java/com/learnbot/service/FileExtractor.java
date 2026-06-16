@@ -9,12 +9,20 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -46,8 +54,17 @@ public class FileExtractor {
         if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
             return excel(inputStream, fileName);
         }
+        if (lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".txt")) {
+            return text(inputStream, fileName, lower.endsWith(".txt") ? "text/plain" : "text/markdown");
+        }
+        if (lower.endsWith(".pdf")) {
+            return pdf(inputStream, fileName);
+        }
+        if (lower.endsWith(".docx")) {
+            return docx(inputStream, fileName);
+        }
 
-        throw new IllegalArgumentException("Only CSV, XLS, and XLSX files are supported.");
+        throw new IllegalArgumentException("Supported files: CSV, XLS, XLSX, PDF, DOCX, Markdown, and TXT.");
     }
 
     private ExtractedDocument csv(InputStream inputStream, String fileName) throws Exception {
@@ -104,6 +121,54 @@ public class FileExtractor {
                 fileName,
                 "file://" + fileName,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                content.toString(),
+                Map.of("fileName", fileName)
+        );
+    }
+
+    private ExtractedDocument text(InputStream inputStream, String fileName, String contentType) throws Exception {
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        String content = decoder.decode(ByteBuffer.wrap(inputStream.readAllBytes())).toString();
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                contentType,
+                content,
+                Map.of("fileName", fileName)
+        );
+    }
+
+    private ExtractedDocument pdf(InputStream inputStream, String fileName) throws Exception {
+        byte[] bytes = inputStream.readAllBytes();
+        String content;
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            content = new PDFTextStripper().getText(document);
+        }
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                "application/pdf",
+                content,
+                Map.of("fileName", fileName, "pageSource", "pdfbox")
+        );
+    }
+
+    private ExtractedDocument docx(InputStream inputStream, String fileName) throws Exception {
+        StringBuilder content = new StringBuilder();
+        try (XWPFDocument document = new XWPFDocument(inputStream)) {
+            for (XWPFParagraph paragraph : document.getParagraphs()) {
+                String text = paragraph.getText();
+                if (text != null && !text.isBlank()) {
+                    content.append(text).append('\n');
+                }
+            }
+        }
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 content.toString(),
                 Map.of("fileName", fileName)
         );

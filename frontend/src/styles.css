@@ -1557,3 +1557,123 @@ textarea:hover:not(:disabled),
     transition-duration: 0.01ms !important;
   }
 }
+
+.boot-screen,
+.login-screen {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.boot-screen {
+  color: var(--primary);
+  font-weight: 800;
+  gap: 10px;
+  justify-content: center;
+}
+
+.login-screen {
+  justify-items: center;
+}
+
+.login-panel {
+  max-width: 460px;
+  width: min(460px, 100%);
+}
+
+.login-brand {
+  margin-bottom: 4px;
+}
+
+.login-copy {
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.dark-select {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #f5fbf8;
+}
+
+.dark-select option {
+  color: #172427;
+}
+
+.sidebar-note {
+  color: #b9c8c3;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sidebar-logout {
+  margin-top: auto;
+}
+
+.three-tabs {
+  grid-template-columns: repeat(3, minmax(0, 150px));
+}
+
+.danger-note {
+  color: var(--danger) !important;
+  font-weight: 800;
+}
+
+.failure-line {
+  align-items: center;
+  color: var(--danger);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.failure-list {
+  display: grid;
+  gap: 8px;
+}
+
+.failure-item {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #f3c6c0;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.failure-item strong,
+.failure-item span {
+  overflow-wrap: anywhere;
+}
+
+.failure-item small {
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.compact-empty {
+  padding: 10px;
+  text-align: left;
+}
+
+.audit-list {
+  max-height: 620px;
+}
+
+.detail-box strong {
+  overflow-wrap: anywhere;
+}
+
+.code-viewer div {
+  min-height: 18px;
+}
+
+@media (max-width: 820px) {
+  .three-tabs {
+    grid-template-columns: 1fr;
+  }
+}

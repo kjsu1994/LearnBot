@@ -18,14 +18,21 @@ public class SearchService {
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit) {
+        return search(query, filter, limit, null, null);
+    }
+
+    public List<SearchResult> search(String query, SearchFilter filter, int limit, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId) {
         int safeLimit = Math.max(1, Math.min(limit, 20));
+        List<java.util.UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
         List<Double> embedding;
         try {
             embedding = ollamaClient.embed(List.of(query)).get(0);
         } catch (RuntimeException ex) {
-            return repository.keywordSearch(query, filter, safeLimit);
+            return repository.keywordSearch(query, filter, safeLimit, safeSpaceIds, selectedSpaceId);
         }
 
-        return repository.search(query, embedding, filter, safeLimit);
+        return repository.search(query, embedding, filter, safeLimit, safeSpaceIds, selectedSpaceId);
     }
 }

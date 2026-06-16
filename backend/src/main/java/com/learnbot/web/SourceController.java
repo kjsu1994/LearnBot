@@ -5,6 +5,7 @@ import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.dto.WebIngestRequest;
 import com.learnbot.service.IngestionService;
+import com.learnbot.security.CurrentUserProvider;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,38 +24,40 @@ import java.util.UUID;
 @RequestMapping("/api")
 public class SourceController {
     private final IngestionService ingestionService;
+    private final CurrentUserProvider currentUserProvider;
 
-    public SourceController(IngestionService ingestionService) {
+    public SourceController(IngestionService ingestionService, CurrentUserProvider currentUserProvider) {
         this.ingestionService = ingestionService;
+        this.currentUserProvider = currentUserProvider;
     }
 
     @PostMapping("/sources/web")
     IngestResponse ingestWeb(@Valid @RequestBody WebIngestRequest request) {
-        return ingestionService.ingestWeb(request.url());
+        return ingestionService.ingestWeb(currentUserProvider.currentUser(), request.spaceId(), request.url());
     }
 
     @PostMapping("/sources/files")
-    IngestResponse ingestFile(@RequestParam("file") MultipartFile file) {
-        return ingestionService.ingestFile(file);
+    IngestResponse ingestFile(@RequestParam("file") MultipartFile file, @RequestParam(required = false) UUID spaceId) {
+        return ingestionService.ingestFile(currentUserProvider.currentUser(), spaceId, file);
     }
 
     @GetMapping("/documents")
-    List<DocumentSummary> listDocuments() {
-        return ingestionService.listDocuments();
+    List<DocumentSummary> listDocuments(@RequestParam(required = false) UUID spaceId) {
+        return ingestionService.listDocuments(currentUserProvider.currentUser(), spaceId);
     }
 
     @GetMapping("/documents/{documentId}")
     DocumentDetail getDocument(@PathVariable UUID documentId) {
-        return ingestionService.getDocument(documentId);
+        return ingestionService.getDocument(currentUserProvider.currentUser(), documentId);
     }
 
     @DeleteMapping("/documents/{documentId}")
     void deleteDocument(@PathVariable UUID documentId) {
-        ingestionService.deleteDocument(documentId);
+        ingestionService.deleteDocument(currentUserProvider.currentUser(), documentId);
     }
 
     @PostMapping("/documents/{documentId}/reindex")
     IngestResponse reindexDocument(@PathVariable UUID documentId) {
-        return ingestionService.reindexDocument(documentId);
+        return ingestionService.reindexDocument(currentUserProvider.currentUser(), documentId);
     }
 }

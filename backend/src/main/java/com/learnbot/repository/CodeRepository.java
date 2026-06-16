@@ -8,6 +8,7 @@ import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.IndexingJobSummary;
+import com.learnbot.dto.IndexingJobFailureSummary;
 import com.learnbot.service.ActiveCodeFileSnapshot;
 import com.learnbot.service.CodeFileRecord;
 import com.learnbot.service.CodeRepositoryRecord;
@@ -35,18 +36,20 @@ public class CodeRepository {
         this.objectMapper = objectMapper;
     }
 
-    public CodeRepositoryRecord createRepository(String name, String gitUrl, String branch, String authType, String localPath) {
+    public CodeRepositoryRecord createRepository(String name, String gitUrl, String branch, String authType, String localPath, UUID spaceId, UUID createdBy) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO code_repositories (id, name, git_url, branch, auth_type, local_path, status)
-                VALUES (:id, :name, :gitUrl, :branch, :authType, :localPath, 'PENDING')
+                INSERT INTO code_repositories (id, name, git_url, branch, auth_type, local_path, status, space_id, created_by)
+                VALUES (:id, :name, :gitUrl, :branch, :authType, :localPath, 'PENDING', :spaceId, :createdBy)
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("name", name)
                 .addValue("gitUrl", gitUrl)
                 .addValue("branch", branch)
                 .addValue("authType", authType)
-                .addValue("localPath", localPath));
+                .addValue("localPath", localPath)
+                .addValue("spaceId", spaceId)
+                .addValue("createdBy", createdBy));
         return findRepository(id).orElseThrow();
     }
 
@@ -82,9 +85,9 @@ public class CodeRepository {
         return credentials.stream().findFirst();
     }
 
-    public List<CodeRepositorySummary> listRepositories() {
+    public List<CodeRepositorySummary> listRepositories(List<UUID> spaceIds, UUID selectedSpaceId) {
         return jdbc.query("""
-                SELECT r.id, r.name, r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
+                SELECT r.id, r.space_id, r.name, r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
                        r.error_message, r.created_at, r.updated_at,
                        (r.credential_token_ciphertext IS NOT NULL) AS credential_stored,
                        COALESCE(f.active_file_count, 0) AS active_file_count,
@@ -102,15 +105,21 @@ public class CodeRepository {
                     WHERE active
                     GROUP BY repository_id
                 ) c ON c.repository_id = r.id
+                WHERE r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                 ORDER BY r.created_at DESC
-                """, this::mapRepositorySummary);
+                """, new MapSqlParameterSource()
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapRepositorySummary);
     }
 
     public Optional<CodeRepositoryRecord> findRepository(UUID repositoryId) {
         List<CodeRepositoryRecord> repositories = jdbc.query("""
-                SELECT id, name, git_url, branch, auth_type, local_path, status, last_indexed_commit
+                SELECT id, space_id, name, git_url, branch, auth_type, local_path, status, last_indexed_commit
                 FROM code_repositories
                 WHERE id = :repositoryId
+                  AND deleted_at IS NULL
                 """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), this::mapRepositoryRecord);
         return repositories.stream().findFirst();
     }
@@ -130,7 +139,8 @@ public class CodeRepository {
 
     public void deleteRepository(UUID repositoryId) {
         jdbc.update("""
-                DELETE FROM code_repositories
+                UPDATE code_repositories
+                SET deleted_at = now(), updated_at = now()
                 WHERE id = :repositoryId
                 """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
     }
@@ -246,6 +256,32 @@ public class CodeRepository {
         return jobs.stream().findFirst();
     }
 
+    public List<IndexingJobFailureSummary> listJobFailures(UUID repositoryId, UUID jobId) {
+        return jdbc.query("""
+                SELECT id, job_id, repository_id, file_path, stage, message, created_at
+                FROM indexing_job_failures
+                WHERE repository_id = :repositoryId
+                  AND job_id = :jobId
+                ORDER BY created_at ASC
+                LIMIT 200
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("jobId", jobId), this::mapJobFailureSummary);
+    }
+
+    public void addJobFailure(UUID repositoryId, UUID jobId, String filePath, String stage, String message) {
+        jdbc.update("""
+                INSERT INTO indexing_job_failures (id, repository_id, job_id, file_path, stage, message)
+                VALUES (:id, :repositoryId, :jobId, :filePath, :stage, :message)
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("repositoryId", repositoryId)
+                .addValue("jobId", jobId)
+                .addValue("filePath", filePath)
+                .addValue("stage", stage)
+                .addValue("message", trimMessage(message)));
+    }
+
     public Optional<IndexingJobSummary> findRunningJob(UUID repositoryId) {
         List<IndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
@@ -357,8 +393,10 @@ public class CodeRepository {
                 SELECT f.id, f.repository_id, f.file_path, f.language, f.content_hash, f.updated_at,
                        COUNT(c.id) AS chunk_count
                 FROM code_files f
+                JOIN code_repositories r ON r.id = f.repository_id
                 LEFT JOIN code_chunks c ON c.file_id = f.id AND c.active
                 WHERE f.active
+                  AND r.deleted_at IS NULL
                   AND (CAST(:repositoryId AS uuid) IS NULL OR f.repository_id = CAST(:repositoryId AS uuid))
                   AND (CAST(:query AS varchar) IS NULL OR f.file_path ILIKE CAST(:query AS varchar))
                 GROUP BY f.id
@@ -453,13 +491,15 @@ public class CodeRepository {
                 .addValue("indexVersion", indexVersion));
     }
 
-    public List<CodeSearchResult> search(UUID repositoryId, String query, List<Double> embedding, int limit) {
+    public List<CodeSearchResult> search(UUID repositoryId, String query, List<Double> embedding, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("query", query)
                 .addValue("likeQuery", "%" + query + "%")
                 .addValue("embedding", vectorLiteral(embedding))
-                .addValue("limit", limit);
+                .addValue("limit", limit)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId);
 
         return jdbc.query("""
                 SELECT c.id AS chunk_id,
@@ -492,18 +532,23 @@ public class CodeRepository {
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
                 WHERE c.active
+                  AND r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
                 ORDER BY score DESC
                 LIMIT :limit
                 """, params, this::mapSearchResult);
     }
 
-    public List<CodeSearchResult> keywordSearch(UUID repositoryId, String query, int limit) {
+    public List<CodeSearchResult> keywordSearch(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("query", query)
                 .addValue("likeQuery", "%" + query + "%")
-                .addValue("limit", limit);
+                .addValue("limit", limit)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId);
 
         return jdbc.query("""
                 SELECT c.id AS chunk_id,
@@ -535,6 +580,9 @@ public class CodeRepository {
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
                 WHERE c.active
+                  AND r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
                   AND (
                     c.search_vector @@ plainto_tsquery('simple', :query)
@@ -551,12 +599,14 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
-    public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit) {
+    public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("symbol", symbol)
                 .addValue("likeQuery", "%" + symbol + "%")
-                .addValue("limit", Math.max(1, Math.min(limit, 50)));
+                .addValue("limit", Math.max(1, Math.min(limit, 50)))
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId);
 
         return jdbc.query("""
                 SELECT c.id AS chunk_id,
@@ -587,6 +637,9 @@ public class CodeRepository {
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
                 WHERE c.active
+                  AND r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
                   AND (
                     lower(c.symbol_name) = lower(:symbol)
@@ -601,12 +654,14 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
-    public List<CodeSearchResult> findSymbolReferences(UUID repositoryId, String symbol, int limit) {
+    public List<CodeSearchResult> findSymbolReferences(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("symbol", symbol)
                 .addValue("likeQuery", "%" + symbol + "%")
-                .addValue("limit", Math.max(1, Math.min(limit, 80)));
+                .addValue("limit", Math.max(1, Math.min(limit, 80)))
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId);
 
         return jdbc.query("""
                 SELECT c.id AS chunk_id,
@@ -638,6 +693,9 @@ public class CodeRepository {
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
                 WHERE c.active
+                  AND r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
                   AND (
                     c.content ILIKE :likeQuery
@@ -686,6 +744,7 @@ public class CodeRepository {
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
                 WHERE c.active
+                  AND r.deleted_at IS NULL
                   AND c.repository_id = :repositoryId
                   AND c.file_path IN (:filePaths)
                   AND c.chunk_index BETWEEN :minIndex AND :maxIndex
@@ -697,6 +756,7 @@ public class CodeRepository {
     private CodeRepositoryRecord mapRepositoryRecord(ResultSet rs, int rowNum) throws SQLException {
         return new CodeRepositoryRecord(
                 rs.getObject("id", UUID.class),
+                rs.getObject("space_id", UUID.class),
                 rs.getString("name"),
                 rs.getString("git_url"),
                 rs.getString("branch"),
@@ -710,6 +770,7 @@ public class CodeRepository {
     private CodeRepositorySummary mapRepositorySummary(ResultSet rs, int rowNum) throws SQLException {
         return new CodeRepositorySummary(
                 rs.getObject("id", UUID.class),
+                rs.getObject("space_id", UUID.class),
                 rs.getString("name"),
                 rs.getString("git_url"),
                 rs.getString("branch"),
@@ -722,6 +783,18 @@ public class CodeRepository {
                 rs.getInt("active_chunk_count"),
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class)
+        );
+    }
+
+    private IndexingJobFailureSummary mapJobFailureSummary(ResultSet rs, int rowNum) throws SQLException {
+        return new IndexingJobFailureSummary(
+                rs.getObject("id", UUID.class),
+                rs.getObject("job_id", UUID.class),
+                rs.getObject("repository_id", UUID.class),
+                rs.getString("file_path"),
+                rs.getString("stage"),
+                rs.getString("message"),
+                rs.getObject("created_at", OffsetDateTime.class)
         );
     }
 
@@ -840,5 +913,10 @@ public class CodeRepository {
             builder.append(values.get(i));
         }
         return builder.append(']').toString();
+    }
+
+    private String trimMessage(String message) {
+        String clean = message == null || message.isBlank() ? "Unknown indexing failure." : message.trim();
+        return clean.length() <= 1000 ? clean : clean.substring(0, 1000);
     }
 }

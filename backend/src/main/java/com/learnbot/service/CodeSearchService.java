@@ -30,21 +30,28 @@ public class CodeSearchService {
     }
 
     public List<CodeSearchResult> search(UUID repositoryId, String query, int limit) {
+        return search(repositoryId, query, limit, java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID), null);
+    }
+
+    public List<CodeSearchResult> search(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         int safeLimit = Math.max(1, Math.min(limit, 30));
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
 
-        for (CodeSearchResult result : repository.keywordSearch(repositoryId, query, safeLimit)) {
+        for (CodeSearchResult result : repository.keywordSearch(repositoryId, query, safeLimit, safeSpaceIds, selectedSpaceId)) {
             merge(merged, result);
         }
         for (String identifier : identifiers(query)) {
-            for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(5, safeLimit / 2))) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(5, safeLimit / 2), safeSpaceIds, selectedSpaceId)) {
                 merge(merged, boost(result, 0.18));
             }
         }
 
         try {
             List<Double> embedding = ollamaClient.embed(List.of(query)).get(0);
-            for (CodeSearchResult result : repository.search(repositoryId, query, embedding, safeLimit)) {
+            for (CodeSearchResult result : repository.search(repositoryId, query, embedding, safeLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
         } catch (RuntimeException ignored) {

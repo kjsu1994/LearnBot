@@ -6,6 +6,7 @@ import java.util.UUID;
 public record DocumentSummary(
         UUID id,
         UUID sourceId,
+        UUID spaceId,
         String sourceType,
         String sourceStatus,
         String title,

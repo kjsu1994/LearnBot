@@ -123,6 +123,9 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:-learnbot1234}
       S3_BUCKET: ${S3_BUCKET:-learnbot-raw}
       LEARNBOT_CODE_WORKSPACE_PATH: /var/lib/learnbot/repos
+      LEARNBOT_BOOTSTRAP_ADMIN_EMAIL: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:-admin@learnbot.local}
+      LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:-learnbot1234}
+      LEARNBOT_BOOTSTRAP_ADMIN_NAME: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:-LearnBot Admin}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record CodeAskRequest(
         UUID repositoryId,
+        UUID spaceId,
         @NotBlank String question,
         String mode,
         Integer limit

@@ -2,10 +2,11 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeRepositorySummary;
+import com.learnbot.dto.IndexingJobFailureSummary;
 import com.learnbot.dto.IndexingJobSummary;
 import com.learnbot.repository.CodeRepository;
-import jakarta.annotation.PreDestroy;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileSystemUtils;
 
@@ -38,6 +39,8 @@ public class CodeIndexingService {
     private final OllamaClient ollamaClient;
     private final CredentialEncryptionService credentialEncryptionService;
     private final LearnBotProperties properties;
+    private final AuthService authService;
+    private final AuditService auditService;
     private final ExecutorService executor;
     private final Map<UUID, Future<?>> runningJobs = new ConcurrentHashMap<>();
     private final Set<UUID> cancelledJobs = ConcurrentHashMap.newKeySet();
@@ -50,7 +53,9 @@ public class CodeIndexingService {
             CodeChunkParser chunkParser,
             OllamaClient ollamaClient,
             CredentialEncryptionService credentialEncryptionService,
-            LearnBotProperties properties
+            LearnBotProperties properties,
+            AuthService authService,
+            AuditService auditService
     ) {
         this.repository = repository;
         this.gitWorkspaceService = gitWorkspaceService;
@@ -60,6 +65,8 @@ public class CodeIndexingService {
         this.ollamaClient = ollamaClient;
         this.credentialEncryptionService = credentialEncryptionService;
         this.properties = properties;
+        this.authService = authService;
+        this.auditService = auditService;
         this.executor = Executors.newFixedThreadPool(properties.getCode().getIndexThreads());
     }
 
@@ -74,6 +81,8 @@ public class CodeIndexingService {
     }
 
     public CodeRepositoryRecord createRepository(
+            AppUser user,
+            UUID spaceId,
             String gitUrl,
             String name,
             String branch,
@@ -86,29 +95,50 @@ public class CodeIndexingService {
         String cleanBranch = branch == null || branch.isBlank() ? "HEAD" : branch.trim();
         String cleanAuthType = authType == null || authType.isBlank() ? "NONE" : authType.trim().toUpperCase(Locale.ROOT);
         if (!cleanAuthType.equals("NONE") && !cleanAuthType.equals("TOKEN")) {
-            throw new IllegalArgumentException("authType은 NONE 또는 TOKEN만 지원합니다.");
+            throw new IllegalArgumentException("authType must be NONE or TOKEN.");
         }
+        UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String repositoryName = name == null || name.isBlank() ? inferName(cleanUrl) : name.trim();
         String localPath = Path.of(properties.getCode().getWorkspacePath(), UUID.randomUUID().toString()).toString();
-        CodeRepositoryRecord record = repository.createRepository(repositoryName, cleanUrl, cleanBranch, cleanAuthType, localPath);
+        CodeRepositoryRecord record = repository.createRepository(
+                repositoryName,
+                cleanUrl,
+                cleanBranch,
+                cleanAuthType,
+                localPath,
+                resolvedSpaceId,
+                user.id()
+        );
         if (Boolean.TRUE.equals(storeToken) && token != null && !token.isBlank()) {
             repository.storeCredential(record.id(), credentialEncryptionService.encrypt(username, token));
+            auditService.log(user, "CODE_CREDENTIAL_STORED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Git token was stored for reuse.");
         }
+        auditService.log(user, "CODE_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Code repository was registered.");
         return record;
     }
 
-    public List<CodeRepositorySummary> listRepositories() {
-        return repository.listRepositories();
+    public List<CodeRepositorySummary> listRepositories(AppUser user, UUID spaceId) {
+        UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
+        return repository.listRepositories(authService.accessibleSpaceIds(user), selectedSpaceId);
     }
 
-    public List<IndexingJobSummary> listJobs(UUID repositoryId) {
+    public List<IndexingJobSummary> listJobs(AppUser user, UUID repositoryId) {
+        requireRepositoryAccess(user, repositoryId);
         return repository.listJobs(repositoryId);
     }
 
-    public IndexingJobSummary startIndex(UUID repositoryId, GitAccessToken accessToken, Boolean storeToken) {
-        CodeRepositoryRecord record = repository.findRepository(repositoryId)
-                .orElseThrow(() -> new IllegalArgumentException("코드 저장소를 찾을 수 없습니다."));
+    public List<IndexingJobFailureSummary> listJobFailures(AppUser user, UUID repositoryId, UUID jobId) {
+        requireRepositoryAccess(user, repositoryId);
+        IndexingJobSummary job = repository.findJob(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Indexing job was not found."));
+        if (!job.repositoryId().equals(repositoryId)) {
+            throw new IllegalArgumentException("Repository and indexing job do not match.");
+        }
+        return repository.listJobFailures(repositoryId, jobId);
+    }
 
+    public IndexingJobSummary startIndex(AppUser user, UUID repositoryId, GitAccessToken accessToken, Boolean storeToken) {
+        CodeRepositoryRecord record = requireRepositoryAccess(user, repositoryId);
         Optional<IndexingJobSummary> runningJob = repository.findRunningJob(repositoryId);
         if (runningJob.isPresent()) {
             return runningJob.get();
@@ -116,47 +146,51 @@ public class CodeIndexingService {
 
         GitAccessToken resolvedAccessToken = resolveAccessToken(repositoryId, accessToken, storeToken);
         if ("TOKEN".equals(record.authType()) && !resolvedAccessToken.hasToken()) {
-            throw new IllegalArgumentException("이 저장소는 TOKEN 인증으로 등록되었습니다. 저장된 토큰이 없으므로 재인덱싱용 token을 입력하세요.");
+            throw new IllegalArgumentException("This repository requires a Git token. Enter a token before indexing.");
         }
         UUID jobId = repository.createJob(repositoryId, record.lastIndexedCommit() == null ? "INITIAL_INDEX" : "REINDEX");
         repository.updateRepositoryStatus(repositoryId, "INDEXING", null);
+        auditService.log(user, "CODE_INDEX_STARTED", "INDEXING_JOB", jobId, record.spaceId(), "Code repository indexing started.");
         Future<?> future = executor.submit(() -> runIndex(record, resolvedAccessToken, jobId));
         runningJobs.put(jobId, future);
         return repository.findJob(jobId).orElseThrow();
     }
 
-    public void deleteRepository(UUID repositoryId) {
-        CodeRepositoryRecord record = repository.findRepository(repositoryId)
-                .orElseThrow(() -> new IllegalArgumentException("코드 저장소를 찾을 수 없습니다."));
+    public void deleteRepository(AppUser user, UUID repositoryId) {
+        CodeRepositoryRecord record = requireRepositoryAccess(user, repositoryId);
         Optional<IndexingJobSummary> runningJob = repository.findRunningJob(repositoryId);
         if (runningJob.isPresent()) {
-            throw new IllegalArgumentException("인덱싱 중인 저장소는 삭제할 수 없습니다. 먼저 취소하세요.");
+            throw new IllegalArgumentException("Cancel the running index job before deleting this repository.");
         }
         repository.deleteRepository(repositoryId);
+        auditService.log(user, "CODE_REPOSITORY_DELETED", "CODE_REPOSITORY", repositoryId, record.spaceId(), "Code repository was soft deleted.");
         deleteLocalRepository(record.localPath());
     }
 
-    public int clearFailedJobHistory(UUID repositoryId) {
-        repository.findRepository(repositoryId)
-                .orElseThrow(() -> new IllegalArgumentException("코드 저장소를 찾을 수 없습니다."));
-        return repository.deleteFailedJobHistory(repositoryId);
+    public int clearFailedJobHistory(AppUser user, UUID repositoryId) {
+        CodeRepositoryRecord record = requireRepositoryAccess(user, repositoryId);
+        int deleted = repository.deleteFailedJobHistory(repositoryId);
+        auditService.log(user, "CODE_INDEX_FAILURES_CLEARED", "CODE_REPOSITORY", repositoryId, record.spaceId(), "Failed indexing history was cleared.");
+        return deleted;
     }
 
-    public IndexingJobSummary cancelIndex(UUID repositoryId, UUID jobId) {
+    public IndexingJobSummary cancelIndex(AppUser user, UUID repositoryId, UUID jobId) {
+        CodeRepositoryRecord record = requireRepositoryAccess(user, repositoryId);
         IndexingJobSummary job = repository.findJob(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("인덱싱 작업을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("Indexing job was not found."));
         if (!job.repositoryId().equals(repositoryId)) {
-            throw new IllegalArgumentException("저장소와 인덱싱 작업이 일치하지 않습니다.");
+            throw new IllegalArgumentException("Repository and indexing job do not match.");
         }
         if (!job.status().equals("RUNNING") && !job.status().equals("CANCELLING")) {
             return job;
         }
 
         cancelledJobs.add(jobId);
-        repository.updateJobStatus(jobId, "CANCELLING", "사용자가 취소를 요청했습니다.");
+        repository.updateJobStatus(jobId, "CANCELLING", "User requested cancellation.");
+        auditService.log(user, "CODE_INDEX_CANCELLED", "INDEXING_JOB", jobId, record.spaceId(), "Code repository indexing was cancelled.");
         Future<?> future = runningJobs.get(jobId);
         if (future == null) {
-            repository.finishJob(jobId, "CANCELLED", job.commitHash(), "사용자가 취소했습니다.");
+            repository.finishJob(jobId, "CANCELLED", job.commitHash(), "User cancelled indexing.");
             restoreRepositoryStatus(repositoryId);
         }
         return repository.findJob(jobId).orElseThrow();
@@ -194,7 +228,7 @@ public class CodeIndexingService {
             totalFiles = candidates.size();
             repository.updateJobProgress(jobId, totalFiles, 0, 0, 0);
             if (candidates.isEmpty()) {
-                throw new IllegalArgumentException("색인할 수 있는 코드 파일이 없습니다.");
+                throw new IllegalArgumentException("No indexable code files were found.");
             }
 
             Map<String, ActiveCodeFileSnapshot> previousFiles = repository.listActiveFileSnapshots(repositoryId);
@@ -240,29 +274,32 @@ public class CodeIndexingService {
                 } catch (RuntimeException ex) {
                     failedFiles++;
                     processedFiles++;
+                    repository.addJobFailure(repositoryId, jobId, candidate.relativePath(), "FILE", rootMessage(ex));
                 }
                 repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
             }
 
             if (totalChunks == 0) {
-                throw new IllegalArgumentException("색인 가능한 코드 chunk가 생성되지 않았습니다.");
+                throw new IllegalArgumentException("No code chunks were created.");
             }
             repository.activateIndex(repositoryId, jobId);
             repository.markRepositoryIndexed(repositoryId, commitHash);
             repository.finishJob(jobId, "SUCCEEDED", commitHash, null);
         } catch (CodeIndexCancelledException ex) {
             repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
-            repository.finishJob(jobId, "CANCELLED", commitHash, "사용자가 취소했습니다.");
+            repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
             restoreRepositoryStatus(repositoryId);
         } catch (RuntimeException ex) {
             if (cancelledJobs.contains(jobId) || Thread.currentThread().isInterrupted()) {
                 repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
-                repository.finishJob(jobId, "CANCELLED", commitHash, "사용자가 취소했습니다.");
+                repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
                 restoreRepositoryStatus(repositoryId);
             } else {
+                String message = rootMessage(ex);
                 repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
-                repository.finishJob(jobId, "FAILED", commitHash, ex.getMessage());
-                repository.updateRepositoryStatus(repositoryId, "FAILED", ex.getMessage());
+                repository.addJobFailure(repositoryId, jobId, null, "REPOSITORY", message);
+                repository.finishJob(jobId, "FAILED", commitHash, message);
+                repository.updateRepositoryStatus(repositoryId, "FAILED", message);
             }
         } finally {
             runningJobs.remove(jobId);
@@ -272,24 +309,24 @@ public class CodeIndexingService {
 
     private String requireGitUrl(String gitUrl) {
         if (gitUrl == null || gitUrl.isBlank()) {
-            throw new IllegalArgumentException("Git URL을 입력하세요.");
+            throw new IllegalArgumentException("Git URL is required.");
         }
         String clean = gitUrl.trim();
         if (clean.startsWith("http://") || clean.startsWith("https://")) {
             try {
                 URI uri = new URI(clean);
                 if (uri.getHost() == null || uri.getHost().isBlank()) {
-                    throw new IllegalArgumentException("Git URL은 http://host/path.git 또는 https://host/path.git 형태여야 합니다.");
+                    throw new IllegalArgumentException("Git URL must include a host.");
                 }
             } catch (URISyntaxException ex) {
-                throw new IllegalArgumentException("Git URL 형식이 올바르지 않습니다. 예: http://192.168.1.146/Git/project.git");
+                throw new IllegalArgumentException("Git URL format is invalid.");
             }
             return clean;
         }
         if (clean.startsWith("ssh://") || clean.startsWith("git://") || clean.startsWith("git@")) {
             return clean;
         }
-        throw new IllegalArgumentException("지원하는 Git URL 형식은 http://, https://, ssh://, git:// 또는 git@host:path.git 입니다.");
+        throw new IllegalArgumentException("Git URL must start with http://, https://, ssh://, git://, or git@.");
     }
 
     private String inferName(String gitUrl) {
@@ -322,7 +359,7 @@ public class CodeIndexingService {
 
     private void restoreRepositoryStatus(UUID repositoryId) {
         CodeRepositoryRecord latest = repository.findRepository(repositoryId)
-                .orElseThrow(() -> new IllegalArgumentException("코드 저장소를 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("Code repository was not found."));
         if (latest.lastIndexedCommit() == null || latest.lastIndexedCommit().isBlank()) {
             repository.updateRepositoryStatus(repositoryId, "PENDING", null);
         } else {
@@ -330,16 +367,23 @@ public class CodeIndexingService {
         }
     }
 
+    private CodeRepositoryRecord requireRepositoryAccess(AppUser user, UUID repositoryId) {
+        CodeRepositoryRecord record = repository.findRepository(repositoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Code repository was not found."));
+        authService.requireSpace(user, record.spaceId());
+        return record;
+    }
+
     private void deleteLocalRepository(String localPath) {
         Path workspaceRoot = Path.of(properties.getCode().getWorkspacePath()).toAbsolutePath().normalize();
         Path target = Path.of(localPath).toAbsolutePath().normalize();
         if (!target.startsWith(workspaceRoot) || target.equals(workspaceRoot)) {
-            throw new IllegalArgumentException("저장소 로컬 경로가 workspace 밖에 있어 삭제하지 않았습니다.");
+            throw new IllegalArgumentException("Local repository path is outside the configured workspace.");
         }
         try {
             FileSystemUtils.deleteRecursively(target);
         } catch (IOException ex) {
-            throw new IllegalArgumentException("로컬 Git 작업 폴더 삭제에 실패했습니다: " + target, ex);
+            throw new IllegalArgumentException("Failed to delete local Git workspace: " + target, ex);
         }
     }
 
@@ -350,6 +394,18 @@ public class CodeIndexingService {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is not available.", ex);
         }
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            message = throwable.getMessage();
+        }
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }
 
     private static class CodeIndexCancelledException extends RuntimeException {

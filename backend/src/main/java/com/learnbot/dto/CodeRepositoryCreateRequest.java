@@ -3,6 +3,8 @@ package com.learnbot.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
+import java.util.UUID;
+
 public record CodeRepositoryCreateRequest(
         @NotBlank String gitUrl,
         String name,
@@ -11,6 +13,7 @@ public record CodeRepositoryCreateRequest(
         String authType,
         String username,
         String token,
-        Boolean storeToken
+        Boolean storeToken,
+        UUID spaceId
 ) {
 }

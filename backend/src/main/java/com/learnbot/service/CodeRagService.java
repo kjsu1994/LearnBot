@@ -24,9 +24,16 @@ public class CodeRagService {
     }
 
     public CodeAskResponse ask(UUID repositoryId, String question, String mode, Integer limit) {
+        return ask(repositoryId, null, java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID), question, mode, limit);
+    }
+
+    public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
         CodeQuestionMode questionMode = CodeQuestionMode.from(mode);
         int safeLimit = limit == null ? properties.getCode().getTopK() : Math.max(1, Math.min(limit, 20));
-        List<CodeSearchResult> results = searchService.search(repositoryId, question, safeLimit);
+        List<CodeSearchResult> results = searchService.search(repositoryId, question, safeLimit, spaceIds, selectedSpaceId);
+        if (results.isEmpty()) {
+            return new CodeAskResponse(questionMode.value(), "코드 근거가 부족해 답변할 수 없습니다.", List.of());
+        }
         String systemPrompt = """
                 You are LearnBot Code, a private source-code RAG assistant inspired by Sourcegraph Cody.
                 Answer in Korean unless the user asks for another language.

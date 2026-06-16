@@ -13,6 +13,9 @@ import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchRequest;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.IndexingJobSummary;
+import com.learnbot.dto.IndexingJobFailureSummary;
+import com.learnbot.security.CurrentUserProvider;
+import com.learnbot.service.AuthService;
 import com.learnbot.service.CodeFileBrowserService;
 import com.learnbot.service.CodeIndexingService;
 import com.learnbot.service.CodeRagService;
@@ -42,24 +45,32 @@ public class CodeController {
     private final CodeSearchService searchService;
     private final CodeRagService ragService;
     private final CodeReferenceService referenceService;
+    private final AuthService authService;
+    private final CurrentUserProvider currentUserProvider;
 
     public CodeController(
             CodeIndexingService indexingService,
             CodeFileBrowserService fileBrowserService,
             CodeSearchService searchService,
             CodeRagService ragService,
-            CodeReferenceService referenceService
+            CodeReferenceService referenceService,
+            AuthService authService,
+            CurrentUserProvider currentUserProvider
     ) {
         this.indexingService = indexingService;
         this.fileBrowserService = fileBrowserService;
         this.searchService = searchService;
         this.ragService = ragService;
         this.referenceService = referenceService;
+        this.authService = authService;
+        this.currentUserProvider = currentUserProvider;
     }
 
     @PostMapping("/repositories")
     CodeRepositoryCreatedResponse createRepository(@Valid @RequestBody CodeRepositoryCreateRequest request) {
         CodeRepositoryRecord repository = indexingService.createRepository(
+                currentUserProvider.currentUser(),
+                request.spaceId(),
                 request.gitUrl(),
                 request.name(),
                 request.branch(),
@@ -70,6 +81,7 @@ public class CodeController {
         );
         return new CodeRepositoryCreatedResponse(
                 repository.id(),
+                repository.spaceId(),
                 repository.name(),
                 repository.gitUrl(),
                 repository.branch(),
@@ -81,8 +93,8 @@ public class CodeController {
     }
 
     @GetMapping("/repositories")
-    List<CodeRepositorySummary> listRepositories() {
-        return indexingService.listRepositories();
+    List<CodeRepositorySummary> listRepositories(@RequestParam(required = false) UUID spaceId) {
+        return indexingService.listRepositories(currentUserProvider.currentUser(), spaceId);
     }
 
     @PostMapping("/repositories/{repositoryId}/index")
@@ -93,27 +105,32 @@ public class CodeController {
         GitAccessToken accessToken = request == null
                 ? new GitAccessToken(null, null)
                 : new GitAccessToken(request.username(), request.token());
-        return indexingService.startIndex(repositoryId, accessToken, request != null && Boolean.TRUE.equals(request.storeToken()));
+        return indexingService.startIndex(currentUserProvider.currentUser(), repositoryId, accessToken, request != null && Boolean.TRUE.equals(request.storeToken()));
     }
 
     @DeleteMapping("/repositories/{repositoryId}")
     void deleteRepository(@PathVariable UUID repositoryId) {
-        indexingService.deleteRepository(repositoryId);
+        indexingService.deleteRepository(currentUserProvider.currentUser(), repositoryId);
     }
 
     @DeleteMapping("/repositories/{repositoryId}/jobs")
     Map<String, Integer> clearFailedJobs(@PathVariable UUID repositoryId) {
-        return Map.of("deleted", indexingService.clearFailedJobHistory(repositoryId));
+        return Map.of("deleted", indexingService.clearFailedJobHistory(currentUserProvider.currentUser(), repositoryId));
     }
 
     @GetMapping("/repositories/{repositoryId}/jobs")
     List<IndexingJobSummary> listJobs(@PathVariable UUID repositoryId) {
-        return indexingService.listJobs(repositoryId);
+        return indexingService.listJobs(currentUserProvider.currentUser(), repositoryId);
+    }
+
+    @GetMapping("/repositories/{repositoryId}/jobs/{jobId}/failures")
+    List<IndexingJobFailureSummary> listJobFailures(@PathVariable UUID repositoryId, @PathVariable UUID jobId) {
+        return indexingService.listJobFailures(currentUserProvider.currentUser(), repositoryId, jobId);
     }
 
     @PostMapping("/repositories/{repositoryId}/jobs/{jobId}/cancel")
     IndexingJobSummary cancelJob(@PathVariable UUID repositoryId, @PathVariable UUID jobId) {
-        return indexingService.cancelIndex(repositoryId, jobId);
+        return indexingService.cancelIndex(currentUserProvider.currentUser(), repositoryId, jobId);
     }
 
     @GetMapping("/repositories/{repositoryId}/files")
@@ -122,27 +139,52 @@ public class CodeController {
             @RequestParam(required = false) String query,
             @RequestParam(required = false) Integer limit
     ) {
+        authService.requireSpace(currentUserProvider.currentUser(), repositorySpace(repositoryId));
         return fileBrowserService.listFiles(repositoryId, query, limit);
     }
 
     @GetMapping("/repositories/{repositoryId}/files/{fileId}")
     CodeFileDetail getFile(@PathVariable UUID repositoryId, @PathVariable UUID fileId) {
+        authService.requireSpace(currentUserProvider.currentUser(), repositorySpace(repositoryId));
         return fileBrowserService.getFile(repositoryId, fileId);
     }
 
     @PostMapping("/search")
     List<CodeSearchResult> search(@Valid @RequestBody CodeSearchRequest request) {
         int limit = request.limit() == null ? 10 : request.limit();
-        return searchService.search(request.repositoryId(), request.query(), limit);
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        if (request.repositoryId() != null) {
+            authService.requireSpace(user, repositorySpace(request.repositoryId()));
+        }
+        return searchService.search(request.repositoryId(), request.query(), limit, authService.accessibleSpaceIds(user), selectedSpaceId);
     }
 
     @PostMapping("/references")
     CodeReferenceResponse references(@Valid @RequestBody CodeReferenceRequest request) {
-        return referenceService.findReferences(request.repositoryId(), request.symbol(), request.limit());
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        if (request.repositoryId() != null) {
+            authService.requireSpace(user, repositorySpace(request.repositoryId()));
+        }
+        return referenceService.findReferences(request.repositoryId(), selectedSpaceId, authService.accessibleSpaceIds(user), request.symbol(), request.limit());
     }
 
     @PostMapping("/ask")
     CodeAskResponse ask(@Valid @RequestBody CodeAskRequest request) {
-        return ragService.ask(request.repositoryId(), request.question(), request.mode(), request.limit());
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        if (request.repositoryId() != null) {
+            authService.requireSpace(user, repositorySpace(request.repositoryId()));
+        }
+        return ragService.ask(request.repositoryId(), selectedSpaceId, authService.accessibleSpaceIds(user), request.question(), request.mode(), request.limit());
+    }
+
+    private UUID repositorySpace(UUID repositoryId) {
+        return indexingService.listRepositories(currentUserProvider.currentUser(), null).stream()
+                .filter(repository -> repository.id().equals(repositoryId))
+                .findFirst()
+                .map(CodeRepositorySummary::spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("Code repository was not found."));
     }
 }

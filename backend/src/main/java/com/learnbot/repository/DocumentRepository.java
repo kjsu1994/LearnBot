@@ -35,17 +35,19 @@ public class DocumentRepository {
         this.objectMapper = objectMapper;
     }
 
-    public UUID createSource(SourceType type, String name, String location) {
+    public UUID createSource(SourceType type, String name, String location, UUID spaceId, UUID createdBy) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO data_sources (id, type, name, location, status)
-                VALUES (:id, :type, :name, :location, :status)
+                INSERT INTO data_sources (id, type, name, location, status, space_id, created_by)
+                VALUES (:id, :type, :name, :location, :status, :spaceId, :createdBy)
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("type", type.name())
                 .addValue("name", name)
                 .addValue("location", location)
-                .addValue("status", SourceStatus.INDEXING.name()));
+                .addValue("status", SourceStatus.INDEXING.name())
+                .addValue("spaceId", spaceId)
+                .addValue("createdBy", createdBy));
         return id;
     }
 
@@ -100,21 +102,31 @@ public class DocumentRepository {
         return sources.stream().findFirst();
     }
 
-    public Optional<StoredSource> findSourceByDocumentId(UUID documentId) {
+    public Optional<StoredSource> findSourceByDocumentId(UUID documentId, List<UUID> spaceIds) {
         List<StoredSource> sources = jdbc.query("""
                 SELECT s.id, s.type, s.name, s.location, s.status
                 FROM data_sources s
                 JOIN documents d ON d.source_id = s.id
                 WHERE d.id = :documentId
-                """, new MapSqlParameterSource().addValue("documentId", documentId), this::mapSource);
+                  AND s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                """, new MapSqlParameterSource()
+                .addValue("documentId", documentId)
+                .addValue("spaceIds", spaceIds), this::mapSource);
         return sources.stream().findFirst();
     }
 
-    public void deleteSource(UUID sourceId) {
+    public void softDeleteSource(UUID sourceId, UUID deletedBy) {
         jdbc.update("""
-                DELETE FROM data_sources
+                UPDATE data_sources
+                SET deleted_at = now(),
+                    deleted_by = :deletedBy,
+                    updated_at = now()
                 WHERE id = :sourceId
-                """, new MapSqlParameterSource().addValue("sourceId", sourceId));
+                  AND deleted_at IS NULL
+                """, new MapSqlParameterSource()
+                .addValue("sourceId", sourceId)
+                .addValue("deletedBy", deletedBy));
     }
 
     public void deleteDocumentsForSource(UUID sourceId) {
@@ -191,23 +203,32 @@ public class DocumentRepository {
                 .addValue("message", message));
     }
 
-    public List<DocumentSummary> listDocuments() {
+    public List<DocumentSummary> listDocuments(List<UUID> spaceIds, UUID selectedSpaceId) {
         return jdbc.query("""
-                SELECT d.id, d.source_id, s.type, s.status, d.title, d.source_uri, d.content_type, d.created_at
+                SELECT d.id, d.source_id, s.space_id, s.type, s.status, d.title, d.source_uri, d.content_type, d.created_at
                 FROM documents d
                 JOIN data_sources s ON s.id = d.source_id
+                WHERE s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
                 ORDER BY d.created_at DESC
                 LIMIT 100
-                """, this::mapDocumentSummary);
+                """, new MapSqlParameterSource()
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapDocumentSummary);
     }
 
-    public Optional<DocumentSummary> findDocument(UUID documentId) {
+    public Optional<DocumentSummary> findDocument(UUID documentId, List<UUID> spaceIds) {
         List<DocumentSummary> documents = jdbc.query("""
-                SELECT d.id, d.source_id, s.type, s.status, d.title, d.source_uri, d.content_type, d.created_at
+                SELECT d.id, d.source_id, s.space_id, s.type, s.status, d.title, d.source_uri, d.content_type, d.created_at
                 FROM documents d
                 JOIN data_sources s ON s.id = d.source_id
                 WHERE d.id = :documentId
-                """, new MapSqlParameterSource().addValue("documentId", documentId), this::mapDocumentSummary);
+                  AND s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                """, new MapSqlParameterSource()
+                .addValue("documentId", documentId)
+                .addValue("spaceIds", spaceIds), this::mapDocumentSummary);
         return documents.stream().findFirst();
     }
 
@@ -260,11 +281,13 @@ public class DocumentRepository {
         ));
     }
 
-    public List<SearchResult> search(String query, List<Double> embedding, SearchFilter filter, int limit) {
+    public List<SearchResult> search(String query, List<Double> embedding, SearchFilter filter, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("query", query)
                 .addValue("embedding", vectorLiteral(embedding))
                 .addValue("limit", limit)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
                 .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
                 .addValue("contentType", clean(filter == null ? null : filter.contentType()));
 
@@ -284,18 +307,23 @@ public class DocumentRepository {
                 FROM document_chunks c
                 JOIN documents d ON d.id = c.document_id
                 JOIN data_sources s ON s.id = d.source_id
-                WHERE (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                WHERE s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
                   AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
                 ORDER BY score DESC
                 LIMIT :limit
                 """, params, this::mapSearchResult);
     }
 
-    public List<SearchResult> keywordSearch(String query, SearchFilter filter, int limit) {
+    public List<SearchResult> keywordSearch(String query, SearchFilter filter, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("query", query)
                 .addValue("likeQuery", "%" + query + "%")
                 .addValue("limit", limit)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
                 .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
                 .addValue("contentType", clean(filter == null ? null : filter.contentType()));
 
@@ -312,7 +340,10 @@ public class DocumentRepository {
                 FROM document_chunks c
                 JOIN documents d ON d.id = c.document_id
                 JOIN data_sources s ON s.id = d.source_id
-                WHERE (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                WHERE s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
                   AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
                   AND (c.search_vector @@ plainto_tsquery('simple', :query) OR c.content ILIKE :likeQuery)
                 ORDER BY score DESC
@@ -338,6 +369,7 @@ public class DocumentRepository {
         return new DocumentSummary(
                 rs.getObject("id", UUID.class),
                 rs.getObject("source_id", UUID.class),
+                rs.getObject("space_id", UUID.class),
                 rs.getString("type"),
                 rs.getString("status"),
                 rs.getString("title"),

@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.learnbot.dto.CodeReferenceResponse;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
+import com.learnbot.repository.SecurityRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -19,14 +20,27 @@ public class CodeReferenceService {
     }
 
     public CodeReferenceResponse findReferences(UUID repositoryId, String symbol, Integer limit) {
+        return findReferences(repositoryId, null, List.of(SecurityRepository.DEFAULT_SPACE_ID), symbol, limit);
+    }
+
+    public CodeReferenceResponse findReferences(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String symbol, Integer limit) {
         if (symbol == null || symbol.isBlank()) {
-            throw new IllegalArgumentException("찾을 심볼명을 입력하세요.");
+            throw new IllegalArgumentException("Symbol is required.");
         }
         String cleanSymbol = symbol.trim();
         int safeLimit = limit == null ? 20 : Math.max(1, Math.min(limit, 50));
-        List<CodeSearchResult> definitions = repository.findSymbolDefinitions(repositoryId, cleanSymbol, Math.min(safeLimit, 12));
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+        List<CodeSearchResult> definitions = repository.findSymbolDefinitions(
+                repositoryId,
+                cleanSymbol,
+                Math.min(safeLimit, 12),
+                safeSpaceIds,
+                selectedSpaceId
+        );
         List<CodeSearchResult> references = withoutDuplicates(
-                repository.findSymbolReferences(repositoryId, cleanSymbol, safeLimit),
+                repository.findSymbolReferences(repositoryId, cleanSymbol, safeLimit, safeSpaceIds, selectedSpaceId),
                 definitions
         );
         return new CodeReferenceResponse(cleanSymbol, definitions, references);

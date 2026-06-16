@@ -47,3 +47,8 @@ learnbot:
     top-k: ${LEARNBOT_CODE_TOP_K:10}
     index-threads: ${LEARNBOT_CODE_INDEX_THREADS:2}
     credential-secret: ${LEARNBOT_CODE_CREDENTIAL_SECRET:learnbot-local-dev-secret-change-me}
+  auth:
+    bootstrap-admin-email: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:admin@learnbot.local}
+    bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:learnbot1234}
+    bootstrap-admin-name: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:LearnBot Admin}
+    session-hours: ${LEARNBOT_SESSION_HOURS:12}

@@ -23,6 +23,8 @@ public class IngestionService {
     private final Chunker chunker;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
+    private final AuthService authService;
+    private final AuditService auditService;
 
     public IngestionService(
             DocumentRepository repository,
@@ -31,7 +33,9 @@ public class IngestionService {
             ObjectStorageService objectStorageService,
             Chunker chunker,
             OllamaClient ollamaClient,
-            LearnBotProperties properties
+            LearnBotProperties properties,
+            AuthService authService,
+            AuditService auditService
     ) {
         this.repository = repository;
         this.webPageExtractor = webPageExtractor;
@@ -40,41 +44,52 @@ public class IngestionService {
         this.chunker = chunker;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
+        this.authService = authService;
+        this.auditService = auditService;
     }
 
     @Transactional
-    public IngestResponse ingestWeb(String url) {
-        UUID sourceId = repository.createSource(SourceType.WEB, url, url);
+    public IngestResponse ingestWeb(AppUser user, UUID spaceId, String url) {
+        UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
+        UUID sourceId = repository.createSource(SourceType.WEB, url, url, resolvedSpaceId, user.id());
         try {
             ExtractedDocument document = webPageExtractor.extract(sourceId, url);
-            return index(sourceId, document);
+            IngestResponse response = index(sourceId, resolvedSpaceId, document);
+            auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "Web document was indexed.");
+            return response;
         } catch (RuntimeException ex) {
             repository.updateSourceStatus(sourceId, SourceStatus.FAILED, ex.getMessage());
+            auditService.log(user, "DOCUMENT_INGEST_FAILED", "SOURCE", sourceId, resolvedSpaceId, ex.getMessage());
             throw ex;
         }
     }
 
     @Transactional
-    public IngestResponse ingestFile(MultipartFile file) {
+    public IngestResponse ingestFile(AppUser user, UUID spaceId, MultipartFile file) {
+        UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String name = file.getOriginalFilename() == null ? "uploaded-file" : file.getOriginalFilename();
-        UUID sourceId = repository.createSource(SourceType.FILE, name, name);
+        UUID sourceId = repository.createSource(SourceType.FILE, name, name, resolvedSpaceId, user.id());
         try {
             StoredObject storedObject = objectStorageService.store(sourceId, file);
             repository.createSourceObject(sourceId, storedObject);
             ExtractedDocument document = fileExtractor.extract(file);
-            return index(sourceId, document);
+            IngestResponse response = index(sourceId, resolvedSpaceId, document);
+            auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "File document was indexed.");
+            return response;
         } catch (RuntimeException ex) {
             repository.updateSourceStatus(sourceId, SourceStatus.FAILED, ex.getMessage());
+            auditService.log(user, "DOCUMENT_INGEST_FAILED", "SOURCE", sourceId, resolvedSpaceId, ex.getMessage());
             throw ex;
         }
     }
 
-    public List<DocumentSummary> listDocuments() {
-        return repository.listDocuments();
+    public List<DocumentSummary> listDocuments(AppUser user, UUID spaceId) {
+        UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
+        return repository.listDocuments(authService.accessibleSpaceIds(user), selectedSpaceId);
     }
 
-    public DocumentDetail getDocument(UUID documentId) {
-        DocumentSummary summary = repository.findDocument(documentId)
+    public DocumentDetail getDocument(AppUser user, UUID documentId) {
+        DocumentSummary summary = repository.findDocument(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         var chunks = repository.listDocumentChunks(documentId);
         var storedObject = repository.findStoredObjectSummary(summary.sourceId()).orElse(null);
@@ -83,18 +98,20 @@ public class IngestionService {
     }
 
     @Transactional
-    public void deleteDocument(UUID documentId) {
-        StoredSource source = repository.findSourceByDocumentId(documentId)
+    public void deleteDocument(AppUser user, UUID documentId) {
+        DocumentSummary summary = repository.findDocument(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
-        for (StoredObject object : repository.listSourceObjects(source.id())) {
-            objectStorageService.delete(object);
-        }
-        repository.deleteSource(source.id());
+        StoredSource source = repository.findSourceByDocumentId(documentId, authService.accessibleSpaceIds(user))
+                .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
+        repository.softDeleteSource(source.id(), user.id());
+        auditService.log(user, "DOCUMENT_DELETED", "DOCUMENT", documentId, summary.spaceId(), "Document was soft deleted.");
     }
 
     @Transactional
-    public IngestResponse reindexDocument(UUID documentId) {
-        StoredSource source = repository.findSourceByDocumentId(documentId)
+    public IngestResponse reindexDocument(AppUser user, UUID documentId) {
+        DocumentSummary summary = repository.findDocument(documentId, authService.accessibleSpaceIds(user))
+                .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
+        StoredSource source = repository.findSourceByDocumentId(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         repository.updateSourceStatus(source.id(), SourceStatus.INDEXING, null);
         repository.deleteDocumentsForSource(source.id());
@@ -110,14 +127,17 @@ public class IngestionService {
                     yield fileExtractor.extract(objectStorageService.load(object));
                 }
             };
-            return index(source.id(), document);
+            IngestResponse response = index(source.id(), summary.spaceId(), document);
+            auditService.log(user, "DOCUMENT_REINDEXED", "DOCUMENT", response.documentId(), summary.spaceId(), "Document was reindexed.");
+            return response;
         } catch (RuntimeException ex) {
             repository.updateSourceStatus(source.id(), SourceStatus.FAILED, ex.getMessage());
+            auditService.log(user, "DOCUMENT_REINDEX_FAILED", "SOURCE", source.id(), summary.spaceId(), ex.getMessage());
             throw ex;
         }
     }
 
-    private IngestResponse index(UUID sourceId, ExtractedDocument document) {
+    private IngestResponse index(UUID sourceId, UUID spaceId, ExtractedDocument document) {
         List<Chunk> chunks = chunker.split(document.content());
         if (chunks.isEmpty()) {
             throw new IllegalArgumentException("No extractable text was found.");
@@ -143,6 +163,6 @@ public class IngestionService {
 
         repository.addChunks(documentId, chunks, embeddings);
         repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
-        return new IngestResponse(sourceId, documentId, chunks.size(), SourceStatus.INDEXED.name());
+        return new IngestResponse(sourceId, documentId, spaceId, chunks.size(), SourceStatus.INDEXED.name());
     }
 }

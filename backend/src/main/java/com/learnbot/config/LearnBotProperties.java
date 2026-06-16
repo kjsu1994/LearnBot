@@ -18,6 +18,7 @@ public class LearnBotProperties {
     private Rag rag = new Rag();
     private Storage storage = new Storage();
     private Code code = new Code();
+    private Auth auth = new Auth();
 
     public Crawler getCrawler() {
         return crawler;
@@ -73,6 +74,14 @@ public class LearnBotProperties {
 
     public void setCode(Code code) {
         this.code = code;
+    }
+
+    public Auth getAuth() {
+        return auth;
+    }
+
+    public void setAuth(Auth auth) {
+        this.auth = auth;
     }
 
     public static class Crawler {
@@ -347,6 +356,52 @@ public class LearnBotProperties {
 
         public void setCredentialSecret(String credentialSecret) {
             this.credentialSecret = credentialSecret;
+        }
+    }
+
+    public static class Auth {
+        @NotBlank
+        private String bootstrapAdminEmail = "admin@learnbot.local";
+
+        @NotBlank
+        private String bootstrapAdminPassword = "learnbot1234";
+
+        @NotBlank
+        private String bootstrapAdminName = "LearnBot Admin";
+
+        @Min(1)
+        private int sessionHours = 12;
+
+        public String getBootstrapAdminEmail() {
+            return bootstrapAdminEmail;
+        }
+
+        public void setBootstrapAdminEmail(String bootstrapAdminEmail) {
+            this.bootstrapAdminEmail = bootstrapAdminEmail;
+        }
+
+        public String getBootstrapAdminPassword() {
+            return bootstrapAdminPassword;
+        }
+
+        public void setBootstrapAdminPassword(String bootstrapAdminPassword) {
+            this.bootstrapAdminPassword = bootstrapAdminPassword;
+        }
+
+        public String getBootstrapAdminName() {
+            return bootstrapAdminName;
+        }
+
+        public void setBootstrapAdminName(String bootstrapAdminName) {
+            this.bootstrapAdminName = bootstrapAdminName;
+        }
+
+        public int getSessionHours() {
+            return sessionHours;
+        }
+
+        public void setSessionHours(int sessionHours) {
+            this.sessionHours = sessionHours;
         }
     }
 }

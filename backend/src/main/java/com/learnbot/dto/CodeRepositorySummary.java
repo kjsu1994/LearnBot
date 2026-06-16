@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record CodeRepositorySummary(
         UUID id,
+        UUID spaceId,
         String name,
         String gitUrl,
         String branch,
