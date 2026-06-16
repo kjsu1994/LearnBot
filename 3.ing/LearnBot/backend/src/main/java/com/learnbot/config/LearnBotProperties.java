@@ -295,6 +295,9 @@ public class LearnBotProperties {
         @Min(1)
         private int topK = 10;
 
+        @Min(1)
+        private int indexThreads = 2;
+
         public String getWorkspacePath() {
             return workspacePath;
         }
@@ -325,6 +328,14 @@ public class LearnBotProperties {
 
         public void setTopK(int topK) {
             this.topK = topK;
+        }
+
+        public int getIndexThreads() {
+            return indexThreads;
+        }
+
+        public void setIndexThreads(int indexThreads) {
+            this.indexThreads = indexThreads;
         }
     }
 }

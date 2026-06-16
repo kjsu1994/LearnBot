@@ -3,6 +3,8 @@ package com.learnbot.repository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.dto.CodeChunkSummary;
+import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.IndexingJobSummary;
@@ -91,6 +93,26 @@ public class CodeRepository {
                 .addValue("errorMessage", errorMessage));
     }
 
+    public void resetInterruptedJobs() {
+        jdbc.update("""
+                UPDATE indexing_jobs
+                SET status = 'FAILED',
+                    error_message = '서버 재시작으로 인덱싱 작업이 중단되었습니다. 다시 인덱싱하세요.',
+                    finished_at = now()
+                WHERE status IN ('RUNNING', 'CANCELLING')
+                """, new MapSqlParameterSource());
+        jdbc.update("""
+                UPDATE code_repositories
+                SET status = CASE
+                        WHEN last_indexed_commit IS NULL THEN 'PENDING'
+                        ELSE 'INDEXED'
+                    END,
+                    error_message = '서버 재시작으로 이전 인덱싱 작업이 중단되었습니다.',
+                    updated_at = now()
+                WHERE status = 'INDEXING'
+                """, new MapSqlParameterSource());
+    }
+
     public void markRepositoryIndexed(UUID repositoryId, String commitHash) {
         jdbc.update("""
                 UPDATE code_repositories
@@ -158,6 +180,41 @@ public class CodeRepository {
                 """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), this::mapJobSummary);
     }
 
+    public Optional<IndexingJobSummary> findJob(UUID jobId) {
+        List<IndexingJobSummary> jobs = jdbc.query("""
+                SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
+                       failed_files, commit_hash, error_message, started_at, finished_at, created_at
+                FROM indexing_jobs
+                WHERE id = :jobId
+                """, new MapSqlParameterSource().addValue("jobId", jobId), this::mapJobSummary);
+        return jobs.stream().findFirst();
+    }
+
+    public Optional<IndexingJobSummary> findRunningJob(UUID repositoryId) {
+        List<IndexingJobSummary> jobs = jdbc.query("""
+                SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
+                       failed_files, commit_hash, error_message, started_at, finished_at, created_at
+                FROM indexing_jobs
+                WHERE repository_id = :repositoryId
+                  AND status IN ('RUNNING', 'CANCELLING')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), this::mapJobSummary);
+        return jobs.stream().findFirst();
+    }
+
+    public void updateJobStatus(UUID jobId, String status, String message) {
+        jdbc.update("""
+                UPDATE indexing_jobs
+                SET status = :status,
+                    error_message = :message
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("status", status)
+                .addValue("message", message));
+    }
+
     public UUID createFile(UUID repositoryId, UUID indexVersion, String filePath, String language, String contentHash) {
         UUID fileId = UUID.randomUUID();
         jdbc.update("""
@@ -171,6 +228,49 @@ public class CodeRepository {
                 .addValue("language", language)
                 .addValue("contentHash", contentHash));
         return fileId;
+    }
+
+    public List<CodeFileSummary> listActiveFiles(UUID repositoryId, String query, int limit) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("query", query == null || query.isBlank() ? null : "%" + query.trim() + "%")
+                .addValue("limit", Math.max(1, Math.min(limit, 200)));
+
+        return jdbc.query("""
+                SELECT f.id, f.repository_id, f.file_path, f.language, f.content_hash, f.updated_at,
+                       COUNT(c.id) AS chunk_count
+                FROM code_files f
+                LEFT JOIN code_chunks c ON c.file_id = f.id AND c.active
+                WHERE f.active
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR f.repository_id = CAST(:repositoryId AS uuid))
+                  AND (CAST(:query AS varchar) IS NULL OR f.file_path ILIKE CAST(:query AS varchar))
+                GROUP BY f.id
+                ORDER BY f.file_path
+                LIMIT :limit
+                """, params, this::mapFileSummary);
+    }
+
+    public Optional<CodeFileRecord> findActiveFile(UUID repositoryId, UUID fileId) {
+        List<CodeFileRecord> files = jdbc.query("""
+                SELECT id, repository_id, index_version, file_path, language, content_hash
+                FROM code_files
+                WHERE id = :fileId
+                  AND active
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR repository_id = CAST(:repositoryId AS uuid))
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("fileId", fileId), this::mapFileRecord);
+        return files.stream().findFirst();
+    }
+
+    public List<CodeChunkSummary> listActiveChunksForFile(UUID fileId) {
+        return jdbc.query("""
+                SELECT id, chunk_index, chunk_type, symbol_name, class_name, method_name, control_name,
+                       event_name, line_start, line_end, content, metadata
+                FROM code_chunks
+                WHERE file_id = :fileId AND active
+                ORDER BY chunk_index ASC
+                """, new MapSqlParameterSource().addValue("fileId", fileId), this::mapChunkSummary);
     }
 
     public void addChunks(UUID repositoryId, UUID fileId, UUID indexVersion, String filePath, List<ParsedCodeChunk> chunks, List<List<Double>> embeddings) {
@@ -402,6 +502,51 @@ public class CodeRepository {
                 rs.getInt("active_chunk_count"),
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class)
+        );
+    }
+
+    private CodeFileRecord mapFileRecord(ResultSet rs, int rowNum) throws SQLException {
+        return new CodeFileRecord(
+                rs.getObject("id", UUID.class),
+                rs.getObject("repository_id", UUID.class),
+                rs.getObject("index_version", UUID.class),
+                rs.getString("file_path"),
+                rs.getString("language"),
+                rs.getString("content_hash")
+        );
+    }
+
+    private CodeFileSummary mapFileSummary(ResultSet rs, int rowNum) throws SQLException {
+        return new CodeFileSummary(
+                rs.getObject("id", UUID.class),
+                rs.getObject("repository_id", UUID.class),
+                rs.getString("file_path"),
+                rs.getString("language"),
+                rs.getString("content_hash"),
+                rs.getInt("chunk_count"),
+                rs.getObject("updated_at", OffsetDateTime.class)
+        );
+    }
+
+    private CodeChunkSummary mapChunkSummary(ResultSet rs, int rowNum) throws SQLException {
+        String content = rs.getString("content");
+        String preview = content == null ? "" : content.replaceAll("\\s+", " ").trim();
+        if (preview.length() > 260) {
+            preview = preview.substring(0, 260) + "...";
+        }
+        return new CodeChunkSummary(
+                rs.getObject("id", UUID.class),
+                rs.getInt("chunk_index"),
+                rs.getString("chunk_type"),
+                rs.getString("symbol_name"),
+                rs.getString("class_name"),
+                rs.getString("method_name"),
+                rs.getString("control_name"),
+                rs.getString("event_name"),
+                rs.getInt("line_start"),
+                rs.getInt("line_end"),
+                preview,
+                fromJson(rs.getString("metadata"))
         );
     }
 

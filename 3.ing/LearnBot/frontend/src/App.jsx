@@ -35,6 +35,10 @@ const statusLabels = {
   PENDING: '대기 중',
   FAILED: '실패',
   PROCESSING: '처리 중',
+  RUNNING: '실행 중',
+  CANCELLING: '취소 중',
+  CANCELLED: '취소됨',
+  SUCCEEDED: '완료',
 };
 
 const answerModes = [
@@ -57,6 +61,10 @@ function App() {
   const [documents, setDocuments] = useState([]);
   const [repositories, setRepositories] = useState([]);
   const [jobs, setJobs] = useState({});
+  const [codeFiles, setCodeFiles] = useState([]);
+  const [fileQuery, setFileQuery] = useState('');
+  const [selectedCodeFile, setSelectedCodeFile] = useState(null);
+  const [highlightRange, setHighlightRange] = useState(null);
   const [webUrl, setWebUrl] = useState('');
   const [file, setFile] = useState(null);
   const [query, setQuery] = useState('');
@@ -86,6 +94,33 @@ function App() {
     refreshDocuments();
     refreshRepositories();
   }, []);
+
+  useEffect(() => {
+    if (!selectedRepositoryId) {
+      setCodeFiles([]);
+      setSelectedCodeFile(null);
+      return;
+    }
+    refreshJobs(selectedRepositoryId);
+    refreshCodeFiles(selectedRepositoryId, fileQuery);
+  }, [selectedRepositoryId]);
+
+  useEffect(() => {
+    const indexingRepos = repositories.filter((repo) => repo.status === 'INDEXING');
+    if (!indexingRepos.length) return undefined;
+    const timer = window.setInterval(() => {
+      refreshRepositories();
+      indexingRepos.forEach((repo) => refreshJobs(repo.id));
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [repositories]);
+
+  useEffect(() => {
+    const selected = repositories.find((repo) => repo.id === selectedRepositoryId);
+    if (selected?.status === 'INDEXED') {
+      refreshCodeFiles(selectedRepositoryId, fileQuery);
+    }
+  }, [repositories, selectedRepositoryId]);
 
   const indexedCount = useMemo(
     () => documents.filter((doc) => doc.sourceStatus === 'INDEXED').length,
@@ -231,6 +266,42 @@ function App() {
       const data = await response.json();
       setJobs((current) => ({ ...current, [repositoryId]: data }));
     }
+  }
+
+  async function refreshCodeFiles(repositoryId = selectedRepositoryId, queryText = fileQuery) {
+    if (!repositoryId) return;
+    const params = new URLSearchParams();
+    if (queryText) params.set('query', queryText);
+    params.set('limit', '80');
+    const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/files?${params.toString()}`);
+    if (response.ok) {
+      setCodeFiles(await response.json());
+    }
+  }
+
+  async function searchCodeFiles(event) {
+    event.preventDefault();
+    await refreshCodeFiles(selectedRepositoryId, fileQuery);
+  }
+
+  async function cancelIndex(repositoryId, jobId) {
+    await run(`repo-cancel-${jobId}`, async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/jobs/${jobId}/cancel`, {
+        method: 'POST',
+      });
+      await requireOk(response);
+      await refreshRepositories();
+      await refreshJobs(repositoryId);
+    });
+  }
+
+  async function openCodeFile(repositoryId, fileId, range = null) {
+    await run(`code-file-${fileId}`, async () => {
+      const response = await fetch(`${apiBase}/api/code/repositories/${repositoryId}/files/${fileId}`);
+      await requireOk(response);
+      setSelectedCodeFile(await response.json());
+      setHighlightRange(range);
+    });
   }
 
   async function askCode(event) {
@@ -393,6 +464,11 @@ function App() {
             selectedRepositoryId={selectedRepositoryId}
             setSelectedRepositoryId={setSelectedRepositoryId}
             jobs={jobs}
+            codeFiles={codeFiles}
+            fileQuery={fileQuery}
+            setFileQuery={setFileQuery}
+            selectedCodeFile={selectedCodeFile}
+            highlightRange={highlightRange}
             codeQuestion={codeQuestion}
             setCodeQuestion={setCodeQuestion}
             codeMode={codeMode}
@@ -400,7 +476,11 @@ function App() {
             codeAnswer={codeAnswer}
             registerRepository={registerRepository}
             indexRepository={indexRepository}
+            cancelIndex={cancelIndex}
             refreshJobs={refreshJobs}
+            refreshCodeFiles={refreshCodeFiles}
+            searchCodeFiles={searchCodeFiles}
+            openCodeFile={openCodeFile}
             askCode={askCode}
             loading={loading}
           />
@@ -456,6 +536,11 @@ function CodeWorkspace({
   selectedRepositoryId,
   setSelectedRepositoryId,
   jobs,
+  codeFiles,
+  fileQuery,
+  setFileQuery,
+  selectedCodeFile,
+  highlightRange,
   codeQuestion,
   setCodeQuestion,
   codeMode,
@@ -463,7 +548,11 @@ function CodeWorkspace({
   codeAnswer,
   registerRepository,
   indexRepository,
+  cancelIndex,
   refreshJobs,
+  refreshCodeFiles,
+  searchCodeFiles,
+  openCodeFile,
   askCode,
   loading,
 }) {
@@ -566,57 +655,113 @@ function CodeWorkspace({
             </div>
           </div>
           <div className="document-list">
-            {repositories.map((repo) => (
-              <article
-                className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'}
-                key={repo.id}
-                onClick={() => setSelectedRepositoryId(repo.id)}
-              >
-                <div className="document-main">
-                  <strong>{repo.name}</strong>
-                  <small>{repo.gitUrl}</small>
-                </div>
-                <div className="document-meta">
-                  <StatusBadge status={repo.status} />
-                  <small>{repo.branch} · {repo.activeFileCount} files · {repo.activeChunkCount} chunks</small>
-                </div>
-                <div className="document-actions">
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="작업 이력"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      refreshJobs(repo.id);
-                    }}
-                  >
-                    <Info size={15} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="인덱싱"
-                    disabled={loading(`repo-index-${repo.id}`)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      indexRepository(repo.id);
-                    }}
-                  >
-                    {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-                  </button>
-                </div>
-                {!!jobs[repo.id]?.length && (
-                  <div className="job-strip">
-                    {jobs[repo.id].slice(0, 2).map((job) => (
-                      <span key={job.id}>
-                        {job.status} · {job.processedFiles}/{job.totalFiles} files · {job.totalChunks} chunks
-                      </span>
-                    ))}
+            {repositories.map((repo) => {
+              const latestJob = jobs[repo.id]?.[0];
+              const runningJob = jobs[repo.id]?.find((job) => job.status === 'RUNNING' || job.status === 'CANCELLING');
+              return (
+                <article
+                  className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'}
+                  key={repo.id}
+                  onClick={() => setSelectedRepositoryId(repo.id)}
+                >
+                  <div className="document-main">
+                    <strong>{repo.name}</strong>
+                    <small>{repo.gitUrl}</small>
                   </div>
-                )}
-              </article>
-            ))}
+                  <div className="document-meta">
+                    <StatusBadge status={repo.status} />
+                    <small>{repo.branch} · {repo.activeFileCount} files · {repo.activeChunkCount} chunks</small>
+                  </div>
+                  <div className="document-actions">
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="작업 이력"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        refreshJobs(repo.id);
+                      }}
+                    >
+                      <Info size={15} />
+                    </button>
+                    {runningJob ? (
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        title="색인 취소"
+                        disabled={runningJob.status === 'CANCELLING' || loading(`repo-cancel-${runningJob.id}`)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          cancelIndex(repo.id, runningJob.id);
+                        }}
+                      >
+                        {loading(`repo-cancel-${runningJob.id}`) ? <Loader2 className="spin" size={15} /> : <X size={15} />}
+                      </button>
+                    ) : (
+                      <button
+                        className="icon-button"
+                        type="button"
+                        title="인덱싱"
+                        disabled={loading(`repo-index-${repo.id}`)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          indexRepository(repo.id);
+                        }}
+                      >
+                        {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                      </button>
+                    )}
+                  </div>
+                  {latestJob && (
+                    <div className="job-strip">
+                      <span>
+                        {latestJob.status} · {latestJob.processedFiles}/{latestJob.totalFiles || '-'} files · {latestJob.totalChunks} chunks
+                      </span>
+                      <div className="progress-track" aria-label="인덱싱 진행률">
+                        <span style={{ width: `${jobPercent(latestJob)}%` }} />
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
             {repositories.length === 0 && <p className="empty">Git URL을 등록한 뒤 인덱싱 버튼을 누르세요.</p>}
+          </div>
+        </section>
+
+        <section className="panel file-browser-panel">
+          <div className="panel-title">
+            <FileCode2 size={18} />
+            <div>
+              <h2>코드 파일</h2>
+              <p>{selectedRepository ? `${codeFiles.length}개 파일 표시 중` : '저장소를 선택하면 파일 목록을 볼 수 있습니다.'}</p>
+            </div>
+          </div>
+          <form className="inline-control" onSubmit={searchCodeFiles}>
+            <input
+              value={fileQuery}
+              onChange={(event) => setFileQuery(event.target.value)}
+              placeholder="MainWindow.xaml, Login, Controller..."
+              disabled={!selectedRepositoryId}
+            />
+            <button disabled={!selectedRepositoryId}>
+              <Search size={16} />
+              찾기
+            </button>
+          </form>
+          <div className="file-list">
+            {codeFiles.slice(0, 80).map((fileItem) => (
+              <button
+                className="file-list-row"
+                key={fileItem.id}
+                type="button"
+                onClick={() => openCodeFile(fileItem.repositoryId, fileItem.id)}
+              >
+                <span>{fileItem.filePath}</span>
+                <small>{fileItem.language} · {fileItem.chunkCount} chunks</small>
+              </button>
+            ))}
+            {selectedRepositoryId && !codeFiles.length && <p className="empty">색인된 파일이 없거나 검색 결과가 없습니다.</p>}
           </div>
         </section>
       </div>
@@ -684,10 +829,12 @@ function CodeWorkspace({
                 <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
               </div>
               <p>{codeAnswer.answer}</p>
-              <CodeEvidenceList evidence={codeAnswer.evidence} />
+              <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
           )}
         </form>
+
+        <CodeFileViewer detail={selectedCodeFile} highlightRange={highlightRange} loading={selectedCodeFile && loading(`code-file-${selectedCodeFile.id}`)} />
       </div>
     </section>
   );
@@ -983,7 +1130,7 @@ function EvidenceList({ evidence }) {
   );
 }
 
-function CodeEvidenceList({ evidence }) {
+function CodeEvidenceList({ evidence, onOpenEvidence }) {
   if (!evidence?.length) return null;
   return (
     <div className="evidence-list">
@@ -1001,9 +1148,67 @@ function CodeEvidenceList({ evidence }) {
             {item.controlName ? ` · ${item.controlName}` : ''}
           </small>
           <p>{item.preview}</p>
+          <div className="action-row">
+            <button
+              className="ghost-button compact-action"
+              type="button"
+              onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}
+            >
+              <FileCode2 size={14} />
+              파일 열기
+            </button>
+          </div>
         </article>
       ))}
     </div>
+  );
+}
+
+function CodeFileViewer({ detail, highlightRange }) {
+  if (!detail) {
+    return (
+      <section className="panel detail-panel muted-panel">
+        <div className="panel-title">
+          <FileCode2 size={18} />
+          <div>
+            <h2>코드 파일 보기</h2>
+            <p>파일 목록이나 답변 근거에서 파일을 열면 원본 라인을 확인할 수 있습니다.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const lines = detail.content.split(/\r?\n/);
+  return (
+    <section className="panel code-viewer-panel">
+      <div className="panel-title">
+        <FileCode2 size={18} />
+        <div>
+          <h2>{detail.filePath}</h2>
+          <p>{detail.repositoryName} · {detail.language} · {lines.length} lines</p>
+        </div>
+      </div>
+      <div className="code-chunk-summary">
+        {detail.chunks.slice(0, 8).map((chunk) => (
+          <span key={chunk.id}>
+            {chunk.chunkType} · {chunk.lineStart}-{chunk.lineEnd}
+          </span>
+        ))}
+      </div>
+      <pre className="code-viewer">
+        {lines.map((line, index) => {
+          const lineNumber = index + 1;
+          const highlighted = highlightRange && lineNumber >= highlightRange.start && lineNumber <= highlightRange.end;
+          return (
+            <code className={highlighted ? 'highlighted-line' : ''} key={lineNumber}>
+              <span>{String(lineNumber).padStart(4, ' ')}</span>
+              {line || ' '}
+            </code>
+          );
+        })}
+      </pre>
+    </section>
   );
 }
 
@@ -1085,6 +1290,15 @@ function formatScore(score) {
   return numericScore.toFixed(3);
 }
 
+function jobPercent(job) {
+  const total = Number(job.totalFiles || 0);
+  const processed = Number(job.processedFiles || 0);
+  if (!total) {
+    return job.status === 'SUCCEEDED' ? 100 : 4;
+  }
+  return Math.max(4, Math.min(100, Math.round((processed / total) * 100)));
+}
+
 function formatBytes(value) {
   const bytes = Number(value);
   if (Number.isNaN(bytes)) return '-';
@@ -1106,7 +1320,9 @@ function formatDate(value) {
 function getProgressMessage(busy) {
   if (!busy) return '';
   if (busy === 'repo-register') return 'Git 저장소를 등록하는 중입니다.';
-  if (busy.startsWith('repo-index-')) return 'Git 저장소를 clone/pull하고 코드 chunk를 색인하는 중입니다.';
+  if (busy.startsWith('repo-index-')) return '백그라운드 인덱싱 작업을 시작하는 중입니다.';
+  if (busy.startsWith('repo-cancel-')) return '인덱싱 취소를 요청하는 중입니다.';
+  if (busy.startsWith('code-file-')) return '코드 파일을 불러오는 중입니다.';
   if (busy === 'code-ask') return '코드를 검색하고 로컬 모델 답변을 기다리는 중입니다.';
   if (busy === 'web') return '웹 페이지를 가져와 텍스트를 추출하고 색인하는 중입니다.';
   if (busy === 'file') return '파일을 업로드하고 원본 저장 및 색인을 진행하는 중입니다.';

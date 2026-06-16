@@ -42,6 +42,8 @@ data/ollama/
 data/minio/
 uploads/
 storage/
+learnbot-db*.sql
+*.dump
 
 # Temporary files
 .cache/
