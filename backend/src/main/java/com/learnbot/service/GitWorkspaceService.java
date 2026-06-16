@@ -87,14 +87,29 @@ public class GitWorkspaceService {
 
     private String toFriendlyGitMessage(String gitUrl, Exception ex) {
         String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+        String lowerMessage = message.toLowerCase();
         if (isSshUrl(gitUrl)) {
             return "SSH Git 주소에 접근하지 못했습니다. 컨테이너에 SSH 키가 없거나 known_hosts 설정이 없을 수 있습니다. "
                     + "가능하면 같은 저장소의 HTTPS URL과 TOKEN 인증으로 다시 등록하세요. 원인: " + message;
         }
-        if (message.toLowerCase().contains("auth")) {
-            return "Git 인증에 실패했습니다. private 저장소라면 username/token을 입력해서 다시 인덱싱하세요. 원인: " + message;
+        if (isAuthenticationFailure(lowerMessage)) {
+            return "Git 인증에 실패했습니다. private 저장소라면 GitHub 계정이 해당 저장소에 접근 가능한지, "
+                    + "토큰이 만료/폐기되지 않았는지, 토큰에 private repo 읽기 권한이 있는지 확인하세요. 원인: " + message;
+        }
+        if (lowerMessage.contains("not found") || lowerMessage.contains("repository not found")) {
+            return "Git 저장소를 찾을 수 없거나 접근 권한이 없습니다. URL이 맞는지, private 저장소라면 토큰에 해당 저장소 접근 권한이 있는지 확인하세요. 원인: "
+                    + message;
         }
         return "Git 저장소 동기화에 실패했습니다. URL, branch, 네트워크 접근 권한을 확인하세요. 원인: " + message;
+    }
+
+    private boolean isAuthenticationFailure(String lowerMessage) {
+        return lowerMessage.contains("auth")
+                || lowerMessage.contains("credential")
+                || lowerMessage.contains("not authorized")
+                || lowerMessage.contains("not permitted")
+                || lowerMessage.contains("401")
+                || lowerMessage.contains("403");
     }
 
     private boolean isSshUrl(String gitUrl) {

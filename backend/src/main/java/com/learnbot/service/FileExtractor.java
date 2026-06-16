@@ -14,6 +14,9 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.xwpf.usermodel.XWPFTableCell;
+import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -142,15 +145,29 @@ public class FileExtractor {
 
     private ExtractedDocument pdf(InputStream inputStream, String fileName) throws Exception {
         byte[] bytes = inputStream.readAllBytes();
-        String content;
+        StringBuilder content = new StringBuilder();
         try (PDDocument document = Loader.loadPDF(bytes)) {
-            content = new PDFTextStripper().getText(document);
+            PDFTextStripper stripper = new PDFTextStripper();
+            int pageCount = document.getNumberOfPages();
+            for (int page = 1; page <= pageCount; page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                String pageText = stripper.getText(document);
+                if (pageText != null && !pageText.isBlank()) {
+                    content.append("Page ").append(page).append(":\n")
+                            .append(pageText.trim())
+                            .append("\n\n");
+                }
+            }
+            if (content.isEmpty()) {
+                content.append(new PDFTextStripper().getText(document));
+            }
         }
         return new ExtractedDocument(
                 fileName,
                 "file://" + fileName,
                 "application/pdf",
-                content,
+                content.toString(),
                 Map.of("fileName", fileName, "pageSource", "pdfbox")
         );
     }
@@ -162,6 +179,25 @@ public class FileExtractor {
                 String text = paragraph.getText();
                 if (text != null && !text.isBlank()) {
                     content.append(text).append('\n');
+                }
+            }
+            int tableIndex = 1;
+            for (XWPFTable table : document.getTables()) {
+                content.append("Table ").append(tableIndex++).append(":\n");
+                int rowIndex = 1;
+                for (XWPFTableRow row : table.getRows()) {
+                    content.append("Row ").append(rowIndex++).append(": ");
+                    boolean first = true;
+                    int columnIndex = 1;
+                    for (XWPFTableCell cell : row.getTableCells()) {
+                        if (!first) {
+                            content.append(" | ");
+                        }
+                        first = false;
+                        content.append("C").append(columnIndex++).append("=")
+                                .append(cell.getText() == null ? "" : cell.getText().replaceAll("\\s+", " ").trim());
+                    }
+                    content.append('\n');
                 }
             }
         }

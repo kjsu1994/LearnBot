@@ -41,7 +41,7 @@ public class AuthService {
             return;
         }
         AppUser admin = securityRepository.createUser(
-                cleanEmail(properties.getAuth().getBootstrapAdminEmail()),
+                cleanLoginId(properties.getAuth().getBootstrapAdminEmail()),
                 passwordHasher.hash(properties.getAuth().getBootstrapAdminPassword()),
                 properties.getAuth().getBootstrapAdminName(),
                 "ADMIN"
@@ -54,20 +54,20 @@ public class AuthService {
                 admin.id().toString(),
                 SecurityRepository.DEFAULT_SPACE_ID,
                 "Initial LearnBot admin account was created.",
-                java.util.Map.of("email", admin.email())
+                java.util.Map.of("loginId", admin.email())
         );
     }
 
     @Transactional
-    public AuthResponse login(String email, String password) {
-        String cleanEmail = cleanEmail(email);
-        String passwordHash = securityRepository.findPasswordHashByEmail(cleanEmail)
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password."));
+    public AuthResponse login(String loginId, String password) {
+        String cleanLoginId = cleanLoginId(loginId);
+        String passwordHash = securityRepository.findPasswordHashByEmail(cleanLoginId)
+                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
         if (!passwordHasher.matches(password, passwordHash)) {
-            throw new UnauthorizedException("Invalid email or password.");
+            throw new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다.");
         }
-        AppUser user = securityRepository.findUserByEmail(cleanEmail)
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password."));
+        AppUser user = securityRepository.findUserByEmail(cleanLoginId)
+                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
         String token = newToken();
         OffsetDateTime expiresAt = OffsetDateTime.now().plusHours(properties.getAuth().getSessionHours());
         securityRepository.createSession(UUID.randomUUID(), user.id(), tokenHash(token), expiresAt);
@@ -95,18 +95,19 @@ public class AuthService {
         securityRepository.createAuditLog(user.id(), "LOGOUT", "USER", user.id().toString(), null, "User logged out.", java.util.Map.of());
     }
 
-    public AppUser inviteUser(AppUser actor, String email, String displayName, String initialPassword, String role, UUID spaceId, String spaceRole) {
+    public AppUser inviteUser(AppUser actor, String loginId, String displayName, String initialPassword, String role, UUID spaceId, String spaceRole) {
         requireAdmin(actor);
         UUID resolvedSpaceId = resolveSpace(actor, spaceId);
         String cleanRole = normalizeUserRole(role);
+        String cleanLoginId = cleanLoginId(loginId);
         AppUser user = securityRepository.createUser(
-                cleanEmail(email),
+                cleanLoginId,
                 passwordHasher.hash(initialPassword),
-                displayName == null || displayName.isBlank() ? cleanEmail(email) : displayName.trim(),
+                displayName == null || displayName.isBlank() ? cleanLoginId : displayName.trim(),
                 cleanRole
         );
         securityRepository.addSpaceMember(resolvedSpaceId, user.id(), normalizeSpaceRole(spaceRole));
-        securityRepository.createAuditLog(actor.id(), "USER_INVITED", "USER", user.id().toString(), resolvedSpaceId, "User was invited.", java.util.Map.of("email", user.email()));
+        securityRepository.createAuditLog(actor.id(), "USER_INVITED", "USER", user.id().toString(), resolvedSpaceId, "User was invited.", java.util.Map.of("loginId", user.email()));
         return user;
     }
 
@@ -116,6 +117,45 @@ public class AuthService {
         securityRepository.addSpaceMember(spaceId, actor.id(), "OWNER");
         securityRepository.createAuditLog(actor.id(), "SPACE_CREATED", "SPACE", spaceId.toString(), spaceId, "Space was created.", java.util.Map.of("name", name.trim()));
         return spaceId;
+    }
+
+    public void deleteUser(AppUser actor, UUID userId) {
+        requireAdmin(actor);
+        if (actor.id().equals(userId)) {
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정은 삭제할 수 없습니다.");
+        }
+        AppUser target = securityRepository.findUserById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        if ("DELETED".equals(target.status())) {
+            return;
+        }
+        securityRepository.deactivateUser(userId);
+        securityRepository.revokeSessionsForUser(userId);
+        securityRepository.createAuditLog(actor.id(), "USER_DELETED", "USER", userId.toString(), null, "User was deleted.", java.util.Map.of("loginId", target.email()));
+    }
+
+    public void updateSpace(AppUser actor, UUID spaceId, String name, String description) {
+        requireAdmin(actor);
+        securityRepository.findSpace(spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+        String cleanName = name == null || name.isBlank() ? null : name.trim();
+        if (cleanName == null) {
+            throw new IllegalArgumentException("공간 이름은 필수입니다.");
+        }
+        String cleanDescription = description == null ? "" : description.trim();
+        securityRepository.updateSpace(spaceId, cleanName, cleanDescription);
+        securityRepository.createAuditLog(actor.id(), "SPACE_UPDATED", "SPACE", spaceId.toString(), spaceId, "Space was updated.", java.util.Map.of("name", cleanName));
+    }
+
+    public void deleteSpace(AppUser actor, UUID spaceId) {
+        requireAdmin(actor);
+        if (SecurityRepository.DEFAULT_SPACE_ID.equals(spaceId)) {
+            throw new IllegalArgumentException("기본 공간은 삭제할 수 없습니다.");
+        }
+        SpaceSummary target = securityRepository.findSpace(spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+        securityRepository.deleteSpace(spaceId);
+        securityRepository.createAuditLog(actor.id(), "SPACE_DELETED", "SPACE", spaceId.toString(), spaceId, "Space was deleted.", java.util.Map.of("name", target.name()));
     }
 
     public void addSpaceMember(AppUser actor, UUID spaceId, UUID userId, String role) {
@@ -172,11 +212,11 @@ public class AuthService {
         return clean.equals("OWNER") ? "OWNER" : "MEMBER";
     }
 
-    private String cleanEmail(String email) {
-        if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException("Email is required.");
+    private String cleanLoginId(String loginId) {
+        if (loginId == null || loginId.isBlank()) {
+            throw new IllegalArgumentException("ID is required.");
         }
-        return email.trim().toLowerCase(Locale.ROOT);
+        return loginId.trim().toLowerCase(Locale.ROOT);
     }
 
     private String newToken() {
@@ -194,4 +234,3 @@ public class AuthService {
         }
     }
 }
-

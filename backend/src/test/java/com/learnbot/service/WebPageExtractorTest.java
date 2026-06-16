@@ -20,6 +20,7 @@ class WebPageExtractorTest {
         DocumentRepository repository = mock(DocumentRepository.class);
         AdminSettingsService adminSettingsService = mock(AdminSettingsService.class);
         when(adminSettingsService.isRespectRobotsTxt()).thenReturn(true);
+        when(adminSettingsService.allowedDomains()).thenReturn(java.util.List.of("example.com"));
         WebPageExtractor extractor = new WebPageExtractor(properties, adminSettingsService, repository);
 
         assertThatThrownBy(() -> extractor.extract("https://not-allowed.test/page"))

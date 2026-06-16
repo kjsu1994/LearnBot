@@ -82,6 +82,7 @@ public class SecurityRepository {
         return jdbc.query("""
                 SELECT id, email, display_name, role, status
                 FROM app_users
+                WHERE status <> 'DELETED'
                 ORDER BY created_at DESC
                 """, new MapSqlParameterSource(), (rs, rowNum) -> new UserSummary(
                 rs.getObject("id", UUID.class),
@@ -90,6 +91,26 @@ public class SecurityRepository {
                 rs.getString("role"),
                 rs.getString("status")
         ));
+    }
+
+    public void deactivateUser(UUID userId) {
+        jdbc.update("""
+                UPDATE app_users
+                SET status = 'DELETED',
+                    deleted_at = now(),
+                    updated_at = now()
+                WHERE id = :userId
+                  AND status <> 'DELETED'
+                """, new MapSqlParameterSource().addValue("userId", userId));
+    }
+
+    public void revokeSessionsForUser(UUID userId) {
+        jdbc.update("""
+                UPDATE auth_sessions
+                SET revoked_at = now()
+                WHERE user_id = :userId
+                  AND revoked_at IS NULL
+                """, new MapSqlParameterSource().addValue("userId", userId));
     }
 
     public void updateLastLogin(UUID userId) {
@@ -144,6 +165,75 @@ public class SecurityRepository {
                 .addValue("description", description)
                 .addValue("createdBy", createdBy));
         return id;
+    }
+
+    public Optional<SpaceSummary> findSpace(UUID spaceId) {
+        List<SpaceSummary> spaces = jdbc.query("""
+                SELECT s.id, s.name, s.description, 'ADMIN' AS role, s.created_at
+                FROM spaces s
+                WHERE s.id = :spaceId
+                  AND s.deleted_at IS NULL
+                """, new MapSqlParameterSource().addValue("spaceId", spaceId), this::mapSpace);
+        return spaces.stream().findFirst();
+    }
+
+    public void updateSpace(UUID spaceId, String name, String description) {
+        jdbc.update("""
+                UPDATE spaces
+                SET name = :name,
+                    description = :description,
+                    updated_at = now()
+                WHERE id = :spaceId
+                  AND deleted_at IS NULL
+                """, new MapSqlParameterSource()
+                .addValue("spaceId", spaceId)
+                .addValue("name", name)
+                .addValue("description", description));
+    }
+
+    public void deleteSpace(UUID spaceId) {
+        jdbc.update("""
+                UPDATE spaces
+                SET deleted_at = now(),
+                    updated_at = now()
+                WHERE id = :spaceId
+                  AND deleted_at IS NULL
+                """, new MapSqlParameterSource().addValue("spaceId", spaceId));
+    }
+
+    public int purgeDeletedUsersOlderThan(OffsetDateTime cutoff) {
+        return jdbc.update("""
+                DELETE FROM app_users
+                WHERE status = 'DELETED'
+                  AND deleted_at IS NOT NULL
+                  AND deleted_at < :cutoff
+                """, new MapSqlParameterSource().addValue("cutoff", cutoff));
+    }
+
+    public int purgeDeletedSpacesOlderThan(OffsetDateTime cutoff) {
+        jdbc.update("""
+                DELETE FROM data_sources
+                WHERE space_id IN (
+                    SELECT id
+                    FROM spaces
+                    WHERE deleted_at IS NOT NULL
+                      AND deleted_at < :cutoff
+                )
+                """, new MapSqlParameterSource().addValue("cutoff", cutoff));
+        jdbc.update("""
+                DELETE FROM code_repositories
+                WHERE space_id IN (
+                    SELECT id
+                    FROM spaces
+                    WHERE deleted_at IS NOT NULL
+                      AND deleted_at < :cutoff
+                )
+                """, new MapSqlParameterSource().addValue("cutoff", cutoff));
+        return jdbc.update("""
+                DELETE FROM spaces
+                WHERE deleted_at IS NOT NULL
+                  AND deleted_at < :cutoff
+                """, new MapSqlParameterSource().addValue("cutoff", cutoff));
     }
 
     public void addSpaceMember(UUID spaceId, UUID userId, String role) {
@@ -243,7 +333,7 @@ public class SecurityRepository {
                 LEFT JOIN spaces s ON s.id = a.space_id
                 ORDER BY a.created_at DESC
                 LIMIT :limit
-                """, new MapSqlParameterSource().addValue("limit", limit == null ? 100 : Math.max(1, Math.min(limit, 300))), (rs, rowNum) ->
+                """, new MapSqlParameterSource().addValue("limit", limit == null ? 50 : Math.max(1, Math.min(limit, 50))), (rs, rowNum) ->
                 new AuditLogSummary(
                         rs.getObject("id", UUID.class),
                         rs.getObject("actor_user_id", UUID.class),

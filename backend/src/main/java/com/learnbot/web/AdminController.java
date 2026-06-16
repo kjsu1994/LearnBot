@@ -7,6 +7,7 @@ import com.learnbot.dto.InviteUserRequest;
 import com.learnbot.dto.SpaceCreateRequest;
 import com.learnbot.dto.SpaceMemberRequest;
 import com.learnbot.dto.SpaceSummary;
+import com.learnbot.dto.SpaceUpdateRequest;
 import com.learnbot.dto.UserSummary;
 import com.learnbot.repository.SecurityRepository;
 import com.learnbot.security.CurrentUserProvider;
@@ -15,6 +16,7 @@ import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -62,7 +64,7 @@ public class AdminController {
         AppUser actor = currentUserProvider.currentUser();
         AppUser user = authService.inviteUser(
                 actor,
-                request.email(),
+                request.identifier(),
                 request.displayName(),
                 request.initialPassword(),
                 request.role(),
@@ -70,6 +72,11 @@ public class AdminController {
                 request.spaceRole()
         );
         return authService.toSummary(user);
+    }
+
+    @DeleteMapping("/users/{userId}")
+    void deleteUser(@PathVariable UUID userId) {
+        authService.deleteUser(currentUserProvider.currentUser(), userId);
     }
 
     @GetMapping("/spaces")
@@ -83,6 +90,16 @@ public class AdminController {
     Map<String, UUID> createSpace(@Valid @RequestBody SpaceCreateRequest request) {
         UUID id = authService.createSpace(currentUserProvider.currentUser(), request.name(), request.description());
         return Map.of("id", id);
+    }
+
+    @PatchMapping("/spaces/{spaceId}")
+    void updateSpace(@PathVariable UUID spaceId, @Valid @RequestBody SpaceUpdateRequest request) {
+        authService.updateSpace(currentUserProvider.currentUser(), spaceId, request.name(), request.description());
+    }
+
+    @DeleteMapping("/spaces/{spaceId}")
+    void deleteSpace(@PathVariable UUID spaceId) {
+        authService.deleteSpace(currentUserProvider.currentUser(), spaceId);
     }
 
     @PostMapping("/spaces/{spaceId}/members")
@@ -106,6 +123,6 @@ public class AdminController {
     AdminSettingsResponse updateSettings(@Valid @RequestBody AdminSettingsUpdateRequest request) {
         AppUser user = currentUserProvider.currentUser();
         authService.requireAdmin(user);
-        return adminSettingsService.update(user, request.respectRobotsTxt());
+        return adminSettingsService.update(user, request.respectRobotsTxt(), request.allowedDomains());
     }
 }

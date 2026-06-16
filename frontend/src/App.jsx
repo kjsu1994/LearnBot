@@ -59,6 +59,7 @@ hljs.registerLanguage('yaml', yaml);
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const tokenKey = 'runbot.session.token';
+const defaultSpaceId = '00000000-0000-0000-0000-000000000001';
 
 const sourceLabels = {
   FILE: '파일',
@@ -75,6 +76,8 @@ const statusLabels = {
   CANCELLING: '취소 중',
   CANCELLED: '취소됨',
   SUCCEEDED: '완료',
+  ACTIVE: '활성',
+  DELETED: '삭제됨',
 };
 
 const answerModes = [
@@ -190,10 +193,10 @@ function App() {
   const [referenceResult, setReferenceResult] = useState(null);
 
   const [adminUsers, setAdminUsers] = useState([]);
-  const [adminSettings, setAdminSettings] = useState({ respectRobotsTxt: true });
+  const [adminSettings, setAdminSettings] = useState({ respectRobotsTxt: true, allowedDomains: [] });
   const [auditLogs, setAuditLogs] = useState([]);
   const [inviteForm, setInviteForm] = useState({
-    email: '',
+    loginId: '',
     displayName: '',
     initialPassword: '',
     role: 'USER',
@@ -388,7 +391,7 @@ function App() {
       await request('/api/sources/web', {
         method: 'POST',
         json: {
-          url: webUrl,
+          url: webUrl.trim(),
           spaceId: activeSpaceId,
           recursive: webRecursive,
           maxDepth: Number(webMaxDepth),
@@ -637,12 +640,12 @@ function App() {
   async function refreshAdmin() {
     const [users, logs, settings] = await Promise.all([
       request('/api/admin/users'),
-      request('/api/admin/audit-logs?limit=80'),
+      request('/api/admin/audit-logs?limit=50'),
       request('/api/admin/settings'),
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
-    setAdminSettings(settings || { respectRobotsTxt: true });
+    setAdminSettings(settings || { respectRobotsTxt: true, allowedDomains: [] });
   }
 
   async function updateAdminSettings(nextSettings) {
@@ -676,8 +679,34 @@ function App() {
           spaceId: activeSpaceId,
         },
       });
-      setInviteForm({ email: '', displayName: '', initialPassword: '', role: 'USER', spaceRole: 'MEMBER' });
+      setInviteForm({ loginId: '', displayName: '', initialPassword: '', role: 'USER', spaceRole: 'MEMBER' });
       await refreshAdmin();
+    });
+  }
+
+  async function deleteAdminUser(userId, displayName) {
+    if (!window.confirm(`${displayName || '사용자'} 계정을 삭제할까요? 해당 사용자는 즉시 로그인할 수 없습니다.`)) return;
+    await run(`user-delete-${userId}`, async () => {
+      await request(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      await refreshAdmin();
+    });
+  }
+
+  async function updateSpace(spaceId, values) {
+    await run(`space-update-${spaceId}`, async () => {
+      await request(`/api/admin/spaces/${spaceId}`, { method: 'PATCH', json: values });
+      await refreshSession();
+      await refreshAdmin();
+    });
+  }
+
+  async function deleteSpace(spaceId, name) {
+    if (!window.confirm(`${name || '공간'} 공간을 삭제할까요? 삭제된 공간의 문서와 코드 저장소는 더 이상 목록에 표시되지 않습니다.`)) return;
+    await run(`space-delete-${spaceId}`, async () => {
+      await request(`/api/admin/spaces/${spaceId}`, { method: 'DELETE' });
+      await refreshSession();
+      await refreshAdmin();
+      setSelectedSpaceId((current) => (current === spaceId ? '' : current));
     });
   }
 
@@ -709,7 +738,6 @@ function App() {
         codeChunkCount={codeChunkCount}
         webCount={webCount}
         fileCount={fileCount}
-        onLogout={logout}
       />
 
       <section className="content">
@@ -729,6 +757,10 @@ function App() {
             <button className="ghost-button" type="button" onClick={refreshDocuments}>
               <Database size={16} />
               문서 새로고침
+            </button>
+            <button className="ghost-button compact-action top-logout" type="button" onClick={logout}>
+              <LogOut size={14} />
+              로그아웃
             </button>
           </div>
         </header>
@@ -840,6 +872,7 @@ function App() {
 
         {activeView === 'admin' && user.role === 'ADMIN' && (
           <AdminWorkspace
+            currentUser={user}
             users={adminUsers}
             adminSettings={adminSettings}
             spaces={spaces}
@@ -851,6 +884,9 @@ function App() {
             setSpaceForm={setSpaceForm}
             createSpace={createSpace}
             inviteUser={inviteUser}
+            deleteAdminUser={deleteAdminUser}
+            updateSpace={updateSpace}
+            deleteSpace={deleteSpace}
             updateAdminSettings={updateAdminSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
@@ -862,12 +898,12 @@ function App() {
 }
 
 function LoginScreen({ onLogin, busy, error }) {
-  const [email, setEmail] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
 
   function submit(event) {
     event.preventDefault();
-    onLogin({ email, password });
+    onLogin({ loginId, password });
   }
 
   return (
@@ -889,11 +925,11 @@ function LoginScreen({ onLogin, busy, error }) {
         </div>
         {error && <div className="alert">{error}</div>}
         <form className="stack" onSubmit={submit} autoComplete="off">
-          <label htmlFor="login-email">ID</label>
-          <input id="login-email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" spellCheck="false" />
+          <label htmlFor="login-id">ID</label>
+          <input id="login-id" value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="off" spellCheck="false" />
           <label htmlFor="login-password">비밀번호</label>
           <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
-          <button disabled={!email || !password || busy}>
+          <button disabled={!loginId || !password || busy}>
             {busy ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />}
             로그인
           </button>
@@ -913,7 +949,6 @@ function Sidebar({
   codeChunkCount,
   webCount,
   fileCount,
-  onLogout,
 }) {
   return (
     <aside className="sidebar">
@@ -934,7 +969,7 @@ function Sidebar({
             <option key={space.id} value={space.id}>{space.name}</option>
           ))}
         </select>
-        <small className="sidebar-note">{user.displayName || user.email} · {user.role}</small>
+        <small className="sidebar-note">{user.displayName || user.loginId || user.email} · {user.role}</small>
       </div>
 
       <div className="side-section">
@@ -984,10 +1019,6 @@ function Sidebar({
         </div>
       </div>
 
-      <button className="ghost-button sidebar-logout" type="button" onClick={onLogout}>
-        <LogOut size={16} />
-        로그아웃
-      </button>
     </aside>
   );
 }
@@ -1365,7 +1396,7 @@ function DocumentWorkspace(props) {
           <form className="stack" onSubmit={props.ingestWeb}>
             <label htmlFor="web-url">웹 URL</label>
             <div className="inline-control">
-              <input id="web-url" value={props.webUrl} onChange={(event) => props.setWebUrl(event.target.value)} placeholder="https://example.com/docs" />
+              <input id="web-url" value={props.webUrl} onChange={(event) => props.setWebUrl(event.target.value)} placeholder="https://example.com/docs 또는 example.com/docs" />
               <button disabled={!props.webUrl || props.loading('web')}>
                 {props.loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
                 인덱싱
@@ -1528,6 +1559,7 @@ function DocumentWorkspace(props) {
 }
 
 function AdminWorkspace({
+  currentUser,
   users,
   adminSettings,
   spaces,
@@ -1539,10 +1571,45 @@ function AdminWorkspace({
   setSpaceForm,
   createSpace,
   inviteUser,
+  deleteAdminUser,
+  updateSpace,
+  deleteSpace,
   updateAdminSettings,
   refreshAdmin,
   loading,
 }) {
+  const [editingSpaceId, setEditingSpaceId] = useState('');
+  const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
+  const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
+
+  useEffect(() => {
+    setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
+  }, [adminSettings?.allowedDomains]);
+
+  function beginEditSpace(space) {
+    setEditingSpaceId(space.id);
+    setSpaceEditForm({ name: space.name || '', description: space.description || '' });
+  }
+
+  async function submitSpaceEdit(event, spaceId) {
+    event.preventDefault();
+    await updateSpace(spaceId, spaceEditForm);
+    setEditingSpaceId('');
+    setSpaceEditForm({ name: '', description: '' });
+  }
+
+  async function submitAllowedDomains(event) {
+    event.preventDefault();
+    const allowedDomains = allowedDomainText
+      .split(/[,\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    await updateAdminSettings({
+      respectRobotsTxt: adminSettings?.respectRobotsTxt ?? true,
+      allowedDomains,
+    });
+  }
+
   return (
     <section className="workspace-grid">
       <div className="left-column">
@@ -1574,6 +1641,27 @@ function AdminWorkspace({
               </small>
             </span>
           </label>
+          <form className="stack admin-url-form" onSubmit={submitAllowedDomains}>
+            <label htmlFor="allowed-domains">허용 URL / 도메인</label>
+            <textarea
+              id="allowed-domains"
+              value={allowedDomainText}
+              onChange={(event) => setAllowedDomainText(event.target.value)}
+              placeholder={'example.com\nhttps://docs.example.com/guide\nintranet.local'}
+              spellCheck="false"
+            />
+            <small className="field-help">
+              한 줄에 하나씩 입력하거나 쉼표로 구분하세요. 전체 URL을 입력해도 호스트만 저장됩니다.
+              예: `https://docs.example.com/guide` → `docs.example.com`.
+              등록한 도메인과 그 하위 도메인만 웹 인덱싱할 수 있습니다.
+            </small>
+            <div className="action-row">
+              <button disabled={!allowedDomainText.trim() || loading('admin-settings')}>
+                {loading('admin-settings') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+                허용 목록 저장
+              </button>
+            </div>
+          </form>
         </section>
 
         <form className="panel" onSubmit={inviteUser}>
@@ -1586,8 +1674,8 @@ function AdminWorkspace({
           </div>
           <div className="form-grid two">
             <div className="stack">
-              <label htmlFor="invite-email">이메일</label>
-              <input id="invite-email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} />
+              <label htmlFor="invite-login-id">ID</label>
+              <input id="invite-login-id" value={inviteForm.loginId} onChange={(event) => setInviteForm((current) => ({ ...current, loginId: event.target.value }))} autoComplete="off" spellCheck="false" />
             </div>
             <div className="stack">
               <label htmlFor="invite-name">표시 이름</label>
@@ -1621,7 +1709,7 @@ function AdminWorkspace({
             <small>초대 사용자는 이 공간의 자료만 접근합니다.</small>
           </div>
           <div className="action-row">
-            <button disabled={!inviteForm.email || !inviteForm.displayName || !inviteForm.initialPassword || loading('user-invite')}>
+            <button disabled={!inviteForm.loginId || !inviteForm.displayName || !inviteForm.initialPassword || loading('user-invite')}>
               {loading('user-invite') ? <Loader2 className="spin" size={16} /> : <UserPlus size={16} />}
               초대
             </button>
@@ -1667,12 +1755,82 @@ function AdminWorkspace({
               <article className="document-row" key={item.id}>
                 <div className="document-main">
                   <strong>{item.displayName}</strong>
-                  <small>{item.email}</small>
+                  <small>{item.loginId || item.email}</small>
                 </div>
                 <div className="document-meta">
                   <StatusBadge status={item.status} />
                   <small>{item.role}</small>
                 </div>
+                <div className="document-actions">
+                  <IconButton
+                    danger
+                    title={item.id === currentUser?.id ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'}
+                    disabled={item.id === currentUser?.id || loading(`user-delete-${item.id}`)}
+                    onClick={() => deleteAdminUser(item.id, item.displayName)}
+                  >
+                    {loading(`user-delete-${item.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                  </IconButton>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>공간 관리</h2>
+              <p>{spaces.length}개 공간</p>
+            </div>
+          </div>
+          <div className="document-list">
+            {spaces.map((space) => (
+              <article className="document-row space-admin-row" key={space.id}>
+                {editingSpaceId === space.id ? (
+                  <form className="space-edit-form" onSubmit={(event) => submitSpaceEdit(event, space.id)}>
+                    <input
+                      value={spaceEditForm.name}
+                      onChange={(event) => setSpaceEditForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="공간 이름"
+                    />
+                    <textarea
+                      value={spaceEditForm.description}
+                      onChange={(event) => setSpaceEditForm((current) => ({ ...current, description: event.target.value }))}
+                      placeholder="설명"
+                    />
+                    <div className="action-row">
+                      <button disabled={!spaceEditForm.name || loading(`space-update-${space.id}`)}>
+                        {loading(`space-update-${space.id}`) ? <Loader2 className="spin" size={15} /> : <CheckCircle2 size={15} />}
+                        저장
+                      </button>
+                      <button className="ghost-button" type="button" onClick={() => setEditingSpaceId('')}>취소</button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <div className="document-main">
+                      <strong>{space.name}</strong>
+                      <small>{space.description || '설명 없음'}</small>
+                    </div>
+                    <div className="document-meta">
+                      <small>{space.role} · {formatDate(space.createdAt)}</small>
+                    </div>
+                    <div className="document-actions">
+                      <IconButton title="공간 이름/설명 편집" onClick={() => beginEditSpace(space)}>
+                        <Info size={15} />
+                      </IconButton>
+                      <IconButton
+                        danger
+                        title={space.id === defaultSpaceId ? '기본 공간은 삭제할 수 없습니다.' : '공간 삭제'}
+                        disabled={space.id === defaultSpaceId || loading(`space-delete-${space.id}`)}
+                        onClick={() => deleteSpace(space.id, space.name)}
+                      >
+                        {loading(`space-delete-${space.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                      </IconButton>
+                    </div>
+                  </>
+                )}
               </article>
             ))}
           </div>
@@ -1699,7 +1857,7 @@ function AdminWorkspace({
                   <strong>{log.action}</strong>
                   <span>{formatDate(log.createdAt)}</span>
                 </div>
-                <small>{log.actorEmail || 'system'} · {log.spaceName || 'global'}</small>
+                <small>{log.actorLoginId || log.actorEmail || 'system'} · {log.spaceName || 'global'}</small>
                 <p>{log.message}</p>
               </article>
             ))}
@@ -1718,6 +1876,7 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
         {getStatusLabel(job.status)} · {job.processedFiles}/{job.totalFiles || '-'} files · {job.totalChunks} chunks
         {job.failedFiles > 0 ? ` · 실패 ${job.failedFiles}` : ''}
       </span>
+      {jobChangeText(job) && <small className="job-change-line">{jobChangeText(job)}</small>}
       <div className="progress-track" aria-label="인덱싱 진행률">
         <span style={{ width: `${jobPercent(job)}%` }} />
       </div>
@@ -1843,8 +2002,8 @@ function DocumentDetailPanel({ detail, loading }) {
           <dd>{detail.storedObject?.originalFilename || '-'}</dd>
         </div>
       </dl>
-      <div className="chunk-list">
-        {detail.chunks.slice(0, 6).map((chunk) => (
+      <div className="chunk-list document-chunk-scroll" tabIndex={0}>
+        {detail.chunks.map((chunk) => (
           <article className="chunk-card" key={chunk.id}>
             <strong>Chunk {chunk.chunkIndex}</strong>
             <p>{chunk.content}</p>
@@ -1999,14 +2158,20 @@ function renderInlineMarkdown(text = '', keyPrefix = 'md') {
 function EvidenceList({ evidence = [] }) {
   if (!evidence.length) return <p className="empty compact-empty">표시할 근거가 없습니다.</p>;
   return (
-    <div className="evidence-list">
-      {evidence.map((item) => (
-        <article className="evidence-card" key={`${item.citationNumber}-${item.chunkId}`}>
-          <strong>[{item.citationNumber}] {item.title}</strong>
-          <small>{item.sourceUri} · chunk {item.chunkIndex}</small>
-          <p>{item.preview}</p>
-        </article>
-      ))}
+    <div className="evidence-section">
+      <div className="evidence-header">
+        <strong>근거 문서</strong>
+        <small>{evidence.length}개</small>
+      </div>
+      <div className="evidence-list document-evidence-scroll" tabIndex={0}>
+        {evidence.map((item) => (
+          <article className="evidence-card" key={`${item.citationNumber}-${item.chunkId}`}>
+            <strong>[{item.citationNumber}] {item.title}</strong>
+            <small>{item.sourceUri} · chunk {item.chunkIndex}</small>
+            <p>{item.preview}</p>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2437,6 +2602,18 @@ function jobPercent(job) {
   return Math.max(5, Math.min(100, Math.round((job.processedFiles / job.totalFiles) * 100)));
 }
 
+function jobChangeText(job) {
+  const parts = [
+    ['추가', job?.addedFiles],
+    ['수정', job?.modifiedFiles],
+    ['유지', job?.unchangedFiles],
+    ['삭제', job?.deletedFiles],
+  ]
+    .filter(([, value]) => Number(value || 0) > 0)
+    .map(([label, value]) => `${label} ${value}`);
+  return parts.length ? parts.join(' · ') : '';
+}
+
 function getProgressMessage(busy) {
   if (!busy) return '';
   if (busy === 'login') return '로그인 중입니다.';
@@ -2453,6 +2630,9 @@ function getProgressMessage(busy) {
   if (busy.startsWith('code-file-')) return '코드 파일을 불러오는 중입니다.';
   if (busy.startsWith('reindex-')) return '문서를 재색인하는 중입니다.';
   if (busy.startsWith('delete-')) return '문서를 삭제하는 중입니다.';
+  if (busy.startsWith('user-delete-')) return '사용자 계정을 삭제하는 중입니다.';
+  if (busy.startsWith('space-update-')) return '공간 정보를 저장하는 중입니다.';
+  if (busy.startsWith('space-delete-')) return '공간을 삭제하는 중입니다.';
   if (busy === 'space-create') return '공간을 생성하는 중입니다.';
   if (busy === 'user-invite') return '사용자를 초대하는 중입니다.';
   return '요청을 처리하는 중입니다.';

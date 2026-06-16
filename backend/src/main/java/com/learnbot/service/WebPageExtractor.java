@@ -174,7 +174,7 @@ public class WebPageExtractor {
 
     private boolean isAllowedDomain(String host) {
         String normalizedHost = host.toLowerCase(Locale.ROOT);
-        return properties.getCrawler().getAllowedDomains().stream()
+        return adminSettingsService.allowedDomains().stream()
                 .map(domain -> domain.toLowerCase(Locale.ROOT).trim())
                 .filter(domain -> !domain.isBlank())
                 .anyMatch(domain -> normalizedHost.equals(domain) || normalizedHost.endsWith("." + domain));

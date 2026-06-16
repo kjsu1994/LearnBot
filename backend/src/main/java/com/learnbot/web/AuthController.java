@@ -26,7 +26,7 @@ public class AuthController {
 
     @PostMapping("/login")
     AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request.email(), request.password());
+        return authService.login(request.identifier(), request.password());
     }
 
     @GetMapping("/me")
@@ -39,4 +39,3 @@ public class AuthController {
         authService.logout(authorization, currentUserProvider.currentUser());
     }
 }
-

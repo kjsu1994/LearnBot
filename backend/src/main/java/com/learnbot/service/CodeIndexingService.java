@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -218,6 +219,10 @@ public class CodeIndexingService {
         int processedFiles = 0;
         int totalChunks = 0;
         int failedFiles = 0;
+        int addedFiles = 0;
+        int modifiedFiles = 0;
+        int unchangedFiles = 0;
+        int deletedFiles = 0;
 
         try {
             ensureNotCancelled(jobId);
@@ -233,26 +238,40 @@ public class CodeIndexingService {
             }
 
             Map<String, ActiveCodeFileSnapshot> previousFiles = repository.listActiveFileSnapshots(repositoryId);
+            Set<String> currentFilePaths = new HashSet<>();
+            for (CodeFileCandidate candidate : candidates) {
+                currentFilePaths.add(candidate.relativePath());
+            }
+            deletedFiles = (int) previousFiles.keySet().stream()
+                    .filter(path -> !currentFilePaths.contains(path))
+                    .count();
+            updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             for (CodeFileCandidate candidate : candidates) {
                 ensureNotCancelled(jobId);
+                ActiveCodeFileSnapshot previousFile = previousFiles.get(candidate.relativePath());
                 try {
                     String content = contentReader.read(candidate.absolutePath());
                     String contentHash = sha256(content);
-                    ActiveCodeFileSnapshot previousFile = previousFiles.get(candidate.relativePath());
                     if (previousFile != null
                             && previousFile.contentHash().equals(contentHash)
                             && previousFile.chunkCount() > 0) {
                         repository.copyActiveFileToIndex(repositoryId, previousFile.fileId(), UUID.randomUUID(), jobId);
                         totalChunks += previousFile.chunkCount();
+                        unchangedFiles++;
                         processedFiles++;
-                        repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+                        updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
                         continue;
                     }
 
                     List<ParsedCodeChunk> chunks = chunkParser.parse(candidate.relativePath(), candidate.language(), content);
                     if (chunks.isEmpty()) {
+                        if (previousFile == null) {
+                            addedFiles++;
+                        } else {
+                            modifiedFiles++;
+                        }
                         processedFiles++;
-                        repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+                        updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
                         continue;
                     }
 
@@ -269,6 +288,11 @@ public class CodeIndexingService {
                     );
                     repository.addChunks(repositoryId, fileId, jobId, candidate.relativePath(), chunks, embeddings);
                     totalChunks += chunks.size();
+                    if (previousFile == null) {
+                        addedFiles++;
+                    } else {
+                        modifiedFiles++;
+                    }
                     processedFiles++;
                 } catch (CodeIndexCancelledException ex) {
                     throw ex;
@@ -276,8 +300,13 @@ public class CodeIndexingService {
                     failedFiles++;
                     processedFiles++;
                     repository.addJobFailure(repositoryId, jobId, candidate.relativePath(), "FILE", rootMessage(ex));
+                    if (previousFile != null && previousFile.chunkCount() > 0) {
+                        repository.copyActiveFileToIndex(repositoryId, previousFile.fileId(), UUID.randomUUID(), jobId);
+                        totalChunks += previousFile.chunkCount();
+                        unchangedFiles++;
+                    }
                 }
-                repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+                updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             }
 
             if (totalChunks == 0) {
@@ -287,17 +316,17 @@ public class CodeIndexingService {
             repository.markRepositoryIndexed(repositoryId, commitHash);
             repository.finishJob(jobId, "SUCCEEDED", commitHash, null);
         } catch (CodeIndexCancelledException ex) {
-            repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+            updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
             restoreRepositoryStatus(repositoryId);
         } catch (RuntimeException ex) {
             if (cancelledJobs.contains(jobId) || Thread.currentThread().isInterrupted()) {
-                repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+                updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
                 repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
                 restoreRepositoryStatus(repositoryId);
             } else {
                 String message = rootMessage(ex);
-                repository.updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles);
+                updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
                 repository.addJobFailure(repositoryId, jobId, null, "REPOSITORY", message);
                 repository.finishJob(jobId, "FAILED", commitHash, message);
                 repository.updateRepositoryStatus(repositoryId, "FAILED", message);
@@ -306,6 +335,30 @@ public class CodeIndexingService {
             runningJobs.remove(jobId);
             cancelledJobs.remove(jobId);
         }
+    }
+
+    private void updateProgress(
+            UUID jobId,
+            int totalFiles,
+            int processedFiles,
+            int totalChunks,
+            int failedFiles,
+            int addedFiles,
+            int modifiedFiles,
+            int unchangedFiles,
+            int deletedFiles
+    ) {
+        repository.updateJobProgress(
+                jobId,
+                totalFiles,
+                processedFiles,
+                totalChunks,
+                failedFiles,
+                addedFiles,
+                modifiedFiles,
+                unchangedFiles,
+                deletedFiles
+        );
     }
 
     private String requireGitUrl(String gitUrl) {
@@ -403,13 +456,17 @@ public class CodeIndexingService {
     }
 
     private String rootMessage(Throwable throwable) {
+        String topMessage = throwable.getMessage();
+        if (throwable instanceof IllegalArgumentException && topMessage != null && !topMessage.isBlank()) {
+            return topMessage;
+        }
         Throwable current = throwable;
         while (current.getCause() != null) {
             current = current.getCause();
         }
         String message = current.getMessage();
         if (message == null || message.isBlank()) {
-            message = throwable.getMessage();
+            message = topMessage;
         }
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }

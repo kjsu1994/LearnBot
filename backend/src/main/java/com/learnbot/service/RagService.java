@@ -26,6 +26,7 @@ public class RagService {
     private static final Pattern SPREADSHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
     private static final int GENERAL_CONTEXT_RESULT_LIMIT = 4;
     private static final int GENERAL_CONTEXT_EXCERPT_CHARS = 360;
+    private static final int TABLE_CONTEXT_EXCERPT_CHARS = 520;
     private static final int FALLBACK_RESULT_LIMIT = 4;
     private static final int FALLBACK_EXCERPT_CHARS = 260;
     private static final int FALLBACK_POINT_CHARS = 220;
@@ -56,8 +57,9 @@ public class RagService {
 
     public AskResponse ask(String question, SearchFilter filter, String mode, List<UUID> spaceIds, UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
-        int topK = isCountQuestion(question) ? Math.max(properties.getRag().getTopK(), 12) : properties.getRag().getTopK();
-        List<SearchResult> citations = searchService.search(question, filter, topK, spaceIds, selectedSpaceId);
+        int topK = retrievalLimit(question, answerMode);
+        List<SearchResult> citations = selectAnswerCitations(question, answerMode,
+                searchService.search(question, filter, topK, spaceIds, selectedSpaceId));
         if (citations.isEmpty()) {
             return new AskResponse(
                     answerMode.value(),
@@ -82,13 +84,8 @@ public class RagService {
             );
         }
 
-        String context = buildContext(question, citations);
-        String systemPrompt = """
-                Answer in Korean using only the provided context.
-                Cite factual claims with bracket numbers such as [1].
-                If the evidence is insufficient, say so.
-                Do not invent sources.
-                """ + "\n" + answerMode.instruction();
+        String context = buildContext(question, answerMode, citations);
+        String systemPrompt = systemPrompt(answerMode);
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
         String answer;
@@ -97,11 +94,11 @@ public class RagService {
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
         } catch (RuntimeException ex) {
-            answer = fallbackAnswer(question, citations);
+            answer = fallbackAnswer(answerMode, question, citations);
             llmUnavailable = true;
         }
         if (isLowQualityAnswer(answer)) {
-            answer = fallbackAnswer(question, citations);
+            answer = fallbackAnswer(answerMode, question, citations);
             answerRewritten = true;
         }
         return new AskResponse(
@@ -110,26 +107,107 @@ public class RagService {
                 citations,
                 buildEvidence(citations),
                 confidence(citations),
-                diagnostics(citations, llmUnavailable, answerRewritten)
+                diagnostics(answerMode, citations, llmUnavailable, answerRewritten)
         );
     }
 
-    private String buildContext(String question, List<SearchResult> results) {
+    private int retrievalLimit(String question, AnswerMode answerMode) {
+        int configured = properties.getRag().getTopK();
+        if (isCountQuestion(question) || answerMode == AnswerMode.TABLE) {
+            return Math.max(configured, 12);
+        }
+        if (answerMode == AnswerMode.SUMMARY) {
+            return Math.max(configured, 10);
+        }
+        return Math.max(configured, 8);
+    }
+
+    private List<SearchResult> selectAnswerCitations(String question, AnswerMode answerMode, List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        int limit = switch (answerMode) {
+            case SUMMARY, TABLE -> Math.min(results.size(), 10);
+            case QUOTE -> Math.min(results.size(), 6);
+            default -> Math.min(results.size(), Math.max(6, properties.getRag().getTopK()));
+        };
+        return results.stream()
+                .sorted(Comparator
+                        .comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result))
+                        .reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private double answerRelevance(String question, AnswerMode answerMode, SearchResult result) {
+        String normalizedQuestion = normalizeForSearch(question);
+        String title = normalizeForSearch(result.title());
+        String source = normalizeForSearch(result.sourceUri());
+        String content = normalizeForSearch(result.content());
+        double score = result.score();
+        for (String term : queryTerms(question)) {
+            if (title.contains(term)) {
+                score += 0.18;
+            }
+            if (source.contains(term)) {
+                score += 0.08;
+            }
+            if (content.contains(term)) {
+                score += 0.04;
+            }
+        }
+        if (answerMode == AnswerMode.TABLE && (isSpreadsheet(result) || content.contains("row ") || content.contains("table"))) {
+            score += 0.25;
+        }
+        if (answerMode == AnswerMode.QUOTE && (content.contains("제") || content.contains("조") || content.contains("권고") || content.contains("원칙"))) {
+            score += 0.08;
+        }
+        if (normalizedQuestion.contains("pdf") && safe(result.contentType()).toLowerCase().contains("pdf")) {
+            score += 0.10;
+        }
+        return score;
+    }
+
+    private String buildContext(String question, AnswerMode answerMode, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "No context retrieved.";
         }
 
-        int limit = Math.min(results.size(), GENERAL_CONTEXT_RESULT_LIMIT);
+        int limit = Math.min(results.size(), contextLimit(answerMode));
+        int excerptChars = answerMode == AnswerMode.TABLE ? TABLE_CONTEXT_EXCERPT_CHARS : GENERAL_CONTEXT_EXCERPT_CHARS;
         return IntStream.range(0, limit)
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
-                    return "[" + (index + 1) + "] " + result.title() + " · chunk " + result.chunkIndex() + "\n"
-                            + relevantExcerpt(question, result.content(), GENERAL_CONTEXT_EXCERPT_CHARS);
+                    return "[" + (index + 1) + "] " + result.title()
+                            + " · " + result.sourceUri()
+                            + " · " + safe(result.contentType())
+                            + " · chunk " + result.chunkIndex() + "\n"
+                            + relevantExcerpt(question, result.content(), excerptChars);
                 })
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private String fallbackAnswer(String question, List<SearchResult> results) {
+    private int contextLimit(AnswerMode answerMode) {
+        return switch (answerMode) {
+            case SUMMARY, TABLE -> 8;
+            case QUOTE -> 6;
+            default -> GENERAL_CONTEXT_RESULT_LIMIT;
+        };
+    }
+
+    private String systemPrompt(AnswerMode answerMode) {
+        return """
+                You are LearnBot, a private RAG assistant.
+                Answer in Korean using Markdown.
+                Use only the provided context.
+                Cite factual claims with bracket numbers such as [1].
+                If the evidence is insufficient, say exactly which part is insufficient.
+                Do not invent sources, counts, filenames, pages, or legal clauses.
+                Do not answer with only a source list.
+                """ + "\n" + answerMode.instruction();
+    }
+
+    private String fallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "근거가 부족해 답변할 수 없습니다.";
         }
@@ -144,7 +222,12 @@ public class RagService {
             return "검색된 일부 근거만으로는 전체 건수를 확정할 수 없습니다. 엑셀/CSV처럼 행 단위로 파싱 가능한 문서라면 문서 전체 청크를 기준으로 계산합니다.\n\n" + sources;
         }
 
-        return extractiveFallbackAnswer(question, results);
+        return switch (answerMode) {
+            case SUMMARY -> summaryFallbackAnswer(question, results);
+            case TABLE -> tableFallbackAnswer(question, results);
+            case QUOTE -> quoteFallbackAnswer(question, results);
+            default -> extractiveFallbackAnswer(question, results);
+        };
     }
 
     private String extractiveFallbackAnswer(String question, List<SearchResult> results) {
@@ -163,6 +246,51 @@ public class RagService {
                 })
                 .collect(Collectors.joining("\n"));
         return "답변 생성 품질이 낮아 검색된 근거 중심으로 정리합니다.\n\n" + sources;
+    }
+
+    private String summaryFallbackAnswer(String question, List<SearchResult> results) {
+        String body = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "- " + trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))
+                            + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "답변 생성 품질이 낮아 검색된 근거를 요약합니다.\n\n" + body;
+    }
+
+    private String tableFallbackAnswer(String question, List<SearchResult> results) {
+        String rows = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "| [" + (index + 1) + "] | " + escapeTable(result.title())
+                            + " | " + escapeTable(trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))) + " |";
+                })
+                .collect(Collectors.joining("\n"));
+        return "답변 생성 품질이 낮아 표 형태로 추출 가능한 근거를 정리합니다.\n\n"
+                + "| 근거 | 문서 | 추출 내용 |\n"
+                + "|---|---|---|\n"
+                + rows;
+    }
+
+    private String quoteFallbackAnswer(String question, List<SearchResult> results) {
+        String quotes = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "> " + trimQuote(relevantExcerpt(question, result.content(), 180))
+                            + "\n\n- 출처: " + result.title() + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n\n"));
+        return "답변 생성 품질이 낮아 원문에 가까운 짧은 인용 중심으로 정리합니다.\n\n" + quotes;
+    }
+
+    private String escapeTable(String value) {
+        return safe(value).replace("|", "\\|").replaceAll("\\s+", " ").trim();
+    }
+
+    private String trimQuote(String value) {
+        String trimmed = safe(value).replaceAll("\\s+", " ").trim();
+        return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 180).trim() + "...";
     }
 
     private boolean isDiscriminationImprovementQuestion(String question) {
@@ -600,10 +728,10 @@ public class RagService {
         return "낮음";
     }
 
-    private List<String> diagnostics(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+    private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
         long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
         List<String> notes = new ArrayList<>();
-        notes.add("검색된 문서 근거 " + results.size() + "개, 문서 " + distinctDocuments + "개를 답변 후보로 사용했습니다.");
+        notes.add("검색된 문서 근거 " + results.size() + "개, 문서 " + distinctDocuments + "개를 " + getModeLabel(answerMode) + " 후보로 사용했습니다.");
         if (llmUnavailable) {
             notes.add("LLM 호출이 실패해 검색 근거 기반 fallback 답변을 반환했습니다.");
         }
@@ -614,6 +742,15 @@ public class RagService {
             notes.add("직접적인 근거 점수가 낮아 답변을 후보 수준으로 검토해야 합니다.");
         }
         return notes;
+    }
+
+    private String getModeLabel(AnswerMode answerMode) {
+        return switch (answerMode) {
+            case SUMMARY -> "요약";
+            case TABLE -> "표 추출";
+            case QUOTE -> "원문 인용";
+            default -> "질문 답변";
+        };
     }
 
     private String relevantExcerpt(String question, String content, int maxChars) {
@@ -735,10 +872,10 @@ public class RagService {
     }
 
     private enum AnswerMode {
-        QA("qa", "Answer the question directly. Keep the answer concise and cite each factual claim."),
-        SUMMARY("summary", "Summarize the retrieved context into key points. Prefer bullets and cite important points."),
-        TABLE("table", "Extract table-like facts from the context. If possible, answer with compact rows or field-value pairs."),
-        QUOTE("quote", "Prefer short direct excerpts from the context, then explain what they mean. Cite every excerpt.");
+        QA("qa", "Answer the question directly. Start with the conclusion, then add 2-5 concise supporting bullets when useful. Cite each factual claim."),
+        SUMMARY("summary", "Summarize the retrieved context into Korean Markdown bullets. Group related points and cite important points."),
+        TABLE("table", "Extract table-like facts from the context. Prefer a compact Markdown table. Do not invent missing rows, columns, counts, or values."),
+        QUOTE("quote", "Prefer short direct excerpts from the context. Put each excerpt in a Markdown blockquote, then explain its meaning briefly. Cite every excerpt.");
 
         private final String value;
         private final String instruction;

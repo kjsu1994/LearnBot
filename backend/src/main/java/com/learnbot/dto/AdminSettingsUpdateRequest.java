@@ -1,8 +1,9 @@
 package com.learnbot.dto;
 
-import jakarta.validation.constraints.NotNull;
+import java.util.List;
 
 public record AdminSettingsUpdateRequest(
-        @NotNull Boolean respectRobotsTxt
+        Boolean respectRobotsTxt,
+        List<String> allowedDomains
 ) {
 }

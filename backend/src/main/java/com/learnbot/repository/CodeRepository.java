@@ -205,19 +205,41 @@ public class CodeRepository {
     }
 
     public void updateJobProgress(UUID jobId, int totalFiles, int processedFiles, int totalChunks, int failedFiles) {
+        updateJobProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, 0, 0, 0, 0);
+    }
+
+    public void updateJobProgress(
+            UUID jobId,
+            int totalFiles,
+            int processedFiles,
+            int totalChunks,
+            int failedFiles,
+            int addedFiles,
+            int modifiedFiles,
+            int unchangedFiles,
+            int deletedFiles
+    ) {
         jdbc.update("""
                 UPDATE indexing_jobs
                 SET total_files = :totalFiles,
                     processed_files = :processedFiles,
                     total_chunks = :totalChunks,
-                    failed_files = :failedFiles
+                    failed_files = :failedFiles,
+                    added_files = :addedFiles,
+                    modified_files = :modifiedFiles,
+                    unchanged_files = :unchangedFiles,
+                    deleted_files = :deletedFiles
                 WHERE id = :jobId
                 """, new MapSqlParameterSource()
                 .addValue("jobId", jobId)
                 .addValue("totalFiles", totalFiles)
                 .addValue("processedFiles", processedFiles)
                 .addValue("totalChunks", totalChunks)
-                .addValue("failedFiles", failedFiles));
+                .addValue("failedFiles", failedFiles)
+                .addValue("addedFiles", addedFiles)
+                .addValue("modifiedFiles", modifiedFiles)
+                .addValue("unchangedFiles", unchangedFiles)
+                .addValue("deletedFiles", deletedFiles));
     }
 
     public void finishJob(UUID jobId, String status, String commitHash, String errorMessage) {
@@ -238,7 +260,8 @@ public class CodeRepository {
     public List<IndexingJobSummary> listJobs(UUID repositoryId) {
         return jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
-                       failed_files, commit_hash, error_message, started_at, finished_at, created_at
+                       failed_files, added_files, modified_files, unchanged_files, deleted_files,
+                       commit_hash, error_message, started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE repository_id = :repositoryId
                 ORDER BY created_at DESC
@@ -249,7 +272,8 @@ public class CodeRepository {
     public Optional<IndexingJobSummary> findJob(UUID jobId) {
         List<IndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
-                       failed_files, commit_hash, error_message, started_at, finished_at, created_at
+                       failed_files, added_files, modified_files, unchanged_files, deleted_files,
+                       commit_hash, error_message, started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE id = :jobId
                 """, new MapSqlParameterSource().addValue("jobId", jobId), this::mapJobSummary);
@@ -285,7 +309,8 @@ public class CodeRepository {
     public Optional<IndexingJobSummary> findRunningJob(UUID repositoryId) {
         List<IndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
-                       failed_files, commit_hash, error_message, started_at, finished_at, created_at
+                       failed_files, added_files, modified_files, unchanged_files, deleted_files,
+                       commit_hash, error_message, started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE repository_id = :repositoryId
                   AND status IN ('RUNNING', 'CANCELLING')
@@ -853,6 +878,10 @@ public class CodeRepository {
                 rs.getInt("processed_files"),
                 rs.getInt("total_chunks"),
                 rs.getInt("failed_files"),
+                rs.getInt("added_files"),
+                rs.getInt("modified_files"),
+                rs.getInt("unchanged_files"),
+                rs.getInt("deleted_files"),
                 rs.getString("commit_hash"),
                 rs.getString("error_message"),
                 rs.getObject("started_at", OffsetDateTime.class),

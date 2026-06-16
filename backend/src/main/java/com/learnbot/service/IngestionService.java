@@ -20,6 +20,7 @@ public class IngestionService {
     private final WebPageExtractor webPageExtractor;
     private final WebCrawler webCrawler;
     private final FileExtractor fileExtractor;
+    private final WebUrlNormalizer webUrlNormalizer;
     private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
     private final OllamaClient ollamaClient;
@@ -32,6 +33,7 @@ public class IngestionService {
             WebPageExtractor webPageExtractor,
             WebCrawler webCrawler,
             FileExtractor fileExtractor,
+            WebUrlNormalizer webUrlNormalizer,
             ObjectStorageService objectStorageService,
             Chunker chunker,
             OllamaClient ollamaClient,
@@ -43,6 +45,7 @@ public class IngestionService {
         this.webPageExtractor = webPageExtractor;
         this.webCrawler = webCrawler;
         this.fileExtractor = fileExtractor;
+        this.webUrlNormalizer = webUrlNormalizer;
         this.objectStorageService = objectStorageService;
         this.chunker = chunker;
         this.ollamaClient = ollamaClient;
@@ -66,9 +69,10 @@ public class IngestionService {
             Integer maxPages
     ) {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
-        UUID sourceId = repository.createSource(SourceType.WEB, url, url, resolvedSpaceId, user.id());
+        String normalizedUrl = webUrlNormalizer.normalize(url);
+        UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id());
         try {
-            WebDocuments documents = extractWebDocuments(sourceId, url, Boolean.TRUE.equals(recursive), maxDepth, maxPages);
+            WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages);
             IngestResponse response = indexAll(
                     sourceId,
                     resolvedSpaceId,
