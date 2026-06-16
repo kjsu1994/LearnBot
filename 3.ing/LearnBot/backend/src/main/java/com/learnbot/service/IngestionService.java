@@ -4,6 +4,7 @@ import com.learnbot.config.LearnBotProperties;
 import com.learnbot.domain.SourceStatus;
 import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
+import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.repository.DocumentRepository;
 import org.springframework.stereotype.Service;
@@ -70,6 +71,15 @@ public class IngestionService {
 
     public List<DocumentSummary> listDocuments() {
         return repository.listDocuments();
+    }
+
+    public DocumentDetail getDocument(UUID documentId) {
+        DocumentSummary summary = repository.findDocument(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
+        var chunks = repository.listDocumentChunks(documentId);
+        var storedObject = repository.findStoredObjectSummary(summary.sourceId()).orElse(null);
+        var crawlAudits = repository.listCrawlAudits(summary.sourceId());
+        return new DocumentDetail(summary, chunks.size(), storedObject, chunks, crawlAudits);
     }
 
     @Transactional

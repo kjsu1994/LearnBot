@@ -1,6 +1,7 @@
 # LearnBot
 
 LearnBot is a local RAG knowledge workspace for approved web pages and CSV/Excel files.
+Uploaded source files are stored in MinIO and indexed into PostgreSQL/pgvector.
 
 ## Stack
 
@@ -57,12 +58,15 @@ Web ingestion is allow-list based. Configure allowed domains with:
 LEARNBOT_CRAWLER_ALLOWED_DOMAINS=example.com,docs.spring.io,ollama.com
 ```
 
-The current v1 ingests one approved URL at a time. Recursive crawling should be added only after approval, rate limits, robots.txt handling, and audit logging are defined.
+The current v1 ingests one approved URL at a time. Web ingestion uses the allow list, robots.txt checks, basic rate limiting, and crawl audit logs. Recursive crawling is not enabled.
 
 ## API
 
 - `POST /api/sources/web` with `{ "url": "https://example.com" }`
 - `POST /api/sources/files` with multipart field `file`
 - `GET /api/documents`
+- `GET /api/documents/{documentId}`
+- `POST /api/documents/{documentId}/reindex`
+- `DELETE /api/documents/{documentId}`
 - `POST /api/search` with `{ "query": "..." }`
-- `POST /api/rag/ask` with `{ "question": "..." }`
+- `POST /api/rag/ask` with `{ "question": "...", "mode": "qa" }`

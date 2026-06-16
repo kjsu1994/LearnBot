@@ -20,6 +20,6 @@ public class RagController {
 
     @PostMapping("/ask")
     AskResponse ask(@Valid @RequestBody AskRequest request) {
-        return ragService.ask(request.question(), request.filter());
+        return ragService.ask(request.question(), request.filter(), request.mode());
     }
 }

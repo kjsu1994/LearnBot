@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.domain.SourceStatus;
 import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
+import com.learnbot.dto.CrawlAuditSummary;
+import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
+import com.learnbot.dto.StoredObjectSummary;
 import com.learnbot.service.Chunk;
 import com.learnbot.service.StoredObject;
 import com.learnbot.service.StoredSource;
@@ -195,15 +198,65 @@ public class DocumentRepository {
                 JOIN data_sources s ON s.id = d.source_id
                 ORDER BY d.created_at DESC
                 LIMIT 100
-                """, (rs, rowNum) -> new DocumentSummary(
+                """, this::mapDocumentSummary);
+    }
+
+    public Optional<DocumentSummary> findDocument(UUID documentId) {
+        List<DocumentSummary> documents = jdbc.query("""
+                SELECT d.id, d.source_id, s.type, s.status, d.title, d.source_uri, d.content_type, d.created_at
+                FROM documents d
+                JOIN data_sources s ON s.id = d.source_id
+                WHERE d.id = :documentId
+                """, new MapSqlParameterSource().addValue("documentId", documentId), this::mapDocumentSummary);
+        return documents.stream().findFirst();
+    }
+
+    public List<DocumentChunkDetail> listDocumentChunks(UUID documentId) {
+        return jdbc.query("""
+                SELECT id, chunk_index, content, created_at
+                FROM document_chunks
+                WHERE document_id = :documentId
+                ORDER BY chunk_index ASC
+                """, new MapSqlParameterSource().addValue("documentId", documentId), (rs, rowNum) -> new DocumentChunkDetail(
                 rs.getObject("id", UUID.class),
-                rs.getObject("source_id", UUID.class),
-                rs.getString("type"),
-                rs.getString("status"),
-                rs.getString("title"),
-                rs.getString("source_uri"),
-                rs.getString("content_type"),
+                rs.getInt("chunk_index"),
+                rs.getString("content"),
                 rs.getObject("created_at", OffsetDateTime.class)
+        ));
+    }
+
+    public Optional<StoredObjectSummary> findStoredObjectSummary(UUID sourceId) {
+        List<StoredObjectSummary> objects = jdbc.query("""
+                SELECT bucket, original_filename, content_type, size_bytes
+                FROM source_objects
+                WHERE source_id = :sourceId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), (rs, rowNum) -> new StoredObjectSummary(
+                rs.getString("bucket"),
+                rs.getString("original_filename"),
+                rs.getString("content_type"),
+                rs.getLong("size_bytes")
+        ));
+        return objects.stream().findFirst();
+    }
+
+    public List<CrawlAuditSummary> listCrawlAudits(UUID sourceId) {
+        return jdbc.query("""
+                SELECT id, url, host, allowed_domain, robots_allowed, status_code, success, message, started_at, finished_at
+                FROM crawl_audit_logs
+                WHERE source_id = :sourceId
+                ORDER BY started_at DESC
+                LIMIT 10
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), (rs, rowNum) -> new CrawlAuditSummary(
+                rs.getObject("id", UUID.class),
+                rs.getString("url"),
+                rs.getString("host"),
+                rs.getBoolean("allowed_domain"),
+                rs.getObject("robots_allowed", Boolean.class),
+                rs.getObject("status_code", Integer.class),
+                rs.getBoolean("success"),
+                rs.getString("message"),
+                rs.getObject("started_at", OffsetDateTime.class),
+                rs.getObject("finished_at", OffsetDateTime.class)
         ));
     }
 
@@ -278,6 +331,19 @@ public class DocumentRepository {
                 rs.getInt("chunk_index"),
                 rs.getString("content"),
                 rs.getDouble("score")
+        );
+    }
+
+    private DocumentSummary mapDocumentSummary(ResultSet rs, int rowNum) throws SQLException {
+        return new DocumentSummary(
+                rs.getObject("id", UUID.class),
+                rs.getObject("source_id", UUID.class),
+                rs.getString("type"),
+                rs.getString("status"),
+                rs.getString("title"),
+                rs.getString("source_uri"),
+                rs.getString("content_type"),
+                rs.getObject("created_at", OffsetDateTime.class)
         );
     }
 

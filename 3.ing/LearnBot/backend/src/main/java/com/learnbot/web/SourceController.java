@@ -1,6 +1,7 @@
 package com.learnbot.web;
 
 import com.learnbot.dto.DocumentSummary;
+import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.dto.WebIngestRequest;
 import com.learnbot.service.IngestionService;
@@ -40,6 +41,11 @@ public class SourceController {
     @GetMapping("/documents")
     List<DocumentSummary> listDocuments() {
         return ingestionService.listDocuments();
+    }
+
+    @GetMapping("/documents/{documentId}")
+    DocumentDetail getDocument(@PathVariable UUID documentId) {
+        return ingestionService.getDocument(documentId);
     }
 
     @DeleteMapping("/documents/{documentId}")

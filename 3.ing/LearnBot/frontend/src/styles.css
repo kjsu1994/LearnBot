@@ -276,6 +276,19 @@ h3 {
   padding: 12px 14px;
 }
 
+.progress-banner {
+  align-items: center;
+  background: #edf6f1;
+  border: 1px solid #cfe3d8;
+  border-radius: 6px;
+  color: #12634f;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 8px;
+  padding: 11px 14px;
+}
+
 .workspace-grid {
   align-items: start;
   display: grid;
@@ -465,11 +478,18 @@ h3 {
   align-items: center;
   border: 1px solid #e2e8e5;
   border-radius: 8px;
+  cursor: pointer;
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto auto;
   min-height: 58px;
   padding: 11px 12px;
+}
+
+.document-row:hover,
+.document-row.selected {
+  background: #f6faf7;
+  border-color: #b9cbc4;
 }
 
 .document-main {
@@ -547,6 +567,133 @@ h3 {
   border-radius: 8px;
   padding: 18px;
   text-align: center;
+}
+
+.mode-control {
+  background: #f4f7f5;
+  border: 1px solid #dfe6e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.mode-button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #53616a;
+  font-size: 13px;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.mode-button:hover:not(:disabled),
+.mode-button.active {
+  background: #fff;
+  border-color: transparent;
+  box-shadow: 0 1px 4px rgba(24, 33, 42, 0.08);
+  color: #13715f;
+}
+
+.answer-mode {
+  color: #6d7a82;
+  font-size: 12px;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 9px;
+}
+
+.evidence-card {
+  background: #fff;
+  border: 1px solid #dfe8e3;
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.evidence-card p,
+.chunk-card p {
+  color: #34424c;
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.detail-panel {
+  align-self: start;
+}
+
+.muted-panel {
+  background: #fbfcfb;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.detail-grid div,
+.detail-box,
+.chunk-card {
+  border: 1px solid #e2e8e5;
+  border-radius: 8px;
+  padding: 11px 12px;
+}
+
+.detail-grid dt {
+  color: #6d7a82;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.detail-grid dd {
+  color: #27343c;
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.detail-box {
+  display: grid;
+  gap: 5px;
+}
+
+.detail-box span {
+  color: #27343c;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-box small {
+  color: #6d7a82;
+  font-size: 12px;
+}
+
+.chunk-list {
+  display: grid;
+  gap: 9px;
+}
+
+.chunk-card {
+  display: grid;
+  gap: 6px;
+}
+
+.chunk-card strong {
+  color: #13715f;
+  font-size: 12px;
 }
 
 .help-button {
@@ -656,6 +803,11 @@ h3 {
   .inline-control,
   .file-row,
   .document-row {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-control,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 

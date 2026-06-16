@@ -7,6 +7,7 @@ import {
   FileSpreadsheet,
   FileUp,
   Globe,
+  Info,
   Loader2,
   MessageSquare,
   RefreshCw,
@@ -32,14 +33,24 @@ const statusLabels = {
   PROCESSING: '처리 중',
 };
 
+const answerModes = [
+  { value: 'qa', label: '질문 답변' },
+  { value: 'summary', label: '요약' },
+  { value: 'table', label: '표에서 찾기' },
+  { value: 'quote', label: '원문 인용' },
+];
+
 function App() {
   const [documents, setDocuments] = useState([]);
   const [webUrl, setWebUrl] = useState('');
   const [file, setFile] = useState(null);
   const [query, setQuery] = useState('');
   const [question, setQuestion] = useState('');
+  const [answerMode, setAnswerMode] = useState('qa');
   const [searchResults, setSearchResults] = useState([]);
   const [answer, setAnswer] = useState(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState('');
+  const [documentDetail, setDocumentDetail] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
@@ -128,7 +139,7 @@ function App() {
       const response = await fetch(`${apiBase}/api/rag/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, mode: answerMode }),
       });
       await requireOk(response);
       setAnswer(await response.json());
@@ -143,6 +154,10 @@ function App() {
       const response = await fetch(`${apiBase}/api/documents/${documentId}`, { method: 'DELETE' });
       await requireOk(response);
       await refreshDocuments();
+      if (selectedDocumentId === documentId) {
+        setSelectedDocumentId('');
+        setDocumentDetail(null);
+      }
       setSearchResults((current) => current.filter((result) => result.documentId !== documentId));
       if (answer?.citations?.some((result) => result.documentId === documentId)) {
         setAnswer(null);
@@ -154,11 +169,24 @@ function App() {
     await run(`reindex-${documentId}`, async () => {
       const response = await fetch(`${apiBase}/api/documents/${documentId}/reindex`, { method: 'POST' });
       await requireOk(response);
+      const result = await response.json();
       await refreshDocuments();
+      setSelectedDocumentId(result.documentId);
+      await loadDocumentDetail(result.documentId);
+    });
+  }
+
+  async function loadDocumentDetail(documentId) {
+    setSelectedDocumentId(documentId);
+    await run(`detail-${documentId}`, async () => {
+      const response = await fetch(`${apiBase}/api/documents/${documentId}`);
+      await requireOk(response);
+      setDocumentDetail(await response.json());
     });
   }
 
   const loading = (name) => busy === name;
+  const progressMessage = getProgressMessage(busy);
 
   return (
     <main className="shell">
@@ -230,6 +258,7 @@ function App() {
         </header>
 
         {error && <div className="alert">{error}</div>}
+        {progressMessage && <div className="progress-banner"><Loader2 className="spin" size={16} />{progressMessage}</div>}
 
         <section className="workspace-grid">
           <div className="left-column">
@@ -290,7 +319,11 @@ function App() {
               </div>
               <div className="document-list">
                 {latestDocuments.map((doc) => (
-                  <article className="document-row" key={doc.id}>
+                  <article
+                    className={doc.id === selectedDocumentId ? 'document-row selected' : 'document-row'}
+                    key={doc.id}
+                    onClick={() => loadDocumentDetail(doc.id)}
+                  >
                     <div className="document-main">
                       <strong>{doc.title}</strong>
                       <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
@@ -305,7 +338,10 @@ function App() {
                         type="button"
                         title="재색인"
                         disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
-                        onClick={() => reindexDocument(doc.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          reindexDocument(doc.id);
+                        }}
                       >
                         {loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
                       </button>
@@ -314,7 +350,10 @@ function App() {
                         type="button"
                         title="삭제"
                         disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
-                        onClick={() => deleteDocument(doc.id, doc.title)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteDocument(doc.id, doc.title);
+                        }}
                       >
                         {loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                       </button>
@@ -324,6 +363,8 @@ function App() {
                 {documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
               </div>
             </section>
+
+            <DocumentDetailPanel detail={documentDetail} loading={selectedDocumentId && loading(`detail-${selectedDocumentId}`)} />
           </div>
 
           <div className="right-column">
@@ -335,6 +376,18 @@ function App() {
                   <p>색인된 문서를 근거로 답변을 생성합니다.</p>
                 </div>
               </div>
+              <div className="mode-control" aria-label="답변 모드">
+                {answerModes.map((mode) => (
+                  <button
+                    className={answerMode === mode.value ? 'mode-button active' : 'mode-button'}
+                    key={mode.value}
+                    type="button"
+                    onClick={() => setAnswerMode(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
               <textarea
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
@@ -343,7 +396,7 @@ function App() {
               <div className="action-row">
                 <button disabled={!question || loading('ask')}>
                   {loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
-                  답변 생성
+                  {loading('ask') ? '모델 응답 대기 중' : '답변 생성'}
                 </button>
               </div>
               {answer && (
@@ -352,8 +405,9 @@ function App() {
                     <CheckCircle2 size={16} />
                     <strong>답변</strong>
                   </div>
+                  <small className="answer-mode">{getAnswerModeLabel(answer.mode)} 모드</small>
                   <p>{answer.answer}</p>
-                  <ResultList results={answer.citations} compact title="참고 문서" />
+                  <EvidenceList evidence={answer.evidence} />
                 </div>
               )}
             </form>
@@ -431,6 +485,116 @@ function App() {
   );
 }
 
+function DocumentDetailPanel({ detail, loading }) {
+  if (loading) {
+    return (
+      <section className="panel detail-panel">
+        <div className="panel-title">
+          <Info size={18} />
+          <div>
+            <h2>문서 상세</h2>
+            <p>문서 정보를 불러오는 중입니다.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <section className="panel detail-panel muted-panel">
+        <div className="panel-title">
+          <Info size={18} />
+          <div>
+            <h2>문서 상세</h2>
+            <p>문서 목록에서 항목을 선택하면 색인 내용과 원본 정보를 확인할 수 있습니다.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const summary = detail.summary;
+  return (
+    <section className="panel detail-panel">
+      <div className="panel-title">
+        <Info size={18} />
+        <div>
+          <h2>문서 상세</h2>
+          <p>{summary.title}</p>
+        </div>
+      </div>
+
+      <dl className="detail-grid">
+        <div>
+          <dt>소스</dt>
+          <dd>{getSourceLabel(summary.sourceType)}</dd>
+        </div>
+        <div>
+          <dt>상태</dt>
+          <dd><StatusBadge status={summary.sourceStatus} /></dd>
+        </div>
+        <div>
+          <dt>청크</dt>
+          <dd>{detail.chunkCount}개</dd>
+        </div>
+        <div>
+          <dt>생성</dt>
+          <dd>{formatDate(summary.createdAt)}</dd>
+        </div>
+      </dl>
+
+      {detail.storedObject && (
+        <div className="detail-box">
+          <strong>원본 파일</strong>
+          <span>{detail.storedObject.originalFilename}</span>
+          <small>{detail.storedObject.bucket} · {detail.storedObject.contentType} · {formatBytes(detail.storedObject.sizeBytes)}</small>
+        </div>
+      )}
+
+      {!!detail.crawlAudits?.length && (
+        <div className="detail-box">
+          <strong>최근 크롤링</strong>
+          {detail.crawlAudits.slice(0, 3).map((audit) => (
+            <small key={audit.id}>
+              {audit.success ? '성공' : '실패'} · {audit.statusCode ?? '-'} · {audit.message || audit.url}
+            </small>
+          ))}
+        </div>
+      )}
+
+      <div className="chunk-list">
+        <h3>색인된 내용</h3>
+        {detail.chunks.slice(0, 5).map((chunk) => (
+          <article className="chunk-card" key={chunk.id}>
+            <strong>chunk {chunk.chunkIndex + 1}</strong>
+            <p>{chunk.content}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EvidenceList({ evidence }) {
+  if (!evidence?.length) return null;
+  return (
+    <div className="evidence-list">
+      <h3>답변 근거</h3>
+      {evidence.map((item) => (
+        <article className="evidence-card" key={`${item.chunkId}-${item.citationNumber}`}>
+          <div className="result-heading">
+            <strong>[{item.citationNumber}] {item.title}</strong>
+            <span>{formatScore(item.score)}</span>
+          </div>
+          <small>{getSourceLabel(item.sourceType)} · chunk {item.chunkIndex + 1}</small>
+          <p>{item.preview}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function ResultList({ results, compact = false, title }) {
   if (!results?.length) return null;
   return (
@@ -450,6 +614,10 @@ function ResultList({ results, compact = false, title }) {
   );
 }
 
+function getAnswerModeLabel(value) {
+  return answerModes.find((mode) => mode.value === value)?.label ?? '질문 답변';
+}
+
 function StatusBadge({ status }) {
   return <span className={`status status-${String(status).toLowerCase()}`}>{statusLabels[status] ?? status}</span>;
 }
@@ -464,6 +632,14 @@ function formatScore(score) {
   return numericScore.toFixed(3);
 }
 
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (Number.isNaN(bytes)) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function formatDate(value) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('ko-KR', {
@@ -472,6 +648,18 @@ function formatDate(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function getProgressMessage(busy) {
+  if (!busy) return '';
+  if (busy === 'web') return '웹 페이지를 가져와 텍스트를 추출하고 색인하는 중입니다.';
+  if (busy === 'file') return '파일을 업로드하고 원본 저장 후 색인하는 중입니다.';
+  if (busy === 'search') return '색인된 문서에서 관련 내용을 검색하는 중입니다.';
+  if (busy === 'ask') return '문서를 검색하고 로컬 모델 응답을 기다리는 중입니다.';
+  if (busy.startsWith('reindex-')) return '원본 소스를 다시 읽고 문서를 재색인하는 중입니다.';
+  if (busy.startsWith('delete-')) return '문서와 원본 저장 객체를 삭제하는 중입니다.';
+  if (busy.startsWith('detail-')) return '문서 상세 정보를 불러오는 중입니다.';
+  return '요청을 처리하는 중입니다.';
 }
 
 async function requireOk(response) {
