@@ -17,6 +17,12 @@ import java.util.stream.IntStream;
 
 @Service
 public class CodeRagService {
+    private static final int OVERVIEW_CONTEXT_LIMIT = 8;
+    private static final int DEFAULT_CONTEXT_LIMIT = 6;
+    private static final int OVERVIEW_CONTEXT_CHARS = 520;
+    private static final int DEFAULT_CONTEXT_CHARS = 720;
+    private static final int FALLBACK_EXCERPT_CHARS = 180;
+
     private final CodeSearchService searchService;
     private final CodeReferenceService referenceService;
     private final OllamaClient ollamaClient;
@@ -52,10 +58,10 @@ public class CodeRagService {
             );
         }
 
+        List<CodeSearchResult> answerResults = answerContextResults(questionMode, question, results);
         String systemPrompt = """
-                You are LearnBot Code, a private source-code RAG assistant inspired by Sourcegraph Cody.
-                Answer in Korean unless the user asks for another language.
-                Use only the provided source-code context.
+                You are LearnBot Code, a private source-code RAG assistant.
+                Answer in Korean using only the provided source-code context.
                 Do not invent files, classes, methods, or behavior not shown in the context.
                 Always cite evidence with bracket numbers like [1].
                 Mention file path and line range when explaining code.
@@ -63,23 +69,23 @@ public class CodeRagService {
                 Include a short reliability note when evidence is weak or indirect.
                 """ + "\n" + questionMode.instruction();
 
-        String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(results);
+        String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
         } catch (RuntimeException ex) {
-            answer = fallbackAnswer(results);
+            answer = fallbackAnswer(questionMode, question, answerResults);
             llmUnavailable = true;
         }
         if (isLowQualityAnswer(answer, questionMode)) {
             answer = questionMode == CodeQuestionMode.OVERVIEW
-                    ? overviewFallbackAnswer(results)
-                    : fallbackAnswer(results);
+                    ? overviewFallbackAnswer(answerResults)
+                    : fallbackAnswer(questionMode, question, answerResults);
             answerRewritten = true;
         }
-        return new CodeAskResponse(questionMode.value(), answer, buildEvidence(results), confidence(results), diagnostics(results, llmUnavailable, answerRewritten));
+        return new CodeAskResponse(questionMode.value(), answer, buildEvidence(answerResults), confidence(answerResults), diagnostics(results, answerResults, llmUnavailable, answerRewritten));
     }
 
     private int safeLimit(CodeQuestionMode questionMode, Integer limit) {
@@ -124,10 +130,19 @@ public class CodeRagService {
                 .toList();
     }
 
-    private String buildContext(List<CodeSearchResult> results) {
+    private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
+        int limit = questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT;
+        return results.stream()
+                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> answerRelevance(question, questionMode, result)).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private String buildContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
         if (results.isEmpty()) {
             return "No source-code context retrieved.";
         }
+        int maxChars = questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_CHARS : DEFAULT_CONTEXT_CHARS;
         return IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
@@ -138,24 +153,23 @@ public class CodeRagService {
                             + nullable(" method=", result.methodName())
                             + nullable(" control=", result.controlName())
                             + nullable(" event=", result.eventName())
-                            + "\n" + result.content();
+                            + "\n" + codeExcerpt(question, result, maxChars);
                 })
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private String fallbackAnswer(List<CodeSearchResult> results) {
+    private String fallbackAnswer(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
         if (results.isEmpty()) {
             return "LLM 답변을 생성하지 못했고 관련 코드 근거도 찾지 못했습니다.";
         }
-        String sources = IntStream.range(0, results.size())
-                .mapToObj(index -> {
-                    CodeSearchResult result = results.get(index);
-                    return "[" + (index + 1) + "] " + result.filePath()
-                            + ":" + result.lineStart() + "-" + result.lineEnd()
-                            + nullable(" / " + result.chunkType() + " ", result.symbolName());
-                })
-                .collect(Collectors.joining("\n"));
-        return "LLM 답변을 생성하지 못해 검색된 코드 근거 중심으로 반환합니다.\n\n" + sources;
+        return switch (questionMode) {
+            case LOCATE -> locateFallbackAnswer(results);
+            case EXPLAIN_METHOD -> methodFallbackAnswer(question, results);
+            case CALL_FLOW -> flowFallbackAnswer(results);
+            case UI_EVENT -> uiEventFallbackAnswer(results);
+            case IMPACT -> impactFallbackAnswer(results);
+            case OVERVIEW -> overviewFallbackAnswer(results);
+        };
     }
 
     private String overviewFallbackAnswer(List<CodeSearchResult> results) {
@@ -188,6 +202,88 @@ public class CodeRagService {
                 .append(results.size())
                 .append("개 코드 근거를 요약한 것입니다. 저장소 전체 목적을 더 정확히 보려면 README, 설정 파일, 주요 엔트리포인트를 함께 인덱싱하거나 더 구체적인 질문을 추가하는 것이 좋습니다.");
         return answer.toString();
+    }
+
+    private String locateFallbackAnswer(List<CodeSearchResult> results) {
+        String candidates = IntStream.range(0, Math.min(results.size(), 6))
+                .mapToObj(index -> {
+                    CodeSearchResult result = results.get(index);
+                    return "- `" + result.filePath() + "` " + result.lineStart() + "-" + result.lineEnd()
+                            + fallbackSymbolText(result)
+                            + ": " + evidenceSummary(result)
+                            + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "LLM 답변 품질이 낮아 검색 근거 기준으로 후보 위치를 정리합니다.\n\n" + candidates
+                + "\n\n확인 한계: 검색된 코드 조각 기준의 후보입니다. 정확한 진입점은 호출 흐름 탭에서 함께 확인하는 것이 좋습니다.";
+    }
+
+    private String methodFallbackAnswer(String question, List<CodeSearchResult> results) {
+        CodeSearchResult primary = results.stream()
+                .filter(result -> notBlank(result.methodName()) || "method".equals(result.chunkType()))
+                .findFirst()
+                .orElse(results.get(0));
+        String related = IntStream.range(0, Math.min(results.size(), 5))
+                .mapToObj(index -> {
+                    CodeSearchResult result = results.get(index);
+                    return "- `" + result.filePath() + "` " + result.lineStart() + "-" + result.lineEnd()
+                            + fallbackSymbolText(result)
+                            + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "LLM 답변 품질이 낮아 검색 근거 기준으로 메서드 후보를 설명합니다.\n\n"
+                + "가장 직접적인 후보는 `" + primary.filePath() + "` " + primary.lineStart() + "-" + primary.lineEnd()
+                + fallbackSymbolText(primary) + "입니다 [1]. "
+                + "코드 발췌상 `" + safe(primary.methodName(), safe(primary.symbolName(), "해당 심볼"))
+                + "` 주변에서 요청한 동작과 관련된 처리가 확인됩니다: "
+                + trimInline(codeExcerpt(question, primary, FALLBACK_EXCERPT_CHARS)) + " [1]\n\n"
+                + "함께 확인할 근거:\n" + related;
+    }
+
+    private String flowFallbackAnswer(List<CodeSearchResult> results) {
+        List<CodeSearchResult> ordered = results.stream()
+                .sorted(Comparator.comparingInt(this::flowRank).thenComparing(CodeSearchResult::filePath))
+                .limit(6)
+                .toList();
+        String steps = IntStream.range(0, ordered.size())
+                .mapToObj(index -> {
+                    CodeSearchResult result = ordered.get(index);
+                    int citation = results.indexOf(result) + 1;
+                    return (index + 1) + ". " + flowLabel(result) + " `" + result.filePath()
+                            + "` " + result.lineStart() + "-" + result.lineEnd()
+                            + fallbackSymbolText(result)
+                            + " [" + citation + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "LLM 답변 품질이 낮아 검색 근거 기준으로 호출 흐름 후보를 정리합니다.\n\n" + steps
+                + "\n\n확인 한계: 실제 런타임 호출 순서는 검색된 조각만으로는 일부 누락될 수 있습니다. 컨트롤러/핸들러에서 서비스, 저장소 순으로 추가 확인하세요.";
+    }
+
+    private String uiEventFallbackAnswer(List<CodeSearchResult> results) {
+        String events = IntStream.range(0, Math.min(results.size(), 6))
+                .mapToObj(index -> {
+                    CodeSearchResult result = results.get(index);
+                    String eventText = nullable(" control=", result.controlName()) + nullable(" event=", result.eventName());
+                    return "- `" + result.filePath() + "` " + result.lineStart() + "-" + result.lineEnd()
+                            + (eventText.isBlank() ? fallbackSymbolText(result) : eventText)
+                            + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "LLM 답변 품질이 낮아 UI 이벤트 근거를 후보 중심으로 정리합니다.\n\n" + events;
+    }
+
+    private String impactFallbackAnswer(List<CodeSearchResult> results) {
+        String areas = categoryEvidence(results).entrySet().stream()
+                .map(entry -> {
+                    CodeSearchResult result = entry.getValue();
+                    return "- " + entry.getKey() + ": `" + result.filePath() + "` "
+                            + result.lineStart() + "-" + result.lineEnd()
+                            + fallbackSymbolText(result)
+                            + " [" + (results.indexOf(result) + 1) + "]";
+                })
+                .collect(Collectors.joining("\n"));
+        return "LLM 답변 품질이 낮아 검색 근거 기준으로 영향 가능 영역을 정리합니다.\n\n" + areas
+                + "\n\n확인 한계: 영향도는 정적 검색 근거 기준입니다. 실제 변경 전에는 호출 흐름과 테스트 커버리지를 함께 확인해야 합니다.";
     }
 
     private List<CodeEvidence> buildEvidence(List<CodeSearchResult> results) {
@@ -243,15 +339,21 @@ public class CodeRagService {
         return "낮음";
     }
 
-    private List<String> diagnostics(List<CodeSearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+    private List<String> diagnostics(
+            List<CodeSearchResult> results,
+            List<CodeSearchResult> answerResults,
+            boolean llmUnavailable,
+            boolean answerRewritten
+    ) {
         long distinctFiles = results.stream().map(CodeSearchResult::filePath).distinct().count();
         List<String> notes = new ArrayList<>();
-        notes.add("검색된 코드 근거 " + results.size() + "개, 파일 " + distinctFiles + "개를 기반으로 답변했습니다.");
+        notes.add("검색된 코드 근거 " + results.size() + "개, 파일 " + distinctFiles + "개 중 "
+                + answerResults.size() + "개를 답변 컨텍스트로 사용했습니다.");
         if (llmUnavailable) {
-            notes.add("LLM 호출이 실패해 자연어 종합 대신 근거 목록 중심의 fallback 답변을 반환했습니다.");
+            notes.add("LLM 호출이 실패해 검색 근거 기반 fallback 답변을 반환했습니다.");
         }
         if (answerRewritten) {
-            notes.add("LLM 응답이 너무 짧거나 인용이 부족해, 검색 근거 기반 자연어 요약으로 대체했습니다.");
+            notes.add("LLM 응답이 너무 짧거나 인용이 부족해, 검색 근거 기반 답변으로 대체했습니다.");
         }
         if ("낮음".equals(confidence(results))) {
             notes.add("직접적인 정의/호출 근거가 약하므로 후보 파일로 검토해야 합니다.");
@@ -267,7 +369,238 @@ public class CodeRagService {
         if (trimmed.length() < 30) {
             return true;
         }
-        return questionMode == CodeQuestionMode.OVERVIEW && !trimmed.matches("(?s).*\\[\\d+].*");
+        if (!containsCitation(trimmed)) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean containsCitation(String answer) {
+        return answer != null && answer.matches("(?s).*\\[\\d+].*");
+    }
+
+    private double answerRelevance(String question, CodeQuestionMode mode, CodeSearchResult result) {
+        double score = result.score();
+        List<String> terms = primaryQuestionTerms(question);
+        String path = normalizeCodeText(result.filePath());
+        String symbolText = normalizeCodeText(String.join(" ",
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), "")
+        ));
+        String content = normalizeCodeText(result.content());
+
+        for (String term : terms) {
+            if (path.contains(term)) {
+                score += 0.55;
+            }
+            if (symbolText.contains(term)) {
+                score += 0.45;
+            }
+            if (content.contains(term)) {
+                score += 0.12;
+            }
+        }
+        if (isStructured(result.chunkType())) {
+            score += 0.08;
+        }
+        if (mode == CodeQuestionMode.CALL_FLOW) {
+            score += Math.max(0, 0.08 * (5 - flowRank(result)));
+        }
+        if (isLoginQuestion(question) && path.contains("git") && !path.contains("auth") && !path.contains("login")) {
+            score -= 0.6;
+        }
+        return score;
+    }
+
+    private List<String> primaryQuestionTerms(String question) {
+        List<String> terms = new ArrayList<>();
+        addTerms(terms, question);
+        String normalized = normalizeCodeText(question);
+        if (isLoginQuestion(question)) {
+            terms.addAll(List.of("login", "signin", "auth", "authentication", "로그인", "인증"));
+        }
+        if (normalized.contains("인덱") || normalized.contains("index")) {
+            terms.addAll(List.of("index", "indexing", "repository", "chunk", "embedding", "인덱싱"));
+        }
+        if (normalized.contains("오류") || normalized.contains("실패") || normalized.contains("error")) {
+            terms.addAll(List.of("error", "exception", "failed", "failure", "실패", "오류"));
+        }
+        if (normalized.contains("관리자") || normalized.contains("admin")) {
+            terms.addAll(List.of("admin", "관리자", "role", "authority"));
+        }
+        return terms.stream()
+                .map(this::normalizeCodeText)
+                .filter(term -> term.length() >= 2 && !isQuestionStopWord(term))
+                .distinct()
+                .toList();
+    }
+
+    private boolean isLoginQuestion(String question) {
+        String normalized = normalizeCodeText(question);
+        return normalized.contains("로그인") || normalized.contains("login") || normalized.contains("signin");
+    }
+
+    private boolean isQuestionStopWord(String term) {
+        return List.of("관련", "파일", "어디", "있어", "있나요", "어떻게", "동작", "설명", "위치", "찾아", "찾기", "코드").contains(term);
+    }
+
+    private String codeExcerpt(String question, CodeSearchResult result, int maxChars) {
+        String content = result == null ? "" : result.content();
+        String compact = content == null ? "" : content.replaceAll("\\R{3,}", "\n\n").trim();
+        if (compact.length() <= maxChars) {
+            return compact;
+        }
+
+        List<String> lines = compact.lines()
+                .map(String::stripTrailing)
+                .filter(line -> !line.isBlank())
+                .toList();
+        List<String> terms = codeQueryTerms(question, result);
+        Map<Integer, String> selected = new LinkedHashMap<>();
+        for (int index = 0; index < lines.size(); index++) {
+            String normalizedLine = normalizeCodeText(lines.get(index));
+            boolean matches = terms.stream().anyMatch(normalizedLine::contains);
+            if (!matches) {
+                continue;
+            }
+            for (int offset = -1; offset <= 1; offset++) {
+                int selectedIndex = index + offset;
+                if (selectedIndex >= 0 && selectedIndex < lines.size()) {
+                    selected.putIfAbsent(selectedIndex, lines.get(selectedIndex));
+                }
+            }
+            if (selected.size() >= 18) {
+                break;
+            }
+        }
+
+        String excerpt = selected.isEmpty()
+                ? compact.substring(0, Math.min(compact.length(), maxChars))
+                : selected.values().stream().collect(Collectors.joining("\n"));
+        if (excerpt.length() > maxChars) {
+            excerpt = excerpt.substring(0, maxChars);
+        }
+        return excerpt.stripTrailing() + (excerpt.length() < compact.length() ? "\n..." : "");
+    }
+
+    private List<String> codeQueryTerms(String question, CodeSearchResult result) {
+        List<String> terms = new ArrayList<>();
+        addTerms(terms, question);
+        if (result != null) {
+            addTerms(terms, result.filePath());
+            addTerms(terms, result.symbolName());
+            addTerms(terms, result.className());
+            addTerms(terms, result.methodName());
+            addTerms(terms, result.controlName());
+            addTerms(terms, result.eventName());
+        }
+        String normalized = normalizeCodeText(question);
+        if (normalized.contains("로그인") || normalized.contains("login")) {
+            terms.addAll(List.of("login", "signin", "auth", "authentication", "session", "token"));
+        }
+        if (normalized.contains("인덱") || normalized.contains("index")) {
+            terms.addAll(List.of("index", "indexing", "repository", "chunk", "embedding", "job"));
+        }
+        if (normalized.contains("오류") || normalized.contains("실패") || normalized.contains("error")) {
+            terms.addAll(List.of("error", "exception", "failed", "failure", "status", "message"));
+        }
+        if (normalized.contains("호출") || normalized.contains("흐름") || normalized.contains("flow")) {
+            terms.addAll(List.of("controller", "service", "repository", "handler", "request", "response"));
+        }
+        return terms.stream()
+                .map(this::normalizeCodeText)
+                .filter(term -> term.length() >= 2)
+                .distinct()
+                .toList();
+    }
+
+    private void addTerms(List<String> terms, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        for (String token : normalizeCodeText(value).split("\\s+")) {
+            if (token.length() >= 2) {
+                terms.add(token);
+            }
+        }
+    }
+
+    private String normalizeCodeText(String value) {
+        return value == null
+                ? ""
+                : value.replaceAll("([a-z])([A-Z])", "$1 $2")
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^\\p{IsHangul}\\p{IsAlphabetic}\\p{IsDigit}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String fallbackSymbolText(CodeSearchResult result) {
+        if (notBlank(result.methodName())) {
+            return " / method `" + result.methodName() + "`";
+        }
+        if (notBlank(result.className())) {
+            return " / class `" + result.className() + "`";
+        }
+        if (notBlank(result.symbolName())) {
+            return " / symbol `" + result.symbolName() + "`";
+        }
+        return nullable(" / " + result.chunkType() + " ", result.symbolName());
+    }
+
+    private String evidenceSummary(CodeSearchResult result) {
+        if (notBlank(result.methodName())) {
+            return "`" + result.methodName() + "` 메서드 주변 코드가 검색되었습니다";
+        }
+        if (notBlank(result.className())) {
+            return "`" + result.className() + "` 클래스 주변 코드가 검색되었습니다";
+        }
+        if (notBlank(result.chunkType())) {
+            return result.chunkType() + " 코드 조각이 검색되었습니다";
+        }
+        return "관련 코드 조각이 검색되었습니다";
+    }
+
+    private String trimInline(String value) {
+        String compact = value == null ? "" : value.replaceAll("\\s+", " ").trim();
+        if (compact.length() <= FALLBACK_EXCERPT_CHARS) {
+            return compact;
+        }
+        return compact.substring(0, FALLBACK_EXCERPT_CHARS).trim() + "...";
+    }
+
+    private int flowRank(CodeSearchResult result) {
+        String path = result.filePath() == null ? "" : result.filePath().toLowerCase(java.util.Locale.ROOT);
+        if (path.startsWith("frontend/") || path.contains("/view/") || path.contains("/pages/")) {
+            return 0;
+        }
+        if (path.contains("controller") || path.contains("/web/")) {
+            return 1;
+        }
+        if (path.contains("/service/")) {
+            return 2;
+        }
+        if (path.contains("/repository/")) {
+            return 3;
+        }
+        if (path.contains("/config/") || path.contains("/security/")) {
+            return 4;
+        }
+        return 5;
+    }
+
+    private String flowLabel(CodeSearchResult result) {
+        return switch (flowRank(result)) {
+            case 0 -> "화면/요청 진입 후보";
+            case 1 -> "API 컨트롤러 후보";
+            case 2 -> "서비스 처리 후보";
+            case 3 -> "데이터 접근 후보";
+            case 4 -> "설정/보안 처리 후보";
+            default -> "관련 코드 후보";
+        };
     }
 
     private String inferPurpose(List<CodeSearchResult> results) {
@@ -364,6 +697,10 @@ public class CodeRagService {
 
     private boolean notBlank(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String safe(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private String nullable(String prefix, String value) {

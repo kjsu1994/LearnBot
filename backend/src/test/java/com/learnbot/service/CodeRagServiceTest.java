@@ -17,7 +17,9 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 class CodeRagServiceTest {
     @Test
@@ -96,10 +98,84 @@ class CodeRagServiceTest {
         assertThat(response.answer()).contains("검색된 코드 근거 기준");
         assertThat(response.answer()).contains("주요 구성");
         assertThat(response.answer()).contains("[1]");
-        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("자연어 요약으로 대체"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
+    }
+
+    @Test
+    void compressesLongCodeContextBeforeCallingLlm() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        List<CodeSearchResult> results = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(index -> result(
+                        "backend/src/main/java/com/learnbot/service/LoginService" + index + ".java",
+                        "method",
+                        "login" + index,
+                        0.9 - (index * 0.01),
+                        ("public LoginResponse login" + index + "() { authenticate(); issueToken(); }\n"
+                                + "unrelated implementation detail ".repeat(300))
+                ))
+                .toList();
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chat(anyString(), anyString())).thenReturn("로그인은 LoginService 후보 메서드에서 인증과 토큰 발급을 처리합니다 [1].");
+
+        service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "로그인 어떻게 동작해?",
+                "overview",
+                16
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chat(anyString(), promptCaptor.capture());
+        assertThat(promptCaptor.getValue()).contains("login0");
+        assertThat(promptCaptor.getValue()).doesNotContain("[9]");
+        assertThat(promptCaptor.getValue().length()).isLessThan(6500);
+    }
+
+    @Test
+    void locateRewritesUncitedModelAnswerIntoActionableFallback() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult controller = result("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.82);
+        CodeSearchResult serviceResult = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.76);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(controller, serviceResult));
+        when(ollamaClient.chat(anyString(), anyString())).thenReturn("AuthController에 있습니다.");
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "로그인 관련 파일 어디있어?",
+                "locate",
+                10
+        );
+
+        assertThat(response.answer()).contains("후보 위치");
+        assertThat(response.answer()).contains("AuthController.java");
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score) {
+        return result(
+                filePath,
+                chunkType,
+                methodName,
+                score,
+                "File: " + filePath + "\nLines: 10-24\npublic LoginResponse login(...) { return authService.login(...); }"
+        );
+    }
+
+    private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
         return new CodeSearchResult(
                 UUID.randomUUID(),
                 UUID.randomUUID(),
@@ -116,7 +192,7 @@ class CodeRagServiceTest {
                 1,
                 10,
                 24,
-                "File: " + filePath + "\nLines: 10-24\npublic LoginResponse login(...) { return authService.login(...); }",
+                content,
                 score,
                 Map.of("language", "java")
         );
