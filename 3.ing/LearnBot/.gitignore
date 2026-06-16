@@ -1,0 +1,50 @@
+# OS / editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Frontend dependencies, builds, and caches
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# Backend build output
+target/
+backend/target/
+*.class
+
+# Local runtime data and object-store volume mirrors
+postgres-data/
+ollama-data/
+minio-data/
+data/postgres/
+data/ollama/
+data/minio/
+uploads/
+storage/
+
+# Temporary files
+.cache/
+.tmp/
+tmp/
+*.tmp

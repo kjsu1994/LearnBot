@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: learnbot
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/learnbot}
+    username: ${SPRING_DATASOURCE_USERNAME:learnbot}
+    password: ${SPRING_DATASOURCE_PASSWORD:learnbot}
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
+learnbot:
+  crawler:
+    allowed-domains: ${LEARNBOT_CRAWLER_ALLOWED_DOMAINS:example.com}
+    timeout-seconds: ${LEARNBOT_CRAWLER_TIMEOUT_SECONDS:15}
+  chunking:
+    size: ${LEARNBOT_CHUNK_SIZE:1200}
+    overlap: ${LEARNBOT_CHUNK_OVERLAP:150}
+  embedding:
+    dimensions: ${LEARNBOT_EMBEDDING_DIMENSIONS:1024}
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    chat-model: ${LLM_MODEL:${OLLAMA_CHAT_MODEL:gemma4:e2b}}
+    embedding-model: ${EMBEDDING_MODEL:${OLLAMA_EMBEDDING_MODEL:bge-m3}}
+    temperature: ${LLM_TEMPERATURE:0.2}
+  rag:
+    top-k: ${RAG_TOP_K:6}
