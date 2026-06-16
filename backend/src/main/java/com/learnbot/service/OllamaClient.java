@@ -63,15 +63,21 @@ public class OllamaClient {
     }
 
     private List<Double> embedLegacy(String input) {
-        LegacyEmbedResponse response = webClient.post()
-                .uri("/api/embeddings")
-                .bodyValue(Map.of(
-                        "model", properties.getOllama().getEmbeddingModel(),
-                        "prompt", input
-                ))
-                .retrieve()
-                .bodyToMono(LegacyEmbedResponse.class)
-                .block();
+        LegacyEmbedResponse response;
+        try {
+            response = webClient.post()
+                    .uri("/api/embeddings")
+                    .bodyValue(Map.of(
+                            "model", properties.getOllama().getEmbeddingModel(),
+                            "prompt", input
+                    ))
+                    .retrieve()
+                    .bodyToMono(LegacyEmbedResponse.class)
+                    .block();
+        } catch (WebClientResponseException.NotFound ex) {
+            throw new IllegalArgumentException("Ollama embedding model '" + properties.getOllama().getEmbeddingModel()
+                    + "' was not found. Pull the model before indexing.", ex);
+        }
 
         if (response == null || response.embedding() == null || response.embedding().isEmpty()) {
             throw new IllegalArgumentException("Ollama returned no embedding.");

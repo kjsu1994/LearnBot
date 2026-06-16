@@ -223,6 +223,7 @@ public class CodeIndexingService {
             ensureNotCancelled(jobId);
             commitHash = gitWorkspaceService.sync(record, accessToken);
             ensureNotCancelled(jobId);
+            ensureEmbeddingAvailable();
 
             List<CodeFileCandidate> candidates = fileScanner.scan(Path.of(record.localPath()));
             totalFiles = candidates.size();
@@ -349,6 +350,11 @@ public class CodeIndexingService {
                         + ". Recreate the vector column and reindex when changing embedding models.");
             }
         }
+    }
+
+    private void ensureEmbeddingAvailable() {
+        List<List<Double>> embeddings = ollamaClient.embed(List.of("learnbot embedding healthcheck"));
+        validateEmbeddings(embeddings);
     }
 
     private void ensureNotCancelled(UUID jobId) {

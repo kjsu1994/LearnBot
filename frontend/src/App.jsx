@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bot,
@@ -121,6 +121,7 @@ function App() {
   const [fileQuery, setFileQuery] = useState('');
   const [selectedCodeFile, setSelectedCodeFile] = useState(null);
   const [highlightRange, setHighlightRange] = useState(null);
+  const [codeModalOpen, setCodeModalOpen] = useState(false);
 
   const [webUrl, setWebUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -205,8 +206,13 @@ function App() {
     if (!selectedRepositoryId) {
       setCodeFiles([]);
       setSelectedCodeFile(null);
+      setHighlightRange(null);
+      setCodeModalOpen(false);
       return;
     }
+    setSelectedCodeFile(null);
+    setHighlightRange(null);
+    setCodeModalOpen(false);
     refreshJobs(selectedRepositoryId);
     refreshCodeFiles(selectedRepositoryId, fileQuery);
   }, [selectedRepositoryId]);
@@ -260,6 +266,10 @@ function App() {
     setRepositories([]);
     setJobs({});
     setJobFailures({});
+    setCodeFiles([]);
+    setSelectedCodeFile(null);
+    setHighlightRange(null);
+    setCodeModalOpen(false);
   }
 
   async function request(path, options = {}) {
@@ -276,8 +286,10 @@ function App() {
     setError('');
     try {
       await task();
+      return true;
     } catch (err) {
       setError(err.message || '요청을 처리하지 못했습니다.');
+      return false;
     } finally {
       setBusy('');
     }
@@ -473,6 +485,8 @@ function App() {
         setSelectedRepositoryId('');
         setCodeFiles([]);
         setSelectedCodeFile(null);
+        setHighlightRange(null);
+        setCodeModalOpen(false);
         setReferenceResult(null);
       }
       await refreshRepositories();
@@ -487,11 +501,14 @@ function App() {
   }
 
   async function openCodeFile(repositoryId, fileId, range = null) {
-    await run(`code-file-${fileId}`, async () => {
+    setSelectedCodeFile(null);
+    setHighlightRange(range);
+    setCodeModalOpen(true);
+    const opened = await run(`code-file-${fileId}`, async () => {
       const data = await request(`/api/code/repositories/${repositoryId}/files/${fileId}`);
       setSelectedCodeFile(data);
-      setHighlightRange(range);
     });
+    if (!opened) setCodeModalOpen(false);
   }
 
   async function askCode(event) {
@@ -679,6 +696,8 @@ function App() {
           )}
         </div>
 
+        <ScreenGuide activeView={activeView} />
+
         {error && <div className="alert">{error}</div>}
         {progressMessage && <div className="progress-banner"><Loader2 className="spin" size={16} />{progressMessage}</div>}
 
@@ -700,6 +719,8 @@ function App() {
             setFileQuery={setFileQuery}
             selectedCodeFile={selectedCodeFile}
             highlightRange={highlightRange}
+            codeModalOpen={codeModalOpen}
+            setCodeModalOpen={setCodeModalOpen}
             codeQuestion={codeQuestion}
             setCodeQuestion={setCodeQuestion}
             codeMode={codeMode}
@@ -724,6 +745,7 @@ function App() {
             searchCode={searchCode}
             findReferences={findReferences}
             loading={loading}
+            codeFileLoading={busy.startsWith('code-file-')}
           />
         )}
 
@@ -778,8 +800,8 @@ function App() {
 }
 
 function LoginScreen({ onLogin, busy, error }) {
-  const [email, setEmail] = useState('admin@learnbot.local');
-  const [password, setPassword] = useState('learnbot1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   function submit(event) {
     event.preventDefault();
@@ -908,6 +930,41 @@ function Sidebar({
   );
 }
 
+function ScreenGuide({ activeView }) {
+  const guides = {
+    code: {
+      title: '코드 RAG 화면',
+      description: 'Git 저장소를 등록하고 인덱싱한 뒤, 실제 파일 경로와 라인 범위를 근거로 코드 질문에 답합니다.',
+      points: ['저장소 상태가 인덱싱 완료인지 확인', '실패 사유 버튼으로 모델, Git 인증, 파일별 실패 원인 확인', '코드 검색과 정의/참조로 답변 근거 검증'],
+    },
+    docs: {
+      title: '문서 RAG 화면',
+      description: 'PDF, DOCX, Markdown, TXT, CSV, Excel, 웹 문서를 업로드하거나 수집해 사내 위키형 근거로 사용합니다.',
+      points: ['업로드 후 문서 상태가 인덱싱 완료인지 확인', '문서 상세에서 청크가 생성됐는지 확인', '근거가 없으면 답변하지 않는 정책으로 검증'],
+    },
+    admin: {
+      title: '관리자 화면',
+      description: '사내 다중 사용자 운영을 위해 계정, 공간, 감사 로그를 관리합니다.',
+      points: ['공간별로 접근 가능한 자료 분리', '초대 사용자의 시스템/공간 권한 지정', '로그인, 인덱싱, 삭제 같은 핵심 작업 감사'],
+    },
+  };
+  const guide = guides[activeView] || guides.code;
+  return (
+    <section className="screen-guide">
+      <div>
+        <span className="eyebrow">Screen Guide</span>
+        <h2>{guide.title}</h2>
+        <p>{guide.description}</p>
+      </div>
+      <ul>
+        {guide.points.map((point) => (
+          <li key={point}>{point}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function CodeWorkspace(props) {
   const {
     repoForm,
@@ -926,6 +983,8 @@ function CodeWorkspace(props) {
     setFileQuery,
     selectedCodeFile,
     highlightRange,
+    codeModalOpen,
+    setCodeModalOpen,
     codeQuestion,
     setCodeQuestion,
     codeMode,
@@ -949,7 +1008,9 @@ function CodeWorkspace(props) {
     searchCode,
     findReferences,
     loading,
+    codeFileLoading,
   } = props;
+  const activeCodeModeGuide = getCodeModeGuide(codeMode);
 
   return (
     <section className="workspace-grid code-grid">
@@ -1130,7 +1191,16 @@ function CodeWorkspace(props) {
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
           <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
-          <textarea value={codeQuestion} onChange={(event) => setCodeQuestion(event.target.value)} placeholder="예: 로그인 버튼 클릭 흐름은 어디서 처리돼?" />
+          <div className="question-guide">
+            <strong>{activeCodeModeGuide.title}</strong>
+            <p>{activeCodeModeGuide.description}</p>
+            <ul>
+              {activeCodeModeGuide.tips.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+          <textarea value={codeQuestion} onChange={(event) => setCodeQuestion(event.target.value)} placeholder={activeCodeModeGuide.placeholder} />
           <div className="action-row">
             <button disabled={!codeQuestion || loading('code-ask')}>
               {loading('code-ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
@@ -1191,7 +1261,14 @@ function CodeWorkspace(props) {
           {referenceResult && <CodeReferenceResults result={referenceResult} onOpenEvidence={openCodeFile} />}
         </form>
 
-        <CodeFileViewer detail={selectedCodeFile} highlightRange={highlightRange} loading={selectedCodeFile && loading(`code-file-${selectedCodeFile.id}`)} />
+        {codeModalOpen && (
+          <CodeFileModal
+            detail={selectedCodeFile}
+            highlightRange={highlightRange}
+            loading={codeFileLoading}
+            onClose={() => setCodeModalOpen(false)}
+          />
+        )}
       </div>
     </section>
   );
@@ -1725,6 +1802,98 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
   );
 }
 
+function CodeFileModal({ detail, highlightRange, loading, onClose }) {
+  const highlightedLineRef = useRef(null);
+  const lines = detail?.content ? detail.content.split(/\r?\n/) : [];
+  const fileName = detail?.filePath?.split(/[\\/]/).pop() || 'code';
+  const language = detail?.language || 'code';
+  const chunkCount = detail?.chunks?.length || 0;
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose?.();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (loading || !highlightRange?.start || !highlightedLineRef.current) return undefined;
+    const timer = window.setTimeout(() => {
+      highlightedLineRef.current?.scrollIntoView({ block: 'center' });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [detail?.id, highlightRange?.start, highlightRange?.end, loading]);
+
+  return (
+    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+      <section className="code-modal" role="dialog" aria-modal="true" aria-labelledby="code-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="code-modal-header">
+          <div className="code-modal-title">
+            <FileCode2 size={18} />
+            <div>
+              <h2 id="code-modal-title">{fileName}</h2>
+              <p>{detail?.filePath || '코드 파일을 불러오는 중입니다.'}</p>
+            </div>
+          </div>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="code-modal-tabs" aria-hidden="true">
+          <span className="active-tab">{fileName}</span>
+          <span>{language}</span>
+          {highlightRange && <span>lines {highlightRange.start}-{highlightRange.end}</span>}
+        </div>
+
+        <div className="code-modal-body">
+          {loading && (
+            <div className="code-modal-state">
+              <Loader2 className="spin" size={22} />
+              <strong>코드 파일을 불러오는 중입니다.</strong>
+            </div>
+          )}
+
+          {!loading && !detail && (
+            <div className="code-modal-state">
+              <FileCode2 size={22} />
+              <strong>표시할 코드가 없습니다.</strong>
+            </div>
+          )}
+
+          {!loading && detail && (
+            <pre className="ide-code-viewer">
+              <code>
+                {lines.map((line, index) => {
+                  const lineNumber = index + 1;
+                  const highlighted = highlightRange && lineNumber >= highlightRange.start && lineNumber <= highlightRange.end;
+                  return (
+                    <div
+                      className={highlighted ? 'ide-code-line highlighted-line' : 'ide-code-line'}
+                      key={lineNumber}
+                      ref={lineNumber === highlightRange?.start ? highlightedLineRef : null}
+                    >
+                      <span className="ide-line-number">{lineNumber}</span>
+                      <span className="ide-line-content">{line || ' '}</span>
+                    </div>
+                  );
+                })}
+              </code>
+            </pre>
+          )}
+        </div>
+
+        <footer className="code-modal-status">
+          <span>{language}</span>
+          <span>{lines.length} lines</span>
+          <span>{chunkCount} chunks</span>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function CodeFileViewer({ detail, highlightRange, loading }) {
   if (loading) {
     return (
@@ -1793,6 +1962,62 @@ function getAnswerModeLabel(mode) {
 
 function getCodeModeLabel(mode) {
   return codeModes.find((item) => item.value === mode)?.label || '위치 찾기';
+}
+
+function getCodeModeGuide(mode) {
+  const guides = {
+    locate: {
+      title: '위치 찾기 질문 예시',
+      description: '기능이나 화면이 어느 파일, 클래스, 메서드에 구현돼 있는지 찾을 때 사용합니다.',
+      placeholder: '예: GitHub 저장소 인덱싱 실패 사유를 저장하는 로직은 어느 파일과 메서드에 있어?',
+      tips: [
+        '기능명, 화면명, 버튼명, 에러 메시지 중 아는 단어를 함께 적으세요.',
+        '“어디에 있어?”, “어느 파일에서 처리해?”처럼 위치를 직접 물어보면 좋습니다.',
+        '파일명을 일부 알고 있으면 같이 적으면 더 정확합니다.',
+      ],
+    },
+    method: {
+      title: '메서드 설명 질문 예시',
+      description: '특정 메서드가 입력을 받아 어떤 검증, 저장, 호출, 반환을 하는지 설명받을 때 사용합니다.',
+      placeholder: '예: CodeIndexingService.startIndex 메서드는 어떤 순서로 인덱싱 작업을 시작해?',
+      tips: [
+        '클래스명과 메서드명을 같이 적으세요.',
+        '입력값, 예외, 부수효과, DB 업데이트 중 궁금한 관점을 덧붙이세요.',
+        '정확한 메서드명을 모르면 관련 기능명과 “메서드 설명”이라고 적어도 됩니다.',
+      ],
+    },
+    flow: {
+      title: '호출 흐름 질문 예시',
+      description: '컨트롤러에서 서비스, 저장소, 외부 API까지 이어지는 실행 순서를 보고 싶을 때 사용합니다.',
+      placeholder: '예: 저장소 등록 버튼을 누른 뒤 Git clone, 청크 생성, 임베딩 저장까지 호출 흐름을 설명해줘.',
+      tips: [
+        '시작 이벤트와 끝 상태를 같이 적으세요.',
+        '“A부터 B까지”처럼 범위를 지정하면 흐름이 덜 흩어집니다.',
+        'API 경로를 알고 있으면 함께 적으세요.',
+      ],
+    },
+    ui_event: {
+      title: 'UI 이벤트 질문 예시',
+      description: '화면의 버튼, 입력, 탭 변경이 어떤 핸들러와 API 호출로 이어지는지 추적할 때 사용합니다.',
+      placeholder: '예: 코드 RAG 화면에서 실패 사유 버튼을 누르면 어떤 함수와 API가 호출돼?',
+      tips: [
+        '버튼명, 탭명, 화면명을 그대로 적으세요.',
+        '프론트 이벤트와 백엔드 API 연결을 같이 물어보면 좋습니다.',
+        'WPF/WinForms/XAML 코드도 컨트롤명이나 이벤트명을 같이 적으면 찾기 쉽습니다.',
+      ],
+    },
+    impact: {
+      title: '영향 범위 질문 예시',
+      description: '설정, DTO, API, DB 컬럼 변경이 어느 코드와 화면에 영향을 주는지 분석할 때 사용합니다.',
+      placeholder: '예: 임베딩 모델명을 바꾸면 영향을 받는 설정, DB 차원, 재인덱싱 코드는 어디야?',
+      tips: [
+        '바꾸려는 항목과 예상 변경 방향을 같이 적으세요.',
+        '확정 근거와 추정 영역을 나눠달라고 요청하면 검토에 유리합니다.',
+        '마이그레이션, API 계약, 프론트 요청 필드를 함께 확인시키면 좋습니다.',
+      ],
+    },
+  };
+  return guides[mode] || guides.locate;
 }
 
 function formatDate(value) {

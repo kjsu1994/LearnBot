@@ -325,6 +325,52 @@ h3 {
   padding: 11px 14px;
 }
 
+.screen-guide {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(207, 219, 214, 0.9);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(24, 33, 42, 0.06);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.95fr);
+  padding: 16px 18px;
+}
+
+.screen-guide p {
+  color: #53616a;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 5px;
+}
+
+.screen-guide ul {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.screen-guide li {
+  align-items: center;
+  color: #34424c;
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 8px;
+  grid-template-columns: 8px minmax(0, 1fr);
+  line-height: 1.45;
+}
+
+.screen-guide li::before {
+  background: #13715f;
+  border-radius: 999px;
+  content: "";
+  height: 8px;
+  width: 8px;
+}
+
 .workspace-grid {
   align-items: start;
   display: grid;
@@ -467,6 +513,34 @@ h3 {
   line-height: 1.62;
   padding: 14px;
   white-space: pre-wrap;
+}
+
+.question-guide {
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid #dfe8e3;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.question-guide strong {
+  color: #13715f;
+  font-size: 13px;
+}
+
+.question-guide p,
+.question-guide li {
+  color: #53616a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.question-guide ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 17px;
 }
 
 .answer-title {
@@ -902,6 +976,199 @@ h3 {
   background: rgba(47, 163, 127, 0.22);
 }
 
+.code-modal-backdrop {
+  align-items: center;
+  animation: code-modal-fade var(--motion-base) ease both;
+  backdrop-filter: blur(10px);
+  background: rgba(10, 18, 24, 0.58);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 100;
+}
+
+.code-modal {
+  background: #121920;
+  border: 1px solid rgba(160, 177, 188, 0.24);
+  border-radius: 8px;
+  box-shadow: 0 28px 90px rgba(5, 12, 18, 0.46);
+  color: #d8e2e8;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: min(88vh, 920px);
+  max-width: 1180px;
+  min-height: 360px;
+  overflow: hidden;
+  width: min(94vw, 1180px);
+}
+
+.code-modal-header {
+  align-items: center;
+  background: #19232c;
+  border-bottom: 1px solid rgba(160, 177, 188, 0.16);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.code-modal-title {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.code-modal-title svg {
+  color: #6ee7c8;
+  flex: 0 0 auto;
+}
+
+.code-modal-title h2 {
+  color: #f4f7f9;
+  font-size: 15px;
+  line-height: 1.2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-modal-title p {
+  color: #91a3af;
+  font-size: 12px;
+  margin: 3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-modal-title > div {
+  min-width: 0;
+}
+
+.code-modal-close {
+  background: #202c36;
+  border-color: rgba(160, 177, 188, 0.24);
+  color: #d8e2e8;
+  flex: 0 0 auto;
+}
+
+.code-modal-close:hover:not(:disabled) {
+  background: #2c3944;
+  color: #ffffff;
+}
+
+.code-modal-tabs {
+  align-items: end;
+  background: #11181f;
+  border-bottom: 1px solid rgba(160, 177, 188, 0.13);
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0 12px;
+}
+
+.code-modal-tabs span {
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  color: #8ea0aa;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  max-width: 320px;
+  overflow: hidden;
+  padding: 9px 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-modal-tabs .active-tab {
+  background: #17212a;
+  border-color: rgba(160, 177, 188, 0.16);
+  color: #edf4f7;
+}
+
+.code-modal-body {
+  background: #0f171f;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.code-modal-state {
+  align-items: center;
+  color: #aebec8;
+  display: flex;
+  gap: 10px;
+  height: 100%;
+  justify-content: center;
+  min-height: 280px;
+  padding: 24px;
+  text-align: center;
+}
+
+.ide-code-viewer {
+  background:
+    linear-gradient(90deg, #101820 0, #101820 74px, #0f171f 74px, #0f171f 100%);
+  color: #e7edf2;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  height: 100%;
+  line-height: 1.62;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 0 18px;
+}
+
+.ide-code-viewer code {
+  display: block;
+  min-width: max-content;
+}
+
+.ide-code-line {
+  display: grid;
+  grid-template-columns: 74px minmax(max-content, 1fr);
+  min-height: 21px;
+}
+
+.ide-code-line.highlighted-line {
+  background: rgba(31, 154, 126, 0.22);
+  box-shadow: inset 3px 0 0 #6ee7c8;
+}
+
+.ide-line-number {
+  color: #6f818c;
+  padding: 0 16px 0 10px;
+  text-align: right;
+  user-select: none;
+}
+
+.ide-line-content {
+  border-left: 1px solid rgba(160, 177, 188, 0.12);
+  padding: 0 22px 0 14px;
+  white-space: pre;
+}
+
+.code-modal-status {
+  align-items: center;
+  background: #13715f;
+  color: #eafff9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-height: 28px;
+  padding: 5px 12px;
+}
+
+.code-modal-status span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .detail-box span {
   color: #27343c;
   font-weight: 800;
@@ -1034,6 +1301,7 @@ h3 {
   }
 
   .topbar,
+  .screen-guide,
   .inline-control,
   .file-row,
   .document-row,
@@ -1489,6 +1757,16 @@ textarea:hover:not(:disabled),
   }
 }
 
+@keyframes code-modal-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes page-fade {
   from {
     opacity: 0;
@@ -1670,6 +1948,50 @@ textarea:hover:not(:disabled),
 
 .code-viewer div {
   min-height: 18px;
+}
+
+@media (max-width: 720px) {
+  .code-modal-backdrop {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .code-modal {
+    height: calc(100dvh - 20px);
+    min-height: 0;
+    width: 100%;
+  }
+
+  .code-modal-header {
+    padding: 12px;
+  }
+
+  .code-modal-title h2 {
+    font-size: 14px;
+  }
+
+  .code-modal-tabs span {
+    max-width: 220px;
+    padding: 8px 10px;
+  }
+
+  .ide-code-viewer {
+    background:
+      linear-gradient(90deg, #101820 0, #101820 58px, #0f171f 58px, #0f171f 100%);
+    font-size: 12px;
+  }
+
+  .ide-code-line {
+    grid-template-columns: 58px minmax(max-content, 1fr);
+  }
+
+  .ide-line-number {
+    padding: 0 10px 0 6px;
+  }
+
+  .ide-line-content {
+    padding: 0 14px 0 10px;
+  }
 }
 
 @media (max-width: 820px) {
