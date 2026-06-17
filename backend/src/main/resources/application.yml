@@ -65,7 +65,7 @@ learnbot:
   auth:
     bootstrap-admin-email: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:jinsu.kim}
     bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:admin1234}
-    bootstrap-admin-name: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:LearnBot Admin}
+    bootstrap-admin-name: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:런봇 Admin}
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
   transfer:
     export-dir: ${LEARNBOT_EXPORT_DIR:export}

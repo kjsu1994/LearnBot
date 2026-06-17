@@ -536,7 +536,7 @@ public class LearnBotProperties {
         private String bootstrapAdminPassword = "learnbot1234";
 
         @NotBlank
-        private String bootstrapAdminName = "LearnBot Admin";
+        private String bootstrapAdminName = "런봇 Admin";
 
         @Min(1)
         private int sessionHours = 12;

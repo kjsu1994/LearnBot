@@ -2,6 +2,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bot,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
   CheckCircle2,
   Code2,
   Database,
@@ -61,6 +65,7 @@ hljs.registerLanguage('yaml', yaml);
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const tokenKey = 'runbot.session.token';
 const defaultSpaceId = '00000000-0000-0000-0000-000000000001';
+const evidencePreviewLimit = 3;
 
 function readStoredToken() {
   return localStorage.getItem(tokenKey) || sessionStorage.getItem(tokenKey) || '';
@@ -179,6 +184,7 @@ function App() {
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
   const [activeView, setActiveView] = useState('code');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [documents, setDocuments] = useState([]);
   const [repositories, setRepositories] = useState([]);
@@ -793,7 +799,7 @@ function App() {
   }
 
   async function updateAdminSettings(nextSettings) {
-    await run('admin-settings', async () => {
+    return await run('admin-settings', async () => {
       const settings = await request('/api/admin/settings', {
         method: 'PATCH',
         json: nextSettings,
@@ -956,12 +962,14 @@ function App() {
   }
 
   return (
-    <main className="shell">
+    <main className={sidebarCollapsed ? 'shell shell-sidebar-collapsed' : 'shell'}>
       <Sidebar
         user={user}
         spaces={spaces}
         selectedSpaceId={activeSpaceId}
         setSelectedSpaceId={setSelectedSpaceId}
+        collapsed={sidebarCollapsed}
+        setCollapsed={setSidebarCollapsed}
         indexedRepoCount={indexedRepoCount}
         indexedCount={indexedCount}
         codeChunkCount={codeChunkCount}
@@ -1192,22 +1200,28 @@ function Sidebar({
   spaces,
   selectedSpaceId,
   setSelectedSpaceId,
+  collapsed,
+  setCollapsed,
   indexedRepoCount,
   indexedCount,
   codeChunkCount,
   webCount,
   fileCount,
 }) {
+  const userLabel = formatBrandText(user.displayName || user.loginId || user.email);
   return (
-    <aside className="sidebar">
+    <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
       <div className="brand">
         <div className="brand-mark">
           <Bot size={22} />
         </div>
-        <div>
+        <div className="brand-copy">
           <span>런봇</span>
           <small>사내 지식 RAG</small>
         </div>
+        <button className="icon-button sidebar-toggle" type="button" title={collapsed ? '사이드바 펼치기' : '사이드바 접기'} onClick={() => setCollapsed((current) => !current)}>
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
       </div>
 
       <div className="side-section">
@@ -1217,7 +1231,7 @@ function Sidebar({
             <option key={space.id} value={space.id}>{space.name}</option>
           ))}
         </select>
-        <small className="sidebar-note">{user.displayName || user.loginId || user.email} · {user.role}</small>
+        <small className="sidebar-note">{userLabel} · {user.role}</small>
       </div>
 
       <div className="side-section">
@@ -1272,6 +1286,7 @@ function Sidebar({
 }
 
 function ScreenGuide({ activeView }) {
+  const [open, setOpen] = useState(false);
   const guides = {
     code: {
       title: '코드 RAG 화면',
@@ -1291,18 +1306,47 @@ function ScreenGuide({ activeView }) {
   };
   const guide = guides[activeView] || guides.code;
   return (
-    <section className="screen-guide">
-      <div>
+    <section className={open ? 'screen-guide' : 'screen-guide screen-guide-compact'}>
+      <div className="screen-guide-main">
         <span className="eyebrow">Screen Guide</span>
         <h2>{guide.title}</h2>
-        <p>{guide.description}</p>
+        {open && <p>{guide.description}</p>}
       </div>
-      <ul>
-        {guide.points.map((point) => (
-          <li key={point}>{point}</li>
-        ))}
-      </ul>
+      {open && (
+        <ul>
+          {guide.points.map((point) => (
+            <li key={point}>{point}</li>
+          ))}
+        </ul>
+      )}
+      <button className="ghost-button compact-action guide-toggle-button" type="button" onClick={() => setOpen((current) => !current)}>
+        {open ? <ChevronUp size={14} /> : <Info size={14} />}
+        {open ? '도움말 접기' : '도움말'}
+      </button>
     </section>
+  );
+}
+
+function QuestionGuide({ guide }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={open ? 'question-guide question-guide-open' : 'question-guide'}>
+      <button className="guide-toggle" type="button" onClick={() => setOpen((current) => !current)}>
+        <Info size={14} />
+        <span>{guide.title}</span>
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && (
+        <div className="question-guide-body">
+          <p>{guide.description}</p>
+          <ul>
+            {guide.tips.map((tip) => (
+              <li key={tip}>{tip}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1532,15 +1576,7 @@ function CodeWorkspace(props) {
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
           <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
-          <div className="question-guide">
-            <strong>{activeCodeModeGuide.title}</strong>
-            <p>{activeCodeModeGuide.description}</p>
-            <ul>
-              {activeCodeModeGuide.tips.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-          </div>
+          <QuestionGuide guide={activeCodeModeGuide} />
           <textarea
             value={codeQuestion}
             onChange={(event) => setCodeQuestion(event.target.value)}
@@ -1565,19 +1601,10 @@ function CodeWorkspace(props) {
                 <CheckCircle2 size={16} />
                 <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
               </div>
-              {(codeAnswer.confidence || codeAnswer.diagnostics?.length > 0) && (
-                <div className={`confidence-strip confidence-${confidenceClass(codeAnswer.confidence)}`}>
-                  {codeAnswer.confidence && <strong>신뢰도 {codeAnswer.confidence}</strong>}
-                  {codeAnswer.diagnostics?.length > 0 && (
-                    <ul>
-                      {codeAnswer.diagnostics.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              <MarkdownAnswer text={codeAnswer.answer} />
+              <AnswerStatus confidence={codeAnswer.confidence} diagnostics={codeAnswer.diagnostics} />
+              <div className="answer-body">
+                <MarkdownAnswer text={codeAnswer.answer} />
+              </div>
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
           )}
@@ -1745,23 +1772,6 @@ function DocumentWorkspace(props) {
         </section>
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
-        <form className="panel search-panel" onSubmit={props.search}>
-          <div className="panel-title">
-            <Search size={18} />
-            <div>
-              <h2>문서 검색</h2>
-              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
-            </div>
-          </div>
-          <div className="inline-control">
-            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
-            <button disabled={!props.query || props.loading('search')}>
-              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-              검색
-            </button>
-          </div>
-          <ResultList results={props.searchResults} title="검색 결과" />
-        </form>
         {props.documentPreviewOpen && (
           <DocumentPreviewModal
             preview={props.documentPreview}
@@ -1782,15 +1792,7 @@ function DocumentWorkspace(props) {
             </div>
           </div>
           <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
-          <div className="question-guide">
-            <strong>{activeAnswerModeGuide.title}</strong>
-            <p>{activeAnswerModeGuide.description}</p>
-            <ul>
-              {activeAnswerModeGuide.tips.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-          </div>
+          <QuestionGuide guide={activeAnswerModeGuide} />
           <textarea
             value={props.question}
             onChange={(event) => props.setQuestion(event.target.value)}
@@ -1810,22 +1812,30 @@ function DocumentWorkspace(props) {
                 <strong>답변</strong>
               </div>
               <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
-              {(props.answer.confidence || props.answer.diagnostics?.length > 0) && (
-                <div className={`confidence-strip confidence-${confidenceClass(props.answer.confidence)}`}>
-                  {props.answer.confidence && <strong>신뢰도 {props.answer.confidence}</strong>}
-                  {props.answer.diagnostics?.length > 0 && (
-                    <ul>
-                      {props.answer.diagnostics.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              <MarkdownAnswer text={props.answer.answer} />
+              <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
+              <div className="answer-body">
+                <MarkdownAnswer text={props.answer.answer} />
+              </div>
               <EvidenceList evidence={props.answer.evidence} />
             </div>
           )}
+        </form>
+        <form className="panel search-panel" onSubmit={props.search}>
+          <div className="panel-title">
+            <Search size={18} />
+            <div>
+              <h2>문서 검색</h2>
+              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
+            </div>
+          </div>
+          <div className="inline-control">
+            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
+            <button disabled={!props.query || props.loading('search')}>
+              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              검색
+            </button>
+          </div>
+          <ResultList results={props.searchResults} title="검색 결과" />
         </form>
       </div>
     </section>
@@ -1863,6 +1873,7 @@ function AdminWorkspace({
   const [editingSpaceId, setEditingSpaceId] = useState('');
   const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
   const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
+  const [allowedDomainsOpen, setAllowedDomainsOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userEditForm, setUserEditForm] = useState({ loginId: '', displayName: '', role: 'USER' });
   const [passwordUser, setPasswordUser] = useState(null);
@@ -1977,16 +1988,29 @@ function AdminWorkspace({
     setSpaceEditForm({ name: '', description: '' });
   }
 
+  function openAllowedDomains() {
+    setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
+    setAllowedDomainsOpen(true);
+  }
+
+  function closeAllowedDomains() {
+    setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
+    setAllowedDomainsOpen(false);
+  }
+
   async function submitAllowedDomains(event) {
     event.preventDefault();
     const allowedDomains = allowedDomainText
       .split(/[,\n]+/)
       .map((item) => item.trim())
       .filter(Boolean);
-    await updateAdminSettings({
+    const saved = await updateAdminSettings({
       respectRobotsTxt: adminSettings?.respectRobotsTxt ?? true,
       allowedDomains,
     });
+    if (saved) {
+      setAllowedDomainsOpen(false);
+    }
   }
 
   async function submitLlmSettings(event) {
@@ -2029,6 +2053,8 @@ function AdminWorkspace({
   }
 
   const transferSpaceName = spaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
+  const allowedDomains = adminSettings?.allowedDomains || [];
+  const allowedDomainPreview = allowedDomains.slice(0, 6);
 
   return (
     <section className="workspace-grid">
@@ -2061,27 +2087,28 @@ function AdminWorkspace({
               </small>
             </span>
           </label>
-          <form className="stack admin-url-form" onSubmit={submitAllowedDomains}>
-            <label htmlFor="allowed-domains">허용 URL / 도메인</label>
-            <textarea
-              id="allowed-domains"
-              value={allowedDomainText}
-              onChange={(event) => setAllowedDomainText(event.target.value)}
-              placeholder={'example.com\nhttps://docs.example.com/guide\nintranet.local'}
-              spellCheck="false"
-            />
-            <small className="field-help">
-              한 줄에 하나씩 입력하거나 쉼표로 구분하세요. 전체 URL을 입력해도 호스트만 저장됩니다.
-              예: `https://docs.example.com/guide` → `docs.example.com`.
-              등록한 도메인과 그 하위 도메인만 웹 인덱싱할 수 있습니다.
-            </small>
+          <div className="allowed-domain-card">
+            <div>
+              <strong>허용 URL / 도메인</strong>
+              <small>{allowedDomains.length ? `${allowedDomains.length}개 등록됨` : '등록된 허용 도메인이 없습니다.'}</small>
+            </div>
+            {allowedDomains.length > 0 ? (
+              <div className="allowed-domain-chips">
+                {allowedDomainPreview.map((domain) => (
+                  <span key={domain} title={domain}>{domain}</span>
+                ))}
+                {allowedDomains.length > allowedDomainPreview.length && <span>+{allowedDomains.length - allowedDomainPreview.length}</span>}
+              </div>
+            ) : (
+              <p className="field-help">허용 목록을 등록하면 해당 도메인과 하위 도메인만 웹 인덱싱할 수 있습니다.</p>
+            )}
             <div className="action-row">
-              <button disabled={!allowedDomainText.trim() || loading('admin-settings')}>
-                {loading('admin-settings') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
-                허용 목록 저장
+              <button className="ghost-button" type="button" disabled={loading('admin-settings')} onClick={openAllowedDomains}>
+                <Globe size={16} />
+                허용 목록 편집
               </button>
             </div>
-          </form>
+          </div>
         </section>
 
         <form className="panel" onSubmit={submitLlmSettings}>
@@ -2247,7 +2274,7 @@ function AdminWorkspace({
             {users.map((item) => (
               <article className="document-row" key={item.id}>
                 <div className="document-main">
-                  <strong>{item.displayName}</strong>
+                  <strong>{formatBrandText(item.displayName)}</strong>
                   <small>{item.loginId || item.email}</small>
                   <small>{item.role === 'ADMIN' ? '전체 공간 접근' : `${item.spaces?.length || 0}개 공간 권한`}</small>
                 </div>
@@ -2277,7 +2304,7 @@ function AdminWorkspace({
                     danger
                     title={item.id === currentUser?.id ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'}
                     disabled={item.id === currentUser?.id || loading(`user-delete-${item.id}`)}
-                    onClick={() => deleteAdminUser(item.id, item.displayName)}
+                    onClick={() => deleteAdminUser(item.id, formatBrandText(item.displayName))}
                   >
                     {loading(`user-delete-${item.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                   </IconButton>
@@ -2564,14 +2591,53 @@ function AdminWorkspace({
           </form>
         </AdminUserModal>
       )}
+      {allowedDomainsOpen && (
+        <AdminUserModal
+          title="허용 URL / 도메인 편집"
+          subtitle={`${allowedDomains.length}개 등록됨`}
+          icon={<Globe size={18} />}
+          className="allowed-domain-modal"
+          bodyClassName="allowed-domain-modal-body"
+          onClose={closeAllowedDomains}
+        >
+          <form className="admin-modal-form allowed-domain-form" onSubmit={submitAllowedDomains}>
+            <div className="allowed-domain-editor-head">
+              <strong>웹 인덱싱 허용 목록</strong>
+              <small>
+                한 줄에 하나씩 입력하거나 쉼표로 구분하세요. 전체 URL을 입력해도 서버에서 호스트만 저장합니다.
+              </small>
+            </div>
+            <textarea
+              id="allowed-domains-modal"
+              value={allowedDomainText}
+              onChange={(event) => setAllowedDomainText(event.target.value)}
+              placeholder={'example.com\nhttps://docs.example.com/guide\nintranet.local'}
+              spellCheck="false"
+              autoFocus
+            />
+            <small className="field-help">
+              예: `https://docs.example.com/guide` → `docs.example.com`. 등록한 도메인과 그 하위 도메인만 웹 인덱싱할 수 있습니다.
+            </small>
+            <div className="allowed-domain-footer">
+              <button className="ghost-button" type="button" disabled={loading('admin-settings')} onClick={closeAllowedDomains}>
+                취소
+              </button>
+              <button disabled={!allowedDomainText.trim() || loading('admin-settings')}>
+                {loading('admin-settings') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+                허용 목록 저장
+              </button>
+            </div>
+          </form>
+        </AdminUserModal>
+      )}
     </section>
   );
 }
 
-function AdminUserModal({ title, subtitle, icon, children, onClose }) {
+function AdminUserModal({ title, subtitle, icon, children, onClose, className = '', bodyClassName = '' }) {
   return (
     <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
-      <section className="code-modal document-preview-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="admin-user-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className={`code-modal document-preview-modal admin-user-modal ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby="admin-user-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
             {icon}
@@ -2584,7 +2650,7 @@ function AdminUserModal({ title, subtitle, icon, children, onClose }) {
             <X size={18} />
           </button>
         </header>
-        <div className="admin-user-modal-body">
+        <div className={`admin-user-modal-body ${bodyClassName}`.trim()}>
           {children}
         </div>
       </section>
@@ -2676,6 +2742,10 @@ function formatSelectedFiles(files = []) {
   if (!files.length) return '파일 선택';
   if (files.length === 1) return files[0].name;
   return `${files.length}개 파일 선택됨`;
+}
+
+function formatBrandText(value) {
+  return String(value || '').replace(/LearnBot/g, '런봇');
 }
 
 function submitFormOnShortcut(event, canSubmit) {
@@ -2774,6 +2844,39 @@ function ResultList({ results, title }) {
         </article>
       ))}
       {!results.length && <p className="empty">{title}가 없습니다.</p>}
+    </div>
+  );
+}
+
+function AnswerStatus({ confidence, diagnostics = [] }) {
+  const [open, setOpen] = useState(false);
+  const items = diagnostics || [];
+  if (!confidence && !items.length) return null;
+  const className = confidenceClass(confidence);
+  const showPreview = items.length > 0 && (
+    className === 'low'
+    || items.some((item) => /오류|실패|부족|대체|낮아|invalid|failed|fallback/i.test(item))
+  );
+
+  return (
+    <div className={`confidence-strip confidence-${className}`}>
+      <div className="confidence-summary">
+        {confidence && <strong>신뢰도 {confidence}</strong>}
+        {items.length > 0 && (
+          <button className="ghost-button compact-action confidence-toggle" type="button" onClick={() => setOpen((current) => !current)}>
+            {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {open ? '진단 접기' : `진단 ${items.length}개 보기`}
+          </button>
+        )}
+      </div>
+      {!open && showPreview && <small className="diagnostic-preview">{items[0]}</small>}
+      {open && items.length > 0 && (
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -2902,55 +3005,89 @@ function renderInlineMarkdown(text = '', keyPrefix = 'md') {
 }
 
 function EvidenceList({ evidence = [] }) {
+  const [expanded, setExpanded] = useState(false);
+  const evidenceKey = evidence.map((item) => item.chunkId || item.citationNumber).join('|');
+  useEffect(() => {
+    setExpanded(false);
+  }, [evidenceKey]);
   if (!evidence.length) return <p className="empty compact-empty">표시할 근거가 없습니다.</p>;
+  const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
+  const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
   return (
     <div className="evidence-section">
       <div className="evidence-header">
         <strong>근거 문서</strong>
-        <small>{evidence.length}개</small>
+        <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
       </div>
       <div className="evidence-list document-evidence-scroll" tabIndex={0}>
-        {evidence.map((item) => (
+        {visibleEvidence.map((item) => (
           <article className="evidence-card" key={`${item.citationNumber}-${item.chunkId}`}>
-            <strong>[{item.citationNumber}] {item.title}</strong>
-            <small>{item.sourceUri} · chunk {item.chunkIndex}</small>
+            <strong title={item.title}>[{item.citationNumber}] {item.title}</strong>
+            <small title={item.sourceUri}>{item.sourceUri} · chunk {item.chunkIndex}</small>
             <p>{item.preview}</p>
           </article>
         ))}
       </div>
+      {evidence.length > evidencePreviewLimit && (
+        <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 ${evidence.length}개 보기`}
+          {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
+        </button>
+      )}
     </div>
   );
 }
 
 function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
+  const [expanded, setExpanded] = useState(false);
+  const evidenceKey = evidence.map((item) => item.chunkId || item.filePath || item.citationNumber).join('|');
+  useEffect(() => {
+    setExpanded(false);
+  }, [evidenceKey]);
   if (!evidence.length) return <p className="empty compact-empty">표시할 코드 근거가 없습니다.</p>;
+  const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
+  const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
   return (
-    <div className="evidence-list">
-      {evidence.map((item) => {
-        const isCommitDiff = item.metadata?.kind === 'commit_diff';
-        const canOpen = Boolean(item.repositoryId && item.fileId);
-        const range = item.lineStart > 0
-          ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
-          : null;
-        const metaText = isCommitDiff
-          ? `${item.metadata?.changeType || item.chunkType} · +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
-          : `${item.lineStart}-${item.lineEnd} · ${item.chunkType}`;
-        return (
-          <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
-            <div className="result-heading">
-              <strong>[{item.citationNumber}] {item.filePath}</strong>
-              {canOpen && (
-                <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
-                  <Eye size={14} />
-                  열기
-                </button>
-              )}
-            </div>
-            <small>{metaText}</small>
-            <p>{item.preview}</p>
-          </article>
-        );
-      })}
+    <div className="evidence-section">
+      <div className="evidence-header">
+        <strong>코드 근거</strong>
+        <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
+      </div>
+      <div className="evidence-list">
+        {visibleEvidence.map((item) => {
+          const isCommitDiff = item.metadata?.kind === 'commit_diff';
+          const canOpen = Boolean(item.repositoryId && item.fileId);
+          const range = item.lineStart > 0
+            ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
+            : null;
+          const metaText = isCommitDiff
+            ? `${item.metadata?.changeType || item.chunkType} · +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
+            : `${item.lineStart}-${item.lineEnd} · ${item.chunkType}`;
+          return (
+            <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
+              <div className="result-heading">
+                <strong title={item.filePath}>[{item.citationNumber}] {item.filePath}</strong>
+                {canOpen && (
+                  <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
+                    <Eye size={14} />
+                    열기
+                  </button>
+                )}
+              </div>
+              <small>{metaText}</small>
+              <p>{item.preview}</p>
+            </article>
+          );
+        })}
+      </div>
+      {evidence.length > evidencePreviewLimit && (
+        <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 ${evidence.length}개 보기`}
+          {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
+        </button>
+      )}
     </div>
   );
 }
