@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { AlertTriangle, CheckCircle2, Eye, FileCode2, GitBranch, GitPullRequest, Info, Loader2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileCode2, GitBranch, GitPullRequest, Info, Loader2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';

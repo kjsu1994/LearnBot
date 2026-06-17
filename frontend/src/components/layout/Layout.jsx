@@ -119,7 +119,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       <AnimatedSection className="home-hero" delay={0.04}>
         <div className="home-hero-copy">
           <span className="home-kicker">CREATE KNOWLEDGE SYSTEM</span>
-          <h1>사내 지식<br />런봇 워크스페이스</h1>
+          <h1>사내 워크스페이스</h1>
           <p>
             코드, 문서, 관리자 운영을 분리된 경로로 정리하고,
             팀별 공간에서 검색 가능한 RAG 지식 기반을 운영합니다.
