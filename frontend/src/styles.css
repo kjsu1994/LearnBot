@@ -2529,6 +2529,10 @@ textarea:hover:not(:disabled),
   margin-top: 8px;
 }
 
+.login-remember {
+  margin: 2px 0 4px;
+}
+
 .dark-select {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.18);

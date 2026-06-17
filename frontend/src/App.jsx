@@ -62,6 +62,20 @@ const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const tokenKey = 'runbot.session.token';
 const defaultSpaceId = '00000000-0000-0000-0000-000000000001';
 
+function readStoredToken() {
+  return localStorage.getItem(tokenKey) || sessionStorage.getItem(tokenKey) || '';
+}
+
+function storeSessionToken(nextToken, rememberLogin) {
+  localStorage.removeItem(tokenKey);
+  sessionStorage.removeItem(tokenKey);
+  if (!nextToken) {
+    return;
+  }
+  const storage = rememberLogin ? localStorage : sessionStorage;
+  storage.setItem(tokenKey, nextToken);
+}
+
 const sourceLabels = {
   FILE: '파일',
   WEB: '웹',
@@ -159,7 +173,7 @@ async function responseMessage(response) {
 }
 
 function App() {
-  const [token, setToken] = useState(() => localStorage.getItem(tokenKey) || '');
+  const [token, setToken] = useState(readStoredToken);
   const [user, setUser] = useState(null);
   const [spaces, setSpaces] = useState([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
@@ -337,6 +351,7 @@ function App() {
 
   function clearSession() {
     localStorage.removeItem(tokenKey);
+    sessionStorage.removeItem(tokenKey);
     setToken('');
     setUser(null);
     setSpaces([]);
@@ -406,11 +421,12 @@ function App() {
     setError('');
     setBusy('login');
     try {
+      const { rememberLogin, ...loginPayload } = credentials;
       const data = await fetchJson('/api/auth/login', {
         method: 'POST',
-        json: credentials,
+        json: loginPayload,
       });
-      localStorage.setItem(tokenKey, data.token);
+      storeSessionToken(data.token, Boolean(rememberLogin));
       applySession(data, data.token);
     } catch (err) {
       setError(err.message || '로그인에 실패했습니다.');
@@ -1127,10 +1143,11 @@ function App() {
 function LoginScreen({ onLogin, busy, error }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(false);
 
   function submit(event) {
     event.preventDefault();
-    onLogin({ loginId, password });
+    onLogin({ loginId, password, rememberLogin });
   }
 
   return (
@@ -1156,6 +1173,10 @@ function LoginScreen({ onLogin, busy, error }) {
           <input id="login-id" value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="off" spellCheck="false" />
           <label htmlFor="login-password">비밀번호</label>
           <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
+          <label className="checkbox-row login-remember" htmlFor="login-remember">
+            <input id="login-remember" type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} />
+            자동 로그인
+          </label>
           <button disabled={!loginId || !password || busy}>
             {busy ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />}
             로그인
