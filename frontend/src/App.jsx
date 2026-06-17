@@ -66,6 +66,12 @@ const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const tokenKey = 'runbot.session.token';
 const defaultSpaceId = '00000000-0000-0000-0000-000000000001';
 const evidencePreviewLimit = 3;
+const routePaths = {
+  home: '/',
+  code: '/code',
+  docs: '/docs',
+  admin: '/admin',
+};
 
 function readStoredToken() {
   return localStorage.getItem(tokenKey) || sessionStorage.getItem(tokenKey) || '';
@@ -79,6 +85,20 @@ function storeSessionToken(nextToken, rememberLogin) {
   }
   const storage = rememberLogin ? localStorage : sessionStorage;
   storage.setItem(tokenKey, nextToken);
+}
+
+function normalizeRoute(pathname = '/') {
+  const cleanPath = String(pathname || '/').replace(/\/+$/, '') || '/';
+  if (Object.values(routePaths).includes(cleanPath)) {
+    return cleanPath;
+  }
+  return routePaths.home;
+}
+
+function routeToView(pathname) {
+  if (pathname === routePaths.docs) return 'docs';
+  if (pathname === routePaths.admin) return 'admin';
+  return 'code';
 }
 
 const sourceLabels = {
@@ -183,7 +203,8 @@ function App() {
   const [spaces, setSpaces] = useState([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
-  const [activeView, setActiveView] = useState('code');
+  const [routePath, setRoutePath] = useState(() => normalizeRoute(window.location.pathname));
+  const [activeView, setActiveView] = useState(() => routeToView(normalizeRoute(window.location.pathname)));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [documents, setDocuments] = useState([]);
@@ -345,6 +366,25 @@ function App() {
   const codeChunkCount = repositories.reduce((sum, repo) => sum + Number(repo.activeChunkCount || 0), 0);
   const webCount = documents.filter((doc) => doc.sourceType === 'WEB').length;
   const fileCount = documents.length - webCount;
+
+  useEffect(() => {
+    function handleRouteChange() {
+      setRoutePath(normalizeRoute(window.location.pathname));
+    }
+    window.addEventListener('popstate', handleRouteChange);
+    return () => window.removeEventListener('popstate', handleRouteChange);
+  }, []);
+
+  useEffect(() => {
+    setActiveView(routeToView(routePath));
+  }, [routePath]);
+
+  useEffect(() => {
+    if (user && routePath === routePaths.admin && user.role !== 'ADMIN') {
+      navigateTo(routePaths.code);
+    }
+  }, [user?.role, routePath]);
+
   function applySession(data, nextToken = token) {
     setToken(nextToken || data.token || '');
     setUser(data.user);
@@ -421,6 +461,14 @@ function App() {
     if (!activeSpaceId) return path;
     const separator = path.includes('?') ? '&' : '?';
     return `${path}${separator}spaceId=${encodeURIComponent(activeSpaceId)}`;
+  }
+
+  function navigateTo(path) {
+    const nextPath = normalizeRoute(path);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setRoutePath(nextPath);
   }
 
   async function login(credentials) {
@@ -948,6 +996,10 @@ function App() {
   const loading = (name) => busy === name;
   const progressMessage = getProgressMessage(busy);
 
+  if (routePath === routePaths.home) {
+    return <HomePage user={user} bootstrapping={bootstrapping} navigateTo={navigateTo} logout={logout} />;
+  }
+
   if (bootstrapping) {
     return (
       <div className="boot-screen">
@@ -1003,16 +1055,16 @@ function App() {
         </header>
 
         <div className={user.role === 'ADMIN' ? 'view-tabs three-tabs' : 'view-tabs'} aria-label="작업 영역">
-          <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('code')}>
+          <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.code)}>
             <Code2 size={16} />
             코드
           </button>
-          <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('docs')}>
+          <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.docs)}>
             <Database size={16} />
             문서
           </button>
           {user.role === 'ADMIN' && (
-            <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('admin')}>
+            <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.admin)}>
               <ShieldCheck size={16} />
               관리자
             </button>
@@ -1143,6 +1195,133 @@ function App() {
             loading={loading}
           />
         )}
+      </section>
+    </main>
+  );
+}
+
+function HomePage({ user, bootstrapping, navigateTo, logout }) {
+  const featureCards = [
+    {
+      path: routePaths.code,
+      icon: <Code2 size={22} />,
+      title: 'Code RAG',
+      eyebrow: 'CODE',
+      description: '저장소를 인덱싱하고 최신 커밋, 호출 흐름, UI 이벤트를 코드 근거와 함께 확인합니다.',
+      metric: 'Git · Commit · Trace',
+    },
+    {
+      path: routePaths.docs,
+      icon: <Database size={22} />,
+      title: 'Document RAG',
+      eyebrow: 'DOCS',
+      description: 'PDF, 엑셀, 웹 문서를 사내 지식으로 축적하고 원문 근거 기반 답변을 생성합니다.',
+      metric: 'PDF · Excel · Web',
+    },
+    {
+      path: routePaths.admin,
+      icon: <ShieldCheck size={22} />,
+      title: 'Admin Console',
+      eyebrow: 'ADMIN',
+      description: '사용자, 공간, 크롤링 정책, 모델 설정, RAG 데이터 이관을 한 곳에서 관리합니다.',
+      metric: 'Users · Spaces · Audit',
+    },
+  ];
+
+  return (
+    <main className="home-shell">
+      <header className="home-nav">
+        <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
+          <span className="home-brand-mark"><Bot size={20} /></span>
+          <span>
+            <strong>런봇</strong>
+            <small>Private Knowledge RAG</small>
+          </span>
+        </button>
+        <nav aria-label="런봇 주요 영역">
+          <button type="button" onClick={() => navigateTo(routePaths.code)}>코드</button>
+          <button type="button" onClick={() => navigateTo(routePaths.docs)}>문서</button>
+          <button type="button" onClick={() => navigateTo(routePaths.admin)}>관리자</button>
+        </nav>
+        <div className="home-nav-actions">
+          {bootstrapping && <Loader2 className="spin" size={16} />}
+          {user ? (
+            <button className="ghost-button" type="button" onClick={logout}>
+              <LogOut size={15} />
+              로그아웃
+            </button>
+          ) : (
+            <button className="ghost-button" type="button" onClick={() => navigateTo(routePaths.code)}>
+              <LockKeyhole size={15} />
+              로그인
+            </button>
+          )}
+        </div>
+      </header>
+
+      <section className="home-hero">
+        <div className="home-hero-copy">
+          <span className="home-kicker">CREATE KNOWLEDGE SYSTEM</span>
+          <h1>사내 지식<br />런봇 워크스페이스</h1>
+          <p>
+            코드, 문서, 관리자 운영을 분리된 경로로 정리하고,
+            팀별 공간에서 검색 가능한 RAG 지식 기반을 운영합니다.
+          </p>
+          <div className="home-hero-actions">
+            <button type="button" onClick={() => navigateTo(routePaths.code)}>
+              <Code2 size={17} />
+              코드 RAG 시작
+            </button>
+            <button className="ghost-button" type="button" onClick={() => navigateTo(routePaths.docs)}>
+              <Database size={17} />
+              문서 지식 보기
+            </button>
+          </div>
+        </div>
+        <div className="home-visual" aria-hidden="true">
+          <div className="home-orbit home-orbit-one" />
+          <div className="home-orbit home-orbit-two" />
+          <div className="home-visual-core">
+            <Bot size={44} />
+            <span>RUNBOT</span>
+          </div>
+          <div className="home-floating-chip chip-code">CODE</div>
+          <div className="home-floating-chip chip-docs">DOCS</div>
+          <div className="home-floating-chip chip-admin">ADMIN</div>
+        </div>
+      </section>
+
+      <section className="home-marquee" aria-label="런봇 핵심 가치">
+        <span>RUNBOT</span>
+        <span>KNOWLEDGE</span>
+        <span>GROUNDING</span>
+        <span>WORKSPACE</span>
+        <span>RUNBOT</span>
+      </section>
+
+      <section className="home-feature-grid" aria-label="런봇 기능 진입">
+        {featureCards.map((card) => (
+          <button className="home-feature-card" type="button" key={card.path} onClick={() => navigateTo(card.path)}>
+            <span className="home-feature-eyebrow">{card.eyebrow}</span>
+            <span className="home-feature-icon">{card.icon}</span>
+            <strong>{card.title}</strong>
+            <p>{card.description}</p>
+            <small>{card.metric}</small>
+          </button>
+        ))}
+      </section>
+
+      <section className="home-proof">
+        <div>
+          <span className="home-kicker">OPERATING MODEL</span>
+          <h2>팀별 복제와 사내 운영을 고려한 구조</h2>
+        </div>
+        <div className="home-proof-list">
+          <span>공간별 데이터 분리</span>
+          <span>근거 기반 답변</span>
+          <span>권한과 감사 로그</span>
+          <span>Export / Import 이관</span>
+        </div>
       </section>
     </main>
   );
