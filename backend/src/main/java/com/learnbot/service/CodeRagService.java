@@ -4,6 +4,7 @@ import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.CodeSearchResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -27,19 +28,32 @@ public class CodeRagService {
 
     private final CodeSearchService searchService;
     private final CodeReferenceService referenceService;
+    private final CommitInsightService commitInsightService;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
 
+    @Autowired
     public CodeRagService(
             CodeSearchService searchService,
             CodeReferenceService referenceService,
+            CommitInsightService commitInsightService,
             OllamaClient ollamaClient,
             LearnBotProperties properties
     ) {
         this.searchService = searchService;
         this.referenceService = referenceService;
+        this.commitInsightService = commitInsightService;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
+    }
+
+    CodeRagService(
+            CodeSearchService searchService,
+            CodeReferenceService referenceService,
+            OllamaClient ollamaClient,
+            LearnBotProperties properties
+    ) {
+        this(searchService, referenceService, null, ollamaClient, properties);
     }
 
     public CodeAskResponse ask(UUID repositoryId, String question, String mode, Integer limit) {
@@ -47,6 +61,9 @@ public class CodeRagService {
     }
 
     public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
+        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
+            return commitInsightService.answer(repositoryId, question);
+        }
         CodeQuestionMode questionMode = CodeQuestionMode.from(mode);
         int safeLimit = safeLimit(questionMode, limit);
         List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);

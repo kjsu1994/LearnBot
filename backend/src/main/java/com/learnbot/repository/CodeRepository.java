@@ -378,6 +378,35 @@ public class CodeRepository {
         });
     }
 
+    public Map<String, UUID> findActiveFileIdsByPath(UUID repositoryId, List<String> filePaths) {
+        if (repositoryId == null || filePaths == null || filePaths.isEmpty()) {
+            return Map.of();
+        }
+        List<String> normalizedPaths = filePaths.stream()
+                .filter(path -> path != null && !path.isBlank())
+                .distinct()
+                .toList();
+        if (normalizedPaths.isEmpty()) {
+            return Map.of();
+        }
+
+        return jdbc.query("""
+                SELECT id, file_path
+                FROM code_files
+                WHERE repository_id = :repositoryId
+                  AND active
+                  AND file_path IN (:filePaths)
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("filePaths", normalizedPaths), rs -> {
+            Map<String, UUID> fileIds = new java.util.LinkedHashMap<>();
+            while (rs.next()) {
+                fileIds.put(rs.getString("file_path"), rs.getObject("id", UUID.class));
+            }
+            return fileIds;
+        });
+    }
+
     public UUID copyActiveFileToIndex(UUID repositoryId, UUID oldFileId, UUID newFileId, UUID indexVersion) {
         int files = jdbc.update("""
                 INSERT INTO code_files (id, repository_id, index_version, file_path, language, content_hash, active)

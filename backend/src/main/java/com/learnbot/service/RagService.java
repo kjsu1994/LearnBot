@@ -7,14 +7,18 @@ import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +27,7 @@ import java.util.stream.IntStream;
 
 @Service
 public class RagService {
+    private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final Pattern SPREADSHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
     private static final int GENERAL_CONTEXT_RESULT_LIMIT = 4;
     private static final int GENERAL_CONTEXT_EXCERPT_CHARS = 360;
@@ -94,10 +99,20 @@ public class RagService {
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
         } catch (RuntimeException ex) {
+            log.warn("RAG LLM call failed mode={} citations={} question={}",
+                    answerMode.value(), citations.size(), abbreviate(question), ex);
             answer = fallbackAnswer(answerMode, question, citations);
             llmUnavailable = true;
         }
-        if (isLowQualityAnswer(answer)) {
+        String lowQualityReason = lowQualityReason(answer);
+        if (lowQualityReason != null) {
+            log.info("RAG LLM answer rewritten mode={} citations={} reason={} length={} hasCitation={} question={}",
+                    answerMode.value(),
+                    citations.size(),
+                    lowQualityReason,
+                    safe(answer).length(),
+                    containsCitation(answer),
+                    abbreviate(question));
             answer = fallbackAnswer(answerMode, question, citations);
             answerRewritten = true;
         }
@@ -106,7 +121,7 @@ public class RagService {
                 answer,
                 citations,
                 buildEvidence(citations),
-                confidence(citations),
+                confidence(citations, llmUnavailable, answerRewritten),
                 diagnostics(answerMode, citations, llmUnavailable, answerRewritten)
         );
     }
@@ -231,6 +246,13 @@ public class RagService {
     }
 
     private String extractiveFallbackAnswer(String question, List<SearchResult> results) {
+        if (isRecruitmentCautionQuestion(question)) {
+            String answer = recruitmentCautionFallback(results);
+            if (!answer.isBlank()) {
+                return answer;
+            }
+        }
+
         if (isDiscriminationImprovementQuestion(question)) {
             String answer = discriminationImprovementFallback(results);
             if (!answer.isBlank()) {
@@ -238,33 +260,25 @@ public class RagService {
             }
         }
 
-        String sources = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT))
-                .mapToObj(index -> {
-                    SearchResult result = results.get(index);
-                    return "- " + trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))
-                            + " [" + (index + 1) + "]";
-                })
+        String sources = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT).stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
                 .collect(Collectors.joining("\n"));
         return "답변 생성 품질이 낮아 검색된 근거 중심으로 정리합니다.\n\n" + sources;
     }
 
     private String summaryFallbackAnswer(String question, List<SearchResult> results) {
-        String body = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
-                .mapToObj(index -> {
-                    SearchResult result = results.get(index);
-                    return "- " + trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))
-                            + " [" + (index + 1) + "]";
-                })
+        String body = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT + 2).stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
                 .collect(Collectors.joining("\n"));
         return "답변 생성 품질이 낮아 검색된 근거를 요약합니다.\n\n" + body;
     }
 
     private String tableFallbackAnswer(String question, List<SearchResult> results) {
-        String rows = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
-                .mapToObj(index -> {
-                    SearchResult result = results.get(index);
-                    return "| [" + (index + 1) + "] | " + escapeTable(result.title())
-                            + " | " + escapeTable(trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS))) + " |";
+        String rows = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT + 2).stream()
+                .map(point -> {
+                    SearchResult result = results.get(point.citationIndex() - 1);
+                    return "| [" + point.citationIndex() + "] | " + escapeTable(result.title())
+                            + " | " + escapeTable(point.text()) + " |";
                 })
                 .collect(Collectors.joining("\n"));
         return "답변 생성 품질이 낮아 표 형태로 추출 가능한 근거를 정리합니다.\n\n"
@@ -284,6 +298,23 @@ public class RagService {
         return "답변 생성 품질이 낮아 원문에 가까운 짧은 인용 중심으로 정리합니다.\n\n" + quotes;
     }
 
+    private List<EvidencePoint> uniqueFallbackPoints(String question, List<SearchResult> results, int limit) {
+        List<EvidencePoint> points = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (int index = 0; index < results.size() && points.size() < limit; index++) {
+            SearchResult result = results.get(index);
+            String text = trimPoint(relevantExcerpt(question, result.content(), FALLBACK_EXCERPT_CHARS));
+            String key = normalizeForSearch(text);
+            if (key.length() > 160) {
+                key = key.substring(0, 160);
+            }
+            if (!key.isBlank() && seen.add(key)) {
+                points.add(new EvidencePoint(text, index + 1));
+            }
+        }
+        return points;
+    }
+
     private String escapeTable(String value) {
         return safe(value).replace("|", "\\|").replaceAll("\\s+", " ").trim();
     }
@@ -291,6 +322,56 @@ public class RagService {
     private String trimQuote(String value) {
         String trimmed = safe(value).replaceAll("\\s+", " ").trim();
         return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 180).trim() + "...";
+    }
+
+    private boolean isRecruitmentCautionQuestion(String question) {
+        String normalized = normalizeForSearch(question);
+        boolean asksAboutCautions = normalized.contains("유의")
+                || normalized.contains("주의")
+                || normalized.contains("주의사항")
+                || normalized.contains("챙겨")
+                || normalized.contains("확인")
+                || normalized.contains("공정");
+        return normalized.contains("채용") && asksAboutCautions;
+    }
+
+    private String recruitmentCautionFallback(List<SearchResult> results) {
+        List<EvidencePoint> points = new ArrayList<>();
+        addEvidencePoint(
+                points,
+                results,
+                List.of("공개경쟁시험", "공개경쟁", "불특정 다수", "신규채용"),
+                "신규채용은 불특정 다수에게 기회를 여는 공개경쟁시험을 원칙으로 잡아야 합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("성별", "신체조건", "용모", "학력", "연령", "불합리한 제한", "공평한 기회"),
+                "응시 기회는 성별, 신체조건, 용모, 학력, 연령 등으로 불합리하게 제한하면 안 됩니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("가족", "친척", "친인척", "우대채용", "가족채용"),
+                "임직원 가족이나 친척을 우대하는 채용은 금지되며, 친인척 채용 현황 공개 대상도 확인해야 합니다."
+        );
+        addEvidencePoint(
+                points,
+                results,
+                List.of("사전협의", "공고기간 단축", "시험단계 축소", "외부전문가", "협의 내용", "간소화"),
+                "공고기간 단축, 시험단계 축소, 외부전문가 비율 조정 같은 예외 운영은 사전협의와 명확한 근거가 필요합니다."
+        );
+
+        if (points.size() < 2) {
+            return "";
+        }
+
+        String body = points.stream()
+                .limit(5)
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return "공직유관단체 채용에서 핵심 유의사항은 공개경쟁 원칙, 차별 금지, 친인척 우대 방지, 예외절차의 근거 관리입니다.\n\n"
+                + body;
     }
 
     private boolean isDiscriminationImprovementQuestion(String question) {
@@ -691,41 +772,53 @@ public class RagService {
     }
 
     private boolean isLowQualityAnswer(String answer) {
+        return lowQualityReason(answer) != null;
+    }
+
+    private String lowQualityReason(String answer) {
         String trimmed = safe(answer).trim();
         if (trimmed.isBlank()) {
-            return true;
+            return "blank";
         }
         if ("the".equalsIgnoreCase(trimmed) || "제".equals(trimmed)) {
-            return true;
+            return "placeholder";
         }
         if (trimmed.startsWith("The chat LLM is unavailable")) {
-            return true;
+            return "llm_unavailable_message";
         }
         if (!containsCitation(trimmed)) {
-            return true;
+            return "missing_citation";
         }
         boolean hasConcreteValue = trimmed.matches("(?s).*\\d+\\s*(명|건|개|행).*");
-        return !hasConcreteValue && trimmed.length() < 12;
+        if (!hasConcreteValue && trimmed.length() < 12) {
+            return "too_short";
+        }
+        return null;
     }
 
     private boolean containsCitation(String answer) {
         return answer != null && answer.matches("(?s).*\\[\\d+].*");
     }
 
-    private String confidence(List<SearchResult> results) {
+    private String confidence(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
         if (results == null || results.isEmpty()) {
             return "낮음";
         }
         double topScore = results.get(0).score();
         long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
         long citationCount = results.stream().filter(result -> safe(result.content()).length() >= 80).count();
+        String baseConfidence;
         if (topScore >= 0.65 && citationCount >= 3 && distinctDocuments <= 4) {
-            return "높음";
+            baseConfidence = "높음";
+        } else if (topScore >= 0.30 || citationCount >= 2) {
+            baseConfidence = "보통";
+        } else {
+            baseConfidence = "낮음";
         }
-        if (topScore >= 0.30 || citationCount >= 2) {
+        if ((llmUnavailable || answerRewritten) && "높음".equals(baseConfidence)) {
             return "보통";
         }
-        return "낮음";
+        return baseConfidence;
     }
 
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
@@ -738,7 +831,7 @@ public class RagService {
         if (answerRewritten) {
             notes.add("LLM 응답이 너무 짧거나 인용이 부족해, 검색 근거 기반 답변으로 대체했습니다.");
         }
-        if ("낮음".equals(confidence(results))) {
+        if ("낮음".equals(confidence(results, llmUnavailable, answerRewritten))) {
             notes.add("직접적인 근거 점수가 낮아 답변을 후보 수준으로 검토해야 합니다.");
         }
         return notes;
@@ -837,6 +930,11 @@ public class RagService {
         }
         String compact = content.replaceAll("\\s+", " ").trim();
         return compact.length() <= 260 ? compact : compact.substring(0, 260) + "...";
+    }
+
+    private String abbreviate(String value) {
+        String compact = safe(value).replaceAll("\\s+", " ").trim();
+        return compact.length() <= 120 ? compact : compact.substring(0, 120) + "...";
     }
 
     private String safe(String value) {

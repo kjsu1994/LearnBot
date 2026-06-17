@@ -756,8 +756,9 @@ function App() {
         method: 'PATCH',
         json: nextSettings,
       });
-      setAdminSettings(settings || nextSettings);
-      await refreshAdmin();
+      if (settings) {
+        setAdminSettings(settings);
+      }
     });
   }
 
@@ -790,6 +791,46 @@ function App() {
     if (!window.confirm(`${displayName || '사용자'} 계정을 삭제할까요? 해당 사용자는 즉시 로그인할 수 없습니다.`)) return;
     await run(`user-delete-${userId}`, async () => {
       await request(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      await refreshAdmin();
+    });
+  }
+
+  async function updateAdminUser(userId, values) {
+    return await run(`user-update-${userId}`, async () => {
+      await request(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        json: values,
+      });
+      await refreshSession();
+      await refreshAdmin();
+    });
+  }
+
+  async function resetAdminUserPassword(userId, newPassword) {
+    return await run(`user-password-${userId}`, async () => {
+      await request(`/api/admin/users/${userId}/password`, {
+        method: 'POST',
+        json: { newPassword },
+      });
+      await refreshAdmin();
+    });
+  }
+
+  async function saveAdminUserSpaceRoles(userId, operations = []) {
+    return await run(`user-spaces-${userId}`, async () => {
+      for (const operation of operations) {
+        if (operation.role) {
+          await request(`/api/admin/users/${userId}/spaces/${operation.spaceId}`, {
+            method: 'PUT',
+            json: { role: operation.role },
+          });
+        } else {
+          await request(`/api/admin/users/${userId}/spaces/${operation.spaceId}`, { method: 'DELETE' });
+        }
+      }
+      if (userId === user?.id) {
+        await refreshSession();
+      }
       await refreshAdmin();
     });
   }
@@ -993,6 +1034,9 @@ function App() {
             createSpace={createSpace}
             inviteUser={inviteUser}
             deleteAdminUser={deleteAdminUser}
+            updateAdminUser={updateAdminUser}
+            resetAdminUserPassword={resetAdminUserPassword}
+            saveAdminUserSpaceRoles={saveAdminUserSpaceRoles}
             updateSpace={updateSpace}
             deleteSpace={deleteSpace}
             updateAdminSettings={updateAdminSettings}
@@ -1697,6 +1741,9 @@ function AdminWorkspace({
   createSpace,
   inviteUser,
   deleteAdminUser,
+  updateAdminUser,
+  resetAdminUserPassword,
+  saveAdminUserSpaceRoles,
   updateSpace,
   deleteSpace,
   updateAdminSettings,
@@ -1706,6 +1753,13 @@ function AdminWorkspace({
   const [editingSpaceId, setEditingSpaceId] = useState('');
   const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
   const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
+  const [editingUser, setEditingUser] = useState(null);
+  const [userEditForm, setUserEditForm] = useState({ loginId: '', displayName: '', role: 'USER' });
+  const [passwordUser, setPasswordUser] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({ newPassword: '', confirmPassword: '' });
+  const [permissionsUser, setPermissionsUser] = useState(null);
+  const [permissionDraft, setPermissionDraft] = useState({});
+  const [modalError, setModalError] = useState('');
 
   useEffect(() => {
     setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
@@ -1714,6 +1768,79 @@ function AdminWorkspace({
   function beginEditSpace(space) {
     setEditingSpaceId(space.id);
     setSpaceEditForm({ name: space.name || '', description: space.description || '' });
+  }
+
+  function closeUserModals() {
+    setEditingUser(null);
+    setPasswordUser(null);
+    setPermissionsUser(null);
+    setModalError('');
+    setUserEditForm({ loginId: '', displayName: '', role: 'USER' });
+    setPasswordForm({ newPassword: '', confirmPassword: '' });
+    setPermissionDraft({});
+  }
+
+  function beginEditUser(item) {
+    setModalError('');
+    setEditingUser(item);
+    setUserEditForm({ loginId: item.loginId || item.email || '', displayName: item.displayName || '', role: item.role || 'USER' });
+  }
+
+  function beginPasswordReset(item) {
+    setModalError('');
+    setPasswordUser(item);
+    setPasswordForm({ newPassword: '', confirmPassword: '' });
+  }
+
+  function beginPermissionEdit(item) {
+    if (item.role === 'ADMIN') {
+      return;
+    }
+    const draft = {};
+    (item.spaces || []).forEach((space) => {
+      draft[space.id] = space.role;
+    });
+    setModalError('');
+    setPermissionsUser(item);
+    setPermissionDraft(draft);
+  }
+
+  async function submitUserEdit(event) {
+    event.preventDefault();
+    if (!editingUser) return;
+    const saved = await updateAdminUser(editingUser.id, userEditForm);
+    if (saved) closeUserModals();
+  }
+
+  async function submitPasswordReset(event) {
+    event.preventDefault();
+    if (!passwordUser) return;
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setModalError('비밀번호 확인이 일치하지 않습니다.');
+      return;
+    }
+    const saved = await resetAdminUserPassword(passwordUser.id, passwordForm.newPassword);
+    if (saved) closeUserModals();
+  }
+
+  async function submitPermissionEdit(event) {
+    event.preventDefault();
+    if (!permissionsUser) return;
+    const currentRoles = new Map((permissionsUser.spaces || []).map((space) => [space.id, space.role]));
+    const operations = spaces
+      .map((space) => {
+        const currentRole = currentRoles.get(space.id) || '';
+        const nextRole = permissionDraft[space.id] || '';
+        if (currentRole === nextRole) return null;
+        return { spaceId: space.id, role: nextRole };
+      })
+      .filter(Boolean);
+    if (!operations.length) {
+      closeUserModals();
+      return;
+    }
+    const saved = await saveAdminUserSpaceRoles(permissionsUser.id, operations);
+    if (saved) closeUserModals();
   }
 
   async function submitSpaceEdit(event, spaceId) {
@@ -1881,12 +2008,30 @@ function AdminWorkspace({
                 <div className="document-main">
                   <strong>{item.displayName}</strong>
                   <small>{item.loginId || item.email}</small>
+                  <small>{item.role === 'ADMIN' ? '전체 공간 접근' : `${item.spaces?.length || 0}개 공간 권한`}</small>
                 </div>
                 <div className="document-meta">
                   <StatusBadge status={item.status} />
                   <small>{item.role}</small>
                 </div>
                 <div className="document-actions">
+                  <IconButton title="계정 편집" onClick={() => beginEditUser(item)}>
+                    <Info size={15} />
+                  </IconButton>
+                  <IconButton
+                    title={item.id === currentUser?.id ? '현재 로그인한 계정의 비밀번호는 여기서 재설정할 수 없습니다.' : '비밀번호 재설정'}
+                    disabled={item.id === currentUser?.id || loading(`user-password-${item.id}`)}
+                    onClick={() => beginPasswordReset(item)}
+                  >
+                    {loading(`user-password-${item.id}`) ? <Loader2 className="spin" size={15} /> : <LockKeyhole size={15} />}
+                  </IconButton>
+                  <IconButton
+                    title={item.role === 'ADMIN' ? 'ADMIN 계정은 모든 공간에 접근합니다.' : '공간 권한 관리'}
+                    disabled={item.role === 'ADMIN' || loading(`user-spaces-${item.id}`)}
+                    onClick={() => beginPermissionEdit(item)}
+                  >
+                    {loading(`user-spaces-${item.id}`) ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
+                  </IconButton>
                   <IconButton
                     danger
                     title={item.id === currentUser?.id ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'}
@@ -1989,7 +2134,150 @@ function AdminWorkspace({
           </div>
         </section>
       </div>
+
+      {editingUser && (
+        <AdminUserModal title="계정 편집" subtitle={editingUser.loginId || editingUser.email} icon={<Info size={18} />} onClose={closeUserModals}>
+          <form className="admin-modal-form" onSubmit={submitUserEdit}>
+            <div className="stack">
+              <label htmlFor="edit-user-login-id">ID</label>
+              <input
+                id="edit-user-login-id"
+                value={userEditForm.loginId}
+                disabled={editingUser.id === currentUser?.id}
+                onChange={(event) => setUserEditForm((current) => ({ ...current, loginId: event.target.value }))}
+                autoComplete="off"
+                spellCheck="false"
+              />
+              {editingUser.id === currentUser?.id && <small className="field-help">현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.</small>}
+            </div>
+            <div className="stack">
+              <label htmlFor="edit-user-name">표시 이름</label>
+              <input
+                id="edit-user-name"
+                value={userEditForm.displayName}
+                onChange={(event) => setUserEditForm((current) => ({ ...current, displayName: event.target.value }))}
+              />
+            </div>
+            <div className="stack">
+              <label htmlFor="edit-user-role">시스템 권한</label>
+              <select
+                id="edit-user-role"
+                value={userEditForm.role}
+                disabled={editingUser.id === currentUser?.id}
+                onChange={(event) => setUserEditForm((current) => ({ ...current, role: event.target.value }))}
+              >
+                <option value="USER">USER</option>
+                <option value="ADMIN">ADMIN</option>
+              </select>
+              {editingUser.id === currentUser?.id && <small className="field-help">현재 로그인한 관리자 계정의 시스템 권한은 이 화면에서 변경할 수 없습니다.</small>}
+            </div>
+            <div className="action-row">
+              <button disabled={!userEditForm.loginId || !userEditForm.displayName || loading(`user-update-${editingUser.id}`)}>
+                {loading(`user-update-${editingUser.id}`) ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                저장
+              </button>
+              <button className="ghost-button" type="button" onClick={closeUserModals}>취소</button>
+            </div>
+          </form>
+        </AdminUserModal>
+      )}
+
+      {passwordUser && (
+        <AdminUserModal title="비밀번호 재설정" subtitle={passwordUser.loginId || passwordUser.email} icon={<LockKeyhole size={18} />} onClose={closeUserModals}>
+          <form className="admin-modal-form" onSubmit={submitPasswordReset}>
+            {modalError && <div className="failure-line"><AlertTriangle size={14} />{modalError}</div>}
+            <div className="stack">
+              <label htmlFor="reset-password">새 임시 비밀번호</label>
+              <input
+                id="reset-password"
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))}
+              />
+            </div>
+            <div className="stack">
+              <label htmlFor="reset-password-confirm">새 임시 비밀번호 확인</label>
+              <input
+                id="reset-password-confirm"
+                type="password"
+                value={passwordForm.confirmPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+              />
+              <small className="field-help">저장하면 해당 사용자의 기존 로그인 세션이 만료됩니다.</small>
+            </div>
+            <div className="action-row">
+              <button disabled={!passwordForm.newPassword || !passwordForm.confirmPassword || loading(`user-password-${passwordUser.id}`)}>
+                {loading(`user-password-${passwordUser.id}`) ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />}
+                재설정
+              </button>
+              <button className="ghost-button" type="button" onClick={closeUserModals}>취소</button>
+            </div>
+          </form>
+        </AdminUserModal>
+      )}
+
+      {permissionsUser && (
+        <AdminUserModal title="공간 권한 관리" subtitle={permissionsUser.loginId || permissionsUser.email} icon={<ShieldCheck size={18} />} onClose={closeUserModals}>
+          <form className="admin-modal-form" onSubmit={submitPermissionEdit}>
+            {permissionsUser.role === 'ADMIN' && (
+              <div className="detail-box compact-box">
+                <strong>시스템 관리자</strong>
+                <small>ADMIN 계정은 모든 공간에 접근할 수 있습니다. 아래 멤버십은 공간별 표시 권한으로 관리됩니다.</small>
+              </div>
+            )}
+            <div className="permission-grid">
+              {spaces.map((space) => (
+                <label className="permission-row" key={space.id}>
+                  <span>
+                    <strong>{space.name}</strong>
+                    <small>{space.description || '설명 없음'}</small>
+                  </span>
+                  <select
+                    value={permissionDraft[space.id] || ''}
+                    onChange={(event) => setPermissionDraft((current) => ({ ...current, [space.id]: event.target.value }))}
+                  >
+                    <option value="">없음</option>
+                    <option value="MEMBER">MEMBER</option>
+                    <option value="OWNER">OWNER</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div className="action-row">
+              <button disabled={loading(`user-spaces-${permissionsUser.id}`)}>
+                {loading(`user-spaces-${permissionsUser.id}`) ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                저장
+              </button>
+              <button className="ghost-button" type="button" onClick={closeUserModals}>취소</button>
+            </div>
+          </form>
+        </AdminUserModal>
+      )}
     </section>
+  );
+}
+
+function AdminUserModal({ title, subtitle, icon, children, onClose }) {
+  return (
+    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+      <section className="code-modal document-preview-modal admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="admin-user-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="code-modal-header">
+          <div className="code-modal-title">
+            {icon}
+            <div>
+              <h2 id="admin-user-modal-title">{title}</h2>
+              <p>{subtitle}</p>
+            </div>
+          </div>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="admin-user-modal-body">
+          {children}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -2323,19 +2611,31 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
   if (!evidence.length) return <p className="empty compact-empty">표시할 코드 근거가 없습니다.</p>;
   return (
     <div className="evidence-list">
-      {evidence.map((item) => (
-        <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId}`}>
-          <div className="result-heading">
-            <strong>[{item.citationNumber}] {item.filePath}</strong>
-            <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
-              <Eye size={14} />
-              열기
-            </button>
-          </div>
-          <small>{item.lineStart}-{item.lineEnd} · {item.chunkType}</small>
-          <p>{item.preview}</p>
-        </article>
-      ))}
+      {evidence.map((item) => {
+        const isCommitDiff = item.metadata?.kind === 'commit_diff';
+        const canOpen = Boolean(item.repositoryId && item.fileId);
+        const range = item.lineStart > 0
+          ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
+          : null;
+        const metaText = isCommitDiff
+          ? `${item.metadata?.changeType || item.chunkType} · +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
+          : `${item.lineStart}-${item.lineEnd} · ${item.chunkType}`;
+        return (
+          <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
+            <div className="result-heading">
+              <strong>[{item.citationNumber}] {item.filePath}</strong>
+              {canOpen && (
+                <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
+                  <Eye size={14} />
+                  열기
+                </button>
+              )}
+            </div>
+            <small>{metaText}</small>
+            <p>{item.preview}</p>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -2849,6 +3149,7 @@ function getAnswerModeGuide(mode) {
 }
 
 function getCodeModeLabel(mode) {
+  if (mode === 'commit') return '커밋 분석';
   return codeModes.find((item) => item.value === mode)?.label || '위치 찾기';
 }
 
@@ -2968,6 +3269,9 @@ function getProgressMessage(busy) {
   if (busy.startsWith('reindex-')) return '문서를 재색인하는 중입니다.';
   if (busy.startsWith('delete-')) return '문서를 삭제하는 중입니다.';
   if (busy.startsWith('user-delete-')) return '사용자 계정을 삭제하는 중입니다.';
+  if (busy.startsWith('user-update-')) return '사용자 계정을 저장하는 중입니다.';
+  if (busy.startsWith('user-password-')) return '사용자 비밀번호를 재설정하는 중입니다.';
+  if (busy.startsWith('user-spaces-')) return '사용자 공간 권한을 저장하는 중입니다.';
   if (busy.startsWith('space-update-')) return '공간 정보를 저장하는 중입니다.';
   if (busy.startsWith('space-delete-')) return '공간을 삭제하는 중입니다.';
   if (busy === 'space-create') return '공간을 생성하는 중입니다.';

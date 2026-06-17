@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AuthResponse;
 import com.learnbot.dto.SpaceSummary;
 import com.learnbot.dto.UserSummary;
@@ -19,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -88,6 +90,11 @@ public class AuthService {
         return new AuthResponse(null, null, toSummary(user), securityRepository.listSpacesForUser(user));
     }
 
+    public List<AdminUserSummary> listAdminUsers(AppUser actor) {
+        requireAdmin(actor);
+        return securityRepository.listAdminUsers();
+    }
+
     public void logout(String token, AppUser user) {
         if (token != null && token.startsWith("Bearer ")) {
             securityRepository.revokeSession(tokenHash(token.substring("Bearer ".length()).trim()));
@@ -109,6 +116,78 @@ public class AuthService {
         securityRepository.addSpaceMember(resolvedSpaceId, user.id(), normalizeSpaceRole(spaceRole));
         securityRepository.createAuditLog(actor.id(), "USER_INVITED", "USER", user.id().toString(), resolvedSpaceId, "User was invited.", java.util.Map.of("loginId", user.email()));
         return user;
+    }
+
+    public AppUser updateUser(AppUser actor, UUID userId, String loginId, String displayName, String role) {
+        requireAdmin(actor);
+        AppUser target = activeUser(userId);
+        String cleanLoginId = loginId == null || loginId.isBlank() ? target.email() : cleanLoginId(loginId);
+        String cleanDisplayName = displayName == null || displayName.isBlank() ? null : displayName.trim();
+        if (cleanDisplayName == null) {
+            throw new IllegalArgumentException("표시 이름은 필수입니다.");
+        }
+        String cleanRole = normalizeUserRole(role);
+        if (actor.id().equals(userId) && !target.role().equals(cleanRole)) {
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 시스템 권한은 변경할 수 없습니다.");
+        }
+        boolean loginIdChanged = !target.email().equalsIgnoreCase(cleanLoginId);
+        if (actor.id().equals(userId) && loginIdChanged) {
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.");
+        }
+        if ("ADMIN".equals(target.role()) && "USER".equals(cleanRole) && securityRepository.countActiveAdmins() <= 1) {
+            throw new IllegalArgumentException("마지막 관리자 계정은 USER로 변경할 수 없습니다.");
+        }
+
+        if (loginIdChanged) {
+            securityRepository.findUserByEmail(cleanLoginId)
+                    .filter(existing -> !existing.id().equals(userId))
+                    .ifPresent(existing -> {
+                        throw new IllegalArgumentException("이미 사용 중인 ID입니다.");
+                    });
+        }
+
+        securityRepository.updateUser(userId, cleanLoginId, cleanDisplayName, cleanRole);
+        if (loginIdChanged) {
+            securityRepository.revokeSessionsForUser(userId);
+        }
+        securityRepository.createAuditLog(
+                actor.id(),
+                "USER_UPDATED",
+                "USER",
+                userId.toString(),
+                null,
+                "User account was updated.",
+                Map.of(
+                        "oldLoginId", target.email(),
+                        "newLoginId", cleanLoginId,
+                        "displayName", cleanDisplayName,
+                        "oldRole", target.role(),
+                        "newRole", cleanRole
+                )
+        );
+        return securityRepository.findUserById(userId).orElseThrow();
+    }
+
+    public void resetUserPassword(AppUser actor, UUID userId, String newPassword) {
+        requireAdmin(actor);
+        if (actor.id().equals(userId)) {
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 비밀번호는 이 화면에서 재설정할 수 없습니다.");
+        }
+        AppUser target = activeUser(userId);
+        if (newPassword == null || newPassword.isBlank()) {
+            throw new IllegalArgumentException("새 비밀번호는 필수입니다.");
+        }
+        securityRepository.updatePasswordHash(userId, passwordHasher.hash(newPassword));
+        securityRepository.revokeSessionsForUser(userId);
+        securityRepository.createAuditLog(
+                actor.id(),
+                "USER_PASSWORD_RESET",
+                "USER",
+                userId.toString(),
+                null,
+                "User password was reset by an administrator.",
+                Map.of("loginId", target.email())
+        );
     }
 
     public UUID createSpace(AppUser actor, String name, String description) {
@@ -161,8 +240,71 @@ public class AuthService {
     public void addSpaceMember(AppUser actor, UUID spaceId, UUID userId, String role) {
         requireAdmin(actor);
         requireSpace(actor, spaceId);
+        activeUser(userId);
+        securityRepository.findSpace(spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         securityRepository.addSpaceMember(spaceId, userId, normalizeSpaceRole(role));
-        securityRepository.createAuditLog(actor.id(), "SPACE_MEMBER_UPDATED", "SPACE", spaceId.toString(), spaceId, "Space member was updated.", java.util.Map.of("userId", userId.toString()));
+        securityRepository.createAuditLog(actor.id(), "SPACE_MEMBER_UPDATED", "SPACE", spaceId.toString(), spaceId, "Space member was updated.", Map.of("userId", userId.toString()));
+    }
+
+    public void updateUserSpaceRole(AppUser actor, UUID userId, UUID spaceId, String role) {
+        requireAdmin(actor);
+        requireSpace(actor, spaceId);
+        AppUser target = activeUser(userId);
+        if ("ADMIN".equals(target.role())) {
+            throw new IllegalArgumentException("관리자는 모든 공간에 접근하므로 공간별 권한을 변경할 수 없습니다.");
+        }
+        securityRepository.findSpace(spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+        String cleanRole = normalizeSpaceRole(role);
+        String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse("");
+        securityRepository.addSpaceMember(spaceId, userId, cleanRole);
+        securityRepository.createAuditLog(
+                actor.id(),
+                "USER_SPACE_ROLE_UPDATED",
+                "SPACE",
+                spaceId.toString(),
+                spaceId,
+                "User space role was updated.",
+                Map.of(
+                        "userId", userId.toString(),
+                        "loginId", target.email(),
+                        "oldRole", oldRole,
+                        "newRole", cleanRole
+                )
+        );
+    }
+
+    public void removeSpaceMember(AppUser actor, UUID spaceId, UUID userId) {
+        requireAdmin(actor);
+        requireSpace(actor, spaceId);
+        AppUser target = activeUser(userId);
+        if ("ADMIN".equals(target.role())) {
+            throw new IllegalArgumentException("관리자는 모든 공간에 접근하므로 공간별 권한을 제거할 수 없습니다.");
+        }
+        securityRepository.findSpace(spaceId)
+                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+        String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse(null);
+        if (oldRole == null) {
+            return;
+        }
+        if (!target.isAdmin() && securityRepository.countSpaceMemberships(userId) <= 1) {
+            throw new IllegalArgumentException("일반 사용자의 마지막 공간 권한은 제거할 수 없습니다.");
+        }
+        securityRepository.removeSpaceMember(spaceId, userId);
+        securityRepository.createAuditLog(
+                actor.id(),
+                "USER_SPACE_ROLE_REMOVED",
+                "SPACE",
+                spaceId.toString(),
+                spaceId,
+                "User space role was removed.",
+                Map.of(
+                        "userId", userId.toString(),
+                        "loginId", target.email(),
+                        "oldRole", oldRole
+                )
+        );
     }
 
     public List<SpaceSummary> listSpaces(AppUser user) {
@@ -200,6 +342,15 @@ public class AuthService {
 
     public UserSummary toSummary(AppUser user) {
         return new UserSummary(user.id(), user.email(), user.displayName(), user.role(), user.status());
+    }
+
+    private AppUser activeUser(UUID userId) {
+        AppUser target = securityRepository.findUserById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        if ("DELETED".equals(target.status())) {
+            throw new IllegalArgumentException("삭제된 사용자는 수정할 수 없습니다.");
+        }
+        return target;
     }
 
     private String normalizeUserRole(String role) {

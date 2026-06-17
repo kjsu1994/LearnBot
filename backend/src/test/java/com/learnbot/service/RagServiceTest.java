@@ -157,6 +157,44 @@ class RagServiceTest {
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
     }
 
+    @Test
+    void recruitmentCautionQuestionFallsBackToStructuredGuidance() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "공직유관단체 채용시 유의사항이 뭐야?";
+
+        UUID documentId = UUID.randomUUID();
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull()))
+                .thenReturn(List.of(
+                        searchResult(documentId, UUID.randomUUID(), 0,
+                                "공직유관단체 채용 관련 주요 유의사항.pdf",
+                                "application/pdf",
+                                "공개경쟁시험: 직원 신규채용시 불특정 다수인을 대상으로 공개경쟁시험으로 채용하는 것을 원칙으로 함. 응시자의 공평한 기회 보장을 위해 성별, 신체조건, 용모, 학력, 연령 등에 대한 불합리한 제한을 두어서는 아니 됨."),
+                        searchResult(documentId, UUID.randomUUID(), 1,
+                                "공직유관단체 채용 관련 주요 유의사항.pdf",
+                                "application/pdf",
+                                "공정채용 기본원칙: 직원을 모집·채용할 때 연령 등을 이유로 차별하여서는 아니되며, 임직원의 가족·친척 등을 대상으로 한 우대채용도 금지. 가족채용 제한 및 친인척 인원수 공개."),
+                        searchResult(documentId, UUID.randomUUID(), 2,
+                                "공직유관단체 채용 관련 주요 유의사항.pdf",
+                                "application/pdf",
+                                "사전협의 통보기한 단축 및 협의 내용 간소화, 공고기간 단축, 시험단계 축소, 시험위원 중 외부전문가 비율 조정 등은 예외 운영 근거를 확인해야 함.")
+                ));
+        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.answer()).contains("공직유관단체 채용");
+        assertThat(response.answer()).contains("공개경쟁");
+        assertThat(response.answer()).contains("친인척");
+        assertThat(response.answer()).contains("사전협의");
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.answer()).contains("[2]");
+        assertThat(response.confidence()).isEqualTo("보통");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("LLM"));
+    }
+
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {
         return searchResult(
                 documentId,

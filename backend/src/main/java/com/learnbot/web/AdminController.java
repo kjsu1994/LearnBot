@@ -1,15 +1,18 @@
 package com.learnbot.web;
 
 import com.learnbot.dto.AuditLogSummary;
+import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
 import com.learnbot.dto.SpaceCreateRequest;
 import com.learnbot.dto.SpaceMemberRequest;
+import com.learnbot.dto.SpaceRoleUpdateRequest;
 import com.learnbot.dto.SpaceSummary;
 import com.learnbot.dto.SpaceUpdateRequest;
+import com.learnbot.dto.UserPasswordResetRequest;
 import com.learnbot.dto.UserSummary;
-import com.learnbot.repository.SecurityRepository;
+import com.learnbot.dto.UserUpdateRequest;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AdminSettingsService;
 import com.learnbot.service.AppUser;
@@ -21,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,27 +40,23 @@ public class AdminController {
     private final AuthService authService;
     private final AuditService auditService;
     private final AdminSettingsService adminSettingsService;
-    private final SecurityRepository securityRepository;
     private final CurrentUserProvider currentUserProvider;
 
     public AdminController(
             AuthService authService,
             AuditService auditService,
             AdminSettingsService adminSettingsService,
-            SecurityRepository securityRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this.authService = authService;
         this.auditService = auditService;
         this.adminSettingsService = adminSettingsService;
-        this.securityRepository = securityRepository;
         this.currentUserProvider = currentUserProvider;
     }
 
     @GetMapping("/users")
-    List<UserSummary> users() {
-        authService.requireAdmin(currentUserProvider.currentUser());
-        return securityRepository.listUsers();
+    List<AdminUserSummary> users() {
+        return authService.listAdminUsers(currentUserProvider.currentUser());
     }
 
     @PostMapping("/users")
@@ -77,6 +77,26 @@ public class AdminController {
     @DeleteMapping("/users/{userId}")
     void deleteUser(@PathVariable UUID userId) {
         authService.deleteUser(currentUserProvider.currentUser(), userId);
+    }
+
+    @PatchMapping("/users/{userId}")
+    UserSummary updateUser(@PathVariable UUID userId, @Valid @RequestBody UserUpdateRequest request) {
+        return authService.toSummary(authService.updateUser(currentUserProvider.currentUser(), userId, request.loginId(), request.displayName(), request.role()));
+    }
+
+    @PostMapping("/users/{userId}/password")
+    void resetUserPassword(@PathVariable UUID userId, @Valid @RequestBody UserPasswordResetRequest request) {
+        authService.resetUserPassword(currentUserProvider.currentUser(), userId, request.newPassword());
+    }
+
+    @PutMapping("/users/{userId}/spaces/{spaceId}")
+    void updateUserSpaceRole(@PathVariable UUID userId, @PathVariable UUID spaceId, @RequestBody SpaceRoleUpdateRequest request) {
+        authService.updateUserSpaceRole(currentUserProvider.currentUser(), userId, spaceId, request.role());
+    }
+
+    @DeleteMapping("/users/{userId}/spaces/{spaceId}")
+    void removeUserSpaceRole(@PathVariable UUID userId, @PathVariable UUID spaceId) {
+        authService.removeSpaceMember(currentUserProvider.currentUser(), spaceId, userId);
     }
 
     @GetMapping("/spaces")

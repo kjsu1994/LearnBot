@@ -18,10 +18,36 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
 class CodeRagServiceTest {
+    @Test
+    void commitQuestionsBypassNormalSearchFlow() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        CommitInsightService commitInsightService = mock(CommitInsightService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, commitInsightService, ollamaClient, new LearnBotProperties());
+        CodeAskResponse commitResponse = new CodeAskResponse("commit", "commit answer [1]", List.of(), "높음", List.of());
+
+        when(commitInsightService.isCommitQuestion("latest changes")).thenReturn(true);
+        when(commitInsightService.answer(null, "latest changes")).thenReturn(commitResponse);
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "latest changes",
+                "overview",
+                4
+        );
+
+        assertThat(response).isSameAs(commitResponse);
+        verifyNoInteractions(searchService, referenceService, ollamaClient);
+    }
+
     @Test
     void overviewKeepsEvidenceWhenChatModelFails() {
         CodeSearchService searchService = mock(CodeSearchService.class);

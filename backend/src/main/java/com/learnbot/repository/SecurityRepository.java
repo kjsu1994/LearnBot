@@ -3,6 +3,7 @@ package com.learnbot.repository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AuditLogSummary;
 import com.learnbot.dto.SpaceSummary;
 import com.learnbot.dto.UserSummary;
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -91,6 +94,94 @@ public class SecurityRepository {
                 rs.getString("role"),
                 rs.getString("status")
         ));
+    }
+
+    public List<AdminUserSummary> listAdminUsers() {
+        List<AdminUserRow> users = jdbc.query("""
+                SELECT id, email, display_name, role, status
+                FROM app_users
+                WHERE status <> 'DELETED'
+                ORDER BY created_at DESC
+                """, new MapSqlParameterSource(), (rs, rowNum) -> new AdminUserRow(
+                rs.getObject("id", UUID.class),
+                rs.getString("email"),
+                rs.getString("display_name"),
+                rs.getString("role"),
+                rs.getString("status")
+        ));
+        if (users.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, List<SpaceSummary>> spacesByUser = new LinkedHashMap<>();
+        users.forEach(user -> spacesByUser.put(user.id(), new ArrayList<>()));
+        List<UUID> userIds = users.stream().map(AdminUserRow::id).toList();
+        jdbc.query("""
+                SELECT sm.user_id, s.id, s.name, s.description, sm.role, s.created_at
+                FROM space_members sm
+                JOIN spaces s ON s.id = sm.space_id
+                WHERE sm.user_id IN (:userIds)
+                  AND s.deleted_at IS NULL
+                ORDER BY s.created_at ASC
+                """, new MapSqlParameterSource().addValue("userIds", userIds), rs -> {
+            while (rs.next()) {
+                UUID userId = rs.getObject("user_id", UUID.class);
+                List<SpaceSummary> spaces = spacesByUser.get(userId);
+                if (spaces != null) {
+                    spaces.add(mapSpace(rs, 0));
+                }
+            }
+            return null;
+        });
+
+        return users.stream()
+                .map(user -> new AdminUserSummary(
+                        user.id(),
+                        user.email(),
+                        user.displayName(),
+                        user.role(),
+                        user.status(),
+                        spacesByUser.getOrDefault(user.id(), List.of())
+                ))
+                .toList();
+    }
+
+    public int countActiveAdmins() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM app_users
+                WHERE role = 'ADMIN'
+                  AND status = 'ACTIVE'
+                """, new MapSqlParameterSource(), Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    public void updateUser(UUID userId, String loginId, String displayName, String role) {
+        jdbc.update("""
+                UPDATE app_users
+                SET email = :loginId,
+                    display_name = :displayName,
+                    role = :role,
+                    updated_at = now()
+                WHERE id = :userId
+                  AND status <> 'DELETED'
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("loginId", loginId)
+                .addValue("displayName", displayName)
+                .addValue("role", role));
+    }
+
+    public void updatePasswordHash(UUID userId, String passwordHash) {
+        jdbc.update("""
+                UPDATE app_users
+                SET password_hash = :passwordHash,
+                    updated_at = now()
+                WHERE id = :userId
+                  AND status <> 'DELETED'
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("passwordHash", passwordHash));
     }
 
     public void deactivateUser(UUID userId) {
@@ -248,6 +339,39 @@ public class SecurityRepository {
                 .addValue("role", role));
     }
 
+    public Optional<String> findSpaceMemberRole(UUID spaceId, UUID userId) {
+        List<String> roles = jdbc.query("""
+                SELECT role
+                FROM space_members
+                WHERE space_id = :spaceId
+                  AND user_id = :userId
+                """, new MapSqlParameterSource()
+                .addValue("spaceId", spaceId)
+                .addValue("userId", userId), (rs, rowNum) -> rs.getString("role"));
+        return roles.stream().findFirst();
+    }
+
+    public void removeSpaceMember(UUID spaceId, UUID userId) {
+        jdbc.update("""
+                DELETE FROM space_members
+                WHERE space_id = :spaceId
+                  AND user_id = :userId
+                """, new MapSqlParameterSource()
+                .addValue("spaceId", spaceId)
+                .addValue("userId", userId));
+    }
+
+    public int countSpaceMemberships(UUID userId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM space_members sm
+                JOIN spaces s ON s.id = sm.space_id
+                WHERE sm.user_id = :userId
+                  AND s.deleted_at IS NULL
+                """, new MapSqlParameterSource().addValue("userId", userId), Integer.class);
+        return count == null ? 0 : count;
+    }
+
     public List<SpaceSummary> listSpacesForUser(AppUser user) {
         if (user.isAdmin()) {
             return jdbc.query("""
@@ -347,6 +471,9 @@ public class SecurityRepository {
                         fromJson(rs.getString("metadata")),
                         rs.getObject("created_at", OffsetDateTime.class)
                 ));
+    }
+
+    private record AdminUserRow(UUID id, String email, String displayName, String role, String status) {
     }
 
     private AppUser mapUser(ResultSet rs, int rowNum) throws SQLException {
