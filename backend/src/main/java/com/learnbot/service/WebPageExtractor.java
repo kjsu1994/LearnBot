@@ -4,6 +4,7 @@ import com.learnbot.config.LearnBotProperties;
 import com.learnbot.repository.DocumentRepository;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
+import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +21,14 @@ import java.util.concurrent.ConcurrentMap;
 
 @Component
 public class WebPageExtractor {
+    private static final int MAX_WEB_PREVIEW_BLOCKS = 220;
+    private static final int MAX_WEB_BLOCK_CHARS = 1_200;
+    private static final int MAX_WEB_LIST_ITEMS = 40;
+    private static final int MAX_WEB_TABLE_ROWS = 60;
+    private static final int MAX_WEB_TABLE_COLUMNS = 8;
+    private static final int MAX_WEB_LINKS = 80;
+    private static final int MAX_WEB_IMAGES = 40;
+
     private final LearnBotProperties properties;
     private final AdminSettingsService adminSettingsService;
     private final DocumentRepository repository;
@@ -73,19 +82,20 @@ public class WebPageExtractor {
             String canonicalUrl = canonicalUrl(doc, url);
             String heading = firstHeading(doc);
 
-            doc.select("script, style, noscript, svg, canvas, nav, footer, form").remove();
+            doc.select("script, style, noscript, svg, canvas, nav, footer, form, iframe").remove();
             String title = doc.title() == null || doc.title().isBlank() ? url : doc.title();
             String bodyText = doc.body() == null ? "" : doc.body().text();
-            String content = webContentHeader(title, url, heading) + bodyText;
-            String images = doc.select("img[src]").stream()
-                    .map(element -> element.absUrl("src"))
+            List<Map<String, Object>> previewBlocks = webPreviewBlocks(doc);
+            String structuredText = webPreviewText(previewBlocks);
+            String content = webContentHeader(title, url, heading) + (structuredText.isBlank() ? bodyText : structuredText);
+            List<String> images = doc.select("img[src]").stream()
+                    .map(element -> firstNonBlank(element.attr("alt"), element.absUrl("src")))
                     .filter(value -> !value.isBlank())
-                    .limit(50)
-                    .reduce((left, right) -> left + "\n" + right)
-                    .orElse("");
+                    .limit(MAX_WEB_IMAGES)
+                    .toList();
 
-            if (!images.isBlank()) {
-                content = content + "\n\nImage URLs:\n" + images;
+            if (!images.isEmpty()) {
+                content = content + "\n\nImages:\n" + String.join("\n", images);
             }
 
             Map<String, Object> metadata = new LinkedHashMap<>();
@@ -93,6 +103,9 @@ public class WebPageExtractor {
             metadata.put("canonicalUrl", canonicalUrl);
             metadata.put("heading", heading);
             metadata.put("bodyTextLength", bodyText.length());
+            metadata.put("webPreviewVersion", 1);
+            metadata.put("webPreviewBlocks", previewBlocks);
+            metadata.put("webPreviewLinks", webLinks(doc));
 
             ExtractedDocument extracted = new ExtractedDocument(
                     title,
@@ -170,6 +183,229 @@ public class WebPageExtractor {
         }
         builder.append("\n");
         return builder.toString();
+    }
+
+    private List<Map<String, Object>> webPreviewBlocks(Document doc) {
+        List<Map<String, Object>> blocks = new ArrayList<>();
+        Element root = previewRoot(doc);
+        if (root == null) {
+            return blocks;
+        }
+        for (Element child : root.children()) {
+            collectPreviewBlocks(child, blocks);
+            if (blocks.size() >= MAX_WEB_PREVIEW_BLOCKS) {
+                break;
+            }
+        }
+        return blocks;
+    }
+
+    private Element previewRoot(Document doc) {
+        Element body = doc.body();
+        if (body == null) {
+            return null;
+        }
+        Element main = doc.selectFirst("article, main, [role=main], .content, #content, .markdown-body, .post, .entry-content");
+        return main == null ? body : main;
+    }
+
+    private void collectPreviewBlocks(Element element, List<Map<String, Object>> blocks) {
+        if (blocks.size() >= MAX_WEB_PREVIEW_BLOCKS) {
+            return;
+        }
+        String tag = element.normalName();
+        if (tag.matches("h[1-6]")) {
+            addTextBlock(blocks, "heading", cleanText(element.text()), headingLevel(tag));
+            return;
+        }
+        if ("p".equals(tag)) {
+            addTextBlock(blocks, "paragraph", cleanText(element.text()), null);
+            return;
+        }
+        if ("pre".equals(tag)) {
+            addTextBlock(blocks, "code", trimToLimit(element.text(), MAX_WEB_BLOCK_CHARS * 2), null);
+            return;
+        }
+        if ("blockquote".equals(tag)) {
+            addTextBlock(blocks, "quote", cleanText(element.text()), null);
+            return;
+        }
+        if ("ul".equals(tag) || "ol".equals(tag)) {
+            addListBlock(blocks, element);
+            return;
+        }
+        if ("table".equals(tag)) {
+            addTableBlock(blocks, element);
+            return;
+        }
+        if ("img".equals(tag)) {
+            addImageBlock(blocks, element);
+            return;
+        }
+        if (element.children().isEmpty()) {
+            addTextBlock(blocks, "paragraph", cleanText(element.text()), null);
+            return;
+        }
+        for (Element child : element.children()) {
+            collectPreviewBlocks(child, blocks);
+            if (blocks.size() >= MAX_WEB_PREVIEW_BLOCKS) {
+                break;
+            }
+        }
+    }
+
+    private void addTextBlock(List<Map<String, Object>> blocks, String type, String text, Integer level) {
+        String clean = trimToLimit(text, MAX_WEB_BLOCK_CHARS);
+        if (clean.isBlank() || isDuplicateTail(blocks, clean)) {
+            return;
+        }
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", type);
+        if (level != null) {
+            block.put("level", level);
+        }
+        block.put("text", clean);
+        blocks.add(block);
+    }
+
+    private void addListBlock(List<Map<String, Object>> blocks, Element element) {
+        List<String> items = element.children().stream()
+                .filter(child -> "li".equals(child.normalName()))
+                .map(child -> cleanText(child.text()))
+                .filter(value -> !value.isBlank())
+                .limit(MAX_WEB_LIST_ITEMS)
+                .toList();
+        if (items.isEmpty()) {
+            return;
+        }
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", "list");
+        block.put("items", items);
+        blocks.add(block);
+    }
+
+    private void addTableBlock(List<Map<String, Object>> blocks, Element element) {
+        List<List<String>> rows = new ArrayList<>();
+        for (Element row : element.select("tr")) {
+            if (rows.size() >= MAX_WEB_TABLE_ROWS) {
+                break;
+            }
+            List<String> cells = row.select("th, td").stream()
+                    .map(cell -> trimToLimit(cleanText(cell.text()), MAX_WEB_BLOCK_CHARS / 4))
+                    .limit(MAX_WEB_TABLE_COLUMNS)
+                    .toList();
+            if (!cells.isEmpty()) {
+                rows.add(cells);
+            }
+        }
+        if (rows.isEmpty()) {
+            return;
+        }
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", "table");
+        block.put("rows", rows);
+        blocks.add(block);
+    }
+
+    private void addImageBlock(List<Map<String, Object>> blocks, Element element) {
+        String href = element.absUrl("src");
+        String text = firstNonBlank(element.attr("alt"), href);
+        if (href.isBlank() && text.isBlank()) {
+            return;
+        }
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", "image");
+        block.put("text", trimToLimit(cleanText(text), 240));
+        block.put("href", href);
+        blocks.add(block);
+    }
+
+    private boolean isDuplicateTail(List<Map<String, Object>> blocks, String text) {
+        if (blocks.isEmpty()) {
+            return false;
+        }
+        Object previous = blocks.get(blocks.size() - 1).get("text");
+        return text.equals(previous);
+    }
+
+    private int headingLevel(String tag) {
+        try {
+            return Integer.parseInt(tag.substring(1));
+        } catch (RuntimeException ex) {
+            return 2;
+        }
+    }
+
+    private String webPreviewText(List<Map<String, Object>> blocks) {
+        StringBuilder builder = new StringBuilder();
+        for (Map<String, Object> block : blocks) {
+            String type = String.valueOf(block.getOrDefault("type", ""));
+            if ("list".equals(type)) {
+                Object items = block.get("items");
+                if (items instanceof List<?> list) {
+                    for (Object item : list) {
+                        appendPreviewLine(builder, "- " + item);
+                    }
+                }
+            } else if ("table".equals(type)) {
+                Object rows = block.get("rows");
+                if (rows instanceof List<?> list) {
+                    for (Object row : list) {
+                        if (row instanceof List<?> cells) {
+                            appendPreviewLine(builder, "| " + String.join(" | ", cells.stream().map(String::valueOf).toList()) + " |");
+                        }
+                    }
+                }
+            } else {
+                Object text = block.get("text");
+                appendPreviewLine(builder, text == null ? "" : String.valueOf(text));
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private void appendPreviewLine(StringBuilder builder, String text) {
+        String clean = cleanText(text);
+        if (clean.isBlank()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append("\n\n");
+        }
+        builder.append(clean);
+    }
+
+    private List<String> webLinks(Document doc) {
+        return doc.select("a[href]").stream()
+                .map(element -> {
+                    String label = cleanText(element.text());
+                    String href = element.absUrl("href");
+                    if (href.isBlank()) {
+                        return "";
+                    }
+                    return label.isBlank() ? href : label + " - " + href;
+                })
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(MAX_WEB_LINKS)
+                .toList();
+    }
+
+    private String cleanText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String trimToLimit(String value, int limit) {
+        String clean = cleanText(value);
+        return clean.length() <= limit ? clean : clean.substring(0, limit).trim() + "...";
+    }
+
+    private String firstNonBlank(String first, String second) {
+        String cleanFirst = cleanText(first);
+        if (!cleanFirst.isBlank()) {
+            return cleanFirst;
+        }
+        return cleanText(second);
     }
 
     private boolean isAllowedDomain(String host) {

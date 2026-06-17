@@ -132,6 +132,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:-learnbot1234}
       S3_BUCKET: ${S3_BUCKET:-learnbot-raw}
       LEARNBOT_CODE_WORKSPACE_PATH: /var/lib/learnbot/repos
+      LEARNBOT_EXPORT_DIR: /var/lib/learnbot/export
       LEARNBOT_BOOTSTRAP_ADMIN_EMAIL: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:-jinsu.kim}
       LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:-admin1234}
       LEARNBOT_BOOTSTRAP_ADMIN_NAME: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:-LearnBot Admin}
@@ -150,6 +151,7 @@ services:
         condition: service_started
     volumes:
       - code-repos:/var/lib/learnbot/repos
+      - ./export:/var/lib/learnbot/export
 
 volumes:
   postgres-data:

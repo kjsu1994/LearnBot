@@ -12,8 +12,8 @@ spring:
     enabled: true
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 25MB
+      max-file-size: ${LEARNBOT_IMPORT_MAX_FILE_SIZE:512MB}
+      max-request-size: ${LEARNBOT_IMPORT_MAX_REQUEST_SIZE:512MB}
 
 learnbot:
   crawler:
@@ -67,3 +67,5 @@ learnbot:
     bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:admin1234}
     bootstrap-admin-name: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:LearnBot Admin}
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
+  transfer:
+    export-dir: ${LEARNBOT_EXPORT_DIR:export}

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -72,6 +73,36 @@ class DocumentPreviewServiceTest {
 
         assertThat(response.previewType()).isEqualTo("web");
         assertThat(response.text()).contains("First indexed paragraph.", "Second indexed paragraph.");
+        assertThat(response.originalAvailable()).isFalse();
+    }
+
+    @Test
+    void webPreviewUsesStructuredMetadataWhenAvailable() {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
+        AuthService authService = mock(AuthService.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        AppUser user = user();
+        UUID documentId = UUID.randomUUID();
+        UUID sourceId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        DocumentSummary summary = summary(documentId, sourceId, spaceId, "WEB", "https://example.com/docs", "text/html");
+
+        when(authService.accessibleSpaceIds(user)).thenReturn(List.of(spaceId));
+        when(repository.findDocument(eq(documentId), anyList())).thenReturn(Optional.of(summary));
+        when(repository.documentMetadata(documentId)).thenReturn(Map.of(
+                "webPreviewBlocks", List.of(
+                        Map.of("type", "heading", "level", 1, "text", "Guide"),
+                        Map.of("type", "list", "items", List.of("First", "Second")),
+                        Map.of("type", "table", "rows", List.of(List.of("Name", "Role"), List.of("Kim", "Admin")))
+                )
+        ));
+
+        DocumentPreviewResponse response = service.preview(user, documentId);
+
+        assertThat(response.previewType()).isEqualTo("web");
+        assertThat(response.blocks()).hasSize(3);
+        assertThat(response.text()).contains("Guide", "- First", "Name | Role");
         assertThat(response.originalAvailable()).isFalse();
     }
 

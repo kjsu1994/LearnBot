@@ -8,6 +8,8 @@ import com.learnbot.dto.InviteUserRequest;
 import com.learnbot.dto.LlmSettingsTestRequest;
 import com.learnbot.dto.LlmSettingsTestResponse;
 import com.learnbot.dto.SpaceCreateRequest;
+import com.learnbot.dto.SpaceExportResponse;
+import com.learnbot.dto.SpaceImportResponse;
 import com.learnbot.dto.SpaceMemberRequest;
 import com.learnbot.dto.SpaceRoleUpdateRequest;
 import com.learnbot.dto.SpaceSummary;
@@ -20,7 +22,13 @@ import com.learnbot.service.AdminSettingsService;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
+import com.learnbot.service.SpaceTransferService;
 import jakarta.validation.Valid;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -31,7 +39,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -43,17 +54,20 @@ public class AdminController {
     private final AuditService auditService;
     private final AdminSettingsService adminSettingsService;
     private final CurrentUserProvider currentUserProvider;
+    private final SpaceTransferService spaceTransferService;
 
     public AdminController(
             AuthService authService,
             AuditService auditService,
             AdminSettingsService adminSettingsService,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            SpaceTransferService spaceTransferService
     ) {
         this.authService = authService;
         this.auditService = auditService;
         this.adminSettingsService = adminSettingsService;
         this.currentUserProvider = currentUserProvider;
+        this.spaceTransferService = spaceTransferService;
     }
 
     @GetMapping("/users")
@@ -122,6 +136,32 @@ public class AdminController {
     @DeleteMapping("/spaces/{spaceId}")
     void deleteSpace(@PathVariable UUID spaceId) {
         authService.deleteSpace(currentUserProvider.currentUser(), spaceId);
+    }
+
+    @PostMapping("/spaces/{spaceId}/rag-export")
+    SpaceExportResponse exportSpace(@PathVariable UUID spaceId) {
+        return spaceTransferService.exportSpace(currentUserProvider.currentUser(), spaceId);
+    }
+
+    @GetMapping("/spaces/{spaceId}/rag-export/files/{fileName:.+}")
+    ResponseEntity<Resource> downloadExport(@PathVariable UUID spaceId, @PathVariable String fileName) throws IOException {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireAdmin(user);
+        authService.requireSpace(user, spaceId);
+        Resource resource = spaceTransferService.exportFile(fileName);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(fileName, StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .contentLength(resource.contentLength())
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(resource);
+    }
+
+    @PostMapping("/spaces/{spaceId}/rag-import")
+    SpaceImportResponse importSpace(@PathVariable UUID spaceId, @RequestParam("file") MultipartFile file) {
+        return spaceTransferService.importSpace(currentUserProvider.currentUser(), spaceId, file);
     }
 
     @PostMapping("/spaces/{spaceId}/members")

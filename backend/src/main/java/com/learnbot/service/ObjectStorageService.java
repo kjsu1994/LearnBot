@@ -70,6 +70,28 @@ public class ObjectStorageService {
         }
     }
 
+    public StoredObject storeBytes(UUID sourceId, String filename, String contentType, byte[] content) {
+        ensureBucket();
+
+        String safeFilename = filename == null || filename.isBlank() ? "imported-file" : filename;
+        String safeContentType = contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;
+        byte[] safeContent = content == null ? new byte[0] : content;
+        String objectKey = "sources/" + sourceId + "/" + UUID.randomUUID() + "-" + sanitize(safeFilename);
+
+        try {
+            PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(properties.getStorage().getBucket())
+                    .key(objectKey)
+                    .contentType(safeContentType)
+                    .contentLength((long) safeContent.length)
+                    .build();
+            s3Client.putObject(request, RequestBody.fromBytes(safeContent));
+            return new StoredObject(properties.getStorage().getBucket(), objectKey, safeFilename, safeContentType, safeContent.length);
+        } catch (S3Exception ex) {
+            throw new IllegalArgumentException("Could not store imported original file: " + ex.awsErrorDetails().errorMessage(), ex);
+        }
+    }
+
     public StoredFile load(StoredObject object) {
         try {
             ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(GetObjectRequest.builder()

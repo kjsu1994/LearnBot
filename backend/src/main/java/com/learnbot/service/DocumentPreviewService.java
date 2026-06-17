@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.dto.DocumentChunkDetail;
+import com.learnbot.dto.DocumentPreviewBlock;
 import com.learnbot.dto.DocumentPreviewResponse;
 import com.learnbot.dto.DocumentPreviewSheet;
 import com.learnbot.dto.DocumentPreviewTable;
@@ -28,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -53,7 +55,7 @@ public class DocumentPreviewService {
     public DocumentPreviewResponse preview(AppUser user, UUID documentId) {
         DocumentSummary summary = findDocument(user, documentId);
         if ("WEB".equalsIgnoreCase(summary.sourceType())) {
-            return fromChunks(summary, "web", false);
+            return web(summary);
         }
 
         StoredObject object = repository.findSourceObject(summary.sourceId()).orElse(null);
@@ -64,7 +66,7 @@ public class DocumentPreviewService {
         StoredFile file = objectStorageService.load(object);
         String type = previewType(file.filename(), summary.contentType());
         return switch (type) {
-            case "pdf" -> base(summary, type, file.filename(), object.sizeBytes(), true, false, null, List.of(), List.of(), List.of());
+            case "pdf" -> base(summary, type, file.filename(), object.sizeBytes(), true, false, null, List.of(), List.of(), List.of(), List.of());
             case "docx" -> docx(summary, file, object);
             case "excel" -> excel(summary, file, object);
             case "csv" -> csv(summary, file, object);
@@ -89,7 +91,7 @@ public class DocumentPreviewService {
         String raw = new String(file.content(), StandardCharsets.UTF_8);
         LimitedText limited = limitText(raw);
         return base(summary, previewType, file.filename(), object.sizeBytes(), true, limited.truncated(),
-                limited.text(), List.of(), List.of(), List.of());
+                limited.text(), List.of(), List.of(), List.of(), List.of());
     }
 
     private DocumentPreviewResponse csv(DocumentSummary summary, StoredFile file, StoredObject object) {
@@ -108,7 +110,7 @@ public class DocumentPreviewService {
             throw new IllegalArgumentException("Could not preview CSV file: " + ex.getMessage(), ex);
         }
         List<DocumentPreviewTable> tables = List.of(new DocumentPreviewTable("CSV", rows));
-        return base(summary, "csv", file.filename(), object.sizeBytes(), true, truncated, null, List.of(), tables, List.of());
+        return base(summary, "csv", file.filename(), object.sizeBytes(), true, truncated, null, List.of(), tables, List.of(), List.of());
     }
 
     private List<String> csvRow(CSVRecord record) {
@@ -139,7 +141,7 @@ public class DocumentPreviewService {
         } catch (Exception ex) {
             throw new IllegalArgumentException("Could not preview Excel file: " + ex.getMessage(), ex);
         }
-        return base(summary, "excel", file.filename(), object.sizeBytes(), true, truncated, null, List.of(), List.of(), sheets);
+        return base(summary, "excel", file.filename(), object.sizeBytes(), true, truncated, null, List.of(), List.of(), sheets, List.of());
     }
 
     private List<String> excelRow(Row row, DataFormatter formatter) {
@@ -183,7 +185,7 @@ public class DocumentPreviewService {
         } catch (Exception ex) {
             throw new IllegalArgumentException("Could not preview DOCX file: " + ex.getMessage(), ex);
         }
-        return base(summary, "docx", file.filename(), object.sizeBytes(), true, truncated, null, paragraphs, tables, List.of());
+        return base(summary, "docx", file.filename(), object.sizeBytes(), true, truncated, null, paragraphs, tables, List.of(), List.of());
     }
 
     private List<String> docxRow(XWPFTableRow row) {
@@ -196,6 +198,16 @@ public class DocumentPreviewService {
             values.add(cell.getText() == null ? "" : cell.getText().replaceAll("\\s+", " ").trim());
         }
         return values;
+    }
+
+    private DocumentPreviewResponse web(DocumentSummary summary) {
+        List<DocumentPreviewBlock> blocks = webPreviewBlocks(repository.documentMetadata(summary.id()));
+        if (!blocks.isEmpty()) {
+            LimitedText limited = limitText(webText(blocks));
+            return base(summary, "web", null, null, false, limited.truncated(),
+                    limited.text(), List.of(), List.of(), List.of(), blocks);
+        }
+        return fromChunks(summary, "web", false);
     }
 
     private DocumentPreviewResponse fromChunks(DocumentSummary summary, String previewType, boolean originalAvailable) {
@@ -211,7 +223,7 @@ public class DocumentPreviewService {
         }
         LimitedText limited = limitText(text.toString());
         return base(summary, previewType, null, null, originalAvailable, limited.truncated(),
-                limited.text(), List.of(), List.of(), List.of());
+                limited.text(), List.of(), List.of(), List.of(), List.of());
     }
 
     private DocumentPreviewResponse base(
@@ -224,7 +236,8 @@ public class DocumentPreviewService {
             String text,
             List<String> paragraphs,
             List<DocumentPreviewTable> tables,
-            List<DocumentPreviewSheet> sheets
+            List<DocumentPreviewSheet> sheets,
+            List<DocumentPreviewBlock> blocks
     ) {
         return new DocumentPreviewResponse(
                 summary.id(),
@@ -240,8 +253,103 @@ public class DocumentPreviewService {
                 text,
                 paragraphs,
                 tables,
-                sheets
+                sheets,
+                blocks
         );
+    }
+
+    private List<DocumentPreviewBlock> webPreviewBlocks(Map<String, Object> metadata) {
+        Object raw = metadata == null ? null : metadata.get("webPreviewBlocks");
+        if (!(raw instanceof List<?> values)) {
+            return List.of();
+        }
+        return values.stream()
+                .map(this::webPreviewBlock)
+                .filter(block -> block != null && block.type() != null && !block.type().isBlank())
+                .toList();
+    }
+
+    private DocumentPreviewBlock webPreviewBlock(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+        String type = stringValue(map.get("type"));
+        String text = stringValue(map.get("text"));
+        String href = stringValue(map.get("href"));
+        Integer level = integerValue(map.get("level"));
+        List<String> items = stringList(map.get("items"));
+        List<List<String>> rows = rows(map.get("rows"));
+        if (type.isBlank()) {
+            return null;
+        }
+        return new DocumentPreviewBlock(type, level, text, items, rows, href);
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> values)) {
+            return List.of();
+        }
+        return values.stream()
+                .map(this::stringValue)
+                .filter(item -> !item.isBlank())
+                .toList();
+    }
+
+    private List<List<String>> rows(Object value) {
+        if (!(value instanceof List<?> values)) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(List.class::isInstance)
+                .map(List.class::cast)
+                .map(this::stringList)
+                .filter(row -> !row.isEmpty())
+                .toList();
+    }
+
+    private String webText(List<DocumentPreviewBlock> blocks) {
+        StringBuilder builder = new StringBuilder();
+        for (DocumentPreviewBlock block : blocks) {
+            switch (block.type()) {
+                case "list" -> {
+                    for (String item : block.items()) {
+                        appendWebText(builder, "- " + item);
+                    }
+                }
+                case "table" -> {
+                    for (List<String> row : block.rows()) {
+                        appendWebText(builder, String.join(" | ", row));
+                    }
+                }
+                default -> appendWebText(builder, block.text());
+            }
+        }
+        return builder.toString();
+    }
+
+    private void appendWebText(StringBuilder builder, String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append("\n\n");
+        }
+        builder.append(text.trim());
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private Integer integerValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? null : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private String previewType(String filename, String contentType) {

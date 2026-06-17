@@ -802,6 +802,34 @@ h3 {
   font-weight: 800;
 }
 
+.transfer-note {
+  background: #f0faf4;
+  border: 1px solid #cfe5d8;
+  border-radius: 8px;
+  color: #13715f;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+}
+
+.transfer-note span,
+.transfer-note small {
+  color: #3f5d51;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.transfer-note .compact-action {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.import-file-picker {
+  min-height: 48px;
+}
+
 .llm-effective-box {
   gap: 3px;
   margin-top: 2px;
@@ -1577,6 +1605,82 @@ h3 {
 .document-reader p {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.web-reader {
+  gap: 14px;
+}
+
+.web-reader-heading {
+  color: #17252e;
+  line-height: 1.28;
+  margin: 8px 0 0;
+}
+
+.web-reader h1.web-reader-heading {
+  font-size: 24px;
+}
+
+.web-reader h2.web-reader-heading {
+  border-bottom: 1px solid #e3ebe7;
+  font-size: 19px;
+  padding-bottom: 7px;
+}
+
+.web-reader h3.web-reader-heading,
+.web-reader h4.web-reader-heading {
+  font-size: 16px;
+}
+
+.web-reader-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.web-reader-list li {
+  color: #34424c;
+  line-height: 1.6;
+}
+
+.web-reader-code {
+  background: #111820;
+  border-radius: 8px;
+  color: #e9f0ee;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.web-reader-quote {
+  border-left: 4px solid #93c5ad;
+  color: #43515a;
+  margin: 0;
+  padding: 4px 0 4px 14px;
+}
+
+.web-reader-asset {
+  background: #f5f8f6;
+  border: 1px solid #dfe8e3;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.web-reader-asset span {
+  color: #27343c;
+  font-weight: 800;
+}
+
+.web-reader-asset small {
+  color: #6d7a82;
+  overflow-wrap: anywhere;
 }
 
 .markdown-preview .markdown-answer {

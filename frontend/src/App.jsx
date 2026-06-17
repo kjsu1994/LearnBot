@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Code2,
   Database,
+  Download,
   Eye,
   FileCode2,
   FileSpreadsheet,
@@ -231,6 +232,7 @@ function App() {
     llmUsingDefaults: true,
   });
   const [auditLogs, setAuditLogs] = useState([]);
+  const [spaceTransferResult, setSpaceTransferResult] = useState(null);
   const [inviteForm, setInviteForm] = useState({
     loginId: '',
     displayName: '',
@@ -886,6 +888,41 @@ function App() {
     });
   }
 
+  async function exportSpaceArchive(spaceId) {
+    return await run(`space-export-${spaceId}`, async () => {
+      const result = await request(`/api/admin/spaces/${spaceId}/rag-export`, { method: 'POST' });
+      setSpaceTransferResult({ type: 'export', spaceId, result });
+      await refreshAdmin();
+      return result;
+    });
+  }
+
+  async function importSpaceArchive(spaceId, file) {
+    return await run(`space-import-${spaceId}`, async () => {
+      const body = new FormData();
+      body.append('file', file);
+      const result = await request(`/api/admin/spaces/${spaceId}/rag-import`, { method: 'POST', body });
+      setSpaceTransferResult({ type: 'import', spaceId, result });
+      await Promise.all([refreshDocuments(), refreshRepositories(), refreshAdmin()]);
+      return result;
+    });
+  }
+
+  async function downloadSpaceArchive(spaceId, fileName) {
+    if (!fileName) return false;
+    return await run(`space-download-${spaceId}`, async () => {
+      const blob = await requestBlob(`/api/admin/spaces/${spaceId}/rag-export/files/${encodeURIComponent(fileName)}`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   const loading = (name) => busy === name;
   const progressMessage = getProgressMessage(busy);
 
@@ -1072,6 +1109,10 @@ function App() {
             saveAdminUserSpaceRoles={saveAdminUserSpaceRoles}
             updateSpace={updateSpace}
             deleteSpace={deleteSpace}
+            exportSpaceArchive={exportSpaceArchive}
+            importSpaceArchive={importSpaceArchive}
+            downloadSpaceArchive={downloadSpaceArchive}
+            spaceTransferResult={spaceTransferResult}
             updateAdminSettings={updateAdminSettings}
             testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
@@ -1779,6 +1820,10 @@ function AdminWorkspace({
   saveAdminUserSpaceRoles,
   updateSpace,
   deleteSpace,
+  exportSpaceArchive,
+  importSpaceArchive,
+  downloadSpaceArchive,
+  spaceTransferResult,
   updateAdminSettings,
   testAdminLlmSettings,
   refreshAdmin,
@@ -1793,6 +1838,8 @@ function AdminWorkspace({
   const [passwordForm, setPasswordForm] = useState({ newPassword: '', confirmPassword: '' });
   const [permissionsUser, setPermissionsUser] = useState(null);
   const [permissionDraft, setPermissionDraft] = useState({});
+  const [importSpace, setImportSpace] = useState(null);
+  const [importFile, setImportFile] = useState(null);
   const [modalError, setModalError] = useState('');
   const [llmForm, setLlmForm] = useState({
     ollamaBaseUrl: adminSettings?.ollamaBaseUrl || '',
@@ -1930,6 +1977,27 @@ function AdminWorkspace({
       setLlmTestResult(result);
     }
   }
+
+  function beginSpaceImport(space) {
+    setImportSpace(space);
+    setImportFile(null);
+    setModalError('');
+  }
+
+  function closeSpaceImport() {
+    setImportSpace(null);
+    setImportFile(null);
+    setModalError('');
+  }
+
+  async function submitSpaceImport(event) {
+    event.preventDefault();
+    if (!importSpace || !importFile) return;
+    const result = await importSpaceArchive(importSpace.id, importFile);
+    if (result) closeSpaceImport();
+  }
+
+  const transferSpaceName = spaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
 
   return (
     <section className="workspace-grid">
@@ -2196,6 +2264,31 @@ function AdminWorkspace({
               <p>{spaces.length}개 공간</p>
             </div>
           </div>
+          {spaceTransferResult?.type === 'export' && (
+            <div className="transfer-note success-note">
+              <strong>{transferSpaceName || '공간'} Export 완료</strong>
+              <span>{spaceTransferResult.result?.relativePath || './export'}</span>
+              <small>{formatFileSize(spaceTransferResult.result?.sizeBytes)} · {formatTransferCounts(spaceTransferResult.result?.counts)}</small>
+              {spaceTransferResult.result?.fileName && (
+                <button
+                  className="ghost-button compact-action"
+                  type="button"
+                  disabled={loading(`space-download-${spaceTransferResult.spaceId}`)}
+                  onClick={() => downloadSpaceArchive(spaceTransferResult.spaceId, spaceTransferResult.result.fileName)}
+                >
+                  {loading(`space-download-${spaceTransferResult.spaceId}`) ? <Loader2 className="spin" size={14} /> : <Download size={14} />}
+                  다운로드
+                </button>
+              )}
+            </div>
+          )}
+          {spaceTransferResult?.type === 'import' && (
+            <div className="transfer-note success-note">
+              <strong>{transferSpaceName || '공간'} Import 완료</strong>
+              <span>가져온 데이터: {formatTransferCounts(spaceTransferResult.result?.imported)}</span>
+              <small>건너뜀: {formatTransferCounts(spaceTransferResult.result?.skipped)}</small>
+            </div>
+          )}
           <div className="document-list">
             {spaces.map((space) => (
               <article className="document-row space-admin-row" key={space.id}>
@@ -2229,6 +2322,20 @@ function AdminWorkspace({
                       <small>{space.role} · {formatDate(space.createdAt)}</small>
                     </div>
                     <div className="document-actions">
+                      <IconButton
+                        title="RAG 데이터 Export"
+                        disabled={loading(`space-export-${space.id}`)}
+                        onClick={() => exportSpaceArchive(space.id)}
+                      >
+                        {loading(`space-export-${space.id}`) ? <Loader2 className="spin" size={15} /> : <Download size={15} />}
+                      </IconButton>
+                      <IconButton
+                        title="RAG 데이터 Import"
+                        disabled={loading(`space-import-${space.id}`)}
+                        onClick={() => beginSpaceImport(space)}
+                      >
+                        {loading(`space-import-${space.id}`) ? <Loader2 className="spin" size={15} /> : <FileUp size={15} />}
+                      </IconButton>
                       <IconButton title="공간 이름/설명 편집" onClick={() => beginEditSpace(space)}>
                         <Info size={15} />
                       </IconButton>
@@ -2391,6 +2498,37 @@ function AdminWorkspace({
                 저장
               </button>
               <button className="ghost-button" type="button" onClick={closeUserModals}>취소</button>
+            </div>
+          </form>
+        </AdminUserModal>
+      )}
+
+      {importSpace && (
+        <AdminUserModal title="RAG 데이터 Import" subtitle={importSpace.name} icon={<FileUp size={18} />} onClose={closeSpaceImport}>
+          <form className="admin-modal-form" onSubmit={submitSpaceImport}>
+            {modalError && <div className="failure-line"><AlertTriangle size={14} />{modalError}</div>}
+            <div className="detail-box compact-box">
+              <strong>병합 가져오기</strong>
+              <small>기존 데이터는 삭제하지 않고, 같은 문서 출처나 같은 Git 커밋 저장소는 건너뜁니다.</small>
+              <small>Export 파일은 작업폴더 하위의 상대경로 `./export`에 생성된 ZIP을 선택하면 됩니다.</small>
+            </div>
+            <label className="file-picker import-file-picker" htmlFor="space-import-file">
+              <FileUp size={16} />
+              <span>{importFile?.name || 'ZIP 파일 선택'}</span>
+            </label>
+            <input
+              className="visually-hidden"
+              id="space-import-file"
+              type="file"
+              accept=".zip,application/zip,application/x-zip-compressed"
+              onChange={(event) => setImportFile(event.target.files?.[0] || null)}
+            />
+            <div className="action-row">
+              <button disabled={!importFile || loading(`space-import-${importSpace.id}`)}>
+                {loading(`space-import-${importSpace.id}`) ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
+                Import
+              </button>
+              <button className="ghost-button" type="button" onClick={closeSpaceImport}>취소</button>
             </div>
           </form>
         </AdminUserModal>
@@ -2994,6 +3132,9 @@ function DocumentPreviewContent({ preview, blobUrl }) {
   }
 
   if (preview.previewType === 'web') {
+    if (preview.blocks?.length) {
+      return <WebReader blocks={preview.blocks} fallbackText={preview.text} />;
+    }
     return <ReaderText text={preview.text} />;
   }
 
@@ -3010,6 +3151,54 @@ function ReaderText({ text = '' }) {
       {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
     </div>
   );
+}
+
+function WebReader({ blocks = [], fallbackText = '' }) {
+  if (!blocks.length) {
+    return <ReaderText text={fallbackText} />;
+  }
+  return (
+    <div className="document-reader web-reader">
+      {blocks.map((block, index) => <WebReaderBlock block={block} key={index} />)}
+    </div>
+  );
+}
+
+function WebReaderBlock({ block }) {
+  const type = block?.type || 'paragraph';
+  if (type === 'heading') {
+    const level = Math.max(1, Math.min(4, Number(block.level || 2)));
+    const HeadingTag = `h${level}`;
+    return <HeadingTag className="web-reader-heading">{block.text}</HeadingTag>;
+  }
+  if (type === 'list') {
+    const items = block.items || [];
+    if (!items.length) return null;
+    return (
+      <ul className="web-reader-list">
+        {items.map((item, index) => <li key={index}>{item}</li>)}
+      </ul>
+    );
+  }
+  if (type === 'table') {
+    return <PreviewTable rows={block.rows || []} />;
+  }
+  if (type === 'code') {
+    return <pre className="web-reader-code"><code>{block.text}</code></pre>;
+  }
+  if (type === 'quote') {
+    return <blockquote className="web-reader-quote">{block.text}</blockquote>;
+  }
+  if (type === 'image') {
+    return (
+      <div className="web-reader-asset">
+        <span>{block.text || 'image'}</span>
+        {block.href && <small>{block.href}</small>}
+      </div>
+    );
+  }
+  if (!block?.text) return null;
+  return <p>{block.text}</p>;
 }
 
 function PreviewTables({ tables = [] }) {
@@ -3075,6 +3264,21 @@ function formatFileSize(value) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatTransferCounts(counts = {}) {
+  const value = counts || {};
+  const parts = [
+    ['문서', value.documents],
+    ['문서 청크', value.documentChunks],
+    ['원문', value.sourceObjects],
+    ['코드 저장소', value.codeRepositories],
+    ['코드 파일', value.codeFiles],
+    ['코드 청크', value.codeChunks],
+  ]
+    .filter(([, value]) => Number(value || 0) > 0)
+    .map(([label, value]) => `${label} ${value}`);
+  return parts.length ? parts.join(' · ') : '이관 데이터 없음';
 }
 
 function CodeFileModal({ detail, highlightRange, loading, onClose }) {
@@ -3412,6 +3616,9 @@ function getProgressMessage(busy) {
   if (busy.startsWith('user-spaces-')) return '사용자 공간 권한을 저장하는 중입니다.';
   if (busy.startsWith('space-update-')) return '공간 정보를 저장하는 중입니다.';
   if (busy.startsWith('space-delete-')) return '공간을 삭제하는 중입니다.';
+  if (busy.startsWith('space-export-')) return '공간 RAG 데이터를 ZIP으로 내보내는 중입니다.';
+  if (busy.startsWith('space-import-')) return '공간 RAG 데이터를 가져오는 중입니다.';
+  if (busy.startsWith('space-download-')) return 'Export ZIP을 다운로드하는 중입니다.';
   if (busy === 'space-create') return '공간을 생성하는 중입니다.';
   if (busy === 'user-invite') return '사용자를 초대하는 중입니다.';
   return '요청을 처리하는 중입니다.';

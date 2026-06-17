@@ -17,6 +17,7 @@ public record DocumentPreviewResponse(
         String text,
         List<String> paragraphs,
         List<DocumentPreviewTable> tables,
-        List<DocumentPreviewSheet> sheets
+        List<DocumentPreviewSheet> sheets,
+        List<DocumentPreviewBlock> blocks
 ) {
 }

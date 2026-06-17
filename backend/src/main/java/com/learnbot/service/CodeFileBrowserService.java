@@ -35,7 +35,15 @@ public class CodeFileBrowserService {
         if (!target.startsWith(root)) {
             throw new IllegalArgumentException("잘못된 파일 경로입니다.");
         }
-        String content = contentReader.read(target);
+        String content;
+        try {
+            content = contentReader.read(target);
+        } catch (RuntimeException ex) {
+            content = repository.activeFileContentFromChunks(file.id());
+            if (content == null || content.isBlank()) {
+                throw ex;
+            }
+        }
         return new CodeFileDetail(
                 file.id(),
                 file.repositoryId(),

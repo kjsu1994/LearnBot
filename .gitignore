@@ -42,6 +42,7 @@ data/ollama/
 data/minio/
 uploads/
 storage/
+export/
 learnbot-db*.sql
 *.dump
 

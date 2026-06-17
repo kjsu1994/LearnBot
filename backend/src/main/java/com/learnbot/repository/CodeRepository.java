@@ -490,6 +490,24 @@ public class CodeRepository {
                 """, new MapSqlParameterSource().addValue("fileId", fileId), this::mapChunkSummary);
     }
 
+    public String activeFileContentFromChunks(UUID fileId) {
+        return jdbc.query("""
+                SELECT content
+                FROM code_chunks
+                WHERE file_id = :fileId AND active
+                ORDER BY chunk_index ASC
+                """, new MapSqlParameterSource().addValue("fileId", fileId), rs -> {
+            StringBuilder content = new StringBuilder();
+            while (rs.next()) {
+                if (!content.isEmpty()) {
+                    content.append("\n\n");
+                }
+                content.append(rs.getString("content"));
+            }
+            return content.toString();
+        });
+    }
+
     public void addChunks(UUID repositoryId, UUID fileId, UUID indexVersion, String filePath, List<ParsedCodeChunk> chunks, List<List<Double>> embeddings) {
         for (int i = 0; i < chunks.size(); i++) {
             ParsedCodeChunk chunk = chunks.get(i);

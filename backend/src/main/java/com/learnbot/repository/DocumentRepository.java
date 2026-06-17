@@ -13,6 +13,7 @@ import com.learnbot.dto.StoredObjectSummary;
 import com.learnbot.service.Chunk;
 import com.learnbot.service.StoredObject;
 import com.learnbot.service.StoredSource;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -255,6 +256,15 @@ public class DocumentRepository {
         ));
     }
 
+    public Map<String, Object> documentMetadata(UUID documentId) {
+        List<String> rows = jdbc.query("""
+                SELECT metadata::text AS metadata
+                FROM documents
+                WHERE id = :documentId
+                """, new MapSqlParameterSource().addValue("documentId", documentId), (rs, rowNum) -> rs.getString("metadata"));
+        return rows.stream().findFirst().map(this::fromJson).orElse(Map.of());
+    }
+
     public Optional<StoredObjectSummary> findStoredObjectSummary(UUID sourceId) {
         List<StoredObjectSummary> objects = jdbc.query("""
                 SELECT bucket, original_filename, content_type, size_bytes
@@ -423,6 +433,18 @@ public class DocumentRepository {
             return objectMapper.writeValueAsString(metadata == null ? Map.of() : metadata);
         } catch (JsonProcessingException ex) {
             throw new IllegalArgumentException("Invalid metadata.", ex);
+        }
+    }
+
+    private Map<String, Object> fromJson(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(metadata, new TypeReference<>() {
+            });
+        } catch (JsonProcessingException ex) {
+            return Map.of();
         }
     }
 

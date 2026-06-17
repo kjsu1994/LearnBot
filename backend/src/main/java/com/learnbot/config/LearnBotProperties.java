@@ -19,6 +19,7 @@ public class LearnBotProperties {
     private Storage storage = new Storage();
     private Code code = new Code();
     private Auth auth = new Auth();
+    private Transfer transfer = new Transfer();
 
     public Crawler getCrawler() {
         return crawler;
@@ -82,6 +83,14 @@ public class LearnBotProperties {
 
     public void setAuth(Auth auth) {
         this.auth = auth;
+    }
+
+    public Transfer getTransfer() {
+        return transfer;
+    }
+
+    public void setTransfer(Transfer transfer) {
+        this.transfer = transfer;
     }
 
     public static class Crawler {
@@ -562,6 +571,19 @@ public class LearnBotProperties {
 
         public void setSessionHours(int sessionHours) {
             this.sessionHours = sessionHours;
+        }
+    }
+
+    public static class Transfer {
+        @NotBlank
+        private String exportDir = "export";
+
+        public String getExportDir() {
+            return exportDir;
+        }
+
+        public void setExportDir(String exportDir) {
+            this.exportDir = exportDir;
         }
     }
 }
