@@ -8,9 +8,12 @@ import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.repository.DocumentRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +30,7 @@ public class IngestionService {
     private final LearnBotProperties properties;
     private final AuthService authService;
     private final AuditService auditService;
+    private final TransactionTemplate transactionTemplate;
 
     public IngestionService(
             DocumentRepository repository,
@@ -39,7 +43,8 @@ public class IngestionService {
             OllamaClient ollamaClient,
             LearnBotProperties properties,
             AuthService authService,
-            AuditService auditService
+            AuditService auditService,
+            PlatformTransactionManager transactionManager
     ) {
         this.repository = repository;
         this.webPageExtractor = webPageExtractor;
@@ -52,14 +57,13 @@ public class IngestionService {
         this.properties = properties;
         this.authService = authService;
         this.auditService = auditService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
     public IngestResponse ingestWeb(AppUser user, UUID spaceId, String url) {
         return ingestWeb(user, spaceId, url, false, null, null);
     }
 
-    @Transactional
     public IngestResponse ingestWeb(
             AppUser user,
             UUID spaceId,
@@ -71,41 +75,46 @@ public class IngestionService {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String normalizedUrl = webUrlNormalizer.normalize(url);
         UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id());
+        IngestResponse response;
         try {
             WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages);
-            IngestResponse response = indexAll(
+            response = indexAll(
                     sourceId,
                     resolvedSpaceId,
                     documents.documents(),
                     documents.pageCount(),
                     documents.skippedCount()
             );
-            auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "Web document was indexed.");
-            return response;
         } catch (RuntimeException ex) {
-            repository.updateSourceStatus(sourceId, SourceStatus.FAILED, ex.getMessage());
-            auditService.log(user, "DOCUMENT_INGEST_FAILED", "SOURCE", sourceId, resolvedSpaceId, ex.getMessage());
+            recordFailure(user, sourceId, resolvedSpaceId, "DOCUMENT_INGEST_FAILED", ex);
             throw ex;
         }
+        auditService.log(
+                user,
+                "DOCUMENT_INGESTED",
+                "DOCUMENT",
+                response.documentId(),
+                resolvedSpaceId,
+                "Web document was indexed."
+        );
+        return response;
     }
 
-    @Transactional
     public IngestResponse ingestFile(AppUser user, UUID spaceId, MultipartFile file) {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String name = file.getOriginalFilename() == null ? "uploaded-file" : file.getOriginalFilename();
         UUID sourceId = repository.createSource(SourceType.FILE, name, name, resolvedSpaceId, user.id());
+        IngestResponse response;
         try {
             StoredObject storedObject = objectStorageService.store(sourceId, file);
-            repository.createSourceObject(sourceId, storedObject);
             ExtractedDocument document = fileExtractor.extract(file);
-            IngestResponse response = index(sourceId, resolvedSpaceId, document);
-            auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "File document was indexed.");
-            return response;
+            response = indexStoredFile(sourceId, resolvedSpaceId, storedObject, document);
         } catch (RuntimeException ex) {
-            repository.updateSourceStatus(sourceId, SourceStatus.FAILED, ex.getMessage());
-            auditService.log(user, "DOCUMENT_INGEST_FAILED", "SOURCE", sourceId, resolvedSpaceId, ex.getMessage());
+            recordFailure(user, sourceId, resolvedSpaceId, "DOCUMENT_INGEST_FAILED", ex);
             throw ex;
         }
+        auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "File document was indexed.");
+        return response;
     }
 
     public List<DocumentSummary> listDocuments(AppUser user, UUID spaceId) {
@@ -132,18 +141,17 @@ public class IngestionService {
         auditService.log(user, "DOCUMENT_DELETED", "DOCUMENT", documentId, summary.spaceId(), "Document was soft deleted.");
     }
 
-    @Transactional
     public IngestResponse reindexDocument(AppUser user, UUID documentId) {
         DocumentSummary summary = repository.findDocument(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         StoredSource source = repository.findSourceByDocumentId(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         repository.updateSourceStatus(source.id(), SourceStatus.INDEXING, null);
-        int previousDocumentCount = repository.countDocumentsForSource(source.id());
-        repository.deleteDocumentsForSource(source.id());
 
+        IngestResponse response;
         try {
-            IngestResponse response = switch (source.type()) {
+            int previousDocumentCount = repository.countDocumentsForSource(source.id());
+            response = switch (source.type()) {
                 case WEB -> {
                     String normalizedUrl = webUrlNormalizer.normalize(source.location());
                     WebDocuments documents = extractWebDocuments(
@@ -153,27 +161,34 @@ public class IngestionService {
                             null,
                             null
                     );
-                    yield indexAll(source.id(), summary.spaceId(), documents.documents(), documents.pageCount(), documents.skippedCount());
+                    yield reindexAll(
+                            source.id(),
+                            summary.spaceId(),
+                            documents.documents(),
+                            documents.pageCount(),
+                            documents.skippedCount()
+                    );
                 }
                 case FILE -> {
                     StoredObject object = repository.findSourceObject(source.id())
                             .orElseThrow(() -> new IllegalArgumentException(
                                     "Original file is not stored. Upload the file again before reindexing."
                             ));
-                    yield index(source.id(), summary.spaceId(), fileExtractor.extract(objectStorageService.load(object)));
+                    yield reindexAll(
+                            source.id(),
+                            summary.spaceId(),
+                            List.of(fileExtractor.extract(objectStorageService.load(object))),
+                            1,
+                            0
+                    );
                 }
             };
-            auditService.log(user, "DOCUMENT_REINDEXED", "DOCUMENT", response.documentId(), summary.spaceId(), "Document was reindexed.");
-            return response;
         } catch (RuntimeException ex) {
-            repository.updateSourceStatus(source.id(), SourceStatus.FAILED, ex.getMessage());
-            auditService.log(user, "DOCUMENT_REINDEX_FAILED", "SOURCE", source.id(), summary.spaceId(), ex.getMessage());
+            recordFailure(user, source.id(), summary.spaceId(), "DOCUMENT_REINDEX_FAILED", ex);
             throw ex;
         }
-    }
-
-    private IngestResponse index(UUID sourceId, UUID spaceId, ExtractedDocument document) {
-        return indexAll(sourceId, spaceId, List.of(document), 1, 0);
+        auditService.log(user, "DOCUMENT_REINDEXED", "DOCUMENT", response.documentId(), summary.spaceId(), "Document was reindexed.");
+        return response;
     }
 
     private IngestResponse indexAll(
@@ -183,16 +198,67 @@ public class IngestionService {
             int pageCount,
             int skippedCount
     ) {
-        UUID firstDocumentId = null;
-        int documentCount = 0;
-        int totalChunkCount = 0;
+        List<IndexedDocument> indexedDocuments = prepareIndex(documents);
+        return transactionTemplate.execute(status ->
+                persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount)
+        );
+    }
 
+    private IngestResponse indexStoredFile(UUID sourceId, UUID spaceId, StoredObject storedObject, ExtractedDocument document) {
+        List<IndexedDocument> indexedDocuments = prepareIndex(List.of(document));
+        return transactionTemplate.execute(status -> {
+            repository.createSourceObject(sourceId, storedObject);
+            return persistIndex(sourceId, spaceId, indexedDocuments, 1, 0);
+        });
+    }
+
+    private IngestResponse reindexAll(
+            UUID sourceId,
+            UUID spaceId,
+            List<ExtractedDocument> documents,
+            int pageCount,
+            int skippedCount
+    ) {
+        List<IndexedDocument> indexedDocuments = prepareIndex(documents);
+        return transactionTemplate.execute(status -> {
+            repository.deleteDocumentsForSource(sourceId);
+            return persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount);
+        });
+    }
+
+    private List<IndexedDocument> prepareIndex(List<ExtractedDocument> documents) {
+        List<IndexedDocument> indexedDocuments = new ArrayList<>();
         for (ExtractedDocument document : documents) {
             List<Chunk> chunks = chunker.split(document.content());
             if (chunks.isEmpty()) {
                 continue;
             }
 
+            List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
+            List<List<Double>> embeddings = ollamaClient.embed(chunkTexts);
+            validateEmbeddings(embeddings, chunks.size());
+            indexedDocuments.add(new IndexedDocument(document, chunks, embeddings));
+        }
+
+        if (indexedDocuments.isEmpty()) {
+            throw new IllegalArgumentException("No extractable text was found.");
+        }
+        return indexedDocuments;
+    }
+
+    private IngestResponse persistIndex(
+            UUID sourceId,
+            UUID spaceId,
+            List<IndexedDocument> indexedDocuments,
+            int pageCount,
+            int skippedCount
+    ) {
+        UUID firstDocumentId = null;
+        int documentCount = 0;
+        int totalChunkCount = 0;
+
+        for (IndexedDocument indexedDocument : indexedDocuments) {
+            ExtractedDocument document = indexedDocument.document();
             UUID documentId = repository.createDocument(
                     sourceId,
                     document.title(),
@@ -204,16 +270,9 @@ public class IngestionService {
                 firstDocumentId = documentId;
             }
 
-            List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
-            List<List<Double>> embeddings = ollamaClient.embed(chunkTexts);
-            validateEmbeddings(embeddings);
-            repository.addChunks(documentId, chunks, embeddings);
+            repository.addChunks(documentId, indexedDocument.chunks(), indexedDocument.embeddings());
             documentCount++;
-            totalChunkCount += chunks.size();
-        }
-
-        if (documentCount == 0 || firstDocumentId == null) {
-            throw new IllegalArgumentException("No extractable text was found.");
+            totalChunkCount += indexedDocument.chunks().size();
         }
         repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
         return new IngestResponse(
@@ -257,6 +316,43 @@ public class IngestionService {
         }
     }
 
+    private void validateEmbeddings(List<List<Double>> embeddings, int expectedCount) {
+        if (embeddings.size() != expectedCount) {
+            throw new IllegalArgumentException("Embedding count mismatch. Expected "
+                    + expectedCount + " but got " + embeddings.size() + ".");
+        }
+        validateEmbeddings(embeddings);
+    }
+
+    private void recordFailure(AppUser user, UUID sourceId, UUID spaceId, String action, RuntimeException ex) {
+        String message = failureMessage(ex);
+        try {
+            repository.updateSourceStatus(sourceId, SourceStatus.FAILED, message);
+            auditService.log(user, action, "SOURCE", sourceId, spaceId, message);
+        } catch (RuntimeException recordEx) {
+            ex.addSuppressed(recordEx);
+        }
+    }
+
+    private String failureMessage(Throwable throwable) {
+        String topMessage = throwable.getMessage();
+        if (throwable instanceof IllegalArgumentException && topMessage != null && !topMessage.isBlank()) {
+            return topMessage;
+        }
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            message = topMessage;
+        }
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
+    }
+
     private record WebDocuments(List<ExtractedDocument> documents, int pageCount, int skippedCount) {
+    }
+
+    private record IndexedDocument(ExtractedDocument document, List<Chunk> chunks, List<List<Double>> embeddings) {
     }
 }

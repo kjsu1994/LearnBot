@@ -312,9 +312,7 @@ public class CodeIndexingService {
             if (totalChunks == 0) {
                 throw new IllegalArgumentException("No code chunks were created.");
             }
-            repository.activateIndex(repositoryId, jobId);
-            repository.markRepositoryIndexed(repositoryId, commitHash);
-            repository.finishJob(jobId, "SUCCEEDED", commitHash, null);
+            repository.completeSuccessfulIndex(repositoryId, jobId, commitHash);
         } catch (CodeIndexCancelledException ex) {
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");

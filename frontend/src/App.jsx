@@ -125,6 +125,25 @@ async function fetchJson(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function fetchBlob(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (options.token) {
+    headers.set('Authorization', `Bearer ${options.token}`);
+  }
+
+  const response = await fetch(`${apiBase}${path}`, {
+    method: options.method || 'GET',
+    headers,
+  });
+  if (!response.ok) {
+    const message = await responseMessage(response);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  return response.blob();
+}
+
 async function responseMessage(response) {
   const text = await response.text();
   if (!text) {
@@ -160,7 +179,8 @@ function App() {
   const [webRecursive, setWebRecursive] = useState(true);
   const [webMaxDepth, setWebMaxDepth] = useState(2);
   const [webMaxPages, setWebMaxPages] = useState(30);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [fileBatchResult, setFileBatchResult] = useState(null);
   const [query, setQuery] = useState('');
   const [question, setQuestion] = useState('');
   const [answerMode, setAnswerMode] = useState('qa');
@@ -168,6 +188,10 @@ function App() {
   const [answer, setAnswer] = useState(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [documentDetail, setDocumentDetail] = useState(null);
+  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
+  const [documentPreview, setDocumentPreview] = useState(null);
+  const [documentPreviewBlobUrl, setDocumentPreviewBlobUrl] = useState('');
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
 
   const [repoForm, setRepoForm] = useState({
     gitUrl: '',
@@ -270,6 +294,12 @@ function App() {
     }
   }, [activeView, user?.role]);
 
+  useEffect(() => () => {
+    if (documentPreviewBlobUrl) {
+      URL.revokeObjectURL(documentPreviewBlobUrl);
+    }
+  }, [documentPreviewBlobUrl]);
+
   const indexedCount = useMemo(
     () => documents.filter((doc) => doc.sourceStatus === 'INDEXED').length,
     [documents],
@@ -281,8 +311,6 @@ function App() {
   const codeChunkCount = repositories.reduce((sum, repo) => sum + Number(repo.activeChunkCount || 0), 0);
   const webCount = documents.filter((doc) => doc.sourceType === 'WEB').length;
   const fileCount = documents.length - webCount;
-  const latestDocuments = documents.slice(0, 8);
-
   function applySession(data, nextToken = token) {
     setToken(nextToken || data.token || '');
     setUser(data.user);
@@ -307,11 +335,33 @@ function App() {
     setSelectedCodeFile(null);
     setHighlightRange(null);
     setCodeModalOpen(false);
+    setFiles([]);
+    setFileBatchResult(null);
+    setDocumentPreviewOpen(false);
+    setDocumentPreview(null);
+    setDocumentPreviewBlobUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return '';
+    });
+  }
+
+  function updateUploadFiles(nextFiles) {
+    setFiles(nextFiles);
+    setFileBatchResult(null);
   }
 
   async function request(path, options = {}) {
     try {
       return await fetchJson(path, { ...options, token });
+    } catch (err) {
+      if (err.status === 401) clearSession();
+      throw err;
+    }
+  }
+
+  async function requestBlob(path, options = {}) {
+    try {
+      return await fetchBlob(path, { ...options, token });
     } catch (err) {
       if (err.status === 401) clearSession();
       throw err;
@@ -406,15 +456,29 @@ function App() {
   async function ingestFile(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    if (!file) return;
+    if (!files.length) return;
     await run('file', async () => {
       const body = new FormData();
-      body.append('file', file);
-      body.append('spaceId', activeSpaceId);
-      await request('/api/sources/files', { method: 'POST', body });
-      setFile(null);
+      let firstDocumentId = null;
+      setFileBatchResult(null);
+      if (files.length === 1) {
+        body.append('file', files[0]);
+        body.append('spaceId', activeSpaceId);
+        const response = await request('/api/sources/files', { method: 'POST', body });
+        firstDocumentId = response?.documentId;
+      } else {
+        files.forEach((selectedFile) => body.append('files', selectedFile));
+        body.append('spaceId', activeSpaceId);
+        const result = await request('/api/sources/files/batch', { method: 'POST', body });
+        setFileBatchResult(result);
+        firstDocumentId = result?.items?.find((item) => item.success)?.response?.documentId || null;
+      }
+      setFiles([]);
       form.reset();
       await refreshDocuments();
+      if (firstDocumentId) {
+        await loadDocumentDetail(firstDocumentId);
+      }
     });
   }
 
@@ -637,6 +701,44 @@ function App() {
     });
   }
 
+  async function openDocumentPreview(documentId) {
+    setError('');
+    setDocumentPreviewOpen(true);
+    setDocumentPreview(null);
+    setDocumentPreviewBlobUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return '';
+    });
+    setDocumentPreviewLoading(true);
+    try {
+      const preview = await request(`/api/documents/${documentId}/preview`);
+      setDocumentPreview(preview);
+      if (preview?.previewType === 'pdf' && preview.originalAvailable) {
+        const blob = await requestBlob(`/api/documents/${documentId}/original`);
+        const nextUrl = URL.createObjectURL(blob);
+        setDocumentPreviewBlobUrl(nextUrl);
+      }
+    } catch (err) {
+      setDocumentPreview(null);
+      setDocumentPreviewBlobUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return '';
+      });
+      setError(err.message || '문서 원문을 불러오지 못했습니다.');
+    } finally {
+      setDocumentPreviewLoading(false);
+    }
+  }
+
+  function closeDocumentPreview() {
+    setDocumentPreviewOpen(false);
+    setDocumentPreview(null);
+    setDocumentPreviewBlobUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return '';
+    });
+  }
+
   async function refreshAdmin() {
     const [users, logs, settings] = await Promise.all([
       request('/api/admin/users'),
@@ -845,17 +947,23 @@ function App() {
             setWebMaxDepth={setWebMaxDepth}
             webMaxPages={webMaxPages}
             setWebMaxPages={setWebMaxPages}
-            file={file}
-            setFile={setFile}
+            files={files}
+            setFiles={updateUploadFiles}
+            fileBatchResult={fileBatchResult}
             ingestWeb={ingestWeb}
             ingestFile={ingestFile}
             documents={documents}
-            latestDocuments={latestDocuments}
             selectedDocumentId={selectedDocumentId}
             loadDocumentDetail={loadDocumentDetail}
             reindexDocument={reindexDocument}
             deleteDocument={deleteDocument}
+            openDocumentPreview={openDocumentPreview}
             documentDetail={documentDetail}
+            documentPreviewOpen={documentPreviewOpen}
+            documentPreview={documentPreview}
+            documentPreviewBlobUrl={documentPreviewBlobUrl}
+            documentPreviewLoading={documentPreviewLoading}
+            closeDocumentPreview={closeDocumentPreview}
             answerMode={answerMode}
             setAnswerMode={setAnswerMode}
             question={question}
@@ -1168,7 +1276,7 @@ function CodeWorkspace(props) {
               <p>{repositories.length ? `${repositories.length}개 저장소` : '등록된 저장소가 없습니다.'}</p>
             </div>
           </div>
-          <div className="document-list">
+          <div className="document-list scrollable-list">
             {repositories.map((repo) => {
               const latestJob = jobs[repo.id]?.[0];
               const runningJob = jobs[repo.id]?.find((job) => job.status === 'RUNNING' || job.status === 'CANCELLING');
@@ -1438,14 +1546,20 @@ function DocumentWorkspace(props) {
             <div className="file-row">
               <label className="file-picker" htmlFor="file-upload">
                 <FileUp size={16} />
-                <span>{props.file ? props.file.name : '파일 선택'}</span>
+                <span>{formatSelectedFiles(props.files)}</span>
               </label>
-              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.xls,.xlsx" onChange={(event) => props.setFile(event.target.files?.[0] ?? null)} />
-              <button disabled={!props.file || props.loading('file')}>
+              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
+              <button disabled={!props.files?.length || props.loading('file')}>
                 {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
                 업로드
               </button>
             </div>
+            {props.files?.length > 1 && (
+              <div className="selected-file-list">
+                {props.files.map((item) => <span key={`${item.name}-${item.size}`}>{item.name}</span>)}
+              </div>
+            )}
+            {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
           </form>
         </section>
 
@@ -1454,11 +1568,11 @@ function DocumentWorkspace(props) {
             <Database size={18} />
             <div>
               <h2>문서 목록</h2>
-              <p>{props.documents.length ? `최근 ${props.latestDocuments.length}개 문서` : '인덱싱된 문서가 없습니다.'}</p>
+              <p>{props.documents.length ? `${props.documents.length}개 문서` : '인덱싱된 문서가 없습니다.'}</p>
             </div>
           </div>
-          <div className="document-list">
-            {props.latestDocuments.map((doc) => (
+          <div className="document-list scrollable-list">
+            {props.documents.map((doc) => (
               <article className={doc.id === props.selectedDocumentId ? 'document-row selected' : 'document-row'} key={doc.id} onClick={() => props.loadDocumentDetail(doc.id)}>
                 <div className="document-main">
                   <strong>{doc.title}</strong>
@@ -1469,6 +1583,9 @@ function DocumentWorkspace(props) {
                   <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
                 </div>
                 <div className="document-actions">
+                  <IconButton title="원문 보기" disabled={props.loading(`detail-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.openDocumentPreview(doc.id); }}>
+                    <Eye size={15} />
+                  </IconButton>
                   <IconButton title="재색인" disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.reindexDocument(doc.id); }}>
                     {props.loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
                   </IconButton>
@@ -1483,6 +1600,14 @@ function DocumentWorkspace(props) {
         </section>
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
+        {props.documentPreviewOpen && (
+          <DocumentPreviewModal
+            preview={props.documentPreview}
+            blobUrl={props.documentPreviewBlobUrl}
+            loading={props.documentPreviewLoading}
+            onClose={props.closeDocumentPreview}
+          />
+        )}
       </div>
 
       <div className="right-column">
@@ -1948,6 +2073,28 @@ function StatusBadge({ status }) {
   return <span className={`status status-${normalized}`}>{getStatusLabel(status)}</span>;
 }
 
+function formatSelectedFiles(files = []) {
+  if (!files.length) return '파일 선택';
+  if (files.length === 1) return files[0].name;
+  return `${files.length}개 파일 선택됨`;
+}
+
+function FileBatchResult({ result }) {
+  if (!result) return null;
+  return (
+    <div className={result.failed ? 'batch-result batch-result-warning' : 'batch-result'}>
+      <strong>{result.succeeded}/{result.total}개 파일 인덱싱 완료</strong>
+      <div className="batch-result-list">
+        {(result.items || []).map((item) => (
+          <span className={item.success ? 'success-note' : 'danger-note'} key={item.filename}>
+            {item.success ? '성공' : '실패'} · {item.filename}{item.errorMessage ? ` · ${item.errorMessage}` : ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DocumentDetailPanel({ detail, loading }) {
   if (loading) {
     return (
@@ -2002,13 +2149,9 @@ function DocumentDetailPanel({ detail, loading }) {
           <dd>{detail.storedObject?.originalFilename || '-'}</dd>
         </div>
       </dl>
-      <div className="chunk-list document-chunk-scroll" tabIndex={0}>
-        {detail.chunks.map((chunk) => (
-          <article className="chunk-card" key={chunk.id}>
-            <strong>Chunk {chunk.chunkIndex}</strong>
-            <p>{chunk.content}</p>
-          </article>
-        ))}
+      <div className="detail-box compact-box">
+        <span>원문 보기 버튼으로 파일 형식에 맞는 렌더링 팝업을 열 수 있습니다.</span>
+        <small>청크는 답변 근거에서만 표시됩니다.</small>
       </div>
     </section>
   );
@@ -2300,6 +2443,200 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {
+  const fileName = preview?.filename || preview?.title || 'document';
+  const typeLabel = getPreviewTypeLabel(preview?.previewType);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose?.();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+      <section className="code-modal document-preview-modal" role="dialog" aria-modal="true" aria-labelledby="document-preview-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="code-modal-header">
+          <div className="code-modal-title">
+            <FileCode2 size={18} />
+            <div>
+              <h2 id="document-preview-title">{fileName}</h2>
+              <p>{preview?.sourceUri || '문서 원문을 불러오는 중입니다.'}</p>
+            </div>
+          </div>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="code-modal-tabs" aria-hidden="true">
+          <span className="active-tab">{typeLabel}</span>
+          {preview?.contentType && <span>{preview.contentType}</span>}
+          {preview?.truncated && <span>preview truncated</span>}
+        </div>
+
+        <div className="code-modal-body document-preview-body">
+          {loading && (
+            <div className="code-modal-state">
+              <Loader2 className="spin" size={22} />
+              <strong>문서 원문을 불러오는 중입니다.</strong>
+            </div>
+          )}
+
+          {!loading && !preview && (
+            <div className="code-modal-state">
+              <FileCode2 size={22} />
+              <strong>표시할 문서 원문이 없습니다.</strong>
+            </div>
+          )}
+
+          {!loading && preview && <DocumentPreviewContent preview={preview} blobUrl={blobUrl} />}
+        </div>
+
+        <footer className="code-modal-status">
+          <span>{typeLabel}</span>
+          {preview?.sizeBytes != null && <span>{formatFileSize(preview.sizeBytes)}</span>}
+          {preview?.originalAvailable && <span>original stored</span>}
+          {preview?.truncated && <span>일부만 표시</span>}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function DocumentPreviewContent({ preview, blobUrl }) {
+  if (preview.previewType === 'pdf') {
+    if (!blobUrl) {
+      return (
+        <div className="code-modal-state">
+          <Loader2 className="spin" size={22} />
+          <strong>PDF 원본을 준비하는 중입니다.</strong>
+        </div>
+      );
+    }
+    return <iframe className="pdf-preview-frame" title={preview.title || 'PDF preview'} src={blobUrl} />;
+  }
+
+  if (preview.previewType === 'docx') {
+    return (
+      <div className="document-reader">
+        {(preview.paragraphs || []).map((paragraph, index) => <p key={`p-${index}`}>{paragraph}</p>)}
+        <PreviewTables tables={preview.tables || []} />
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'excel') {
+    return (
+      <div className="document-table-workbook">
+        {(preview.sheets || []).map((sheet, index) => (
+          <section className="preview-sheet" key={`${sheet.name}-${index}`}>
+            <h3>{sheet.name || `Sheet ${index + 1}`}</h3>
+            <PreviewTable rows={sheet.rows || []} />
+          </section>
+        ))}
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'csv') {
+    return <PreviewTables tables={preview.tables || []} />;
+  }
+
+  if (preview.previewType === 'markdown') {
+    return (
+      <div className="document-reader markdown-preview">
+        <MarkdownAnswer text={preview.text || ''} />
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'web') {
+    return <ReaderText text={preview.text} />;
+  }
+
+  return <pre className="document-text-viewer">{preview.text || ''}</pre>;
+}
+
+function ReaderText({ text = '' }) {
+  const paragraphs = splitReaderParagraphs(text);
+  if (!paragraphs.length) {
+    return <div className="code-modal-state"><strong>표시할 본문이 없습니다.</strong></div>;
+  }
+  return (
+    <div className="document-reader">
+      {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+    </div>
+  );
+}
+
+function PreviewTables({ tables = [] }) {
+  if (!tables.length) {
+    return <div className="code-modal-state"><strong>표시할 표가 없습니다.</strong></div>;
+  }
+  return (
+    <div className="document-table-stack">
+      {tables.map((table, index) => (
+        <section className="preview-sheet" key={`${table.name}-${index}`}>
+          {table.name && <h3>{table.name}</h3>}
+          <PreviewTable rows={table.rows || []} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function PreviewTable({ rows = [] }) {
+  if (!rows.length) {
+    return <p className="empty compact-empty">표 데이터가 없습니다.</p>;
+  }
+  return (
+    <div className="preview-table-wrap">
+      <table className="preview-table">
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {(row || []).map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function splitReaderParagraphs(text = '') {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+  const paragraphs = normalized.split(/\n{2,}/).map((item) => item.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (paragraphs.length > 1) return paragraphs;
+  return normalized.split('\n').map((item) => item.trim()).filter(Boolean);
+}
+
+function getPreviewTypeLabel(type) {
+  const labels = {
+    pdf: 'PDF',
+    docx: 'DOCX',
+    excel: 'Excel',
+    csv: 'CSV',
+    markdown: 'Markdown',
+    web: 'URL 본문',
+    text: 'Text',
+  };
+  return labels[type] || 'Document';
+}
+
+function formatFileSize(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function CodeFileModal({ detail, highlightRange, loading, onClose }) {

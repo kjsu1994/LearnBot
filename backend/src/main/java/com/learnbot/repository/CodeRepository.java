@@ -17,6 +17,7 @@ import com.learnbot.service.ParsedCodeChunk;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -190,6 +191,13 @@ public class CodeRepository {
                 """, new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("commitHash", commitHash));
+    }
+
+    @Transactional
+    public void completeSuccessfulIndex(UUID repositoryId, UUID indexVersion, String commitHash) {
+        setActiveIndex(repositoryId, indexVersion);
+        markRepositoryIndexed(repositoryId, commitHash);
+        finishJob(indexVersion, "SUCCEEDED", commitHash, null);
     }
 
     public UUID createJob(UUID repositoryId, String jobType) {
@@ -489,7 +497,12 @@ public class CodeRepository {
         }
     }
 
+    @Transactional
     public void activateIndex(UUID repositoryId, UUID indexVersion) {
+        setActiveIndex(repositoryId, indexVersion);
+    }
+
+    private void setActiveIndex(UUID repositoryId, UUID indexVersion) {
         jdbc.update("""
                 UPDATE code_files
                 SET active = FALSE

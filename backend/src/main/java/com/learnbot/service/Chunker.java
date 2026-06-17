@@ -46,6 +46,10 @@ public class Chunker {
     }
 
     private String normalize(String content) {
-        return content == null ? "" : content.replace("\r\n", "\n").replaceAll("[ \\t]+", " ").trim();
+        return content == null ? "" : content
+                .replace('\u0000', ' ')
+                .replace("\r\n", "\n")
+                .replaceAll("[ \\t]+", " ")
+                .trim();
     }
 }
