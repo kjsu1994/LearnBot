@@ -2,6 +2,9 @@ docker compose up -d --build  : using CPU
 .\scripts\up.ps1 -Build  : auto using GPU
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  : using GPU
 
+
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\up.ps1 -Build
+
 # LearnBot
 
 LearnBot is a local RAG knowledge workspace for approved web pages, CSV/Excel files, and private Git repositories.

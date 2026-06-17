@@ -291,7 +291,7 @@ function EvidenceList({ evidence = [] }) {
   const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
   const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
   return (
-    <div className="evidence-section">
+    <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
         <strong>근거 문서</strong>
         <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
