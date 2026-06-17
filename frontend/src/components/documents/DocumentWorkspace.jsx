@@ -1,0 +1,536 @@
+import { useEffect, useState } from 'react';
+import { CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
+import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
+import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
+import { QuestionGuide } from '../layout/Layout.jsx';
+import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
+
+function DocumentWorkspace(props) {
+  const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
+
+  return (
+    <section className="workspace-grid">
+      <div className="left-column">
+        <section className="panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 소스 추가</h2>
+              <p>허용된 웹 URL과 PDF, DOCX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
+            </div>
+          </div>
+          <form className="stack" onSubmit={props.ingestWeb}>
+            <label htmlFor="web-url">웹 URL</label>
+            <div className="inline-control">
+              <input id="web-url" value={props.webUrl} onChange={(event) => props.setWebUrl(event.target.value)} placeholder="https://example.com/docs 또는 example.com/docs" />
+              <button disabled={!props.webUrl || props.loading('web')}>
+                {props.loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+                인덱싱
+              </button>
+            </div>
+            <label className="checkbox-row" htmlFor="web-recursive">
+              <input id="web-recursive" type="checkbox" checked={props.webRecursive} onChange={(event) => props.setWebRecursive(event.target.checked)} />
+              <span>시작 URL의 하위 경로를 재귀 수집</span>
+            </label>
+            <div className="form-grid two">
+              <div className="stack">
+                <label htmlFor="web-max-depth">깊이</label>
+                <input
+                  id="web-max-depth"
+                  type="number"
+                  min="0"
+                  max="2"
+                  value={props.webMaxDepth}
+                  disabled={!props.webRecursive}
+                  onChange={(event) => props.setWebMaxDepth(event.target.value)}
+                />
+              </div>
+              <div className="stack">
+                <label htmlFor="web-max-pages">최대 페이지</label>
+                <input
+                  id="web-max-pages"
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={props.webMaxPages}
+                  disabled={!props.webRecursive}
+                  onChange={(event) => props.setWebMaxPages(event.target.value)}
+                />
+              </div>
+            </div>
+          </form>
+          <form className="stack" onSubmit={props.ingestFile}>
+            <label htmlFor="file-upload">파일 업로드</label>
+            <div className="file-row">
+              <label className="file-picker" htmlFor="file-upload">
+                <FileUp size={16} />
+                <span>{formatSelectedFiles(props.files)}</span>
+              </label>
+              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
+              <button disabled={!props.files?.length || props.loading('file')}>
+                {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
+                업로드
+              </button>
+            </div>
+            {props.files?.length > 1 && (
+              <div className="selected-file-list">
+                {props.files.map((item) => <span key={`${item.name}-${item.size}`}>{item.name}</span>)}
+              </div>
+            )}
+            {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
+          </form>
+        </section>
+
+        <section className="panel documents-panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 목록</h2>
+              <p>{props.documents.length ? `${props.documents.length}개 문서` : '인덱싱된 문서가 없습니다.'}</p>
+            </div>
+          </div>
+          <div className="document-list scrollable-list">
+            {props.documents.map((doc) => (
+              <article className={doc.id === props.selectedDocumentId ? 'document-row selected' : 'document-row'} key={doc.id} onClick={() => props.loadDocumentDetail(doc.id)}>
+                <div className="document-main">
+                  <strong>{doc.title}</strong>
+                  <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
+                </div>
+                <div className="document-meta">
+                  <StatusBadge status={doc.sourceStatus} />
+                  <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
+                </div>
+                <div className="document-actions">
+                  <IconButton title="원문 보기" disabled={props.loading(`detail-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.openDocumentPreview(doc.id); }}>
+                    <Eye size={15} />
+                  </IconButton>
+                  <IconButton title="재색인" disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.reindexDocument(doc.id); }}>
+                    {props.loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                  </IconButton>
+                  <IconButton danger title="삭제" disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.deleteDocument(doc.id, doc.title); }}>
+                    {props.loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                  </IconButton>
+                </div>
+              </article>
+            ))}
+            {props.documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
+          </div>
+        </section>
+
+        <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
+        {props.documentPreviewOpen && (
+          <DocumentPreviewModal
+            preview={props.documentPreview}
+            blobUrl={props.documentPreviewBlobUrl}
+            loading={props.documentPreviewLoading}
+            onClose={props.closeDocumentPreview}
+          />
+        )}
+      </div>
+
+      <div className="right-column">
+        <form className="panel ask-panel" onSubmit={props.ask}>
+          <div className="panel-title">
+            <MessageSquare size={18} />
+            <div>
+              <h2>문서에게 질문하기</h2>
+              <p>현재 선택된 공간의 인덱싱 완료 문서 전체에서 근거를 찾아 답변합니다.</p>
+            </div>
+          </div>
+          <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
+          <QuestionGuide guide={activeAnswerModeGuide} />
+          <textarea
+            value={props.question}
+            onChange={(event) => props.setQuestion(event.target.value)}
+            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
+            placeholder={activeAnswerModeGuide.placeholder}
+          />
+          <div className="action-row">
+            <button disabled={!props.question || props.loading('ask')}>
+              {props.loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
+              답변 생성
+            </button>
+          </div>
+          {props.answer && (
+            <div className="answer">
+              <div className="answer-title">
+                <CheckCircle2 size={16} />
+                <strong>답변</strong>
+              </div>
+              <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
+              <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
+              <div className="answer-body">
+                <MarkdownAnswer text={props.answer.answer} />
+              </div>
+              <EvidenceList evidence={props.answer.evidence} />
+            </div>
+          )}
+        </form>
+        <form className="panel search-panel" onSubmit={props.search}>
+          <div className="panel-title">
+            <Search size={18} />
+            <div>
+              <h2>문서 검색</h2>
+              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
+            </div>
+          </div>
+          <div className="inline-control">
+            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
+            <button disabled={!props.query || props.loading('search')}>
+              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              검색
+            </button>
+          </div>
+          <ResultList results={props.searchResults} title="검색 결과" />
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function FileBatchResult({ result }) {
+  if (!result) return null;
+  return (
+    <div className={result.failed ? 'batch-result batch-result-warning' : 'batch-result'}>
+      <strong>{result.succeeded}/{result.total}개 파일 인덱싱 완료</strong>
+      <div className="batch-result-list">
+        {(result.items || []).map((item) => (
+          <span className={item.success ? 'success-note' : 'danger-note'} key={item.filename}>
+            {item.success ? '성공' : '실패'} · {item.filename}{item.errorMessage ? ` · ${item.errorMessage}` : ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocumentDetailPanel({ detail, loading }) {
+  if (loading) {
+    return (
+      <section className="panel detail-panel">
+        <div className="panel-title">
+          <Info size={18} />
+          <div>
+            <h2>문서 상세</h2>
+            <p>불러오는 중입니다.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  if (!detail) {
+    return (
+      <section className="panel muted-panel">
+        <div className="panel-title">
+          <Info size={18} />
+          <div>
+            <h2>문서 상세</h2>
+            <p>문서를 선택하면 청크와 원본 정보를 확인할 수 있습니다.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="panel detail-panel">
+      <div className="panel-title">
+        <Info size={18} />
+        <div>
+          <h2>{detail.summary.title}</h2>
+          <p>{detail.summary.sourceUri}</p>
+        </div>
+      </div>
+      <dl className="detail-grid">
+        <div>
+          <dt>유형</dt>
+          <dd>{getSourceLabel(detail.summary.sourceType)}</dd>
+        </div>
+        <div>
+          <dt>청크</dt>
+          <dd>{detail.chunkCount}</dd>
+        </div>
+        <div>
+          <dt>상태</dt>
+          <dd>{getStatusLabel(detail.summary.sourceStatus)}</dd>
+        </div>
+        <div>
+          <dt>업로드</dt>
+          <dd>{detail.storedObject?.originalFilename || '-'}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function ResultList({ results, title }) {
+  return (
+    <div className="results">
+      {results.map((result) => (
+        <article className="result" key={result.chunkId}>
+          <div className="result-heading">
+            <strong>{result.title}</strong>
+            <span>{Number(result.score || 0).toFixed(3)}</span>
+          </div>
+          <small>{result.sourceUri} · chunk {result.chunkIndex}</small>
+          <p>{result.content}</p>
+        </article>
+      ))}
+      {!results.length && <p className="empty">{title}가 없습니다.</p>}
+    </div>
+  );
+}
+
+function EvidenceList({ evidence = [] }) {
+  const [expanded, setExpanded] = useState(false);
+  const evidenceKey = evidence.map((item) => item.chunkId || item.citationNumber).join('|');
+  useEffect(() => {
+    setExpanded(false);
+  }, [evidenceKey]);
+  if (!evidence.length) return <p className="empty compact-empty">표시할 근거가 없습니다.</p>;
+  const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
+  const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
+  return (
+    <div className="evidence-section">
+      <div className="evidence-header">
+        <strong>근거 문서</strong>
+        <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
+      </div>
+      <div className="evidence-list document-evidence-scroll" tabIndex={0}>
+        {visibleEvidence.map((item) => (
+          <article className="evidence-card" key={`${item.citationNumber}-${item.chunkId}`}>
+            <strong title={item.title}>[{item.citationNumber}] {item.title}</strong>
+            <small title={item.sourceUri}>{item.sourceUri} · chunk {item.chunkIndex}</small>
+            <p>{item.preview}</p>
+          </article>
+        ))}
+      </div>
+      {evidence.length > evidencePreviewLimit && (
+        <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 ${evidence.length}개 보기`}
+          {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {
+  const fileName = preview?.filename || preview?.title || 'document';
+  const typeLabel = getPreviewTypeLabel(preview?.previewType);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose?.();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+      <section className="code-modal document-preview-modal" role="dialog" aria-modal="true" aria-labelledby="document-preview-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="code-modal-header">
+          <div className="code-modal-title">
+            <FileCode2 size={18} />
+            <div>
+              <h2 id="document-preview-title">{fileName}</h2>
+              <p>{preview?.sourceUri || '문서 원문을 불러오는 중입니다.'}</p>
+            </div>
+          </div>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="code-modal-tabs" aria-hidden="true">
+          <span className="active-tab">{typeLabel}</span>
+          {preview?.contentType && <span>{preview.contentType}</span>}
+          {preview?.truncated && <span>preview truncated</span>}
+        </div>
+
+        <div className="code-modal-body document-preview-body">
+          {loading && (
+            <div className="code-modal-state">
+              <Loader2 className="spin" size={22} />
+              <strong>문서 원문을 불러오는 중입니다.</strong>
+            </div>
+          )}
+
+          {!loading && !preview && (
+            <div className="code-modal-state">
+              <FileCode2 size={22} />
+              <strong>표시할 문서 원문이 없습니다.</strong>
+            </div>
+          )}
+
+          {!loading && preview && <DocumentPreviewContent preview={preview} blobUrl={blobUrl} />}
+        </div>
+
+        <footer className="code-modal-status">
+          <span>{typeLabel}</span>
+          {preview?.sizeBytes != null && <span>{formatFileSize(preview.sizeBytes)}</span>}
+          {preview?.originalAvailable && <span>original stored</span>}
+          {preview?.truncated && <span>일부만 표시</span>}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function DocumentPreviewContent({ preview, blobUrl }) {
+  if (preview.previewType === 'pdf') {
+    if (!blobUrl) {
+      return (
+        <div className="code-modal-state">
+          <Loader2 className="spin" size={22} />
+          <strong>PDF 원본을 준비하는 중입니다.</strong>
+        </div>
+      );
+    }
+    return <iframe className="pdf-preview-frame" title={preview.title || 'PDF preview'} src={blobUrl} />;
+  }
+
+  if (preview.previewType === 'docx') {
+    return (
+      <div className="document-reader">
+        {(preview.paragraphs || []).map((paragraph, index) => <p key={`p-${index}`}>{paragraph}</p>)}
+        <PreviewTables tables={preview.tables || []} />
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'excel') {
+    return (
+      <div className="document-table-workbook">
+        {(preview.sheets || []).map((sheet, index) => (
+          <section className="preview-sheet" key={`${sheet.name}-${index}`}>
+            <h3>{sheet.name || `Sheet ${index + 1}`}</h3>
+            <PreviewTable rows={sheet.rows || []} />
+          </section>
+        ))}
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'csv') {
+    return <PreviewTables tables={preview.tables || []} />;
+  }
+
+  if (preview.previewType === 'markdown') {
+    return (
+      <div className="document-reader markdown-preview">
+        <MarkdownAnswer text={preview.text || ''} />
+      </div>
+    );
+  }
+
+  if (preview.previewType === 'web') {
+    if (preview.blocks?.length) {
+      return <WebReader blocks={preview.blocks} fallbackText={preview.text} />;
+    }
+    return <ReaderText text={preview.text} />;
+  }
+
+  return <pre className="document-text-viewer">{preview.text || ''}</pre>;
+}
+
+function ReaderText({ text = '' }) {
+  const paragraphs = splitReaderParagraphs(text);
+  if (!paragraphs.length) {
+    return <div className="code-modal-state"><strong>표시할 본문이 없습니다.</strong></div>;
+  }
+  return (
+    <div className="document-reader">
+      {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+    </div>
+  );
+}
+
+function WebReader({ blocks = [], fallbackText = '' }) {
+  if (!blocks.length) {
+    return <ReaderText text={fallbackText} />;
+  }
+  return (
+    <div className="document-reader web-reader">
+      {blocks.map((block, index) => <WebReaderBlock block={block} key={index} />)}
+    </div>
+  );
+}
+
+function WebReaderBlock({ block }) {
+  const type = block?.type || 'paragraph';
+  if (type === 'heading') {
+    const level = Math.max(1, Math.min(4, Number(block.level || 2)));
+    const HeadingTag = `h${level}`;
+    return <HeadingTag className="web-reader-heading">{block.text}</HeadingTag>;
+  }
+  if (type === 'list') {
+    const items = block.items || [];
+    if (!items.length) return null;
+    return (
+      <ul className="web-reader-list">
+        {items.map((item, index) => <li key={index}>{item}</li>)}
+      </ul>
+    );
+  }
+  if (type === 'table') {
+    return <PreviewTable rows={block.rows || []} />;
+  }
+  if (type === 'code') {
+    return <pre className="web-reader-code"><code>{block.text}</code></pre>;
+  }
+  if (type === 'quote') {
+    return <blockquote className="web-reader-quote">{block.text}</blockquote>;
+  }
+  if (type === 'image') {
+    return (
+      <div className="web-reader-asset">
+        <span>{block.text || 'image'}</span>
+        {block.href && <small>{block.href}</small>}
+      </div>
+    );
+  }
+  if (!block?.text) return null;
+  return <p>{block.text}</p>;
+}
+
+function PreviewTables({ tables = [] }) {
+  if (!tables.length) {
+    return <div className="code-modal-state"><strong>표시할 표가 없습니다.</strong></div>;
+  }
+  return (
+    <div className="document-table-stack">
+      {tables.map((table, index) => (
+        <section className="preview-sheet" key={`${table.name}-${index}`}>
+          {table.name && <h3>{table.name}</h3>}
+          <PreviewTable rows={table.rows || []} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function PreviewTable({ rows = [] }) {
+  if (!rows.length) {
+    return <p className="empty compact-empty">표 데이터가 없습니다.</p>;
+  }
+  return (
+    <div className="preview-table-wrap">
+      <table className="preview-table">
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {(row || []).map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export { DocumentWorkspace };
