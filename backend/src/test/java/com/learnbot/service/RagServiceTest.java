@@ -42,7 +42,7 @@ class RagServiceTest {
                         """),
                 chunk(1, "Sheet Sheet1 Row 4: C2=ROW()-1 | C3=상담직 | C4=오용숙 | C5=경영지원본부")
         ));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("총 3명입니다. 1행을 헤더로 보고 2~4행의 이름 값이 있는 행을 계산했습니다 [1].");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("총 3명입니다. 1행을 헤더로 보고 2~4행의 이름 값이 있는 행을 계산했습니다 [1]."));
 
         AskResponse response = service.ask(question, null, "qa");
 
@@ -71,7 +71,7 @@ class RagServiceTest {
                         Sheet Sheet1 Row 3: C2=ROW()-1 | C3=일반직 | C4=안소민 | C5=경영지원본부
                         """)
         ));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("제"));
 
         AskResponse response = service.ask(question, null, "qa");
 
@@ -97,7 +97,7 @@ class RagServiceTest {
                         Sheet Sheet1 Row 9: C2=ROW()-1 | C3=VLOOKUP(D9,Sheet!A:N,6,FALSE) | C4=서세덕 | C5=관세행정운영본부
                         """)
         ));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("제"));
 
         AskResponse response = service.ask(question, null, "qa");
 
@@ -121,12 +121,12 @@ class RagServiceTest {
                         "기간제·단시간·파견 근로자 차별 예방 가이드라인.pdf",
                         "application/pdf",
                         longContent)));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("임금, 복리후생, 교육훈련, 고충처리 절차의 차별적 처우를 점검하고 개선합니다 [1].");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("임금, 복리후생, 교육훈련, 고충처리 절차의 차별적 처우를 점검하고 개선합니다 [1]."));
 
         AskResponse response = service.ask(question, null, "qa");
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).chat(anyString(), promptCaptor.capture());
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture());
         assertThat(promptCaptor.getValue()).contains("차별 예방");
         assertThat(promptCaptor.getValue().length()).isLessThan(1000);
         assertThat(response.answer()).contains("임금");
@@ -146,7 +146,7 @@ class RagServiceTest {
                         "기간제·단시간·파견 근로자 차별 예방 가이드라인.pdf",
                         "application/pdf",
                         content)));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("제"));
 
         AskResponse response = service.ask(question, null, "qa");
 
@@ -181,7 +181,7 @@ class RagServiceTest {
                                 "application/pdf",
                                 "사전협의 통보기한 단축 및 협의 내용 간소화, 공고기간 단축, 시험단계 축소, 시험위원 중 외부전문가 비율 조정 등은 예외 운영 근거를 확인해야 함.")
                 ));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("제");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("제"));
 
         AskResponse response = service.ask(question, null, "qa");
 
@@ -204,6 +204,10 @@ class RagServiceTest {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "Sheet Sheet1 Row 1: C2=연번 | C3=직종 | C4=이름"
         );
+    }
+
+    private static OllamaClient.ChatResult chat(String content) {
+        return new OllamaClient.ChatResult(content, "stop", true, 0, 0);
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content) {

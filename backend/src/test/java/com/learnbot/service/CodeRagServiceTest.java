@@ -58,7 +58,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chat(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
 
         CodeAskResponse response = service.ask(
                 null,
@@ -110,7 +110,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(controller, rag));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("The");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("The"));
 
         CodeAskResponse response = service.ask(
                 null,
@@ -146,7 +146,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("로그인은 LoginService 후보 메서드에서 인증과 토큰 발급을 처리합니다 [1].");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("로그인은 LoginService 후보 메서드에서 인증과 토큰 발급을 처리합니다 [1]."));
 
         service.ask(
                 null,
@@ -158,7 +158,7 @@ class CodeRagServiceTest {
         );
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).chat(anyString(), promptCaptor.capture());
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture());
         assertThat(promptCaptor.getValue()).contains("login0");
         assertThat(promptCaptor.getValue()).doesNotContain("[9]");
         assertThat(promptCaptor.getValue().length()).isLessThan(6500);
@@ -174,7 +174,7 @@ class CodeRagServiceTest {
         CodeSearchResult serviceResult = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.76);
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(controller, serviceResult));
-        when(ollamaClient.chat(anyString(), anyString())).thenReturn("AuthController에 있습니다.");
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("AuthController에 있습니다."));
 
         CodeAskResponse response = service.ask(
                 null,
@@ -199,6 +199,10 @@ class CodeRagServiceTest {
                 score,
                 "File: " + filePath + "\nLines: 10-24\npublic LoginResponse login(...) { return authService.login(...); }"
         );
+    }
+
+    private static OllamaClient.ChatResult chat(String content) {
+        return new OllamaClient.ChatResult(content, "stop", true, 0, 0);
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {

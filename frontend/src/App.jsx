@@ -1644,6 +1644,23 @@ function DocumentWorkspace(props) {
         </section>
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
+        <form className="panel search-panel" onSubmit={props.search}>
+          <div className="panel-title">
+            <Search size={18} />
+            <div>
+              <h2>문서 검색</h2>
+              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
+            </div>
+          </div>
+          <div className="inline-control">
+            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
+            <button disabled={!props.query || props.loading('search')}>
+              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              검색
+            </button>
+          </div>
+          <ResultList results={props.searchResults} title="검색 결과" />
+        </form>
         {props.documentPreviewOpen && (
           <DocumentPreviewModal
             preview={props.documentPreview}
@@ -1703,24 +1720,6 @@ function DocumentWorkspace(props) {
               <EvidenceList evidence={props.answer.evidence} />
             </div>
           )}
-        </form>
-
-        <form className="panel search-panel" onSubmit={props.search}>
-          <div className="panel-title">
-            <Search size={18} />
-            <div>
-              <h2>문서 검색</h2>
-              <p>벡터 검색과 키워드 검색 결과를 함께 확인합니다.</p>
-            </div>
-          </div>
-          <div className="inline-control">
-            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
-            <button disabled={!props.query || props.loading('search')}>
-              {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-              검색
-            </button>
-          </div>
-          <ResultList results={props.searchResults} title="검색 결과" />
         </form>
       </div>
     </section>
@@ -2437,10 +2436,6 @@ function DocumentDetailPanel({ detail, loading }) {
           <dd>{detail.storedObject?.originalFilename || '-'}</dd>
         </div>
       </dl>
-      <div className="detail-box compact-box">
-        <span>원문 보기 버튼으로 파일 형식에 맞는 렌더링 팝업을 열 수 있습니다.</span>
-        <small>청크는 답변 근거에서만 표시됩니다.</small>
-      </div>
     </section>
   );
 }

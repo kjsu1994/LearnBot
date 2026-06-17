@@ -107,24 +107,30 @@ public class CodeRagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        String answerDoneReason = null;
         try {
-            answer = ollamaClient.chat(systemPrompt, userPrompt);
-            String qualityReason = qualityFailureReason(answer, answerResults.size());
+            OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            answer = chatResult.content();
+            answerDoneReason = chatResult.doneReason();
+            String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
             if (qualityReason != null && pipelineService.maxIterations() > 1) {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
-                String retryAnswer = ollamaClient.chat(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
-                if (qualityFailureReason(retryAnswer, answerResults.size()) == null) {
+                OllamaClient.ChatResult retryResult = ollamaClient.chatResult(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                String retryAnswer = retryResult.content();
+                if (qualityFailureReason(retryAnswer, answerResults.size(), retryResult.doneReason()) == null) {
                     answer = retryAnswer;
+                    answerDoneReason = retryResult.doneReason();
                     answerRetried = true;
                 }
             }
         } catch (RuntimeException ex) {
             answer = fallbackAnswer(questionMode, question, answerResults);
+            answerDoneReason = null;
             llmUnavailable = true;
         }
-        if (qualityFailureReason(answer, answerResults.size()) != null) {
+        if (qualityFailureReason(answer, answerResults.size(), answerDoneReason) != null) {
             answer = questionMode == CodeQuestionMode.OVERVIEW
                     ? overviewFallbackAnswer(answerResults)
                     : fallbackAnswer(questionMode, question, answerResults);
@@ -506,8 +512,8 @@ public class CodeRagService {
 
     private String confidence(List<CodeSearchResult> results, RagPipelineService.EvidenceAssessment assessment) {
         String value = confidence(results);
-        if (assessment != null && !assessment.sufficient() && "?믪쓬".equals(value)) {
-            return "蹂댄넻";
+        if (assessment != null && !assessment.sufficient() && "높음".equals(value)) {
+            return "보통";
         }
         return value;
     }
@@ -576,6 +582,10 @@ public class CodeRagService {
     }
 
     private String qualityFailureReason(String answer, int evidenceCount) {
+        return qualityFailureReason(answer, evidenceCount, null);
+    }
+
+    private String qualityFailureReason(String answer, int evidenceCount, String doneReason) {
         if (isLowQualityAnswer(answer, null)) {
             if (answer == null || answer.isBlank()) {
                 return "blank";
@@ -588,7 +598,7 @@ public class CodeRagService {
             }
             return "low quality";
         }
-        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true);
+        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true, doneReason);
         return assessment.acceptable() ? null : assessment.reason();
     }
 

@@ -111,18 +111,23 @@ public class RagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        String answerDoneReason = null;
         try {
-            answer = ollamaClient.chat(systemPrompt, userPrompt);
-            String qualityReason = qualityFailureReason(answer, citations.size());
+            OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            answer = chatResult.content();
+            answerDoneReason = chatResult.doneReason();
+            String qualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
             if (qualityReason != null && pipelineService.maxIterations() > 1) {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited context. Cite every factual claim with [n].";
-                String retryAnswer = ollamaClient.chat(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
-                if (qualityFailureReason(retryAnswer, citations.size()) == null) {
+                OllamaClient.ChatResult retryResult = ollamaClient.chatResult(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                String retryAnswer = retryResult.content();
+                if (qualityFailureReason(retryAnswer, citations.size(), retryResult.doneReason()) == null) {
                     answer = retryAnswer;
+                    answerDoneReason = retryResult.doneReason();
                     answerRetried = true;
                 }
             }
@@ -130,9 +135,10 @@ public class RagService {
             log.warn("RAG LLM call failed mode={} citations={} question={}",
                     answerMode.value(), citations.size(), abbreviate(question), ex);
             answer = fallbackAnswer(answerMode, question, citations);
+            answerDoneReason = null;
             llmUnavailable = true;
         }
-        String lowQualityReason = qualityFailureReason(answer, citations.size());
+        String lowQualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
         if (lowQualityReason != null) {
             log.info("RAG LLM answer rewritten mode={} citations={} reason={} length={} hasCitation={} question={}",
                     answerMode.value(),
@@ -847,8 +853,15 @@ public class RagService {
                 + "\n\nEvidence previews:\n" + evidence;
 
         try {
-            String answer = ollamaClient.chat(systemPrompt, userPrompt);
-            if (!isLowQualityAnswer(answer) && mentionsCount(answer, expectedTotal) && answer.contains("[")) {
+            OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            String answer = chatResult.content();
+            boolean acceptable = pipelineService.assessAnswer(
+                    answer,
+                    computedCitations.size(),
+                    true,
+                    chatResult.doneReason()
+            ).acceptable();
+            if (acceptable && !isLowQualityAnswer(answer) && mentionsCount(answer, expectedTotal) && answer.contains("[")) {
                 return answer;
             }
         } catch (RuntimeException ignored) {
@@ -917,11 +930,15 @@ public class RagService {
     }
 
     private String qualityFailureReason(String answer, int evidenceCount) {
+        return qualityFailureReason(answer, evidenceCount, null);
+    }
+
+    private String qualityFailureReason(String answer, int evidenceCount, String doneReason) {
         String lowQualityReason = lowQualityReason(answer);
         if (lowQualityReason != null) {
             return lowQualityReason;
         }
-        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true);
+        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true, doneReason);
         return assessment.acceptable() ? null : assessment.reason();
     }
 
@@ -978,8 +995,8 @@ public class RagService {
             RagPipelineService.EvidenceAssessment assessment
     ) {
         String value = confidence(results, llmUnavailable, answerRewritten);
-        if (assessment != null && !assessment.sufficient() && "?믪쓬".equals(value)) {
-            return "蹂댄넻";
+        if (assessment != null && !assessment.sufficient() && "높음".equals(value)) {
+            return "보통";
         }
         return value;
     }

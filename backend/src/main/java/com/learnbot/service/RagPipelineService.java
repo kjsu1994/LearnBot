@@ -121,6 +121,10 @@ public class RagPipelineService {
     }
 
     public AnswerAssessment assessAnswer(String answer, int evidenceCount, boolean citationRequired) {
+        return assessAnswer(answer, evidenceCount, citationRequired, null);
+    }
+
+    public AnswerAssessment assessAnswer(String answer, int evidenceCount, boolean citationRequired, String doneReason) {
         String trimmed = safe(answer).trim();
         if (!pipeline().isSelfCheckEnabled()) {
             return new AnswerAssessment(true, "self-check disabled");
@@ -130,6 +134,12 @@ public class RagPipelineService {
         }
         if (trimmed.length() < 12) {
             return new AnswerAssessment(false, "answer too short");
+        }
+        if ("length".equalsIgnoreCase(safe(doneReason))) {
+            return new AnswerAssessment(false, "model stopped before finishing");
+        }
+        if (looksIncompleteEnding(trimmed)) {
+            return new AnswerAssessment(false, "answer appears incomplete");
         }
         List<Integer> citations = citations(trimmed);
         if (citationRequired && citations.isEmpty()) {
@@ -329,6 +339,48 @@ public class RagPipelineService {
                 || notBlank(result.methodName())
                 || notBlank(result.className())
                 || notBlank(result.symbolName()));
+    }
+
+    private boolean looksIncompleteEnding(String answer) {
+        String trimmed = stripTrailingMarkdownNoise(answer);
+        if (trimmed.isBlank()) {
+            return true;
+        }
+        char last = trimmed.charAt(trimmed.length() - 1);
+        if (isAcceptableTerminal(last)) {
+            return false;
+        }
+        String lastLine = trimmed.lines()
+                .reduce((first, second) -> second)
+                .orElse(trimmed)
+                .trim();
+        String normalized = lastLine.replaceAll("\\s+", " ");
+        return normalized.length() < 24 || endsWithDanglingWord(normalized);
+    }
+
+    private String stripTrailingMarkdownNoise(String answer) {
+        String trimmed = safe(answer).trim();
+        while (trimmed.endsWith("```")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
+        }
+        return trimmed;
+    }
+
+    private boolean isAcceptableTerminal(char value) {
+        return ".?!。！？)]}`|".indexOf(value) >= 0
+                || "다요음함됨임".indexOf(value) >= 0;
+    }
+
+    private boolean endsWithDanglingWord(String value) {
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return normalized.endsWith("라는")
+                || normalized.endsWith("이라는")
+                || normalized.endsWith("위한")
+                || normalized.endsWith("통해")
+                || normalized.endsWith("및")
+                || normalized.endsWith("또는")
+                || normalized.endsWith("그리고")
+                || normalized.endsWith("정");
     }
 
     private boolean notBlank(String value) {

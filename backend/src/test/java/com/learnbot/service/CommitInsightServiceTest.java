@@ -78,7 +78,7 @@ class CommitInsightServiceTest {
 
         when(repository.findRepository(repositoryId)).thenReturn(Optional.of(record));
         when(repository.findActiveFileIdsByPath(eq(repositoryId), anyList())).thenReturn(Map.of("src/App.java", fileId));
-        when(ollamaClient.chat(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
 
         CodeAskResponse response = service.answer(repositoryId, "최근 변경내용 설명해줘");
 
@@ -89,5 +89,57 @@ class CommitInsightServiceTest {
         assertThat(response.evidence().get(0).fileId()).isEqualTo(fileId);
         assertThat(response.evidence().get(0).metadata()).containsEntry("kind", "commit_diff");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("최신 인덱싱 커밋"));
+    }
+
+    @Test
+    void fallsBackWhenCommitAnswerEndsIncomplete() throws Exception {
+        Path source = tempDir.resolve("src").resolve("App.java");
+        Files.createDirectories(source.getParent());
+        UUID repositoryId = UUID.randomUUID();
+        RevCommit second;
+
+        try (Git git = Git.init().setDirectory(tempDir.toFile()).call()) {
+            Files.writeString(source, "class App {\n}\n");
+            git.add().addFilepattern(".").call();
+            git.commit()
+                    .setMessage("Initial app")
+                    .setAuthor("Tester", "tester@example.com")
+                    .setCommitter("Tester", "tester@example.com")
+                    .call();
+
+            Files.writeString(source, "class App {\n    void run() { }\n}\n");
+            git.add().addFilepattern(".").call();
+            second = git.commit()
+                    .setMessage("Add run method")
+                    .setAuthor("Tester", "tester@example.com")
+                    .setCommitter("Tester", "tester@example.com")
+                    .call();
+        }
+
+        CodeRepository repository = mock(CodeRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CommitInsightService service = new CommitInsightService(repository, ollamaClient);
+        CodeRepositoryRecord record = new CodeRepositoryRecord(
+                repositoryId,
+                SecurityRepository.DEFAULT_SPACE_ID,
+                "sample",
+                "https://example.com/sample.git",
+                "main",
+                "NONE",
+                tempDir.toString(),
+                "INDEXED",
+                second.getName()
+        );
+
+        when(repository.findRepository(repositoryId)).thenReturn(Optional.of(record));
+        when(repository.findActiveFileIdsByPath(eq(repositoryId), anyList())).thenReturn(Map.of());
+        when(ollamaClient.chatResult(anyString(), anyString()))
+                .thenReturn(new OllamaClient.ChatResult("변경 요약은 App.java에 run 메서드를 추가했다는 정", "stop", true, 0, 0));
+
+        CodeAskResponse response = service.answer(repositoryId, "최신 바뀐 내용 알려줘");
+
+        assertThat(response.answer()).contains("Add run method");
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("완성되지 않아"));
     }
 }

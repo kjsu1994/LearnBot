@@ -35,6 +35,7 @@ learnbot:
     embedding-model: ${EMBEDDING_MODEL:${OLLAMA_EMBEDDING_MODEL:bge-m3}}
     temperature: ${LLM_TEMPERATURE:0.2}
     context-window: ${LLM_CONTEXT_WINDOW:${OLLAMA_CONTEXT_LENGTH:4096}}
+    max-output-tokens: ${LLM_MAX_OUTPUT_TOKENS:0}
   rag:
     top-k: ${RAG_TOP_K:6}
     pipeline:

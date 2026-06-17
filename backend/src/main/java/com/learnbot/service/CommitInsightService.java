@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.repository.CodeRepository;
@@ -16,6 +17,7 @@ import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -62,10 +64,17 @@ public class CommitInsightService {
 
     private final CodeRepository repository;
     private final OllamaClient ollamaClient;
+    private final RagPipelineService pipelineService;
 
     public CommitInsightService(CodeRepository repository, OllamaClient ollamaClient) {
+        this(repository, ollamaClient, new RagPipelineService(ollamaClient, new LearnBotProperties()));
+    }
+
+    @Autowired
+    public CommitInsightService(CodeRepository repository, OllamaClient ollamaClient, RagPipelineService pipelineService) {
         this.repository = repository;
         this.ollamaClient = ollamaClient;
+        this.pipelineService = pipelineService;
     }
 
     public boolean isCommitQuestion(String question) {
@@ -113,13 +122,16 @@ public class CommitInsightService {
             boolean llmUnavailable = false;
             boolean answerRewritten = false;
             String answer;
+            String answerDoneReason = null;
             try {
-                answer = ollamaClient.chat(systemPrompt(), userPrompt(question, snapshot));
+                OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt(), userPrompt(question, snapshot));
+                answer = chatResult.content();
+                answerDoneReason = chatResult.doneReason();
             } catch (RuntimeException ex) {
                 answer = fallbackAnswer(snapshot);
                 llmUnavailable = true;
             }
-            if (isLowQualityAnswer(answer)) {
+            if (qualityFailureReason(answer, evidence.size(), answerDoneReason) != null) {
                 answer = fallbackAnswer(snapshot);
                 answerRewritten = true;
             }
@@ -497,7 +509,7 @@ public class CommitInsightService {
             notes.add("LLM 호출이 실패해 Git diff 기반 fallback 응답을 반환했고, 해석 범위가 좁아 신뢰도를 보통으로 낮췄습니다.");
         }
         if (answerRewritten) {
-            notes.add("LLM 응답에 근거 인용이 부족해 Git diff 기반 fallback 응답으로 대체했고, 신뢰도를 보통으로 낮췄습니다.");
+            notes.add("LLM 응답에 근거 인용이 부족하거나 답변이 완성되지 않아 Git diff 기반 fallback 응답으로 대체했고, 신뢰도를 보통으로 낮췄습니다.");
         }
         return notes;
     }
@@ -613,8 +625,18 @@ public class CommitInsightService {
                 .orElse(firstPatchLine(patch));
     }
 
-    private boolean isLowQualityAnswer(String answer) {
-        return answer == null || answer.isBlank() || answer.trim().length() < 30 || !answer.matches("(?s).*\\[\\d+].*");
+    private String qualityFailureReason(String answer, int evidenceCount, String doneReason) {
+        if (answer == null || answer.isBlank()) {
+            return "blank";
+        }
+        if (answer.trim().length() < 30) {
+            return "too short";
+        }
+        if (!answer.matches("(?s).*\\[\\d+].*")) {
+            return "missing citation";
+        }
+        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true, doneReason);
+        return assessment.acceptable() ? null : assessment.reason();
     }
 
     private boolean containsAny(String normalizedQuestion, List<String> terms) {

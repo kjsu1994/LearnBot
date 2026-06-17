@@ -213,6 +213,9 @@ public class LearnBotProperties {
         @Min(512)
         private int contextWindow = 4096;
 
+        @Min(0)
+        private int maxOutputTokens = 0;
+
         public String getBaseUrl() {
             return baseUrl;
         }
@@ -251,6 +254,14 @@ public class LearnBotProperties {
 
         public void setContextWindow(int contextWindow) {
             this.contextWindow = contextWindow;
+        }
+
+        public int getMaxOutputTokens() {
+            return maxOutputTokens;
+        }
+
+        public void setMaxOutputTokens(int maxOutputTokens) {
+            this.maxOutputTokens = maxOutputTokens;
         }
     }
 

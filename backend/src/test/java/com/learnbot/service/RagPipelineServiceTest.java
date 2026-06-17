@@ -70,4 +70,33 @@ class RagPipelineServiceTest {
         assertThat(assessment.acceptable()).isFalse();
         assertThat(assessment.reason()).isEqualTo("citation out of range");
     }
+
+    @Test
+    void answerSelfCheckRejectsLengthStoppedGeneration() {
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), new LearnBotProperties());
+
+        RagPipelineService.AnswerAssessment assessment = service.assessAnswer(
+                "근거에 따르면 관리자 권한 관리가 추가되었습니다 [1].",
+                1,
+                true,
+                "length"
+        );
+
+        assertThat(assessment.acceptable()).isFalse();
+        assertThat(assessment.reason()).isEqualTo("model stopped before finishing");
+    }
+
+    @Test
+    void answerSelfCheckRejectsIncompleteFinalSentence() {
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), new LearnBotProperties());
+
+        RagPipelineService.AnswerAssessment assessment = service.assessAnswer(
+                "근거에 따르면 설정 클래스에 Pipeline이라는 정",
+                1,
+                false
+        );
+
+        assertThat(assessment.acceptable()).isFalse();
+        assertThat(assessment.reason()).isEqualTo("answer appears incomplete");
+    }
 }
