@@ -203,7 +203,13 @@ public class LearnBotProperties {
         private String baseUrl = "http://localhost:11434";
 
         @NotBlank
-        private String chatModel = "gemma4:e2b";
+        private String chatModel = "gemma4:e2b-it-qat";
+
+        @NotBlank
+        private String primaryChatModel = "qwen3:8b-q4_K_M";
+
+        @NotBlank
+        private String auxiliaryChatModel = "qwen3.5:2b-q4_K_M";
 
         @NotBlank
         private String embeddingModel = "bge-m3";
@@ -230,6 +236,22 @@ public class LearnBotProperties {
 
         public void setChatModel(String chatModel) {
             this.chatModel = chatModel;
+        }
+
+        public String getPrimaryChatModel() {
+            return primaryChatModel;
+        }
+
+        public void setPrimaryChatModel(String primaryChatModel) {
+            this.primaryChatModel = primaryChatModel;
+        }
+
+        public String getAuxiliaryChatModel() {
+            return auxiliaryChatModel;
+        }
+
+        public void setAuxiliaryChatModel(String auxiliaryChatModel) {
+            this.auxiliaryChatModel = auxiliaryChatModel;
         }
 
         public String getEmbeddingModel() {

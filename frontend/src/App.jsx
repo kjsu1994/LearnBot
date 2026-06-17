@@ -217,7 +217,19 @@ function App() {
   const [referenceResult, setReferenceResult] = useState(null);
 
   const [adminUsers, setAdminUsers] = useState([]);
-  const [adminSettings, setAdminSettings] = useState({ respectRobotsTxt: true, allowedDomains: [] });
+  const [adminSettings, setAdminSettings] = useState({
+    respectRobotsTxt: true,
+    allowedDomains: [],
+    ollamaBaseUrl: '',
+    chatModel: '',
+    primaryChatModel: '',
+    auxiliaryChatModel: '',
+    effectiveOllamaBaseUrl: '',
+    effectiveChatModel: '',
+    effectivePrimaryChatModel: '',
+    effectiveAuxiliaryChatModel: '',
+    llmUsingDefaults: true,
+  });
   const [auditLogs, setAuditLogs] = useState([]);
   const [inviteForm, setInviteForm] = useState({
     loginId: '',
@@ -372,8 +384,8 @@ function App() {
     setBusy(label);
     setError('');
     try {
-      await task();
-      return true;
+      const result = await task();
+      return result === undefined ? true : result;
     } catch (err) {
       setError(err.message || '요청을 처리하지 못했습니다.');
       return false;
@@ -747,7 +759,19 @@ function App() {
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
-    setAdminSettings(settings || { respectRobotsTxt: true, allowedDomains: [] });
+    setAdminSettings(settings || {
+      respectRobotsTxt: true,
+      allowedDomains: [],
+      ollamaBaseUrl: '',
+      chatModel: '',
+      primaryChatModel: '',
+      auxiliaryChatModel: '',
+      effectiveOllamaBaseUrl: '',
+      effectiveChatModel: '',
+      effectivePrimaryChatModel: '',
+      effectiveAuxiliaryChatModel: '',
+      llmUsingDefaults: true,
+    });
   }
 
   async function updateAdminSettings(nextSettings) {
@@ -759,6 +783,15 @@ function App() {
       if (settings) {
         setAdminSettings(settings);
       }
+    });
+  }
+
+  async function testAdminLlmSettings(settings) {
+    return await run('admin-llm-test', async () => {
+      return await request('/api/admin/settings/llm/test', {
+        method: 'POST',
+        json: settings,
+      });
     });
   }
 
@@ -1040,6 +1073,7 @@ function App() {
             updateSpace={updateSpace}
             deleteSpace={deleteSpace}
             updateAdminSettings={updateAdminSettings}
+            testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
           />
@@ -1746,6 +1780,7 @@ function AdminWorkspace({
   updateSpace,
   deleteSpace,
   updateAdminSettings,
+  testAdminLlmSettings,
   refreshAdmin,
   loading,
 }) {
@@ -1759,10 +1794,25 @@ function AdminWorkspace({
   const [permissionsUser, setPermissionsUser] = useState(null);
   const [permissionDraft, setPermissionDraft] = useState({});
   const [modalError, setModalError] = useState('');
+  const [llmForm, setLlmForm] = useState({
+    ollamaBaseUrl: adminSettings?.ollamaBaseUrl || '',
+    primaryChatModel: adminSettings?.primaryChatModel || adminSettings?.chatModel || '',
+    auxiliaryChatModel: adminSettings?.auxiliaryChatModel || '',
+  });
+  const [llmTestResult, setLlmTestResult] = useState(null);
 
   useEffect(() => {
     setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
   }, [adminSettings?.allowedDomains]);
+
+  useEffect(() => {
+    setLlmForm({
+      ollamaBaseUrl: adminSettings?.ollamaBaseUrl || '',
+      primaryChatModel: adminSettings?.primaryChatModel || adminSettings?.chatModel || '',
+      auxiliaryChatModel: adminSettings?.auxiliaryChatModel || '',
+    });
+    setLlmTestResult(null);
+  }, [adminSettings?.ollamaBaseUrl, adminSettings?.chatModel, adminSettings?.primaryChatModel, adminSettings?.auxiliaryChatModel]);
 
   function beginEditSpace(space) {
     setEditingSpaceId(space.id);
@@ -1861,6 +1911,26 @@ function AdminWorkspace({
     });
   }
 
+  async function submitLlmSettings(event) {
+    event.preventDefault();
+    await updateAdminSettings({
+      ollamaBaseUrl: llmForm.ollamaBaseUrl,
+      primaryChatModel: llmForm.primaryChatModel,
+      auxiliaryChatModel: llmForm.auxiliaryChatModel,
+    });
+  }
+
+  async function testLlmSettings() {
+    const result = await testAdminLlmSettings({
+      ollamaBaseUrl: llmForm.ollamaBaseUrl,
+      primaryChatModel: llmForm.primaryChatModel,
+      auxiliaryChatModel: llmForm.auxiliaryChatModel,
+    });
+    if (result && typeof result === 'object') {
+      setLlmTestResult(result);
+    }
+  }
+
   return (
     <section className="workspace-grid">
       <div className="left-column">
@@ -1914,6 +1984,79 @@ function AdminWorkspace({
             </div>
           </form>
         </section>
+
+        <form className="panel" onSubmit={submitLlmSettings}>
+          <div className="panel-title">
+            <Bot size={18} />
+            <div>
+              <h2>LLM 설정</h2>
+              <p>{adminSettings?.llmUsingDefaults ? '시스템 기본값 사용 중' : '관리자 설정 사용 중'}</p>
+            </div>
+          </div>
+          <div className="form-grid">
+            <div className="stack">
+              <label htmlFor="llm-ollama-url">Ollama 주소 / 포트</label>
+              <input
+                id="llm-ollama-url"
+                value={llmForm.ollamaBaseUrl}
+                onChange={(event) => setLlmForm((current) => ({ ...current, ollamaBaseUrl: event.target.value }))}
+                placeholder={adminSettings?.effectiveOllamaBaseUrl || 'http://ollama:11434'}
+                spellCheck="false"
+              />
+            </div>
+          </div>
+          <div className="form-grid two">
+            <div className="stack">
+              <label htmlFor="llm-primary-model">메인 모델</label>
+              <input
+                id="llm-primary-model"
+                value={llmForm.primaryChatModel}
+                onChange={(event) => setLlmForm((current) => ({ ...current, primaryChatModel: event.target.value }))}
+                placeholder={adminSettings?.effectivePrimaryChatModel || 'qwen3:8b-q4_K_M'}
+                spellCheck="false"
+              />
+            </div>
+            <div className="stack">
+              <label htmlFor="llm-auxiliary-model">보조 모델</label>
+              <input
+                id="llm-auxiliary-model"
+                value={llmForm.auxiliaryChatModel}
+                onChange={(event) => setLlmForm((current) => ({ ...current, auxiliaryChatModel: event.target.value }))}
+                placeholder={adminSettings?.effectiveAuxiliaryChatModel || 'qwen3.5:2b-q4_K_M'}
+                spellCheck="false"
+              />
+            </div>
+          </div>
+          <small className="field-help">
+            빈 값은 기본 메인/보조 모델을 사용합니다. 포트만 입력하면 host.docker.internal 기준으로 연결합니다.
+          </small>
+          <div className="detail-box compact-box llm-effective-box">
+            <strong>현재 적용값</strong>
+            <small>주소: {adminSettings?.effectiveOllamaBaseUrl || '-'}</small>
+            <small>메인: {adminSettings?.effectivePrimaryChatModel || adminSettings?.effectiveChatModel || '-'}</small>
+            <small>보조: {adminSettings?.effectiveAuxiliaryChatModel || '-'}</small>
+          </div>
+          {llmTestResult && (
+            <div className={llmTestResult.success ? 'success-note llm-test-result' : 'danger-note llm-test-result'}>
+              {llmTestResult.message}
+              <small>메인: {llmTestResult.primaryModel || llmTestResult.model || '-'}</small>
+              <small>보조: {llmTestResult.auxiliaryModel || '-'}</small>
+              {llmTestResult.availableModels?.length > 0 && (
+                <small>사용 가능 모델: {llmTestResult.availableModels.slice(0, 5).join(', ')}</small>
+              )}
+            </div>
+          )}
+          <div className="action-row">
+            <button type="button" className="ghost-button" disabled={loading('admin-llm-test') || loading('admin-settings')} onClick={testLlmSettings}>
+              {loading('admin-llm-test') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              연결 테스트
+            </button>
+            <button disabled={loading('admin-settings') || loading('admin-llm-test')}>
+              {loading('admin-settings') ? <Loader2 className="spin" size={16} /> : <Bot size={16} />}
+              LLM 설정 저장
+            </button>
+          </div>
+        </form>
 
         <form className="panel" onSubmit={inviteUser}>
           <div className="panel-title">

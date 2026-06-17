@@ -5,6 +5,8 @@ import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
+import com.learnbot.dto.LlmSettingsTestRequest;
+import com.learnbot.dto.LlmSettingsTestResponse;
 import com.learnbot.dto.SpaceCreateRequest;
 import com.learnbot.dto.SpaceMemberRequest;
 import com.learnbot.dto.SpaceRoleUpdateRequest;
@@ -143,6 +145,25 @@ public class AdminController {
     AdminSettingsResponse updateSettings(@Valid @RequestBody AdminSettingsUpdateRequest request) {
         AppUser user = currentUserProvider.currentUser();
         authService.requireAdmin(user);
-        return adminSettingsService.update(user, request.respectRobotsTxt(), request.allowedDomains());
+        return adminSettingsService.update(
+                user,
+                request.respectRobotsTxt(),
+                request.allowedDomains(),
+                request.ollamaBaseUrl(),
+                request.chatModel(),
+                request.primaryChatModel(),
+                request.auxiliaryChatModel()
+        );
+    }
+
+    @PostMapping("/settings/llm/test")
+    LlmSettingsTestResponse testLlmSettings(@RequestBody LlmSettingsTestRequest request) {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        return adminSettingsService.testLlmSettings(
+                request.ollamaBaseUrl(),
+                request.chatModel(),
+                request.primaryChatModel(),
+                request.auxiliaryChatModel()
+        );
     }
 }

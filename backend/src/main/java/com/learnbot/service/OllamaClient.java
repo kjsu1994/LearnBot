@@ -10,6 +10,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -17,11 +18,15 @@ import java.util.Map;
 public class OllamaClient {
     private static final Logger log = LoggerFactory.getLogger(OllamaClient.class);
 
+    private final WebClient.Builder webClientBuilder;
     private final WebClient webClient;
     private final LearnBotProperties properties;
+    private final AdminSettingsService adminSettingsService;
 
-    public OllamaClient(WebClient.Builder builder, LearnBotProperties properties) {
+    public OllamaClient(WebClient.Builder builder, LearnBotProperties properties, AdminSettingsService adminSettingsService) {
+        this.webClientBuilder = builder;
         this.properties = properties;
+        this.adminSettingsService = adminSettingsService;
         this.webClient = builder.baseUrl(properties.getOllama().getBaseUrl()).build();
     }
 
@@ -50,7 +55,41 @@ public class OllamaClient {
         return chatResult(systemPrompt, userPrompt).content();
     }
 
+    public String chat(String systemPrompt, String userPrompt, ChatRole role) {
+        return chatResult(systemPrompt, userPrompt, role).content();
+    }
+
     public ChatResult chatResult(String systemPrompt, String userPrompt) {
+        return chatResult(systemPrompt, userPrompt, ChatRole.PRIMARY);
+    }
+
+    public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role) {
+        List<AdminSettingsService.LlmSettings> candidates = candidates(role);
+        RuntimeException lastFailure = null;
+        for (int index = 0; index < candidates.size(); index++) {
+            AdminSettingsService.LlmSettings settings = candidates.get(index);
+            try {
+                return chatResultWith(settings, systemPrompt, userPrompt, index > 0);
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+                if (index < candidates.size() - 1) {
+                    AdminSettingsService.LlmSettings next = candidates.get(index + 1);
+                    log.warn("Ollama chat failed. Falling back role={} failedRole={} failedBaseUrl={} failedModel={} nextRole={} nextBaseUrl={} nextModel={} reason={}",
+                            role,
+                            settings.role(),
+                            settings.baseUrl(),
+                            settings.model(),
+                            next.role(),
+                            next.baseUrl(),
+                            next.model(),
+                            ex.getClass().getSimpleName());
+                }
+            }
+        }
+        throw lastFailure == null ? new IllegalArgumentException("Ollama chat failed.") : lastFailure;
+    }
+
+    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed) {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("temperature", properties.getOllama().getTemperature());
         options.put("num_ctx", properties.getOllama().getContextWindow());
@@ -58,10 +97,13 @@ public class OllamaClient {
             options.put("num_predict", properties.getOllama().getMaxOutputTokens());
         }
 
-        ChatResponse response = webClient.post()
+        ChatResponse response = webClientBuilder.clone()
+                .baseUrl(settings.baseUrl())
+                .build()
+                .post()
                 .uri("/api/chat")
                 .bodyValue(Map.of(
-                        "model", properties.getOllama().getChatModel(),
+                        "model", settings.model(),
                         "stream", false,
                         "messages", List.of(
                                 Map.of("role", "system", "content", systemPrompt),
@@ -81,11 +123,16 @@ public class OllamaClient {
                 response.doneReason(),
                 Boolean.TRUE.equals(response.done()),
                 response.promptEvalCount() == null ? 0 : response.promptEvalCount(),
-                response.evalCount() == null ? 0 : response.evalCount()
+                response.evalCount() == null ? 0 : response.evalCount(),
+                settings.baseUrl(),
+                settings.model(),
+                settings.role(),
+                fallbackUsed
         );
         if (result.stoppedByLength()) {
-            log.warn("Ollama chat response stopped by length model={} promptTokens={} outputTokens={} contentLength={}",
-                    properties.getOllama().getChatModel(),
+            log.warn("Ollama chat response stopped by length model={} baseUrl={} promptTokens={} outputTokens={} contentLength={}",
+                    result.model(),
+                    result.baseUrl(),
                     result.promptEvalCount(),
                     result.evalCount(),
                     result.content().length());
@@ -129,7 +176,11 @@ public class OllamaClient {
             String doneReason,
             boolean done,
             int promptEvalCount,
-            int evalCount
+            int evalCount,
+            String baseUrl,
+            String model,
+            String role,
+            boolean fallbackUsed
     ) {
         public boolean stoppedByLength() {
             return "length".equalsIgnoreCase(doneReason);
@@ -148,5 +199,30 @@ public class OllamaClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ChatMessage(String content) {
+    }
+
+    private List<AdminSettingsService.LlmSettings> candidates(ChatRole role) {
+        List<AdminSettingsService.LlmSettings> candidates = new ArrayList<>();
+        if (role == ChatRole.PRIMARY) {
+            addCandidate(candidates, adminSettingsService.primaryLlmSettings());
+            addCandidate(candidates, adminSettingsService.auxiliaryLlmSettings());
+        } else {
+            addCandidate(candidates, adminSettingsService.auxiliaryLlmSettings());
+        }
+        addCandidate(candidates, adminSettingsService.defaultLlmSettings());
+        return candidates;
+    }
+
+    private void addCandidate(List<AdminSettingsService.LlmSettings> candidates, AdminSettingsService.LlmSettings next) {
+        boolean duplicate = candidates.stream()
+                .anyMatch(current -> current.baseUrl().equals(next.baseUrl()) && current.model().equals(next.model()));
+        if (!duplicate) {
+            candidates.add(next);
+        }
+    }
+
+    public enum ChatRole {
+        PRIMARY,
+        AUXILIARY
     }
 }

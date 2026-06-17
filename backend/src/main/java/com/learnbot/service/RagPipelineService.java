@@ -45,7 +45,11 @@ public class RagPipelineService {
         }
 
         try {
-            String response = ollamaClient.chat(rewriteSystemPrompt(domain), rewriteUserPrompt(question, domain, baselineQueries));
+            String response = ollamaClient.chat(
+                    rewriteSystemPrompt(domain),
+                    rewriteUserPrompt(question, domain, baselineQueries),
+                    OllamaClient.ChatRole.AUXILIARY
+            );
             List<String> rewritten = parseRewriteQueries(response);
             addQueries(queries, rewritten);
             boolean usedRewrite = !rewritten.isEmpty();

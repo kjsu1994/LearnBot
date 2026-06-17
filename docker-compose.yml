@@ -81,13 +81,20 @@ services:
     container_name: learnbot-ollama-pull
     environment:
       OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e2b-it-qat}
+      PRIMARY_LLM_MODEL: ${PRIMARY_LLM_MODEL:-qwen3:8b-q4_K_M}
+      AUXILIARY_LLM_MODEL: ${AUXILIARY_LLM_MODEL:-qwen3.5:2b-q4_K_M}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
     depends_on:
       - ollama
     entrypoint: ["/bin/sh", "-c"]
     command: >
       "sleep 5 &&
-       ollama pull gemma4:e2b-it-qat &&
-       ollama pull bge-m3"
+       ollama pull \"$${LLM_MODEL}\" &&
+       ollama pull \"$${EMBEDDING_MODEL}\" &&
+       (ollama pull \"$${AUXILIARY_LLM_MODEL}\" || echo \"Optional auxiliary LLM pull failed: $${AUXILIARY_LLM_MODEL}\") &&
+       (ollama pull \"$${PRIMARY_LLM_MODEL}\" || echo \"Optional primary LLM pull failed: $${PRIMARY_LLM_MODEL}\") &&
+       ollama list"
 
   redis:
     image: redis:7
@@ -110,6 +117,8 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       LLM_MODEL: ${LLM_MODEL:-gemma4:e2b-it-qat}
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-gemma4:e2b-it-qat}
+      PRIMARY_LLM_MODEL: ${PRIMARY_LLM_MODEL:-qwen3:8b-q4_K_M}
+      AUXILIARY_LLM_MODEL: ${AUXILIARY_LLM_MODEL:-qwen3.5:2b-q4_K_M}
       LLM_CONTEXT_WINDOW: ${LLM_CONTEXT_WINDOW:-4096}
       LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-0}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}

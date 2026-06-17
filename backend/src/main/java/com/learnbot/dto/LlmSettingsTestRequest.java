@@ -1,10 +1,6 @@
 package com.learnbot.dto;
 
-import java.util.List;
-
-public record AdminSettingsUpdateRequest(
-        Boolean respectRobotsTxt,
-        List<String> allowedDomains,
+public record LlmSettingsTestRequest(
         String ollamaBaseUrl,
         String chatModel,
         String primaryChatModel,
