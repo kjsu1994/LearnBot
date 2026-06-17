@@ -209,7 +209,7 @@ function App() {
   });
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('');
   const [codeQuestion, setCodeQuestion] = useState('');
-  const [codeMode, setCodeMode] = useState('locate');
+  const [codeMode, setCodeMode] = useState('overview');
   const [codeAnswer, setCodeAnswer] = useState(null);
   const [codeSearchQuery, setCodeSearchQuery] = useState('');
   const [codeSearchResults, setCodeSearchResults] = useState([]);
