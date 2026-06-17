@@ -258,12 +258,106 @@ public class LearnBotProperties {
         @Min(1)
         private int topK = 6;
 
+        private Pipeline pipeline = new Pipeline();
+
         public int getTopK() {
             return topK;
         }
 
         public void setTopK(int topK) {
             this.topK = topK;
+        }
+
+        public Pipeline getPipeline() {
+            return pipeline;
+        }
+
+        public void setPipeline(Pipeline pipeline) {
+            this.pipeline = pipeline;
+        }
+
+        public static class Pipeline {
+            private boolean rewriteEnabled = true;
+            private boolean selfCheckEnabled = true;
+
+            @Min(1)
+            private int maxIterations = 2;
+
+            @Min(1)
+            private int rerankTopN = 30;
+
+            @Min(1)
+            private int documentContextLimit = 8;
+
+            @Min(1)
+            private int codeContextLimit = 8;
+
+            private double minTopScore = 0.30;
+            private double minCoverage = 0.15;
+
+            public boolean isRewriteEnabled() {
+                return rewriteEnabled;
+            }
+
+            public void setRewriteEnabled(boolean rewriteEnabled) {
+                this.rewriteEnabled = rewriteEnabled;
+            }
+
+            public boolean isSelfCheckEnabled() {
+                return selfCheckEnabled;
+            }
+
+            public void setSelfCheckEnabled(boolean selfCheckEnabled) {
+                this.selfCheckEnabled = selfCheckEnabled;
+            }
+
+            public int getMaxIterations() {
+                return maxIterations;
+            }
+
+            public void setMaxIterations(int maxIterations) {
+                this.maxIterations = maxIterations;
+            }
+
+            public int getRerankTopN() {
+                return rerankTopN;
+            }
+
+            public void setRerankTopN(int rerankTopN) {
+                this.rerankTopN = rerankTopN;
+            }
+
+            public int getDocumentContextLimit() {
+                return documentContextLimit;
+            }
+
+            public void setDocumentContextLimit(int documentContextLimit) {
+                this.documentContextLimit = documentContextLimit;
+            }
+
+            public int getCodeContextLimit() {
+                return codeContextLimit;
+            }
+
+            public void setCodeContextLimit(int codeContextLimit) {
+                this.codeContextLimit = codeContextLimit;
+            }
+
+            public double getMinTopScore() {
+                return minTopScore;
+            }
+
+            public void setMinTopScore(double minTopScore) {
+                this.minTopScore = minTopScore;
+            }
+
+            public double getMinCoverage() {
+                return minCoverage;
+            }
+
+            public void setMinCoverage(double minCoverage) {
+                this.minCoverage = minCoverage;
+            }
         }
     }
 

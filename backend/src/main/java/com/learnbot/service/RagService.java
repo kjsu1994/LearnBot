@@ -7,6 +7,7 @@ import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,7 @@ public class RagService {
     private final OllamaClient ollamaClient;
     private final DocumentRepository documentRepository;
     private final LearnBotProperties properties;
+    private final RagPipelineService pipelineService;
 
     public RagService(
             SearchService searchService,
@@ -50,10 +52,22 @@ public class RagService {
             DocumentRepository documentRepository,
             LearnBotProperties properties
     ) {
+        this(searchService, ollamaClient, documentRepository, properties, new RagPipelineService(ollamaClient, properties));
+    }
+
+    @Autowired
+    public RagService(
+            SearchService searchService,
+            OllamaClient ollamaClient,
+            DocumentRepository documentRepository,
+            LearnBotProperties properties,
+            RagPipelineService pipelineService
+    ) {
         this.searchService = searchService;
         this.ollamaClient = ollamaClient;
         this.documentRepository = documentRepository;
         this.properties = properties;
+        this.pipelineService = pipelineService;
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode) {
@@ -63,8 +77,8 @@ public class RagService {
     public AskResponse ask(String question, SearchFilter filter, String mode, List<UUID> spaceIds, UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
         int topK = retrievalLimit(question, answerMode);
-        List<SearchResult> citations = selectAnswerCitations(question, answerMode,
-                searchService.search(question, filter, topK, spaceIds, selectedSpaceId));
+        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, topK, spaceIds, selectedSpaceId);
+        List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
             return new AskResponse(
                     answerMode.value(),
@@ -96,15 +110,29 @@ public class RagService {
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
+        boolean answerRetried = false;
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
+            String qualityReason = qualityFailureReason(answer, citations.size());
+            if (qualityReason != null && pipelineService.maxIterations() > 1) {
+                log.info("RAG answer retry mode={} reason={} citations={} question={}",
+                        answerMode.value(), qualityReason, citations.size(), abbreviate(question));
+                String retryPrompt = userPrompt
+                        + "\n\nPrevious answer failed quality check: " + qualityReason + "."
+                        + "\nRewrite the answer using only the cited context. Cite every factual claim with [n].";
+                String retryAnswer = ollamaClient.chat(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                if (qualityFailureReason(retryAnswer, citations.size()) == null) {
+                    answer = retryAnswer;
+                    answerRetried = true;
+                }
+            }
         } catch (RuntimeException ex) {
             log.warn("RAG LLM call failed mode={} citations={} question={}",
                     answerMode.value(), citations.size(), abbreviate(question), ex);
             answer = fallbackAnswer(answerMode, question, citations);
             llmUnavailable = true;
         }
-        String lowQualityReason = lowQualityReason(answer);
+        String lowQualityReason = qualityFailureReason(answer, citations.size());
         if (lowQualityReason != null) {
             log.info("RAG LLM answer rewritten mode={} citations={} reason={} length={} hasCitation={} question={}",
                     answerMode.value(),
@@ -121,9 +149,122 @@ public class RagService {
                 answer,
                 citations,
                 buildEvidence(citations),
-                confidence(citations, llmUnavailable, answerRewritten),
-                diagnostics(answerMode, citations, llmUnavailable, answerRewritten)
+                confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
+                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval)
         );
+    }
+
+    private DocumentRetrieval retrieveDocuments(
+            String question,
+            SearchFilter filter,
+            AnswerMode answerMode,
+            int topK,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        Map<UUID, SearchResult> merged = new LinkedHashMap<>();
+        List<String> queriesUsed = new ArrayList<>();
+        int searchLimit = pipelineService.documentSearchLimit(topK);
+
+        searchAndMergeDocuments(question, question, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+        List<SearchResult> citations = selectAnswerCitations(question, answerMode, List.copyOf(merged.values()));
+        RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
+                question,
+                citations,
+                minDocumentEvidence(answerMode),
+                1
+        );
+        RagPipelineService.QueryPlan queryPlan = new RagPipelineService.QueryPlan(
+                RagPipelineService.Domain.DOCUMENT,
+                List.of(question),
+                false,
+                false,
+                "initial search"
+        );
+        int iteration = 1;
+
+        if (!isCountQuestion(question) && !assessment.sufficient() && pipelineService.maxIterations() > 1) {
+            queryPlan = pipelineService.buildQueryPlan(
+                    question,
+                    RagPipelineService.Domain.DOCUMENT,
+                    searchService.expandedQueries(question)
+            );
+            for (String query : queryPlan.queries()) {
+                searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+            }
+            iteration = 2;
+            citations = selectAnswerCitations(question, answerMode, List.copyOf(merged.values()));
+            assessment = pipelineService.assessDocuments(
+                    question,
+                    citations,
+                    minDocumentEvidence(answerMode),
+                    iteration
+            );
+        }
+
+        log.info("RAG retrieval domain=document iterations={} candidates={} citations={} sufficient={} rewriteUsed={} rewriteFailed={} coverage={} question={}",
+                iteration,
+                merged.size(),
+                citations.size(),
+                assessment.sufficient(),
+                queryPlan.rewriteUsed(),
+                queryPlan.rewriteFailed(),
+                String.format(java.util.Locale.ROOT, "%.2f", assessment.coverage()),
+                abbreviate(question));
+        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size());
+    }
+
+    private void searchAndMergeDocuments(
+            String originalQuestion,
+            String query,
+            SearchFilter filter,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            Map<UUID, SearchResult> merged,
+            List<String> queriesUsed
+    ) {
+        String safeQuery = safe(query).trim();
+        if (safeQuery.isBlank() || queriesUsed.contains(safeQuery)) {
+            return;
+        }
+        queriesUsed.add(safeQuery);
+        try {
+            for (SearchResult result : searchService.search(safeQuery, filter, limit, spaceIds, selectedSpaceId)) {
+                mergeDocument(merged, safeQuery.equals(originalQuestion) ? result : boostDocument(result, 0.03));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("RAG retrieval query failed query={} question={}", abbreviate(safeQuery), abbreviate(originalQuestion), ex);
+        }
+    }
+
+    private void mergeDocument(Map<UUID, SearchResult> merged, SearchResult result) {
+        SearchResult current = merged.get(result.chunkId());
+        if (current == null || result.score() > current.score()) {
+            merged.put(result.chunkId(), result);
+        }
+    }
+
+    private SearchResult boostDocument(SearchResult result, double value) {
+        return new SearchResult(
+                result.chunkId(),
+                result.documentId(),
+                result.title(),
+                result.sourceUri(),
+                result.sourceType(),
+                result.contentType(),
+                result.chunkIndex(),
+                result.content(),
+                result.score() + value
+        );
+    }
+
+    private int minDocumentEvidence(AnswerMode answerMode) {
+        return switch (answerMode) {
+            case SUMMARY, TABLE -> 4;
+            case QUOTE -> 1;
+            default -> 2;
+        };
     }
 
     private int retrievalLimit(String question, AnswerMode answerMode) {
@@ -204,9 +345,9 @@ public class RagService {
 
     private int contextLimit(AnswerMode answerMode) {
         return switch (answerMode) {
-            case SUMMARY, TABLE -> 8;
+            case SUMMARY, TABLE -> pipelineService.documentContextLimit(8);
             case QUOTE -> 6;
-            default -> GENERAL_CONTEXT_RESULT_LIMIT;
+            default -> pipelineService.documentContextLimit(GENERAL_CONTEXT_RESULT_LIMIT);
         };
     }
 
@@ -775,6 +916,15 @@ public class RagService {
         return lowQualityReason(answer) != null;
     }
 
+    private String qualityFailureReason(String answer, int evidenceCount) {
+        String lowQualityReason = lowQualityReason(answer);
+        if (lowQualityReason != null) {
+            return lowQualityReason;
+        }
+        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true);
+        return assessment.acceptable() ? null : assessment.reason();
+    }
+
     private String lowQualityReason(String answer) {
         String trimmed = safe(answer).trim();
         if (trimmed.isBlank()) {
@@ -819,6 +969,46 @@ public class RagService {
             return "보통";
         }
         return baseConfidence;
+    }
+
+    private String confidence(
+            List<SearchResult> results,
+            boolean llmUnavailable,
+            boolean answerRewritten,
+            RagPipelineService.EvidenceAssessment assessment
+    ) {
+        String value = confidence(results, llmUnavailable, answerRewritten);
+        if (assessment != null && !assessment.sufficient() && "?믪쓬".equals(value)) {
+            return "蹂댄넻";
+        }
+        return value;
+    }
+
+    private List<String> diagnostics(
+            AnswerMode answerMode,
+            List<SearchResult> results,
+            boolean llmUnavailable,
+            boolean answerRewritten,
+            boolean answerRetried,
+            DocumentRetrieval retrieval
+    ) {
+        List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten));
+        if (retrieval != null && retrieval.iteration() > 1) {
+            notes.add("RAG pipeline retried retrieval once because the first evidence set was weak.");
+        }
+        if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
+            notes.add("RAG pipeline used query rewrite as an auxiliary retrieval signal.");
+        }
+        if (retrieval != null && retrieval.queryPlan().rewriteFailed()) {
+            notes.add("RAG query rewrite failed, so deterministic hybrid search was used.");
+        }
+        if (retrieval != null && !retrieval.assessment().sufficient()) {
+            notes.add("Evidence sufficiency check remained weak: " + String.join(", ", retrieval.assessment().reasons()));
+        }
+        if (answerRetried) {
+            notes.add("Answer self-check retried generation once before returning the final answer.");
+        }
+        return notes;
     }
 
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
@@ -942,6 +1132,16 @@ public class RagService {
     }
 
     private record ComputedAnswer(String answer, List<SearchResult> citations) {
+    }
+
+    private record DocumentRetrieval(
+            List<SearchResult> citations,
+            RagPipelineService.EvidenceAssessment assessment,
+            RagPipelineService.QueryPlan queryPlan,
+            int iteration,
+            int candidateCount,
+            int queryCount
+    ) {
     }
 
     private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {

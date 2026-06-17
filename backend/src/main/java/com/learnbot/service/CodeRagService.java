@@ -31,6 +31,7 @@ public class CodeRagService {
     private final CommitInsightService commitInsightService;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
+    private final RagPipelineService pipelineService;
 
     @Autowired
     public CodeRagService(
@@ -38,13 +39,25 @@ public class CodeRagService {
             CodeReferenceService referenceService,
             CommitInsightService commitInsightService,
             OllamaClient ollamaClient,
-            LearnBotProperties properties
+            LearnBotProperties properties,
+            RagPipelineService pipelineService
     ) {
         this.searchService = searchService;
         this.referenceService = referenceService;
         this.commitInsightService = commitInsightService;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
+        this.pipelineService = pipelineService;
+    }
+
+    CodeRagService(
+            CodeSearchService searchService,
+            CodeReferenceService referenceService,
+            CommitInsightService commitInsightService,
+            OllamaClient ollamaClient,
+            LearnBotProperties properties
+    ) {
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties));
     }
 
     CodeRagService(
@@ -66,7 +79,8 @@ public class CodeRagService {
         }
         CodeQuestionMode questionMode = CodeQuestionMode.from(mode);
         int safeLimit = safeLimit(questionMode, limit);
-        List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);
+        CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);
+        List<CodeSearchResult> results = retrieval.results();
         if (results.isEmpty()) {
             return new CodeAskResponse(
                     questionMode.value(),
@@ -92,19 +106,37 @@ public class CodeRagService {
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
+        boolean answerRetried = false;
         try {
             answer = ollamaClient.chat(systemPrompt, userPrompt);
+            String qualityReason = qualityFailureReason(answer, answerResults.size());
+            if (qualityReason != null && pipelineService.maxIterations() > 1) {
+                String retryPrompt = userPrompt
+                        + "\n\nPrevious answer failed quality check: " + qualityReason + "."
+                        + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
+                String retryAnswer = ollamaClient.chat(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                if (qualityFailureReason(retryAnswer, answerResults.size()) == null) {
+                    answer = retryAnswer;
+                    answerRetried = true;
+                }
+            }
         } catch (RuntimeException ex) {
             answer = fallbackAnswer(questionMode, question, answerResults);
             llmUnavailable = true;
         }
-        if (isLowQualityAnswer(answer, questionMode)) {
+        if (qualityFailureReason(answer, answerResults.size()) != null) {
             answer = questionMode == CodeQuestionMode.OVERVIEW
                     ? overviewFallbackAnswer(answerResults)
                     : fallbackAnswer(questionMode, question, answerResults);
             answerRewritten = true;
         }
-        return new CodeAskResponse(questionMode.value(), answer, buildEvidence(answerResults), confidence(answerResults), diagnostics(results, answerResults, llmUnavailable, answerRewritten));
+        return new CodeAskResponse(
+                questionMode.value(),
+                answer,
+                buildEvidence(answerResults),
+                confidence(answerResults, retrieval.assessment()),
+                diagnostics(results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval)
+        );
     }
 
     private int safeLimit(CodeQuestionMode questionMode, Integer limit) {
@@ -112,6 +144,90 @@ public class CodeRagService {
                 ? Math.max(properties.getCode().getTopK(), 14)
                 : properties.getCode().getTopK();
         return limit == null ? defaultLimit : Math.max(1, Math.min(limit, 24));
+    }
+
+    private CodeRetrieval retrieveCodeEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String question,
+            CodeQuestionMode questionMode,
+            int limit
+    ) {
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
+        collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit);
+        RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
+                question,
+                results,
+                minCodeEvidence(questionMode),
+                1
+        );
+        RagPipelineService.QueryPlan queryPlan = new RagPipelineService.QueryPlan(
+                RagPipelineService.Domain.CODE,
+                List.of(question),
+                false,
+                false,
+                "initial search"
+        );
+        int iteration = 1;
+
+        if (!assessment.sufficient() && pipelineService.maxIterations() > 1) {
+            queryPlan = pipelineService.buildQueryPlan(
+                    question,
+                    RagPipelineService.Domain.CODE,
+                    searchService.expandedQueries(question)
+            );
+            for (String query : queryPlan.queries()) {
+                collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+            }
+            iteration = 2;
+            results = rankedCodeEvidence(question, questionMode, merged, limit);
+            assessment = pipelineService.assessCode(
+                    question,
+                    results,
+                    minCodeEvidence(questionMode),
+                    iteration
+            );
+        }
+
+        return new CodeRetrieval(results, assessment, queryPlan, iteration, merged.size());
+    }
+
+    private void collectEvidenceForQuery(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String query,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, query, questionMode, limit);
+        for (CodeSearchResult result : results) {
+            merge(merged, result);
+        }
+    }
+
+    private List<CodeSearchResult> rankedCodeEvidence(
+            String question,
+            CodeQuestionMode questionMode,
+            Map<UUID, CodeSearchResult> merged,
+            int limit
+    ) {
+        return merged.values().stream()
+                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> answerRelevance(question, questionMode, result)).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private int minCodeEvidence(CodeQuestionMode questionMode) {
+        return switch (questionMode) {
+            case OVERVIEW, IMPACT -> 4;
+            case CALL_FLOW -> 3;
+            default -> 2;
+        };
     }
 
     private List<CodeSearchResult> collectEvidence(
@@ -148,7 +264,7 @@ public class CodeRagService {
     }
 
     private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
-        int limit = questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT;
+        int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
         List<CodeSearchResult> ranked = results.stream()
                 .sorted(Comparator.comparingDouble((CodeSearchResult result) -> answerRelevance(question, questionMode, result)).reversed())
                 .toList();
@@ -388,6 +504,41 @@ public class CodeRagService {
         return "낮음";
     }
 
+    private String confidence(List<CodeSearchResult> results, RagPipelineService.EvidenceAssessment assessment) {
+        String value = confidence(results);
+        if (assessment != null && !assessment.sufficient() && "?믪쓬".equals(value)) {
+            return "蹂댄넻";
+        }
+        return value;
+    }
+
+    private List<String> diagnostics(
+            List<CodeSearchResult> results,
+            List<CodeSearchResult> answerResults,
+            boolean llmUnavailable,
+            boolean answerRewritten,
+            boolean answerRetried,
+            CodeRetrieval retrieval
+    ) {
+        List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten));
+        if (retrieval != null && retrieval.iteration() > 1) {
+            notes.add("RAG pipeline retried code retrieval once because the first evidence set was weak.");
+        }
+        if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
+            notes.add("RAG pipeline used query rewrite as an auxiliary code retrieval signal.");
+        }
+        if (retrieval != null && retrieval.queryPlan().rewriteFailed()) {
+            notes.add("RAG query rewrite failed, so deterministic hybrid code search was used.");
+        }
+        if (retrieval != null && !retrieval.assessment().sufficient()) {
+            notes.add("Code evidence sufficiency check remained weak: " + String.join(", ", retrieval.assessment().reasons()));
+        }
+        if (answerRetried) {
+            notes.add("Answer self-check retried generation once before returning the final answer.");
+        }
+        return notes;
+    }
+
     private List<String> diagnostics(
             List<CodeSearchResult> results,
             List<CodeSearchResult> answerResults,
@@ -422,6 +573,23 @@ public class CodeRagService {
             return true;
         }
         return false;
+    }
+
+    private String qualityFailureReason(String answer, int evidenceCount) {
+        if (isLowQualityAnswer(answer, null)) {
+            if (answer == null || answer.isBlank()) {
+                return "blank";
+            }
+            if (answer.trim().length() < 30) {
+                return "too short";
+            }
+            if (!containsCitation(answer)) {
+                return "missing citation";
+            }
+            return "low quality";
+        }
+        RagPipelineService.AnswerAssessment assessment = pipelineService.assessAnswer(answer, evidenceCount, true);
+        return assessment.acceptable() ? null : assessment.reason();
     }
 
     private boolean containsCitation(String answer) {
@@ -754,6 +922,15 @@ public class CodeRagService {
 
     private String nullable(String prefix, String value) {
         return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
+    private record CodeRetrieval(
+            List<CodeSearchResult> results,
+            RagPipelineService.EvidenceAssessment assessment,
+            RagPipelineService.QueryPlan queryPlan,
+            int iteration,
+            int candidateCount
+    ) {
     }
 
     private enum CodeQuestionMode {
