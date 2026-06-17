@@ -207,7 +207,7 @@ class RagServiceTest {
     }
 
     private static OllamaClient.ChatResult chat(String content) {
-        return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "gemma4:e2b-it-qat", "primary", false);
+        return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content) {

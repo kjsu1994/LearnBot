@@ -98,10 +98,6 @@ public class AdminSettingsService {
         );
     }
 
-    public LlmSettings defaultLlmSettings() {
-        return new LlmSettings(properties.getOllama().getBaseUrl(), properties.getOllama().getChatModel(), false, "compose-default");
-    }
-
     public LlmSettingsTestResponse testLlmSettings(String baseUrl, String chatModel, String primaryModel, String auxiliaryModel) {
         RequestedLlmSettings settings = resolveRequestedLlmSettings(baseUrl, chatModel, primaryModel, auxiliaryModel);
         try {

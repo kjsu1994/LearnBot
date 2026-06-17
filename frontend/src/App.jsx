@@ -3288,7 +3288,7 @@ function getAnswerModeGuide(mode) {
 
 function getCodeModeLabel(mode) {
   if (mode === 'commit') return '커밋 분석';
-  return codeModes.find((item) => item.value === mode)?.label || '위치 찾기';
+  return codeModes.find((item) => item.value === mode)?.label || '통합 질문';
 }
 
 function getCodeModeGuide(mode) {
@@ -3296,7 +3296,7 @@ function getCodeModeGuide(mode) {
     overview: {
       title: '통합 질문 예시',
       description: '검색, 위치 찾기, 정의/참조, 주변 코드 근거를 함께 사용해 기능의 위치와 동작을 자연어로 설명받을 때 사용합니다.',
-      placeholder: '예: 로그인 관련 파일이나 메서드가 어디 있고, 로그인 요청부터 세션 저장까지 어떻게 동작해?',
+      placeholder: '예: 최근 커밋에대해 분석해줘',
       tips: [
         '기능명, 화면명, 버튼명, 에러 문구처럼 사용자가 아는 단서를 자연어로 적어도 됩니다.',
         '어디 있는지와 어떻게 동작하는지를 한 번에 물어보면 관련 파일과 처리 흐름을 함께 정리합니다.',

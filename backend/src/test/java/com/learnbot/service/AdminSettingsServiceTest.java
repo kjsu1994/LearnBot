@@ -22,7 +22,7 @@ class AdminSettingsServiceTest {
     void llmSettingsUseSystemPrimaryAndAuxiliaryDefaultsWhenNoAdminValuesExist() {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getOllama().setBaseUrl("http://ollama:11434");
-        properties.getOllama().setChatModel("gemma4:e2b-it-qat");
+        properties.getOllama().setChatModel("qwen3:8b-q4_K_M");
         AdminSettingsService service = serviceWithStore(properties, new HashMap<>());
 
         AdminSettingsResponse response = service.current();
@@ -40,23 +40,23 @@ class AdminSettingsServiceTest {
     void llmSettingsNormalizePortOnlyInputForDockerHostFallback() {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getOllama().setBaseUrl("http://ollama:11434");
-        properties.getOllama().setChatModel("gemma4:e2b-it-qat");
+        properties.getOllama().setChatModel("qwen3:8b-q4_K_M");
         Map<String, String> store = new HashMap<>();
         AdminSettingsService service = serviceWithStore(properties, store);
         AppUser actor = new AppUser(UUID.randomUUID(), "admin", "admin", "ADMIN", "ACTIVE");
 
-        AdminSettingsResponse response = service.update(actor, null, null, "11436", null, "qwen:test", "gemma4:test");
+        AdminSettingsResponse response = service.update(actor, null, null, "11436", null, "qwen:test", "qwen-small:test");
 
         assertThat(response.llmUsingDefaults()).isFalse();
         assertThat(response.ollamaBaseUrl()).isEqualTo("http://host.docker.internal:11436");
         assertThat(response.primaryChatModel()).isEqualTo("qwen:test");
-        assertThat(response.auxiliaryChatModel()).isEqualTo("gemma4:test");
+        assertThat(response.auxiliaryChatModel()).isEqualTo("qwen-small:test");
         assertThat(response.effectiveOllamaBaseUrl()).isEqualTo("http://host.docker.internal:11436");
         assertThat(response.effectivePrimaryChatModel()).isEqualTo("qwen:test");
-        assertThat(response.effectiveAuxiliaryChatModel()).isEqualTo("gemma4:test");
+        assertThat(response.effectiveAuxiliaryChatModel()).isEqualTo("qwen-small:test");
         assertThat(store).containsEntry("llm.ollamaBaseUrl", "http://host.docker.internal:11436");
         assertThat(store).containsEntry("llm.primaryChatModel", "qwen:test");
-        assertThat(store).containsEntry("llm.auxiliaryChatModel", "gemma4:test");
+        assertThat(store).containsEntry("llm.auxiliaryChatModel", "qwen-small:test");
     }
 
     @Test

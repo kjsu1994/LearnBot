@@ -202,7 +202,7 @@ class CodeRagServiceTest {
     }
 
     private static OllamaClient.ChatResult chat(String content) {
-        return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "gemma4:e2b-it-qat", "primary", false);
+        return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {

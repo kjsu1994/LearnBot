@@ -31,7 +31,7 @@ learnbot:
     dimensions: ${LEARNBOT_EMBEDDING_DIMENSIONS:1024}
   ollama:
     base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-    chat-model: ${LLM_MODEL:${OLLAMA_CHAT_MODEL:gemma4:e2b-it-qat}}
+    chat-model: ${PRIMARY_LLM_MODEL:qwen3:8b-q4_K_M}
     primary-chat-model: ${PRIMARY_LLM_MODEL:qwen3:8b-q4_K_M}
     auxiliary-chat-model: ${AUXILIARY_LLM_MODEL:qwen3.5:2b-q4_K_M}
     embedding-model: ${EMBEDDING_MODEL:${OLLAMA_EMBEDDING_MODEL:bge-m3}}

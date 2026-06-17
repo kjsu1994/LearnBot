@@ -134,7 +134,7 @@ class CommitInsightServiceTest {
         when(repository.findRepository(repositoryId)).thenReturn(Optional.of(record));
         when(repository.findActiveFileIdsByPath(eq(repositoryId), anyList())).thenReturn(Map.of());
         when(ollamaClient.chatResult(anyString(), anyString()))
-                .thenReturn(new OllamaClient.ChatResult("변경 요약은 App.java에 run 메서드를 추가했다는 정", "stop", true, 0, 0, "http://ollama:11434", "gemma4:e2b-it-qat", "primary", false));
+                .thenReturn(new OllamaClient.ChatResult("변경 요약은 App.java에 run 메서드를 추가했다는 정", "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false));
 
         CodeAskResponse response = service.answer(repositoryId, "최신 바뀐 내용 알려줘");
 

@@ -209,7 +209,6 @@ public class OllamaClient {
         } else {
             addCandidate(candidates, adminSettingsService.auxiliaryLlmSettings());
         }
-        addCandidate(candidates, adminSettingsService.defaultLlmSettings());
         return candidates;
     }
 
