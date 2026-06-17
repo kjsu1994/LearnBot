@@ -3,6 +3,8 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeEvidence;
+import com.learnbot.dto.CodeChunkSummary;
+import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.repository.CodeRepository;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
@@ -106,8 +108,7 @@ public class CommitInsightService {
 
         Path localPath = Path.of(record.localPath());
         if (!Files.isDirectory(localPath) || !Files.exists(localPath.resolve(".git"))) {
-            return informational("로컬 Git 작업 디렉터리를 찾을 수 없어 커밋 diff를 확인할 수 없습니다.",
-                    List.of("localPath=" + localPath + " 경로에 .git 디렉터리가 없습니다."));
+            return importedSnapshotFallback(record, target, "localPath=" + localPath + " 경로에 .git 디렉터리가 없습니다.");
         }
 
         try (Git git = Git.open(localPath.toFile())) {
@@ -166,6 +167,107 @@ public class CommitInsightService {
         }
         Matcher matcher = SHA_PATTERN.matcher(question);
         return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
+    }
+
+    private CodeAskResponse importedSnapshotFallback(CodeRepositoryRecord record, String targetCommit, String reason) {
+        List<CodeFileSummary> files = repository.listActiveFiles(record.id(), null, MAX_EVIDENCE);
+        List<CodeEvidence> evidence = buildImportedSnapshotEvidence(record, targetCommit, files);
+        String answer = importedSnapshotAnswer(record, targetCommit, files, evidence);
+        List<String> diagnostics = new ArrayList<>();
+        diagnostics.add("이 저장소는 import된 코드 스냅샷이거나 로컬 Git checkout이 없어 Git diff를 계산하지 못했습니다.");
+        diagnostics.add(reason);
+        diagnostics.add("last_indexed_commit `" + targetCommit + "` 기준으로 가져온 코드 파일/청크를 근거로 fallback 답변을 생성했습니다.");
+        diagnostics.add("정확한 커밋 변경점이 필요하면 원본 Git 저장소를 이 서버에서 다시 등록/인덱싱해야 합니다.");
+        return new CodeAskResponse(
+                "commit",
+                answer,
+                evidence,
+                "낮음",
+                diagnostics
+        );
+    }
+
+    private List<CodeEvidence> buildImportedSnapshotEvidence(CodeRepositoryRecord record, String targetCommit, List<CodeFileSummary> files) {
+        List<CodeEvidence> evidence = new ArrayList<>();
+        for (int index = 0; index < Math.min(files.size(), MAX_EVIDENCE); index++) {
+            CodeFileSummary file = files.get(index);
+            List<CodeChunkSummary> chunks = repository.listActiveChunksForFile(file.id());
+            CodeChunkSummary primary = chunks.isEmpty() ? null : chunks.get(0);
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("kind", "imported_code_snapshot");
+            metadata.put("commitHash", targetCommit);
+            metadata.put("fileChunkCount", file.chunkCount());
+            metadata.put("localGitAvailable", false);
+            evidence.add(new CodeEvidence(
+                    index + 1,
+                    primary == null ? null : primary.id(),
+                    record.id(),
+                    file.id(),
+                    record.name(),
+                    file.filePath(),
+                    primary == null ? "file" : primary.chunkType(),
+                    primary == null ? null : primary.symbolName(),
+                    primary == null ? null : primary.className(),
+                    primary == null ? null : primary.methodName(),
+                    primary == null ? null : primary.controlName(),
+                    primary == null ? null : primary.eventName(),
+                    primary == null ? 0 : primary.lineStart(),
+                    primary == null ? 0 : primary.lineEnd(),
+                    importedSnapshotPreview(file, chunks),
+                    Math.max(0.1, 0.65 - (index * 0.03)),
+                    metadata
+            ));
+        }
+        return evidence;
+    }
+
+    private String importedSnapshotAnswer(
+            CodeRepositoryRecord record,
+            String targetCommit,
+            List<CodeFileSummary> files,
+            List<CodeEvidence> evidence
+    ) {
+        StringBuilder answer = new StringBuilder();
+        answer.append("이 저장소는 import된 코드 스냅샷이라 로컬 `.git` 디렉터리가 없어 최신 커밋의 diff를 직접 계산할 수 없습니다.\n\n");
+        answer.append("대신 import archive에 포함된 `last_indexed_commit` `").append(targetCommit)
+                .append("` 시점의 인덱싱된 코드 상태를 기준으로 확인했습니다.\n\n");
+        if (evidence.isEmpty()) {
+            answer.append("확인 가능한 코드 파일/청크 근거가 없어 변경 내용을 추정할 수 없습니다.\n\n");
+        } else {
+            answer.append("확인 가능한 코드 스냅샷 근거:\n");
+            for (int index = 0; index < evidence.size(); index++) {
+                CodeEvidence item = evidence.get(index);
+                answer.append("- [").append(index + 1).append("] `")
+                        .append(item.filePath()).append("`: ")
+                        .append(item.preview()).append("\n");
+            }
+            answer.append("\n");
+        }
+        answer.append("해석 한계:\n");
+        answer.append("- 위 내용은 커밋 diff가 아니라 import된 코드 스냅샷입니다.\n");
+        answer.append("- 어떤 파일이 추가/수정/삭제되었는지, 커밋 메시지와 parent 기준 변경량은 이 서버에서 확정할 수 없습니다.\n");
+        answer.append("- 정확한 커밋 변경 분석이 필요하면 원본 Git 저장소를 이 서버에서 다시 등록하고 인덱싱해야 합니다.\n\n");
+        answer.append("저장소 정보:\n");
+        answer.append("- 저장소: ").append(record.name()).append("\n");
+        answer.append("- 브랜치: ").append(record.branch()).append("\n");
+        answer.append("- 인덱싱 커밋: ").append(targetCommit).append("\n");
+        answer.append("- 인덱싱 파일: ").append(files.size()).append("개 이상");
+        return answer.toString();
+    }
+
+    private String importedSnapshotPreview(CodeFileSummary file, List<CodeChunkSummary> chunks) {
+        if (chunks.isEmpty()) {
+            return file.language() + ", 청크 " + file.chunkCount() + "개";
+        }
+        List<String> parts = chunks.stream()
+                .limit(2)
+                .map(chunk -> {
+                    String symbol = firstNonBlank(chunk.methodName(), chunk.className(), chunk.symbolName(), chunk.controlName(), chunk.eventName(), chunk.chunkType());
+                    String line = chunk.lineStart() > 0 ? " lines " + chunk.lineStart() + "-" + chunk.lineEnd() : "";
+                    return symbol + line + " - " + trimPreview(chunk.preview());
+                })
+                .toList();
+        return file.language() + ", 청크 " + file.chunkCount() + "개. " + String.join(" / ", parts);
     }
 
     private ObjectId resolveCommit(org.eclipse.jgit.lib.Repository gitRepository, String target) throws IOException {
@@ -657,6 +759,18 @@ public class CommitInsightService {
 
     private String safeMessage(Exception ex) {
         return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private record CommitIntent(boolean commitQuestion, Optional<String> sha, boolean latest) {

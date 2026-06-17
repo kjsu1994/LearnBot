@@ -1,6 +1,8 @@
 package com.learnbot.service;
 
 import com.learnbot.dto.CodeAskResponse;
+import com.learnbot.dto.CodeChunkSummary;
+import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.repository.SecurityRepository;
 import org.eclipse.jgit.api.Git;
@@ -10,14 +12,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -141,5 +147,43 @@ class CommitInsightServiceTest {
         assertThat(response.answer()).contains("Add run method");
         assertThat(response.answer()).contains("[1]");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("완성되지 않아"));
+    }
+
+    @Test
+    void importedRepositoryFallsBackToIndexedSnapshotWhenGitDirectoryIsMissing() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        CodeRepository repository = mock(CodeRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CommitInsightService service = new CommitInsightService(repository, ollamaClient);
+        CodeRepositoryRecord record = new CodeRepositoryRecord(
+                repositoryId,
+                SecurityRepository.DEFAULT_SPACE_ID,
+                "imported-sample",
+                "https://example.com/sample.git",
+                "main",
+                "NONE",
+                "imported://" + repositoryId,
+                "INDEXED",
+                "abc1234567890"
+        );
+
+        when(repository.findRepository(repositoryId)).thenReturn(Optional.of(record));
+        when(repository.listActiveFiles(eq(repositoryId), isNull(), anyInt())).thenReturn(List.of(
+                new CodeFileSummary(fileId, repositoryId, "src/App.java", "java", "hash", 2, OffsetDateTime.now())
+        ));
+        when(repository.listActiveChunksForFile(fileId)).thenReturn(List.of(
+                new CodeChunkSummary(chunkId, 0, "method", "run", "App", "run", null, null, 10, 20, "void run() { start(); }", Map.of())
+        ));
+
+        CodeAskResponse response = service.answer(repositoryId, "latest changes");
+
+        assertThat(response.mode()).isEqualTo("commit");
+        assertThat(response.confidence()).isEqualTo("낮음");
+        assertThat(response.answer()).contains("import", "abc1234567890", "[1]", "src/App.java");
+        assertThat(response.evidence()).hasSize(1);
+        assertThat(response.evidence().get(0).metadata()).containsEntry("kind", "imported_code_snapshot");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("localPath=imported:"));
     }
 }

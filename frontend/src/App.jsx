@@ -981,11 +981,11 @@ function App() {
         <div className={user.role === 'ADMIN' ? 'view-tabs three-tabs' : 'view-tabs'} aria-label="작업 영역">
           <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('code')}>
             <Code2 size={16} />
-            코드 RAG
+            코드
           </button>
           <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('docs')}>
             <Database size={16} />
-            문서 RAG
+            문서
           </button>
           {user.role === 'ADMIN' && (
             <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => setActiveView('admin')}>
@@ -1520,7 +1520,12 @@ function CodeWorkspace(props) {
               ))}
             </ul>
           </div>
-          <textarea value={codeQuestion} onChange={(event) => setCodeQuestion(event.target.value)} placeholder={activeCodeModeGuide.placeholder} />
+          <textarea
+            value={codeQuestion}
+            onChange={(event) => setCodeQuestion(event.target.value)}
+            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
+            placeholder={activeCodeModeGuide.placeholder}
+          />
           <div className="action-row">
             <button disabled={!codeQuestion || loading('code-ask')}>
               {loading('code-ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
@@ -1765,7 +1770,12 @@ function DocumentWorkspace(props) {
               ))}
             </ul>
           </div>
-          <textarea value={props.question} onChange={(event) => props.setQuestion(event.target.value)} placeholder={activeAnswerModeGuide.placeholder} />
+          <textarea
+            value={props.question}
+            onChange={(event) => props.setQuestion(event.target.value)}
+            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
+            placeholder={activeAnswerModeGuide.placeholder}
+          />
           <div className="action-row">
             <button disabled={!props.question || props.loading('ask')}>
               {props.loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
@@ -2645,6 +2655,14 @@ function formatSelectedFiles(files = []) {
   if (!files.length) return '파일 선택';
   if (files.length === 1) return files[0].name;
   return `${files.length}개 파일 선택됨`;
+}
+
+function submitFormOnShortcut(event, canSubmit) {
+  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || !canSubmit) {
+    return;
+  }
+  event.preventDefault();
+  event.currentTarget.form?.requestSubmit();
 }
 
 function FileBatchResult({ result }) {
