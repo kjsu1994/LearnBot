@@ -188,6 +188,8 @@ function getProgressMessage(busy) {
   if (busy === 'ask' || busy === 'code-ask') return '근거 검색 후 답변을 생성하는 중입니다.';
   if (busy === 'search' || busy === 'code-search') return '검색 결과를 가져오는 중입니다.';
   if (busy === 'repo-register') return '저장소를 등록하는 중입니다.';
+  if (busy === 'repo-zip-upload') return 'ZIP 코드 스냅샷을 업로드하고 인덱싱을 시작하는 중입니다.';
+  if (busy.startsWith('repo-zip-replace-')) return '새 ZIP 코드 스냅샷으로 재인덱싱하는 중입니다.';
   if (busy.startsWith('repo-index-')) return '저장소를 동기화하고 코드 청크를 인덱싱하는 중입니다.';
   if (busy.startsWith('repo-cancel-')) return '인덱싱 취소를 요청하는 중입니다.';
   if (busy.startsWith('repo-delete-')) return '저장소를 삭제하는 중입니다.';

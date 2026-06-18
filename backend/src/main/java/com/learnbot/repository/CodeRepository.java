@@ -40,14 +40,40 @@ public class CodeRepository {
     public CodeRepositoryRecord createRepository(String name, String gitUrl, String branch, String authType, String localPath, UUID spaceId, UUID createdBy) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO code_repositories (id, name, git_url, branch, auth_type, local_path, status, space_id, created_by)
-                VALUES (:id, :name, :gitUrl, :branch, :authType, :localPath, 'PENDING', :spaceId, :createdBy)
+                INSERT INTO code_repositories (
+                    id, name, source_type, source_label, git_url, branch, auth_type, local_path, status, space_id, created_by
+                )
+                VALUES (
+                    :id, :name, 'GIT', :gitUrl, :gitUrl, :branch, :authType, :localPath, 'PENDING', :spaceId, :createdBy
+                )
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("name", name)
                 .addValue("gitUrl", gitUrl)
                 .addValue("branch", branch)
                 .addValue("authType", authType)
+                .addValue("localPath", localPath)
+                .addValue("spaceId", spaceId)
+                .addValue("createdBy", createdBy));
+        return findRepository(id).orElseThrow();
+    }
+
+    public CodeRepositoryRecord createZipRepository(String name, String sourceLabel, String sourceHash, String localPath, UUID spaceId, UUID createdBy) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO code_repositories (
+                    id, name, source_type, source_label, source_hash, git_url, branch, auth_type,
+                    local_path, status, last_indexed_commit, space_id, created_by
+                )
+                VALUES (
+                    :id, :name, 'ZIP', :sourceLabel, :sourceHash, NULL, 'SNAPSHOT', 'NONE',
+                    :localPath, 'PENDING', NULL, :spaceId, :createdBy
+                )
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", name)
+                .addValue("sourceLabel", sourceLabel)
+                .addValue("sourceHash", sourceHash)
                 .addValue("localPath", localPath)
                 .addValue("spaceId", spaceId)
                 .addValue("createdBy", createdBy));
@@ -88,7 +114,8 @@ public class CodeRepository {
 
     public List<CodeRepositorySummary> listRepositories(List<UUID> spaceIds, UUID selectedSpaceId) {
         return jdbc.query("""
-                SELECT r.id, r.space_id, r.name, r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
+                SELECT r.id, r.space_id, r.name, r.source_type, r.source_label, r.source_hash,
+                       r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
                        r.error_message, r.created_at, r.updated_at,
                        (r.credential_token_ciphertext IS NOT NULL) AS credential_stored,
                        COALESCE(f.active_file_count, 0) AS active_file_count,
@@ -118,12 +145,29 @@ public class CodeRepository {
 
     public Optional<CodeRepositoryRecord> findRepository(UUID repositoryId) {
         List<CodeRepositoryRecord> repositories = jdbc.query("""
-                SELECT id, space_id, name, git_url, branch, auth_type, local_path, status, last_indexed_commit
+                SELECT id, space_id, name, source_type, source_label, source_hash,
+                       git_url, branch, auth_type, local_path, status, last_indexed_commit
                 FROM code_repositories
                 WHERE id = :repositoryId
                   AND deleted_at IS NULL
                 """, new MapSqlParameterSource().addValue("repositoryId", repositoryId), this::mapRepositoryRecord);
         return repositories.stream().findFirst();
+    }
+
+    public void updateZipSnapshot(UUID repositoryId, String sourceLabel, String sourceHash, String localPath) {
+        jdbc.update("""
+                UPDATE code_repositories
+                SET source_label = :sourceLabel,
+                    source_hash = :sourceHash,
+                    local_path = :localPath,
+                    updated_at = now()
+                WHERE id = :repositoryId
+                  AND source_type = 'ZIP'
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("sourceLabel", sourceLabel)
+                .addValue("sourceHash", sourceHash)
+                .addValue("localPath", localPath));
     }
 
     public void updateRepositoryStatus(UUID repositoryId, String status, String errorMessage) {
@@ -199,6 +243,14 @@ public class CodeRepository {
         setActiveIndex(repositoryId, indexVersion);
         markRepositoryIndexed(repositoryId, commitHash);
         finishJob(indexVersion, "SUCCEEDED", commitHash, null);
+    }
+
+    @Transactional
+    public void completeSuccessfulZipIndex(UUID repositoryId, UUID indexVersion, String sourceLabel, String sourceHash, String localPath) {
+        updateZipSnapshot(repositoryId, sourceLabel, sourceHash, localPath);
+        setActiveIndex(repositoryId, indexVersion);
+        markRepositoryIndexed(repositoryId, sourceHash);
+        finishJob(indexVersion, "SUCCEEDED", sourceHash, null);
     }
 
     public UUID createJob(UUID repositoryId, String jobType) {
@@ -845,6 +897,9 @@ public class CodeRepository {
                 rs.getObject("id", UUID.class),
                 rs.getObject("space_id", UUID.class),
                 rs.getString("name"),
+                rs.getString("source_type"),
+                rs.getString("source_label"),
+                rs.getString("source_hash"),
                 rs.getString("git_url"),
                 rs.getString("branch"),
                 rs.getString("auth_type"),
@@ -859,6 +914,9 @@ public class CodeRepository {
                 rs.getObject("id", UUID.class),
                 rs.getObject("space_id", UUID.class),
                 rs.getString("name"),
+                rs.getString("source_type"),
+                rs.getString("source_label"),
+                rs.getString("source_hash"),
                 rs.getString("git_url"),
                 rs.getString("branch"),
                 rs.getString("auth_type"),

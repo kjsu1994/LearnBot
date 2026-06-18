@@ -49,6 +49,7 @@ export default function App() {
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
 
   const [repoForm, setRepoForm] = useState({
+    sourceMode: 'GIT',
     gitUrl: '',
     name: '',
     branch: 'HEAD',
@@ -57,6 +58,11 @@ export default function App() {
     token: '',
     storeToken: false,
   });
+  const [zipForm, setZipForm] = useState({
+    file: null,
+    name: '',
+  });
+  const [zipReplaceFile, setZipReplaceFile] = useState(null);
   const [indexCredential, setIndexCredential] = useState({
     username: '',
     token: '',
@@ -424,6 +430,23 @@ export default function App() {
     });
   }
 
+  async function uploadZipRepository(event) {
+    event.preventDefault();
+    if (!zipForm.file) return;
+    await run('repo-zip-upload', async () => {
+      const body = new FormData();
+      body.append('file', zipForm.file);
+      body.append('spaceId', activeSpaceId);
+      if (zipForm.name.trim()) body.append('name', zipForm.name.trim());
+      const created = await request('/api/code/repositories/zip', { method: 'POST', body });
+      setSelectedRepositoryId(created.id);
+      setZipForm({ file: null, name: '' });
+      event.currentTarget.reset();
+      await refreshRepositories();
+      await refreshJobs(created.id);
+    });
+  }
+
   async function indexRepository(repositoryId) {
     await run(`repo-index-${repositoryId}`, async () => {
       const targetRepository = repositories.find((repo) => repo.id === repositoryId);
@@ -443,6 +466,20 @@ export default function App() {
       if (indexCredential.token) {
         setIndexCredential((current) => ({ ...current, token: '' }));
       }
+      await refreshRepositories();
+      await refreshJobs(repositoryId);
+    });
+  }
+
+  async function replaceZipRepository(repositoryId, event) {
+    event.preventDefault();
+    if (!zipReplaceFile) return;
+    await run(`repo-zip-replace-${repositoryId}`, async () => {
+      const body = new FormData();
+      body.append('file', zipReplaceFile);
+      await request(`/api/code/repositories/${repositoryId}/zip`, { method: 'POST', body });
+      setZipReplaceFile(null);
+      event.currentTarget.reset();
       await refreshRepositories();
       await refreshJobs(repositoryId);
     });
@@ -901,6 +938,12 @@ export default function App() {
             setReferenceSymbol={setReferenceSymbol}
             referenceResult={referenceResult}
             registerRepository={registerRepository}
+            uploadZipRepository={uploadZipRepository}
+            zipForm={zipForm}
+            setZipForm={setZipForm}
+            zipReplaceFile={zipReplaceFile}
+            setZipReplaceFile={setZipReplaceFile}
+            replaceZipRepository={replaceZipRepository}
             indexRepository={indexRepository}
             cancelIndex={cancelIndex}
             deleteRepository={deleteRepository}

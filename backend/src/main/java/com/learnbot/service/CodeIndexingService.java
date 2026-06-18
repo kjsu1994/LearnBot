@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileSystemUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.net.URI;
@@ -34,6 +35,7 @@ import java.util.concurrent.Future;
 public class CodeIndexingService {
     private final CodeRepository repository;
     private final GitWorkspaceService gitWorkspaceService;
+    private final ZipCodeArchiveService zipCodeArchiveService;
     private final CodeFileScanner fileScanner;
     private final CodeContentReader contentReader;
     private final CodeChunkParser chunkParser;
@@ -50,6 +52,7 @@ public class CodeIndexingService {
     public CodeIndexingService(
             CodeRepository repository,
             GitWorkspaceService gitWorkspaceService,
+            ZipCodeArchiveService zipCodeArchiveService,
             CodeFileScanner fileScanner,
             CodeContentReader contentReader,
             CodeChunkParser chunkParser,
@@ -62,6 +65,7 @@ public class CodeIndexingService {
     ) {
         this.repository = repository;
         this.gitWorkspaceService = gitWorkspaceService;
+        this.zipCodeArchiveService = zipCodeArchiveService;
         this.fileScanner = fileScanner;
         this.contentReader = contentReader;
         this.chunkParser = chunkParser;
@@ -121,6 +125,29 @@ public class CodeIndexingService {
         return record;
     }
 
+    public ZipRepositoryIndexResult createZipRepository(AppUser user, UUID spaceId, MultipartFile file, String name) {
+        ZipCodeArchiveService.PreparedZip zip = zipCodeArchiveService.prepare(file);
+        UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
+        String repositoryName = name == null || name.isBlank() ? inferName(zip.sourceLabel()) : name.trim();
+        CodeRepositoryRecord record;
+        try {
+            record = repository.createZipRepository(
+                    repositoryName,
+                    zip.sourceLabel(),
+                    zip.sourceHash(),
+                    zip.localPath(),
+                    resolvedSpaceId,
+                    user.id()
+            );
+        } catch (RuntimeException ex) {
+            zipCodeArchiveService.deleteWorkspace(zip.localPath());
+            throw ex;
+        }
+        auditService.log(user, "CODE_ZIP_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "ZIP code snapshot was uploaded.");
+        IndexingJobSummary job = startIndex(user, record.id(), new GitAccessToken(null, null), false);
+        return new ZipRepositoryIndexResult(record, job);
+    }
+
     public List<CodeRepositorySummary> listRepositories(AppUser user, UUID spaceId) {
         UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
         return repository.listRepositories(authService.accessibleSpaceIds(user), selectedSpaceId);
@@ -148,16 +175,43 @@ public class CodeIndexingService {
             return runningJob.get();
         }
 
-        GitAccessToken resolvedAccessToken = resolveAccessToken(repositoryId, accessToken, storeToken);
-        if ("TOKEN".equals(record.authType()) && !resolvedAccessToken.hasToken()) {
+        GitAccessToken resolvedAccessToken = "ZIP".equals(record.sourceType())
+                ? new GitAccessToken(null, null)
+                : resolveAccessToken(repositoryId, accessToken, storeToken);
+        if ("GIT".equals(record.sourceType()) && "TOKEN".equals(record.authType()) && !resolvedAccessToken.hasToken()) {
             throw new IllegalArgumentException("This repository requires a Git token. Enter a token before indexing.");
         }
         UUID jobId = repository.createJob(repositoryId, record.lastIndexedCommit() == null ? "INITIAL_INDEX" : "REINDEX");
         repository.updateRepositoryStatus(repositoryId, "INDEXING", null);
         auditService.log(user, "CODE_INDEX_STARTED", "INDEXING_JOB", jobId, record.spaceId(), "Code repository indexing started.");
-        Future<?> future = executor.submit(() -> runIndex(record, resolvedAccessToken, jobId));
+        Future<?> future = executor.submit(() -> runIndex(record, resolvedAccessToken, jobId, null));
         runningJobs.put(jobId, future);
         return repository.findJob(jobId).orElseThrow();
+    }
+
+    public IndexingJobSummary replaceZipSnapshot(AppUser user, UUID repositoryId, MultipartFile file) {
+        CodeRepositoryRecord current = requireRepositoryAccess(user, repositoryId);
+        if (!"ZIP".equals(current.sourceType())) {
+            throw new IllegalArgumentException("Only ZIP code snapshots can be replaced with a ZIP upload.");
+        }
+        Optional<IndexingJobSummary> runningJob = repository.findRunningJob(repositoryId);
+        if (runningJob.isPresent()) {
+            return runningJob.get();
+        }
+        ZipCodeArchiveService.PreparedZip zip = zipCodeArchiveService.prepare(file);
+        PendingZipSnapshot pending = new PendingZipSnapshot(zip.sourceLabel(), zip.sourceHash(), zip.localPath(), current.localPath());
+        CodeRepositoryRecord pendingRecord = withZipSnapshot(current, pending);
+        try {
+            UUID jobId = repository.createJob(repositoryId, "REINDEX");
+            repository.updateRepositoryStatus(repositoryId, "INDEXING", null);
+            auditService.log(user, "CODE_ZIP_REINDEX_STARTED", "INDEXING_JOB", jobId, current.spaceId(), "ZIP code snapshot reindexing started.");
+            Future<?> future = executor.submit(() -> runIndex(pendingRecord, new GitAccessToken(null, null), jobId, pending));
+            runningJobs.put(jobId, future);
+            return repository.findJob(jobId).orElseThrow();
+        } catch (RuntimeException ex) {
+            zipCodeArchiveService.deleteWorkspace(zip.localPath());
+            throw ex;
+        }
     }
 
     public void deleteRepository(AppUser user, UUID repositoryId) {
@@ -215,7 +269,7 @@ public class CodeIndexingService {
                 .orElse(new GitAccessToken(null, null));
     }
 
-    private void runIndex(CodeRepositoryRecord record, GitAccessToken accessToken, UUID jobId) {
+    private void runIndex(CodeRepositoryRecord record, GitAccessToken accessToken, UUID jobId, PendingZipSnapshot pendingZipSnapshot) {
         UUID repositoryId = record.id();
         String commitHash = null;
         int totalFiles = 0;
@@ -229,7 +283,9 @@ public class CodeIndexingService {
 
         try {
             ensureNotCancelled(jobId);
-            commitHash = gitWorkspaceService.sync(record, accessToken);
+            commitHash = "ZIP".equals(record.sourceType())
+                    ? record.sourceHash()
+                    : gitWorkspaceService.sync(record, accessToken);
             ensureNotCancelled(jobId);
             ensureEmbeddingAvailable();
 
@@ -329,7 +385,14 @@ public class CodeIndexingService {
             if (totalChunks == 0) {
                 throw new IllegalArgumentException("No code chunks were created.");
             }
-            repository.completeSuccessfulIndex(repositoryId, jobId, commitHash);
+            if ("ZIP".equals(record.sourceType())) {
+                repository.completeSuccessfulZipIndex(repositoryId, jobId, record.sourceLabel(), record.sourceHash(), record.localPath());
+                if (pendingZipSnapshot != null && !record.localPath().equals(pendingZipSnapshot.previousLocalPath())) {
+                    zipCodeArchiveService.deleteWorkspace(pendingZipSnapshot.previousLocalPath());
+                }
+            } else {
+                repository.completeSuccessfulIndex(repositoryId, jobId, commitHash);
+            }
         } catch (CodeIndexCancelledException ex) {
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
@@ -347,6 +410,9 @@ public class CodeIndexingService {
                 repository.updateRepositoryStatus(repositoryId, "FAILED", message);
             }
         } finally {
+            if (pendingZipSnapshot != null && !"SUCCEEDED".equals(repository.findJob(jobId).map(IndexingJobSummary::status).orElse(null))) {
+                zipCodeArchiveService.deleteWorkspace(pendingZipSnapshot.localPath());
+            }
             runningJobs.remove(jobId);
             cancelledJobs.remove(jobId);
         }
@@ -447,6 +513,23 @@ public class CodeIndexingService {
         return clean.isBlank() ? "code-repository" : clean;
     }
 
+    private CodeRepositoryRecord withZipSnapshot(CodeRepositoryRecord record, PendingZipSnapshot pending) {
+        return new CodeRepositoryRecord(
+                record.id(),
+                record.spaceId(),
+                record.name(),
+                record.sourceType(),
+                pending.sourceLabel(),
+                pending.sourceHash(),
+                record.gitUrl(),
+                record.branch(),
+                record.authType(),
+                pending.localPath(),
+                record.status(),
+                record.lastIndexedCommit()
+        );
+    }
+
     private void validateEmbeddings(List<List<Double>> embeddings) {
         for (List<Double> embedding : embeddings) {
             if (embedding.size() != properties.getEmbedding().getDimensions()) {
@@ -534,5 +617,11 @@ public class CodeIndexingService {
     }
 
     private static class CodeIndexCancelledException extends RuntimeException {
+    }
+
+    public record ZipRepositoryIndexResult(CodeRepositoryRecord repository, IndexingJobSummary job) {
+    }
+
+    private record PendingZipSnapshot(String sourceLabel, String sourceHash, String localPath, String previousLocalPath) {
     }
 }

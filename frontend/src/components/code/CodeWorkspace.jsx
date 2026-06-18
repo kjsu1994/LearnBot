@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileCode2, GitBranch, GitPullRequest, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, GitPullRequest, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
@@ -12,6 +12,10 @@ function CodeWorkspace(props) {
   const {
     repoForm,
     setRepoForm,
+    zipForm,
+    setZipForm,
+    zipReplaceFile,
+    setZipReplaceFile,
     indexCredential,
     setIndexCredential,
     repositories,
@@ -40,6 +44,8 @@ function CodeWorkspace(props) {
     setReferenceSymbol,
     referenceResult,
     registerRepository,
+    uploadZipRepository,
+    replaceZipRepository,
     indexRepository,
     cancelIndex,
     deleteRepository,
@@ -109,6 +115,25 @@ function CodeWorkspace(props) {
               </button>
             </div>
           </form>
+          <form className="stack" onSubmit={uploadZipRepository}>
+            <div className="panel-title">
+              <FileArchive size={18} />
+              <div>
+                <h2>ZIP 코드 스냅샷 업로드</h2>
+                <p>압축 파일을 업로드하면 코드 RAG 저장소로 등록하고 바로 인덱싱합니다.</p>
+              </div>
+            </div>
+            <label htmlFor="zip-file">ZIP 파일</label>
+            <input id="zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipForm((current) => ({ ...current, file: event.target.files?.[0] || null }))} />
+            <label htmlFor="zip-name">표시 이름</label>
+            <input id="zip-name" value={zipForm.name} onChange={(event) => setZipForm((current) => ({ ...current, name: event.target.value }))} placeholder={zipForm.file?.name?.replace(/\.zip$/i, '') || 'code snapshot'} />
+            <div className="action-row">
+              <button disabled={!zipForm.file || loading('repo-zip-upload')}>
+                {loading('repo-zip-upload') ? <Loader2 className="spin" size={16} /> : <FileArchive size={16} />}
+                ZIP 업로드 및 인덱싱
+              </button>
+            </div>
+          </form>
         </section>
 
         <section className="panel documents-panel">
@@ -127,7 +152,7 @@ function CodeWorkspace(props) {
                 <article className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'} key={repo.id} onClick={() => setSelectedRepositoryId(repo.id)}>
                   <div className="document-main">
                     <strong>{repo.name}</strong>
-                    <small>{repo.gitUrl}</small>
+                    <small>{repo.sourceType === 'ZIP' ? repo.sourceLabel : repo.gitUrl}</small>
                     {repo.errorMessage && <small className="danger-note">{repo.errorMessage}</small>}
                     {repo.credentialStored && <small className="success-note">암호화된 Git 토큰 저장됨</small>}
                   </div>
@@ -170,6 +195,21 @@ function CodeWorkspace(props) {
             {repositories.length === 0 && <p className="empty">Git URL을 등록한 뒤 인덱싱을 시작하세요.</p>}
           </div>
         </section>
+
+        {selectedRepository?.sourceType === 'ZIP' && (
+          <section className="panel compact-auth-panel">
+            <form className="stack" onSubmit={(event) => replaceZipRepository(selectedRepository.id, event)}>
+              <label htmlFor="replace-zip-file">새 ZIP 스냅샷</label>
+              <input id="replace-zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipReplaceFile(event.target.files?.[0] || null)} />
+              <div className="action-row">
+                <button disabled={!zipReplaceFile || loading(`repo-zip-replace-${selectedRepository.id}`)}>
+                  {loading(`repo-zip-replace-${selectedRepository.id}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                  새 ZIP으로 재인덱싱
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
 
         {selectedRepository?.authType === 'TOKEN' && (
           <section className="panel compact-auth-panel">

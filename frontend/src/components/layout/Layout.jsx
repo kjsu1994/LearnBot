@@ -149,11 +149,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       </AnimatedSection>
 
       <AnimatedSection className="home-marquee" aria-label="런봇 핵심 가치" delay={0.08}>
-        <span>RUNBOT</span>
-        <span>KNOWLEDGE</span>
-        <span>GROUNDING</span>
-        <span>WORKSPACE</span>
-        <span>RUNBOT</span>
+        <span>Runbot supports your work</span>
       </AnimatedSection>
 
       <AnimatedSection className="home-feature-grid" aria-label="런봇 기능 진입" delay={0.12}>

@@ -623,10 +623,10 @@ public class SpaceTransferService {
     private void insertCodeRepository(UUID repositoryId, UUID spaceId, UUID actorId, CodeRepositoryArchive repository) {
         jdbc.update("""
                 INSERT INTO code_repositories (
-                    id, name, git_url, branch, auth_type, local_path, status, last_indexed_commit, space_id, created_by, created_at, updated_at
+                    id, name, source_type, source_label, git_url, branch, auth_type, local_path, status, last_indexed_commit, space_id, created_by, created_at, updated_at
                 )
                 VALUES (
-                    :id, :name, :gitUrl, :branch, 'NONE', :localPath, 'INDEXED', :lastIndexedCommit, :spaceId, :createdBy, now(), now()
+                    :id, :name, 'GIT', :gitUrl, :gitUrl, :branch, 'NONE', :localPath, 'INDEXED', :lastIndexedCommit, :spaceId, :createdBy, now(), now()
                 )
                 """, new MapSqlParameterSource()
                 .addValue("id", repositoryId)

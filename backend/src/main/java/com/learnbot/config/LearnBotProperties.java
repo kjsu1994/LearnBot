@@ -471,6 +471,12 @@ public class LearnBotProperties {
         private int maxFiles = 5000;
 
         @Min(1)
+        private long maxArchiveBytes = 512_000_000;
+
+        @Min(1)
+        private long maxArchiveExtractedBytes = 1_000_000_000;
+
+        @Min(1)
         private int topK = 10;
 
         @Min(1)
@@ -503,6 +509,22 @@ public class LearnBotProperties {
 
         public void setMaxFiles(int maxFiles) {
             this.maxFiles = maxFiles;
+        }
+
+        public long getMaxArchiveBytes() {
+            return maxArchiveBytes;
+        }
+
+        public void setMaxArchiveBytes(long maxArchiveBytes) {
+            this.maxArchiveBytes = maxArchiveBytes;
+        }
+
+        public long getMaxArchiveExtractedBytes() {
+            return maxArchiveExtractedBytes;
+        }
+
+        public void setMaxArchiveExtractedBytes(long maxArchiveExtractedBytes) {
+            this.maxArchiveExtractedBytes = maxArchiveExtractedBytes;
         }
 
         public int getTopK() {

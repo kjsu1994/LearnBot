@@ -59,6 +59,8 @@ learnbot:
     workspace-path: ${LEARNBOT_CODE_WORKSPACE_PATH:/var/lib/learnbot/repos}
     max-file-bytes: ${LEARNBOT_CODE_MAX_FILE_BYTES:1000000}
     max-files: ${LEARNBOT_CODE_MAX_FILES:5000}
+    max-archive-bytes: ${LEARNBOT_CODE_MAX_ARCHIVE_BYTES:512000000}
+    max-archive-extracted-bytes: ${LEARNBOT_CODE_MAX_ARCHIVE_EXTRACTED_BYTES:1000000000}
     top-k: ${LEARNBOT_CODE_TOP_K:10}
     index-threads: ${LEARNBOT_CODE_INDEX_THREADS:2}
     credential-secret: ${LEARNBOT_CODE_CREDENTIAL_SECRET:learnbot-local-dev-secret-change-me}

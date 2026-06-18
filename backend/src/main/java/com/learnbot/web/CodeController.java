@@ -32,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,9 @@ public class CodeController {
                 repository.id(),
                 repository.spaceId(),
                 repository.name(),
+                repository.sourceType(),
+                repository.sourceLabel(),
+                repository.sourceHash(),
                 repository.gitUrl(),
                 repository.branch(),
                 repository.authType(),
@@ -90,6 +94,21 @@ public class CodeController {
                 repository.lastIndexedCommit(),
                 Boolean.TRUE.equals(request.storeToken()) && request.token() != null && !request.token().isBlank()
         );
+    }
+
+    @PostMapping("/repositories/zip")
+    CodeRepositoryCreatedResponse createZipRepository(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) UUID spaceId
+    ) {
+        CodeIndexingService.ZipRepositoryIndexResult result = indexingService.createZipRepository(
+                currentUserProvider.currentUser(),
+                spaceId,
+                file,
+                name
+        );
+        return createdResponse(result.repository(), false);
     }
 
     @GetMapping("/repositories")
@@ -106,6 +125,11 @@ public class CodeController {
                 ? new GitAccessToken(null, null)
                 : new GitAccessToken(request.username(), request.token());
         return indexingService.startIndex(currentUserProvider.currentUser(), repositoryId, accessToken, request != null && Boolean.TRUE.equals(request.storeToken()));
+    }
+
+    @PostMapping("/repositories/{repositoryId}/zip")
+    IndexingJobSummary replaceZipRepository(@PathVariable UUID repositoryId, @RequestParam("file") MultipartFile file) {
+        return indexingService.replaceZipSnapshot(currentUserProvider.currentUser(), repositoryId, file);
     }
 
     @DeleteMapping("/repositories/{repositoryId}")
@@ -186,5 +210,22 @@ public class CodeController {
                 .findFirst()
                 .map(CodeRepositorySummary::spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("Code repository was not found."));
+    }
+
+    private CodeRepositoryCreatedResponse createdResponse(CodeRepositoryRecord repository, boolean credentialStored) {
+        return new CodeRepositoryCreatedResponse(
+                repository.id(),
+                repository.spaceId(),
+                repository.name(),
+                repository.sourceType(),
+                repository.sourceLabel(),
+                repository.sourceHash(),
+                repository.gitUrl(),
+                repository.branch(),
+                repository.authType(),
+                repository.status(),
+                repository.lastIndexedCommit(),
+                credentialStored
+        );
     }
 }
