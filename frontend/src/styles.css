@@ -4302,3 +4302,67 @@ button:hover:not(:disabled),
     padding: 16px;
   }
 }
+
+.sidebar-documents {
+  min-width: 0;
+}
+
+.sidebar-document-list {
+  display: grid;
+  gap: 7px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sidebar-document-row {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.sidebar-document-row:hover,
+.sidebar-document-row.selected {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.sidebar-document-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sidebar-document-main strong,
+.sidebar-document-main small,
+.sidebar-document-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-document-main strong {
+  color: #eef6f2;
+  font-size: 12px;
+}
+
+.sidebar-document-main small,
+.sidebar-document-meta small {
+  color: #b9c8c3;
+  font-size: 11px;
+}
+
+.sidebar-document-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.sidebar-document-actions {
+  display: flex;
+  gap: 5px;
+}

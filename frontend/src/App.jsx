@@ -860,6 +860,13 @@ export default function App() {
       setFileQuery={setFileQuery}
       searchCodeFiles={searchCodeFiles}
       openCodeFile={openCodeFile}
+      documents={documents}
+      selectedDocumentId={selectedDocumentId}
+      loadDocumentDetail={loadDocumentDetail}
+      openDocumentPreview={openDocumentPreview}
+      reindexDocument={reindexDocument}
+      deleteDocument={deleteDocument}
+      loading={loading}
     >
 
         {activeView === 'code' && (

@@ -84,42 +84,6 @@ function DocumentWorkspace(props) {
           </form>
         </section>
 
-        <section className="panel documents-panel">
-          <div className="panel-title">
-            <Database size={18} />
-            <div>
-              <h2>문서 목록</h2>
-              <p>{props.documents.length ? `${props.documents.length}개 문서` : '인덱싱된 문서가 없습니다.'}</p>
-            </div>
-          </div>
-          <div className="document-list scrollable-list">
-            {props.documents.map((doc) => (
-              <article className={doc.id === props.selectedDocumentId ? 'document-row selected' : 'document-row'} key={doc.id} onClick={() => props.loadDocumentDetail(doc.id)}>
-                <div className="document-main">
-                  <strong>{doc.title}</strong>
-                  <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
-                </div>
-                <div className="document-meta">
-                  <StatusBadge status={doc.sourceStatus} />
-                  <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
-                </div>
-                <div className="document-actions">
-                  <IconButton title="원문 보기" disabled={props.loading(`detail-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.openDocumentPreview(doc.id); }}>
-                    <Eye size={15} />
-                  </IconButton>
-                  <IconButton title="재색인" disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.reindexDocument(doc.id); }}>
-                    {props.loading(`reindex-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-                  </IconButton>
-                  <IconButton danger title="삭제" disabled={props.loading(`reindex-${doc.id}`) || props.loading(`delete-${doc.id}`)} onClick={(event) => { event.stopPropagation(); props.deleteDocument(doc.id, doc.title); }}>
-                    {props.loading(`delete-${doc.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-                  </IconButton>
-                </div>
-              </article>
-            ))}
-            {props.documents.length === 0 && <p className="empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>}
-          </div>
-        </section>
-
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
         {props.documentPreviewOpen && (
           <DocumentPreviewModal
@@ -235,17 +199,7 @@ function DocumentDetailPanel({ detail, loading }) {
     );
   }
   if (!detail) {
-    return (
-      <section className="panel muted-panel">
-        <div className="panel-title">
-          <Info size={18} />
-          <div>
-            <h2>문서 상세</h2>
-            <p>문서를 선택하면 청크와 원본 정보를 확인할 수 있습니다.</p>
-          </div>
-        </div>
-      </section>
-    );
+    return null;
   }
   return (
     <section className="panel detail-panel">

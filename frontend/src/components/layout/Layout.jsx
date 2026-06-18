@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search } from 'lucide-react';
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, RefreshCw, Trash2 } from 'lucide-react';
 import { routePaths } from '../../config/constants.js';
-import { formatBrandText } from '../../lib/formatters.js';
-import { AnimatedContent, AnimatedPage, AnimatedSection } from '../common/Common.jsx';
+import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
+import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
 
 function HomePage({ user, bootstrapping, navigateTo, logout }) {
   const shellRef = useRef(null);
@@ -259,6 +259,13 @@ function WorkspaceShell({
   setFileQuery,
   searchCodeFiles,
   openCodeFile,
+  documents,
+  selectedDocumentId,
+  loadDocumentDetail,
+  openDocumentPreview,
+  reindexDocument,
+  deleteDocument,
+  loading,
 }) {
   return (
     <AnimatedPage className={sidebarCollapsed ? 'shell shell-sidebar-collapsed' : 'shell'}>
@@ -283,6 +290,13 @@ function WorkspaceShell({
         setFileQuery={setFileQuery}
         searchCodeFiles={searchCodeFiles}
         openCodeFile={openCodeFile}
+        documents={documents}
+        selectedDocumentId={selectedDocumentId}
+        loadDocumentDetail={loadDocumentDetail}
+        openDocumentPreview={openDocumentPreview}
+        reindexDocument={reindexDocument}
+        deleteDocument={deleteDocument}
+        loading={loading}
       />
 
       <section className="content">
@@ -341,26 +355,33 @@ function WorkspaceShell({
 }
 
 function Sidebar({
-                   user,
-                   spaces,
-                   selectedSpaceId,
-                   setSelectedSpaceId,
-                   collapsed,
-                   setCollapsed,
-                   indexedRepoCount,
-                   indexedCount,
-                   codeChunkCount,
-                   webCount,
-                   fileCount,
-                   activeView,
-                   selectedRepository,
-                   selectedRepositoryId,
-                   codeFiles,
-                   fileQuery,
-                   setFileQuery,
-                   searchCodeFiles,
-                   openCodeFile,
-                   navigateTo,
+  user,
+  spaces,
+  selectedSpaceId,
+  setSelectedSpaceId,
+  collapsed,
+  setCollapsed,
+  indexedRepoCount,
+  indexedCount,
+  codeChunkCount,
+  webCount,
+  fileCount,
+  activeView,
+  selectedRepository,
+  selectedRepositoryId,
+  codeFiles,
+  fileQuery,
+  setFileQuery,
+  searchCodeFiles,
+  openCodeFile,
+  navigateTo,
+  documents,
+  selectedDocumentId,
+  loadDocumentDetail,
+  openDocumentPreview,
+  reindexDocument,
+  deleteDocument,
+  loading,
 }) {
   const userLabel = formatBrandText(user.displayName || user.loginId || user.email);
   return (
@@ -462,6 +483,79 @@ function Sidebar({
 
               {selectedRepositoryId && !codeFiles.length && (
                   <p className="empty sidebar-empty">파일이 없습니다.</p>
+              )}
+            </div>
+          </div>
+      )}
+      {activeView === 'docs' && !collapsed && (
+          <div className="side-section sidebar-documents">
+            <span className="section-label">문서 목록</span>
+
+            <small className="sidebar-note">
+              {documents.length ? `${documents.length}개 문서` : '인덱싱된 문서가 없습니다.'}
+            </small>
+
+            <div className="sidebar-document-list">
+              {documents.map((doc) => (
+                  <article
+                      className={doc.id === selectedDocumentId ? 'sidebar-document-row selected' : 'sidebar-document-row'}
+                      key={doc.id}
+                      onClick={() => loadDocumentDetail(doc.id)}
+                  >
+                    <div className="sidebar-document-main">
+                      <strong>{doc.title}</strong>
+                      <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
+                    </div>
+
+                    <div className="sidebar-document-meta">
+                      <StatusBadge status={doc.sourceStatus} />
+                      <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
+                    </div>
+
+                    <div className="sidebar-document-actions">
+                      <IconButton
+                          title="원문 보기"
+                          disabled={loading(`detail-${doc.id}`) || loading(`delete-${doc.id}`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openDocumentPreview(doc.id);
+                          }}
+                      >
+                        <Eye size={14} />
+                      </IconButton>
+
+                      <IconButton
+                          title="재색인"
+                          disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            reindexDocument(doc.id);
+                          }}
+                      >
+                        {loading(`reindex-${doc.id}`)
+                            ? <Loader2 className="spin" size={14} />
+                            : <RefreshCw size={14} />}
+                      </IconButton>
+
+                      <IconButton
+                          danger
+                          title="삭제"
+                          disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteDocument(doc.id, doc.title);
+                          }}
+                      >
+                        {loading(`delete-${doc.id}`)
+                            ? <Loader2 className="spin" size={14} />
+                            : <Trash2 size={14} />}
+                      </IconButton>
+                    </div>
+                  </article>
+              ))}
+
+              {documents.length === 0 && (
+                  <p className="empty sidebar-empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>
               )}
             </div>
           </div>
