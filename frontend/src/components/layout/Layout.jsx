@@ -401,19 +401,6 @@ function Sidebar({
           </div>
         </div>
       </div>
-
-      <div className="model">
-        <span className="section-label">정책</span>
-        <div>
-          <small>답변</small>
-          <strong>근거 필수</strong>
-        </div>
-        <div>
-          <small>삭제</small>
-          <strong>소프트 삭제</strong>
-        </div>
-      </div>
-
     </aside>
   );
 }

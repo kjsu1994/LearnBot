@@ -103,7 +103,7 @@ The UI also provides:
 Change models with environment variables:
 
 ```bash
-LLM_MODEL=gemma4:e4b
+LLM_MODEL=qwen3:8b-q4_K_M, qwen3.5:2b-q4_K_M
 EMBEDDING_MODEL=bge-m3
 ```
 

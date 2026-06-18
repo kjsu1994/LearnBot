@@ -173,13 +173,6 @@ function CodeWorkspace(props) {
 
         {selectedRepository?.authType === 'TOKEN' && (
           <section className="panel compact-auth-panel">
-            <div className="panel-title">
-              <GitPullRequest size={18} />
-              <div>
-                <h2>재인덱싱 인증</h2>
-                <p>{selectedRepository.credentialStored ? '저장된 토큰을 사용할 수 있습니다. 새 토큰을 입력하면 갱신됩니다.' : '이 저장소는 토큰 인증이 필요합니다.'}</p>
-              </div>
-            </div>
             <div className="form-grid two">
               <div className="stack">
                 <label htmlFor="index-username">Username</label>
