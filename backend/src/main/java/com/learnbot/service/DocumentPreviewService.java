@@ -21,6 +21,10 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
@@ -71,7 +75,7 @@ public class DocumentPreviewService {
             case "excel" -> excel(summary, file, object);
             case "csv" -> csv(summary, file, object);
             case "markdown", "text" -> text(summary, file, object, type);
-            case "pptx" -> fromChunks(summary, type, true);
+            case "pptx" -> pptx(summary, file, object);
             default -> fromChunks(summary, "text", true);
         };
     }
@@ -187,6 +191,43 @@ public class DocumentPreviewService {
             throw new IllegalArgumentException("Could not preview DOCX file: " + ex.getMessage(), ex);
         }
         return base(summary, "docx", file.filename(), object.sizeBytes(), true, truncated, null, paragraphs, tables, List.of(), List.of());
+    }
+
+    private DocumentPreviewResponse pptx(DocumentSummary summary, StoredFile file, StoredObject object) {
+        List<DocumentPreviewBlock> blocks = new ArrayList<>();
+        StringBuilder text = new StringBuilder();
+        try (XMLSlideShow slideShow = new XMLSlideShow(new ByteArrayInputStream(file.content()))) {
+            int slideIndex = 1;
+            for (XSLFSlide slide : slideShow.getSlides()) {
+                List<String> slideTexts = new ArrayList<>();
+                for (XSLFShape shape : slide.getShapes()) {
+                    if (shape instanceof XSLFTextShape textShape) {
+                        String value = normalizePreviewText(textShape.getText());
+                        if (!value.isBlank()) {
+                            slideTexts.add(value);
+                        }
+                    }
+                }
+                if (!slideTexts.isEmpty()) {
+                    String slideTitle = "Slide " + slideIndex;
+                    blocks.add(new DocumentPreviewBlock("heading", 2, slideTitle, List.of(), List.of(), null));
+                    appendWebText(text, slideTitle);
+                    for (String value : slideTexts) {
+                        blocks.add(new DocumentPreviewBlock("paragraph", null, value, List.of(), List.of(), null));
+                        appendWebText(text, value);
+                    }
+                }
+                slideIndex++;
+            }
+        } catch (Exception ex) {
+            return fromChunks(summary, "pptx", true);
+        }
+        if (blocks.isEmpty()) {
+            return fromChunks(summary, "pptx", true);
+        }
+        LimitedText limited = limitText(text.toString());
+        return base(summary, "pptx", file.filename(), object.sizeBytes(), true, limited.truncated(),
+                limited.text(), List.of(), List.of(), List.of(), blocks);
     }
 
     private List<String> docxRow(XWPFTableRow row) {
@@ -348,6 +389,10 @@ public class DocumentPreviewService {
 
     private String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private String normalizePreviewText(String value) {
+        return value == null ? "" : value.replace('\u0000', ' ').replaceAll("[ \\t\\x0B\\f\\r]+", " ").trim();
     }
 
     private Integer integerValue(Object value) {

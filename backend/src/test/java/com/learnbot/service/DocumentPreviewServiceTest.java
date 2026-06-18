@@ -6,6 +6,8 @@ import com.learnbot.dto.DocumentSummary;
 import com.learnbot.repository.DocumentRepository;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 
@@ -77,6 +79,64 @@ class DocumentPreviewServiceTest {
     }
 
     @Test
+    void pptxPreviewRendersSlidesFromStoredOriginal() throws Exception {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
+        AuthService authService = mock(AuthService.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        AppUser user = user();
+        UUID documentId = UUID.randomUUID();
+        UUID sourceId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        DocumentSummary summary = summary(documentId, sourceId, spaceId, "FILE", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        StoredObject object = new StoredObject("bucket", "key", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", 256);
+
+        when(authService.accessibleSpaceIds(user)).thenReturn(List.of(spaceId));
+        when(repository.findDocument(eq(documentId), anyList())).thenReturn(Optional.of(summary));
+        when(repository.findSourceObject(sourceId)).thenReturn(Optional.of(object));
+        when(objectStorageService.load(object)).thenReturn(new StoredFile("deck.pptx", object.contentType(), pptxBytes()));
+
+        DocumentPreviewResponse response = service.preview(user, documentId);
+
+        assertThat(response.previewType()).isEqualTo("pptx");
+        assertThat(response.blocks()).extracting("type").contains("heading", "paragraph");
+        assertThat(response.text()).contains("Slide 1", "Roadmap", "Ship preview");
+        assertThat(response.originalAvailable()).isTrue();
+    }
+
+    @Test
+    void pptxPreviewFallsBackToChunksWhenStoredOriginalCannotBeParsed() {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
+        AuthService authService = mock(AuthService.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        AppUser user = user();
+        UUID documentId = UUID.randomUUID();
+        UUID sourceId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        DocumentSummary summary = summary(documentId, sourceId, spaceId, "FILE", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        StoredObject object = new StoredObject("bucket", "key", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", 256);
+
+        when(authService.accessibleSpaceIds(user)).thenReturn(List.of(spaceId));
+        when(repository.findDocument(eq(documentId), anyList())).thenReturn(Optional.of(summary));
+        when(repository.findSourceObject(sourceId)).thenReturn(Optional.of(object));
+        when(objectStorageService.load(object)).thenReturn(new StoredFile("deck.pptx", object.contentType(), "not a pptx".getBytes()));
+        when(repository.listDocumentChunks(documentId)).thenReturn(List.of(chunk(0, "Slide 1:\nFallback text")));
+
+        DocumentPreviewResponse response = service.preview(user, documentId);
+
+        assertThat(response.previewType()).isEqualTo("pptx");
+        assertThat(response.blocks()).isEmpty();
+        assertThat(response.text()).contains("Fallback text");
+        assertThat(response.originalAvailable()).isTrue();
+    }
+
+
+    @Test
     void webPreviewUsesStructuredMetadataWhenAvailable() {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
@@ -139,6 +199,16 @@ class DocumentPreviewServiceTest {
             row.createCell(0).setCellValue("Kim");
             row.createCell(1).setCellValue("Admin");
             workbook.write(output);
+            return output.toByteArray();
+        }
+    }
+
+    private byte[] pptxBytes() throws Exception {
+        try (XMLSlideShow slideShow = new XMLSlideShow();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XSLFSlide slide = slideShow.createSlide();
+            slide.createTextBox().setText("Roadmap\nShip preview");
+            slideShow.write(output);
             return output.toByteArray();
         }
     }

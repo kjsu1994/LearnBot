@@ -1945,6 +1945,40 @@ h3 {
   gap: 14px;
 }
 
+.presentation-reader {
+  display: grid;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 980px;
+  min-height: 100%;
+  padding: 28px;
+}
+
+.presentation-slide {
+  background: #fff;
+  border: 1px solid #d8e1dd;
+  border-radius: 8px;
+  color: #1f2a33;
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+
+.presentation-slide h3 {
+  color: #47645a;
+  font-size: 0.82rem;
+  letter-spacing: 0;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.presentation-slide p {
+  line-height: 1.68;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .web-reader-heading {
   color: #17252e;
   line-height: 1.28;

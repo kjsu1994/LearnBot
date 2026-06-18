@@ -124,15 +124,19 @@ function CodeWorkspace(props) {
               </div>
             </div>
             <label htmlFor="zip-file">ZIP 파일</label>
-            <input id="zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipForm((current) => ({ ...current, file: event.target.files?.[0] || null }))} />
-            <label htmlFor="zip-name">표시 이름</label>
-            <input id="zip-name" value={zipForm.name} onChange={(event) => setZipForm((current) => ({ ...current, name: event.target.value }))} placeholder={zipForm.file?.name?.replace(/\.zip$/i, '') || 'code snapshot'} />
-            <div className="action-row">
+            <div className="file-row">
+              <label className="file-picker" htmlFor="zip-file">
+                <FileArchive size={16} />
+                <span>{zipForm.file?.name || 'ZIP 파일 선택'}</span>
+              </label>
+              <input id="zip-file" className="visually-hidden" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipForm((current) => ({ ...current, file: event.target.files?.[0] || null }))} />
               <button disabled={!zipForm.file || loading('repo-zip-upload')}>
                 {loading('repo-zip-upload') ? <Loader2 className="spin" size={16} /> : <FileArchive size={16} />}
-                ZIP 업로드 및 인덱싱
+                업로드
               </button>
             </div>
+            <label htmlFor="zip-name">표시 이름</label>
+            <input id="zip-name" value={zipForm.name} onChange={(event) => setZipForm((current) => ({ ...current, name: event.target.value }))} placeholder={zipForm.file?.name?.replace(/\.zip$/i, '') || 'code snapshot'} />
           </form>
         </section>
 

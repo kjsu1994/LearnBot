@@ -395,6 +395,10 @@ function DocumentPreviewContent({ preview, blobUrl }) {
     );
   }
 
+  if (preview.previewType === 'pptx') {
+    return <PresentationReader blocks={preview.blocks || []} fallbackText={preview.text} />;
+  }
+
   if (preview.previewType === 'web') {
     if (preview.blocks?.length) {
       return <WebReader blocks={preview.blocks} fallbackText={preview.text} />;
@@ -413,6 +417,38 @@ function ReaderText({ text = '' }) {
   return (
     <div className="document-reader">
       {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+    </div>
+  );
+}
+
+function PresentationReader({ blocks = [], fallbackText = '' }) {
+  if (!blocks.length) {
+    return <ReaderText text={fallbackText} />;
+  }
+  const slides = [];
+  let current = null;
+  for (const block of blocks) {
+    if (block?.type === 'heading') {
+      current = { title: block.text || `Slide ${slides.length + 1}`, paragraphs: [] };
+      slides.push(current);
+    } else if (block?.text) {
+      if (!current) {
+        current = { title: `Slide ${slides.length + 1}`, paragraphs: [] };
+        slides.push(current);
+      }
+      current.paragraphs.push(block.text);
+    }
+  }
+  return (
+    <div className="presentation-reader">
+      {slides.map((slide, index) => (
+        <section className="presentation-slide" key={`${slide.title}-${index}`}>
+          <h3>{slide.title}</h3>
+          {slide.paragraphs.map((paragraph, paragraphIndex) => (
+            <p key={paragraphIndex}>{paragraph}</p>
+          ))}
+        </section>
+      ))}
     </div>
   );
 }
