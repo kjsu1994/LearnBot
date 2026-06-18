@@ -6,6 +6,7 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
@@ -77,6 +78,37 @@ class FileExtractorTest {
                 .hasMessageContaining("Could not extract file");
     }
 
+    @Test
+    void extractsPptxSlideText() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                pptxBytes("Slide RAG evidence")
+        );
+
+        ExtractedDocument document = extractor.extract(file);
+
+        assertThat(document.contentType()).isEqualTo("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        assertThat(document.content()).contains("Slide 1:", "Slide RAG evidence");
+    }
+
+    @Test
+    void fallsBackToPlainTextForUnknownTextExtension() {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "notes.custom",
+                "application/octet-stream",
+                "plain text fallback evidence".getBytes(StandardCharsets.UTF_8)
+        );
+
+        ExtractedDocument document = extractor.extract(file);
+
+        assertThat(document.contentType()).isEqualTo("text/plain");
+        assertThat(document.metadata()).containsEntry("fallbackExtractor", "plain-text");
+        assertThat(document.content()).contains("plain text fallback evidence");
+    }
+
     private byte[] docxBytes(String text) throws Exception {
         try (XWPFDocument document = new XWPFDocument();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -99,6 +131,17 @@ class FileExtractorTest {
                 content.endText();
             }
             document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private byte[] pptxBytes(String text) throws Exception {
+        try (XMLSlideShow slideShow = new XMLSlideShow();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var slide = slideShow.createSlide();
+            var shape = slide.createTextBox();
+            shape.setText(text);
+            slideShow.write(output);
             return output.toByteArray();
         }
     }

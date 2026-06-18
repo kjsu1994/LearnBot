@@ -47,6 +47,7 @@ learnbot-db*.sql
 *.dump
 
 # Temporary files
+.tools/
 .cache/
 .tmp/
 tmp/

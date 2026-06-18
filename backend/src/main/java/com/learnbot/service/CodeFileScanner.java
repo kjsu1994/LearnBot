@@ -84,6 +84,7 @@ public class CodeFileScanner {
                 || name.endsWith(".jsx")
                 || name.endsWith(".ts")
                 || name.endsWith(".tsx")
+                || name.endsWith(".dart")
                 || name.endsWith(".java")
                 || name.endsWith(".py")
                 || name.endsWith(".go")
@@ -116,6 +117,7 @@ public class CodeFileScanner {
         if (name.endsWith(".xaml")) return "xaml";
         if (name.endsWith(".js") || name.endsWith(".jsx")) return "javascript";
         if (name.endsWith(".ts") || name.endsWith(".tsx")) return "typescript";
+        if (name.endsWith(".dart")) return "dart";
         if (name.endsWith(".java")) return "java";
         if (name.endsWith(".py")) return "python";
         if (name.endsWith(".go")) return "go";

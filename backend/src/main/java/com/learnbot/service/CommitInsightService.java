@@ -106,6 +106,10 @@ public class CommitInsightService {
                     List.of("code_repositories.local_path 값이 비어 있습니다."));
         }
 
+        if (isPseudoLocalPath(record.localPath())) {
+            return importedSnapshotFallback(record, target, "localPath=" + record.localPath() + " is not a local filesystem path.");
+        }
+
         Path localPath = Path.of(record.localPath());
         if (!Files.isDirectory(localPath) || !Files.exists(localPath.resolve(".git"))) {
             return importedSnapshotFallback(record, target, "localPath=" + localPath + " 경로에 .git 디렉터리가 없습니다.");
@@ -751,6 +755,10 @@ public class CommitInsightService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean isPseudoLocalPath(String value) {
+        return value != null && value.contains("://");
     }
 
     private String shortHash(String value) {

@@ -275,7 +275,7 @@ public class CodeIndexingService {
                         continue;
                     }
 
-                    List<List<Double>> embeddings = ollamaClient.embed(chunks.stream().map(ParsedCodeChunk::content).toList());
+                    List<List<Double>> embeddings = embedInBatches(chunks.stream().map(ParsedCodeChunk::content).toList());
                     ensureNotCancelled(jobId);
                     validateEmbeddings(embeddings);
 
@@ -401,6 +401,16 @@ public class CodeIndexingService {
                         + ". Recreate the vector column and reindex when changing embedding models.");
             }
         }
+    }
+
+    private List<List<Double>> embedInBatches(List<String> texts) {
+        List<List<Double>> embeddings = new java.util.ArrayList<>();
+        int batchSize = 32;
+        for (int start = 0; start < texts.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, texts.size());
+            embeddings.addAll(ollamaClient.embed(texts.subList(start, end)));
+        }
+        return embeddings;
     }
 
     private void ensureEmbeddingAvailable() {

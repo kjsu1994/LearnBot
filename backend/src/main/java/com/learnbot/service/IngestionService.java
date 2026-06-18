@@ -229,13 +229,13 @@ public class IngestionService {
     private List<IndexedDocument> prepareIndex(List<ExtractedDocument> documents) {
         List<IndexedDocument> indexedDocuments = new ArrayList<>();
         for (ExtractedDocument document : documents) {
-            List<Chunk> chunks = chunker.split(document.content());
+            List<Chunk> chunks = chunker.split(document);
             if (chunks.isEmpty()) {
                 continue;
             }
 
             List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
-            List<List<Double>> embeddings = ollamaClient.embed(chunkTexts);
+            List<List<Double>> embeddings = embedInBatches(chunkTexts);
             validateEmbeddings(embeddings, chunks.size());
             indexedDocuments.add(new IndexedDocument(document, chunks, embeddings));
         }
@@ -244,6 +244,16 @@ public class IngestionService {
             throw new IllegalArgumentException("No extractable text was found.");
         }
         return indexedDocuments;
+    }
+
+    private List<List<Double>> embedInBatches(List<String> texts) {
+        List<List<Double>> embeddings = new ArrayList<>();
+        int batchSize = 32;
+        for (int start = 0; start < texts.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, texts.size());
+            embeddings.addAll(ollamaClient.embed(texts.subList(start, end)));
+        }
+        return embeddings;
     }
 
     private IngestResponse persistIndex(

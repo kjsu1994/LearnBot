@@ -11,6 +11,10 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -26,6 +30,7 @@ import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -66,8 +71,11 @@ public class FileExtractor {
         if (lower.endsWith(".docx")) {
             return docx(inputStream, fileName);
         }
+        if (lower.endsWith(".pptx")) {
+            return pptx(inputStream, fileName);
+        }
 
-        throw new IllegalArgumentException("Supported files: CSV, XLS, XLSX, PDF, DOCX, Markdown, and TXT.");
+        return genericText(inputStream, fileName);
     }
 
     private ExtractedDocument csv(InputStream inputStream, String fileName) throws Exception {
@@ -130,16 +138,31 @@ public class FileExtractor {
     }
 
     private ExtractedDocument text(InputStream inputStream, String fileName, String contentType) throws Exception {
-        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT);
-        String content = decoder.decode(ByteBuffer.wrap(inputStream.readAllBytes())).toString();
+        String content = decodeUtf8(inputStream.readAllBytes());
         return new ExtractedDocument(
                 fileName,
                 "file://" + fileName,
                 contentType,
                 content,
                 Map.of("fileName", fileName)
+        );
+    }
+
+    private ExtractedDocument genericText(InputStream inputStream, String fileName) throws Exception {
+        byte[] bytes = inputStream.readAllBytes();
+        if (looksBinary(bytes)) {
+            throw new IllegalArgumentException("Unsupported binary file. Supported structured files: CSV, XLS, XLSX, PDF, DOCX, PPTX, Markdown, and TXT.");
+        }
+        String content = decodeUtf8(bytes);
+        if (content.isBlank()) {
+            throw new IllegalArgumentException("No extractable text was found in this file.");
+        }
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                "text/plain",
+                content,
+                Map.of("fileName", fileName, "fallbackExtractor", "plain-text")
         );
     }
 
@@ -210,10 +233,53 @@ public class FileExtractor {
         );
     }
 
+    private ExtractedDocument pptx(InputStream inputStream, String fileName) throws Exception {
+        StringBuilder content = new StringBuilder();
+        try (XMLSlideShow slideShow = new XMLSlideShow(inputStream)) {
+            int slideIndex = 1;
+            for (XSLFSlide slide : slideShow.getSlides()) {
+                content.append("Slide ").append(slideIndex++).append(":\n");
+                for (XSLFShape shape : slide.getShapes()) {
+                    if (shape instanceof XSLFTextShape textShape) {
+                        String text = textShape.getText();
+                        if (text != null && !text.isBlank()) {
+                            content.append(text.replaceAll("\\s+", " ").trim()).append('\n');
+                        }
+                    }
+                }
+                content.append('\n');
+            }
+        }
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                content.toString(),
+                Map.of("fileName", fileName, "slideSource", "poi")
+        );
+    }
+
     private String stripBom(String value) {
         if (value == null || value.isEmpty()) {
             return "";
         }
         return value.charAt(0) == '\uFEFF' ? value.substring(1) : value;
+    }
+
+    private String decodeUtf8(byte[] bytes) throws CharacterCodingException {
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        return decoder.decode(ByteBuffer.wrap(bytes)).toString();
+    }
+
+    private boolean looksBinary(byte[] bytes) {
+        int sample = Math.min(bytes.length, 2048);
+        for (int i = 0; i < sample; i++) {
+            if (bytes[i] == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 }
