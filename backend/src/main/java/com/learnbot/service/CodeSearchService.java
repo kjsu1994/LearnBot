@@ -221,6 +221,12 @@ public class CodeSearchService {
         if (isLoginQuestion(query) && path.contains("git") && !path.contains("auth") && !path.contains("login")) {
             boost -= 0.6;
         }
+        if (isOverviewQuestion(query) && isProjectContext(result.chunkType())) {
+            boost += "project_structure".equals(result.chunkType()) || "repository_summary".equals(result.chunkType()) ? 0.70 : 0.38;
+        }
+        if (!isOverviewQuestion(query) && isProjectContext(result.chunkType())) {
+            boost -= "file_summary".equals(result.chunkType()) ? 0.05 : 0.18;
+        }
         return boost;
     }
 
@@ -256,12 +262,35 @@ public class CodeSearchService {
         return normalized.contains("로그인") || normalized.contains("login") || normalized.contains("signin");
     }
 
+    private boolean isOverviewQuestion(String query) {
+        String normalized = normalizeCodeText(query);
+        return normalized.contains("overview")
+                || normalized.contains("architecture")
+                || normalized.contains("structure")
+                || normalized.contains("project")
+                || normalized.contains("module")
+                || normalized.contains("component")
+                || normalized.contains("\uD504\uB85C\uC81D\uD2B8")
+                || normalized.contains("\uAD6C\uC870")
+                || normalized.contains("\uC544\uD0A4\uD14D\uCC98")
+                || normalized.contains("\uBAA8\uB4C8")
+                || normalized.contains("\uAD6C\uC131");
+    }
+
     private boolean isStructured(String chunkType) {
         return "class".equals(chunkType)
                 || "method".equals(chunkType)
                 || "event_handler".equals(chunkType)
                 || "xaml_event".equals(chunkType)
-                || "xaml_view".equals(chunkType);
+                || "xaml_view".equals(chunkType)
+                || isProjectContext(chunkType);
+    }
+
+    private boolean isProjectContext(String chunkType) {
+        return "project_structure".equals(chunkType)
+                || "repository_summary".equals(chunkType)
+                || "directory_summary".equals(chunkType)
+                || "file_summary".equals(chunkType);
     }
 
     private boolean isQuestionStopWord(String term) {

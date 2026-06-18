@@ -479,6 +479,8 @@ public class LearnBotProperties {
         @NotBlank
         private String credentialSecret = "learnbot-local-dev-secret-change-me";
 
+        private Context context = new Context();
+
         public String getWorkspacePath() {
             return workspacePath;
         }
@@ -525,6 +527,68 @@ public class LearnBotProperties {
 
         public void setCredentialSecret(String credentialSecret) {
             this.credentialSecret = credentialSecret;
+        }
+
+        public Context getContext() {
+            return context;
+        }
+
+        public void setContext(Context context) {
+            this.context = context;
+        }
+
+        public static class Context {
+            private boolean enabled = true;
+            private boolean llmSummaryEnabled = true;
+
+            @Min(1)
+            private int maxFileSummaries = 1500;
+
+            @Min(0)
+            private int maxLlmDirectorySummaries = 12;
+
+            @Min(1)
+            private int maxTreeDepth = 4;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public boolean isLlmSummaryEnabled() {
+                return llmSummaryEnabled;
+            }
+
+            public void setLlmSummaryEnabled(boolean llmSummaryEnabled) {
+                this.llmSummaryEnabled = llmSummaryEnabled;
+            }
+
+            public int getMaxFileSummaries() {
+                return maxFileSummaries;
+            }
+
+            public void setMaxFileSummaries(int maxFileSummaries) {
+                this.maxFileSummaries = maxFileSummaries;
+            }
+
+            public int getMaxLlmDirectorySummaries() {
+                return maxLlmDirectorySummaries;
+            }
+
+            public void setMaxLlmDirectorySummaries(int maxLlmDirectorySummaries) {
+                this.maxLlmDirectorySummaries = maxLlmDirectorySummaries;
+            }
+
+            public int getMaxTreeDepth() {
+                return maxTreeDepth;
+            }
+
+            public void setMaxTreeDepth(int maxTreeDepth) {
+                this.maxTreeDepth = maxTreeDepth;
+            }
         }
     }
 

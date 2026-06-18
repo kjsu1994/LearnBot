@@ -633,6 +633,12 @@ public class CodeRagService {
         if (isStructured(result.chunkType())) {
             score += 0.08;
         }
+        if ((mode == CodeQuestionMode.OVERVIEW || mode == CodeQuestionMode.IMPACT) && isProjectContext(result.chunkType())) {
+            score += "project_structure".equals(result.chunkType()) || "repository_summary".equals(result.chunkType()) ? 0.65 : 0.30;
+        }
+        if (mode != CodeQuestionMode.OVERVIEW && mode != CodeQuestionMode.IMPACT && isProjectContext(result.chunkType())) {
+            score -= "file_summary".equals(result.chunkType()) ? 0.04 : 0.16;
+        }
         if (mode == CodeQuestionMode.CALL_FLOW) {
             score += Math.max(0, 0.08 * (5 - flowRank(result)));
         }
@@ -919,7 +925,15 @@ public class CodeRagService {
                 || "method".equals(chunkType)
                 || "event_handler".equals(chunkType)
                 || "xaml_event".equals(chunkType)
-                || "xaml_view".equals(chunkType);
+                || "xaml_view".equals(chunkType)
+                || isProjectContext(chunkType);
+    }
+
+    private boolean isProjectContext(String chunkType) {
+        return "project_structure".equals(chunkType)
+                || "repository_summary".equals(chunkType)
+                || "directory_summary".equals(chunkType)
+                || "file_summary".equals(chunkType);
     }
 
     private boolean notBlank(String value) {

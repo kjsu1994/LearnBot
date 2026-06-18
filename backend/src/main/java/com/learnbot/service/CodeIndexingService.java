@@ -37,6 +37,7 @@ public class CodeIndexingService {
     private final CodeFileScanner fileScanner;
     private final CodeContentReader contentReader;
     private final CodeChunkParser chunkParser;
+    private final CodeProjectContextBuilder projectContextBuilder;
     private final OllamaClient ollamaClient;
     private final CredentialEncryptionService credentialEncryptionService;
     private final LearnBotProperties properties;
@@ -52,6 +53,7 @@ public class CodeIndexingService {
             CodeFileScanner fileScanner,
             CodeContentReader contentReader,
             CodeChunkParser chunkParser,
+            CodeProjectContextBuilder projectContextBuilder,
             OllamaClient ollamaClient,
             CredentialEncryptionService credentialEncryptionService,
             LearnBotProperties properties,
@@ -63,6 +65,7 @@ public class CodeIndexingService {
         this.fileScanner = fileScanner;
         this.contentReader = contentReader;
         this.chunkParser = chunkParser;
+        this.projectContextBuilder = projectContextBuilder;
         this.ollamaClient = ollamaClient;
         this.credentialEncryptionService = credentialEncryptionService;
         this.properties = properties;
@@ -242,16 +245,29 @@ public class CodeIndexingService {
             for (CodeFileCandidate candidate : candidates) {
                 currentFilePaths.add(candidate.relativePath());
             }
+            if (projectContextBuilder.enabled()) {
+                currentFilePaths.add(CodeProjectContextBuilder.CONTEXT_FILE_PATH);
+            }
             deletedFiles = (int) previousFiles.keySet().stream()
                     .filter(path -> !currentFilePaths.contains(path))
                     .count();
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
+            List<CodeProjectContextBuilder.IndexedFileContext> projectContexts = new java.util.ArrayList<>();
             for (CodeFileCandidate candidate : candidates) {
                 ensureNotCancelled(jobId);
                 ActiveCodeFileSnapshot previousFile = previousFiles.get(candidate.relativePath());
                 try {
                     String content = contentReader.read(candidate.absolutePath());
                     String contentHash = sha256(content);
+                    List<ParsedCodeChunk> chunks = chunkParser.parse(candidate.relativePath(), candidate.language(), content);
+                    if (!chunks.isEmpty()) {
+                        projectContexts.add(new CodeProjectContextBuilder.IndexedFileContext(
+                                candidate.relativePath(),
+                                candidate.language(),
+                                content,
+                                chunks
+                        ));
+                    }
                     if (previousFile != null
                             && previousFile.contentHash().equals(contentHash)
                             && previousFile.chunkCount() > 0) {
@@ -263,7 +279,6 @@ public class CodeIndexingService {
                         continue;
                     }
 
-                    List<ParsedCodeChunk> chunks = chunkParser.parse(candidate.relativePath(), candidate.language(), content);
                     if (chunks.isEmpty()) {
                         if (previousFile == null) {
                             addedFiles++;
@@ -309,6 +324,8 @@ public class CodeIndexingService {
                 updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             }
 
+            totalChunks += addProjectContextChunks(record, jobId, projectContexts);
+            updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             if (totalChunks == 0) {
                 throw new IllegalArgumentException("No code chunks were created.");
             }
@@ -332,6 +349,43 @@ public class CodeIndexingService {
         } finally {
             runningJobs.remove(jobId);
             cancelledJobs.remove(jobId);
+        }
+    }
+
+    private int addProjectContextChunks(
+            CodeRepositoryRecord record,
+            UUID jobId,
+            List<CodeProjectContextBuilder.IndexedFileContext> projectContexts
+    ) {
+        if (!projectContextBuilder.enabled() || projectContexts == null || projectContexts.isEmpty()) {
+            return 0;
+        }
+        try {
+            ensureNotCancelled(jobId);
+            List<ParsedCodeChunk> chunks = projectContextBuilder.build(record, projectContexts);
+            if (chunks.isEmpty()) {
+                return 0;
+            }
+            List<List<Double>> embeddings = embedInBatches(chunks.stream().map(ParsedCodeChunk::content).toList());
+            ensureNotCancelled(jobId);
+            validateEmbeddings(embeddings);
+            String combinedContent = chunks.stream()
+                    .map(ParsedCodeChunk::content)
+                    .reduce("", (left, right) -> left + "\n\n" + right);
+            UUID fileId = repository.createFile(
+                    record.id(),
+                    jobId,
+                    CodeProjectContextBuilder.CONTEXT_FILE_PATH,
+                    "markdown",
+                    sha256(combinedContent)
+            );
+            repository.addChunks(record.id(), fileId, jobId, CodeProjectContextBuilder.CONTEXT_FILE_PATH, chunks, embeddings);
+            return chunks.size();
+        } catch (CodeIndexCancelledException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            repository.addJobFailure(record.id(), jobId, CodeProjectContextBuilder.CONTEXT_FILE_PATH, "PROJECT_CONTEXT", rootMessage(ex));
+            return 0;
         }
     }
 

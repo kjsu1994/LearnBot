@@ -340,6 +340,10 @@ public class RagPipelineService {
                 || "event_handler".equals(result.chunkType())
                 || "xaml_event".equals(result.chunkType())
                 || "xaml_view".equals(result.chunkType())
+                || "project_structure".equals(result.chunkType())
+                || "repository_summary".equals(result.chunkType())
+                || "directory_summary".equals(result.chunkType())
+                || "file_summary".equals(result.chunkType())
                 || notBlank(result.methodName())
                 || notBlank(result.className())
                 || notBlank(result.symbolName()));

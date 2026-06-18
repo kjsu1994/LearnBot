@@ -62,6 +62,12 @@ learnbot:
     top-k: ${LEARNBOT_CODE_TOP_K:10}
     index-threads: ${LEARNBOT_CODE_INDEX_THREADS:2}
     credential-secret: ${LEARNBOT_CODE_CREDENTIAL_SECRET:learnbot-local-dev-secret-change-me}
+    context:
+      enabled: ${LEARNBOT_CODE_CONTEXT_ENABLED:true}
+      llm-summary-enabled: ${LEARNBOT_CODE_CONTEXT_LLM_SUMMARY_ENABLED:true}
+      max-file-summaries: ${LEARNBOT_CODE_CONTEXT_MAX_FILE_SUMMARIES:1500}
+      max-llm-directory-summaries: ${LEARNBOT_CODE_CONTEXT_MAX_LLM_DIRECTORY_SUMMARIES:12}
+      max-tree-depth: ${LEARNBOT_CODE_CONTEXT_MAX_TREE_DEPTH:4}
   auth:
     bootstrap-admin-email: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:jinsu.kim}
     bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:admin1234}

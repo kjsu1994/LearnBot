@@ -98,6 +98,7 @@ public class CodeRepository {
                     SELECT repository_id, COUNT(*) AS active_file_count
                     FROM code_files
                     WHERE active
+                      AND file_path <> '__learnbot__/project-context.md'
                     GROUP BY repository_id
                 ) f ON f.repository_id = r.id
                 LEFT JOIN (
@@ -459,6 +460,7 @@ public class CodeRepository {
                 LEFT JOIN code_chunks c ON c.file_id = f.id AND c.active
                 WHERE f.active
                   AND r.deleted_at IS NULL
+                  AND f.file_path <> '__learnbot__/project-context.md'
                   AND (CAST(:repositoryId AS uuid) IS NULL OR f.repository_id = CAST(:repositoryId AS uuid))
                   AND (CAST(:query AS varchar) IS NULL OR f.file_path ILIKE CAST(:query AS varchar))
                 GROUP BY f.id
