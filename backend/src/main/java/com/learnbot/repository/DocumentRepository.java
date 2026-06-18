@@ -244,7 +244,7 @@ public class DocumentRepository {
 
     public List<DocumentChunkDetail> listDocumentChunks(UUID documentId) {
         return jdbc.query("""
-                SELECT id, chunk_index, content, created_at
+                SELECT id, chunk_index, content, metadata::text AS metadata, created_at
                 FROM document_chunks
                 WHERE document_id = :documentId
                 ORDER BY chunk_index ASC
@@ -252,6 +252,7 @@ public class DocumentRepository {
                 rs.getObject("id", UUID.class),
                 rs.getInt("chunk_index"),
                 rs.getString("content"),
+                fromJson(rs.getString("metadata")),
                 rs.getObject("created_at", OffsetDateTime.class)
         ));
     }
@@ -319,6 +320,7 @@ public class DocumentRepository {
                        d.content_type,
                        c.chunk_index,
                        c.content,
+                       c.metadata::text AS metadata,
                        (
                          0.75 * (1 - (c.embedding <=> CAST(:embedding AS vector))) +
                          0.25 * ts_rank(c.search_vector, plainto_tsquery('simple', :query))
@@ -355,6 +357,7 @@ public class DocumentRepository {
                        d.content_type,
                        c.chunk_index,
                        c.content,
+                       c.metadata::text AS metadata,
                        (
                          ts_rank(c.search_vector, plainto_tsquery('simple', :query)) +
                          CASE WHEN d.title ILIKE :likeQuery THEN 0.30 ELSE 0 END +
@@ -390,6 +393,7 @@ public class DocumentRepository {
                 rs.getString("content_type"),
                 rs.getInt("chunk_index"),
                 rs.getString("content"),
+                fromJson(rs.getString("metadata")),
                 rs.getDouble("score")
         );
     }

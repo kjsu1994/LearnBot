@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -26,6 +27,7 @@ public class IngestionService {
     private final WebUrlNormalizer webUrlNormalizer;
     private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
+    private final DocumentContextBuilder documentContextBuilder;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
     private final AuthService authService;
@@ -40,6 +42,7 @@ public class IngestionService {
             WebUrlNormalizer webUrlNormalizer,
             ObjectStorageService objectStorageService,
             Chunker chunker,
+            DocumentContextBuilder documentContextBuilder,
             OllamaClient ollamaClient,
             LearnBotProperties properties,
             AuthService authService,
@@ -53,6 +56,7 @@ public class IngestionService {
         this.webUrlNormalizer = webUrlNormalizer;
         this.objectStorageService = objectStorageService;
         this.chunker = chunker;
+        this.documentContextBuilder = documentContextBuilder;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
         this.authService = authService;
@@ -125,7 +129,9 @@ public class IngestionService {
     public DocumentDetail getDocument(AppUser user, UUID documentId) {
         DocumentSummary summary = repository.findDocument(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
-        var chunks = repository.listDocumentChunks(documentId);
+        var chunks = repository.listDocumentChunks(documentId).stream()
+                .filter(chunk -> !isDocumentContext(chunk.metadata()))
+                .toList();
         var storedObject = repository.findStoredObjectSummary(summary.sourceId()).orElse(null);
         var crawlAudits = repository.listCrawlAudits(summary.sourceId());
         return new DocumentDetail(summary, chunks.size(), storedObject, chunks, crawlAudits);
@@ -227,23 +233,63 @@ public class IngestionService {
     }
 
     private List<IndexedDocument> prepareIndex(List<ExtractedDocument> documents) {
-        List<IndexedDocument> indexedDocuments = new ArrayList<>();
+        List<PreparedDocument> preparedDocuments = new ArrayList<>();
         for (ExtractedDocument document : documents) {
             List<Chunk> chunks = chunker.split(document);
             if (chunks.isEmpty()) {
                 continue;
             }
+            preparedDocuments.add(new PreparedDocument(document, chunks));
+        }
 
+        if (preparedDocuments.isEmpty()) {
+            throw new IllegalArgumentException("No extractable text was found.");
+        }
+
+        List<PreparedDocument> enrichedDocuments = enrichWithDocumentContext(preparedDocuments);
+        List<IndexedDocument> indexedDocuments = new ArrayList<>();
+        for (PreparedDocument preparedDocument : enrichedDocuments) {
+            List<Chunk> chunks = preparedDocument.chunks();
             List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
             List<List<Double>> embeddings = embedInBatches(chunkTexts);
             validateEmbeddings(embeddings, chunks.size());
-            indexedDocuments.add(new IndexedDocument(document, chunks, embeddings));
+            indexedDocuments.add(new IndexedDocument(preparedDocument.document(), chunks, embeddings));
         }
 
-        if (indexedDocuments.isEmpty()) {
-            throw new IllegalArgumentException("No extractable text was found.");
-        }
         return indexedDocuments;
+    }
+
+    private List<PreparedDocument> enrichWithDocumentContext(List<PreparedDocument> documents) {
+        if (!documentContextBuilder.enabled()) {
+            return documents;
+        }
+        try {
+            List<DocumentContextBuilder.DocumentContextInput> inputs = documents.stream()
+                    .map(document -> new DocumentContextBuilder.DocumentContextInput(document.document(), document.chunks()))
+                    .toList();
+            List<Chunk> sourceContext = documentContextBuilder.buildSourceContext(inputs);
+            List<PreparedDocument> enriched = new ArrayList<>();
+            for (int i = 0; i < documents.size(); i++) {
+                PreparedDocument prepared = documents.get(i);
+                List<Chunk> chunks = new ArrayList<>(prepared.chunks());
+                chunks.addAll(documentContextBuilder.buildDocumentContext(prepared.document(), prepared.chunks()));
+                if (i == 0) {
+                    chunks.addAll(sourceContext);
+                }
+                enriched.add(new PreparedDocument(prepared.document(), reindexChunks(chunks)));
+            }
+            return enriched;
+        } catch (RuntimeException ex) {
+            return documents;
+        }
+    }
+
+    private List<Chunk> reindexChunks(List<Chunk> chunks) {
+        List<Chunk> reindexed = new ArrayList<>();
+        for (Chunk chunk : chunks) {
+            reindexed.add(new Chunk(reindexed.size(), chunk.content(), chunk.metadata()));
+        }
+        return reindexed;
     }
 
     private List<List<Double>> embedInBatches(List<String> texts) {
@@ -360,9 +406,17 @@ public class IngestionService {
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }
 
+    private boolean isDocumentContext(Map<String, Object> metadata) {
+        Object value = metadata == null ? null : metadata.get("kind");
+        return "document_context".equals(value == null ? "" : String.valueOf(value));
+    }
+
     private record WebDocuments(List<ExtractedDocument> documents, int pageCount, int skippedCount) {
     }
 
     private record IndexedDocument(ExtractedDocument document, List<Chunk> chunks, List<List<Double>> embeddings) {
+    }
+
+    private record PreparedDocument(ExtractedDocument document, List<Chunk> chunks) {
     }
 }

@@ -214,6 +214,9 @@ public class DocumentPreviewService {
     private DocumentPreviewResponse fromChunks(DocumentSummary summary, String previewType, boolean originalAvailable) {
         StringBuilder text = new StringBuilder();
         for (DocumentChunkDetail chunk : repository.listDocumentChunks(summary.id())) {
+            if (isDocumentContext(chunk.metadata())) {
+                continue;
+            }
             if (text.length() > 0) {
                 text.append("\n\n");
             }
@@ -225,6 +228,11 @@ public class DocumentPreviewService {
         LimitedText limited = limitText(text.toString());
         return base(summary, previewType, null, null, originalAvailable, limited.truncated(),
                 limited.text(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    private boolean isDocumentContext(Map<String, Object> metadata) {
+        Object value = metadata == null ? null : metadata.get("kind");
+        return "document_context".equals(value == null ? "" : String.valueOf(value));
     }
 
     private DocumentPreviewResponse base(

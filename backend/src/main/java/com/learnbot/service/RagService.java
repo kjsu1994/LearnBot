@@ -261,6 +261,7 @@ public class RagService {
                 result.contentType(),
                 result.chunkIndex(),
                 result.content(),
+                result.metadata(),
                 result.score() + value
         );
     }
@@ -293,12 +294,32 @@ public class RagService {
             case QUOTE -> Math.min(results.size(), 6);
             default -> Math.min(results.size(), Math.max(6, properties.getRag().getTopK()));
         };
-        return results.stream()
+        List<SearchResult> ordered = results.stream()
                 .sorted(Comparator
                         .comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result))
                         .reversed())
-                .limit(limit)
                 .toList();
+        if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
+            List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
+            if (!originals.isEmpty()) {
+                return originals;
+            }
+        }
+        List<SearchResult> selected = new ArrayList<>();
+        int contextCount = 0;
+        for (SearchResult result : ordered) {
+            if (isDocumentContext(result)) {
+                if (contextCount >= 2) {
+                    continue;
+                }
+                contextCount++;
+            }
+            selected.add(result);
+            if (selected.size() >= limit) {
+                break;
+            }
+        }
+        return selected;
     }
 
     private double answerRelevance(String question, AnswerMode answerMode, SearchResult result) {
@@ -320,6 +341,18 @@ public class RagService {
         }
         if (answerMode == AnswerMode.TABLE && (isSpreadsheet(result) || content.contains("row ") || content.contains("table"))) {
             score += 0.25;
+        }
+        if (isDocumentContext(result)) {
+            String contextType = contextType(result);
+            if (answerMode == AnswerMode.SUMMARY && (contextType.endsWith("_summary") || contextType.endsWith("_structure"))) {
+                score += contextType.endsWith("_summary") ? 0.30 : 0.12;
+            } else if (isStructureQuestion(question) && contextType.endsWith("_structure")) {
+                score += 0.22;
+            } else if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
+                score -= 0.80;
+            } else {
+                score -= 0.08;
+            }
         }
         if (answerMode == AnswerMode.QUOTE && (content.contains("제") || content.contains("조") || content.contains("권고") || content.contains("원칙"))) {
             score += 0.08;
@@ -619,6 +652,7 @@ public class RagService {
         List<SearchResult> computedCitations = new ArrayList<>();
         for (SearchResult source : spreadsheetDocuments.values()) {
             List<DocumentChunkDetail> chunks = documentRepository.listDocumentChunks(source.documentId());
+            chunks = chunks.stream().filter(chunk -> !isDocumentContext(chunk.metadata())).toList();
             SpreadsheetStats stats = analyzeSpreadsheet(chunks);
             if (stats.dataRowCount() <= 0) {
                 continue;
@@ -745,6 +779,7 @@ public class RagService {
 
     private List<DocumentChunkDetail> selectEvidenceChunks(List<DocumentChunkDetail> chunks, SpreadsheetStats stats) {
         List<DocumentChunkDetail> ordered = chunks.stream()
+                .filter(chunk -> !isDocumentContext(chunk.metadata()))
                 .sorted(Comparator.comparingInt(DocumentChunkDetail::chunkIndex))
                 .toList();
         if (ordered.size() <= 10) {
@@ -786,6 +821,7 @@ public class RagService {
                         source.contentType(),
                         chunk.chunkIndex(),
                         chunk.content(),
+                        chunk.metadata(),
                         source.score()
                 ))
                 .toList();
@@ -923,6 +959,38 @@ public class RagService {
                 || title.endsWith(".xlsx")
                 || title.endsWith(".xls")
                 || title.endsWith(".csv");
+    }
+
+    private boolean isStructureQuestion(String question) {
+        String normalized = normalizeForSearch(question);
+        return normalized.contains("structure")
+                || normalized.contains("section")
+                || normalized.contains("page")
+                || normalized.contains("slide")
+                || normalized.contains("sheet")
+                || normalized.contains("table")
+                || normalized.contains("where")
+                || normalized.contains("구조")
+                || normalized.contains("목차")
+                || normalized.contains("섹션")
+                || normalized.contains("페이지")
+                || normalized.contains("표")
+                || normalized.contains("시트")
+                || normalized.contains("어디");
+    }
+
+    private boolean isDocumentContext(SearchResult result) {
+        return result != null && isDocumentContext(result.metadata());
+    }
+
+    private boolean isDocumentContext(Map<String, Object> metadata) {
+        Object value = metadata == null ? null : metadata.get("kind");
+        return "document_context".equals(value == null ? "" : String.valueOf(value));
+    }
+
+    private String contextType(SearchResult result) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get("contextType");
+        return value == null ? "" : String.valueOf(value);
     }
 
     private boolean isLowQualityAnswer(String answer) {

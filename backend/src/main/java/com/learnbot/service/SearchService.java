@@ -127,6 +127,17 @@ public class SearchService {
         if (isSpreadsheetQuestion(query) && isSpreadsheet(result)) {
             boost += 0.35;
         }
+        if (isOverviewQuestion(query) && isDocumentContext(result)) {
+            String contextType = contextType(result);
+            boost += ("document_summary".equals(contextType) || "source_summary".equals(contextType)) ? 0.42 : 0.20;
+        }
+        if (isStructureQuestion(query) && isDocumentContext(result)) {
+            String contextType = contextType(result);
+            boost += ("document_structure".equals(contextType) || "source_structure".equals(contextType)) ? 0.38 : 0.12;
+        }
+        if (!isOverviewQuestion(query) && !isStructureQuestion(query) && isDocumentContext(result)) {
+            boost -= ("document_summary".equals(contextType(result)) || "source_summary".equals(contextType(result))) ? 0.06 : 0.14;
+        }
         if (normalize(query).contains("차별") && title.contains("차별")) {
             boost += 0.2;
         }
@@ -179,6 +190,39 @@ public class SearchService {
                 || title.endsWith("csv");
     }
 
+    private boolean isOverviewQuestion(String query) {
+        String normalized = normalize(query);
+        return normalized.contains("summary")
+                || normalized.contains("summarize")
+                || normalized.contains("overview")
+                || normalized.contains("outline")
+                || normalized.contains("main")
+                || normalized.contains("topic")
+                || normalized.contains("요약")
+                || normalized.contains("개요")
+                || normalized.contains("정리")
+                || normalized.contains("주요")
+                || normalized.contains("핵심");
+    }
+
+    private boolean isStructureQuestion(String query) {
+        String normalized = normalize(query);
+        return normalized.contains("structure")
+                || normalized.contains("section")
+                || normalized.contains("page")
+                || normalized.contains("slide")
+                || normalized.contains("sheet")
+                || normalized.contains("table")
+                || normalized.contains("where")
+                || normalized.contains("구조")
+                || normalized.contains("목차")
+                || normalized.contains("섹션")
+                || normalized.contains("페이지")
+                || normalized.contains("표")
+                || normalized.contains("시트")
+                || normalized.contains("어디");
+    }
+
     private boolean isStopWord(String token) {
         return List.of("관련", "대해", "무엇", "뭐가", "어떤", "어디", "있어", "있나요", "되는거야", "되나요", "설명", "알려줘")
                 .contains(token);
@@ -201,8 +245,22 @@ public class SearchService {
                 result.contentType(),
                 result.chunkIndex(),
                 result.content(),
+                result.metadata(),
                 result.score() + value
         );
+    }
+
+    private boolean isDocumentContext(SearchResult result) {
+        return "document_context".equals(stringMetadata(result, "kind"));
+    }
+
+    private String contextType(SearchResult result) {
+        return stringMetadata(result, "contextType");
+    }
+
+    private String stringMetadata(SearchResult result, String key) {
+        Object value = result.metadata() == null ? null : result.metadata().get(key);
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String normalize(String value) {

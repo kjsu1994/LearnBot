@@ -301,6 +301,7 @@ public class LearnBotProperties {
         private int topK = 6;
 
         private Pipeline pipeline = new Pipeline();
+        private DocumentContext documentContext = new DocumentContext();
 
         public int getTopK() {
             return topK;
@@ -316,6 +317,14 @@ public class LearnBotProperties {
 
         public void setPipeline(Pipeline pipeline) {
             this.pipeline = pipeline;
+        }
+
+        public DocumentContext getDocumentContext() {
+            return documentContext;
+        }
+
+        public void setDocumentContext(DocumentContext documentContext) {
+            this.documentContext = documentContext;
         }
 
         public static class Pipeline {
@@ -399,6 +408,49 @@ public class LearnBotProperties {
 
             public void setMinCoverage(double minCoverage) {
                 this.minCoverage = minCoverage;
+            }
+        }
+
+        public static class DocumentContext {
+            private boolean enabled = true;
+            private boolean llmSummaryEnabled = true;
+
+            @Min(1)
+            private int maxSourceDocuments = 80;
+
+            @Min(1000)
+            private int maxSummaryInputChars = 9000;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public boolean isLlmSummaryEnabled() {
+                return llmSummaryEnabled;
+            }
+
+            public void setLlmSummaryEnabled(boolean llmSummaryEnabled) {
+                this.llmSummaryEnabled = llmSummaryEnabled;
+            }
+
+            public int getMaxSourceDocuments() {
+                return maxSourceDocuments;
+            }
+
+            public void setMaxSourceDocuments(int maxSourceDocuments) {
+                this.maxSourceDocuments = maxSourceDocuments;
+            }
+
+            public int getMaxSummaryInputChars() {
+                return maxSummaryInputChars;
+            }
+
+            public void setMaxSummaryInputChars(int maxSummaryInputChars) {
+                this.maxSummaryInputChars = maxSummaryInputChars;
             }
         }
     }
