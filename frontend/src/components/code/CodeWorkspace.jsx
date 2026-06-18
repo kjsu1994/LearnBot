@@ -235,19 +235,19 @@ function CodeWorkspace(props) {
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
           <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
-          <QuestionGuide guide={activeCodeModeGuide} />
+          <div className="code-question-toolbar">
+            <QuestionGuide guide={activeCodeModeGuide} />
+            <button className="code-ask-button" disabled={!codeQuestion || loading('code-ask')}>
+              {loading('code-ask') ? <Loader2 className="spin" size={15} /> : <MessageSquare size={15} />}
+              코드 질문
+            </button>
+          </div>
           <textarea
             value={codeQuestion}
             onChange={(event) => setCodeQuestion(event.target.value)}
             onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
             placeholder={activeCodeModeGuide.placeholder}
           />
-          <div className="action-row">
-            <button disabled={!codeQuestion || loading('code-ask')}>
-              {loading('code-ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
-              코드 질문
-            </button>
-          </div>
           {selectedRepository && (
             <div className="detail-box compact-box">
               <strong>{selectedRepository.name}</strong>
