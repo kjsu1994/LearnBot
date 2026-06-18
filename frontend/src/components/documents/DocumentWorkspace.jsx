@@ -19,7 +19,7 @@ function DocumentWorkspace(props) {
             <Database size={18} />
             <div>
               <h2>문서 소스 추가</h2>
-              <p>허용된 웹 URL과 PDF, DOCX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
+              <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
             </div>
           </div>
           <form className="stack" onSubmit={props.ingestWeb}>
@@ -69,7 +69,7 @@ function DocumentWorkspace(props) {
                 <FileUp size={16} />
                 <span>{formatSelectedFiles(props.files)}</span>
               </label>
-              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
+              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
               <button disabled={!props.files?.length || props.loading('file')}>
                 {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
                 업로드

@@ -428,7 +428,7 @@ function ScreenGuide({ activeView }) {
     },
     docs: {
       title: '문서 RAG 화면',
-      description: 'PDF, DOCX, Markdown, TXT, CSV, Excel, 웹 문서를 업로드하거나 수집해 사내 위키형 근거로 사용합니다.',
+      description: 'PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel, 웹 문서를 업로드하거나 수집해 사내 위키형 근거로 사용합니다.',
       points: ['업로드 후 문서 상태가 인덱싱 완료인지 확인', '문서 상세에서 청크가 생성됐는지 확인', '근거가 없으면 답변하지 않는 정책으로 검증'],
     },
     admin: {

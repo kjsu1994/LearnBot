@@ -222,6 +222,7 @@ function getPreviewTypeLabel(type) {
   const labels = {
     pdf: 'PDF',
     docx: 'DOCX',
+    pptx: 'PPTX',
     excel: 'Excel',
     csv: 'CSV',
     markdown: 'Markdown',

@@ -71,6 +71,7 @@ public class DocumentPreviewService {
             case "excel" -> excel(summary, file, object);
             case "csv" -> csv(summary, file, object);
             case "markdown", "text" -> text(summary, file, object, type);
+            case "pptx" -> fromChunks(summary, type, true);
             default -> fromChunks(summary, "text", true);
         };
     }
@@ -360,6 +361,9 @@ public class DocumentPreviewService {
         }
         if (lowerName.endsWith(".docx") || lowerType.contains("wordprocessingml")) {
             return "docx";
+        }
+        if (lowerName.endsWith(".pptx") || lowerType.contains("presentationml")) {
+            return "pptx";
         }
         if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerType.contains("spreadsheetml") || lowerType.contains("excel")) {
             return "excel";
