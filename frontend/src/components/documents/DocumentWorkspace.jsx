@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
+import { AnswerModal } from '../common/AnswerModal.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
+  const [answerModalOpen, setAnswerModalOpen] = useState(false);
 
   return (
     <section className="workspace-grid">
@@ -155,8 +157,13 @@ function DocumentWorkspace(props) {
           {props.answer && (
             <div className="answer">
               <div className="answer-title">
-                <CheckCircle2 size={16} />
-                <strong>답변</strong>
+                <div className="answer-title-main">
+                  <CheckCircle2 size={16} />
+                  <strong>답변</strong>
+                </div>
+                <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                  <Maximize2 size={15} />
+                </button>
               </div>
               <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
               <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
@@ -165,6 +172,14 @@ function DocumentWorkspace(props) {
               </div>
               <EvidenceList evidence={props.answer.evidence} />
             </div>
+          )}
+          {answerModalOpen && props.answer && (
+            <AnswerModal
+              title="답변"
+              subtitle={`${getAnswerModeLabel(props.answer.mode)} 모드`}
+              answer={props.answer.answer}
+              onClose={() => setAnswerModalOpen(false)}
+            />
           )}
         </form>
         <form className="panel search-panel" onSubmit={props.search}>

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileCode2, GitBranch, GitPullRequest, Info, Loader2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileCode2, GitBranch, GitPullRequest, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
+import { AnswerModal } from '../common/AnswerModal.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
@@ -53,6 +54,7 @@ function CodeWorkspace(props) {
     codeFileLoading,
   } = props;
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
+  const [answerModalOpen, setAnswerModalOpen] = useState(false);
 
   return (
     <section className="workspace-grid code-grid">
@@ -255,8 +257,13 @@ function CodeWorkspace(props) {
           {codeAnswer && (
             <div className="answer">
               <div className="answer-title">
-                <CheckCircle2 size={16} />
-                <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
+                <div className="answer-title-main">
+                  <CheckCircle2 size={16} />
+                  <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
+                </div>
+                <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                  <Maximize2 size={15} />
+                </button>
               </div>
               <AnswerStatus confidence={codeAnswer.confidence} diagnostics={codeAnswer.diagnostics} />
               <div className="answer-body">
@@ -264,6 +271,14 @@ function CodeWorkspace(props) {
               </div>
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
+          )}
+          {answerModalOpen && codeAnswer && (
+            <AnswerModal
+              title={`${getCodeModeLabel(codeAnswer.mode)} 답변`}
+              subtitle={selectedRepository?.name || '코드 답변'}
+              answer={codeAnswer.answer}
+              onClose={() => setAnswerModalOpen(false)}
+            />
           )}
         </form>
 
