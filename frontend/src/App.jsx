@@ -853,6 +853,13 @@ export default function App() {
       logout={logout}
       error={error}
       progressMessage={progressMessage}
+      selectedRepository={selectedRepository}
+      selectedRepositoryId={selectedRepositoryId}
+      codeFiles={codeFiles}
+      fileQuery={fileQuery}
+      setFileQuery={setFileQuery}
+      searchCodeFiles={searchCodeFiles}
+      openCodeFile={openCodeFile}
     >
 
         {activeView === 'code' && (

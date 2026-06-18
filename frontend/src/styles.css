@@ -204,6 +204,78 @@ h3 {
   margin-left: 0;
 }
 
+.sidebar-code-files {
+  min-width: 0;
+}
+
+.sidebar-file-search {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 34px;
+}
+
+.sidebar-file-search input {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.sidebar-file-search button {
+  min-height: 34px;
+  padding: 0;
+}
+
+.sidebar-file-list {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sidebar-file-row {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #eef6f2;
+  display: grid;
+  gap: 3px;
+  justify-content: stretch;
+  min-height: auto;
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-file-row:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.sidebar-file-row span,
+.sidebar-file-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-file-row span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sidebar-file-row small {
+  color: #b9c8c3;
+  font-size: 11px;
+}
+
+.sidebar-empty {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #b9c8c3;
+  padding: 12px;
+}
+
 .brand-mark {
   align-items: center;
   background: #e8f4ef;

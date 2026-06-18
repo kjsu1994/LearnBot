@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck } from 'lucide-react';
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search } from 'lucide-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection } from '../common/Common.jsx';
@@ -252,6 +252,13 @@ function WorkspaceShell({
   error,
   progressMessage,
   children,
+  selectedRepository,
+  selectedRepositoryId,
+  codeFiles,
+  fileQuery,
+  setFileQuery,
+  searchCodeFiles,
+  openCodeFile,
 }) {
   return (
     <AnimatedPage className={sidebarCollapsed ? 'shell shell-sidebar-collapsed' : 'shell'}>
@@ -268,6 +275,14 @@ function WorkspaceShell({
         webCount={webCount}
         fileCount={fileCount}
         navigateTo={navigateTo}
+        activeView={activeView}
+        selectedRepository={selectedRepository}
+        selectedRepositoryId={selectedRepositoryId}
+        codeFiles={codeFiles}
+        fileQuery={fileQuery}
+        setFileQuery={setFileQuery}
+        searchCodeFiles={searchCodeFiles}
+        openCodeFile={openCodeFile}
       />
 
       <section className="content">
@@ -326,18 +341,26 @@ function WorkspaceShell({
 }
 
 function Sidebar({
-  user,
-  spaces,
-  selectedSpaceId,
-  setSelectedSpaceId,
-  collapsed,
-  setCollapsed,
-  indexedRepoCount,
-  indexedCount,
-  codeChunkCount,
-  webCount,
-  fileCount,
-  navigateTo,
+                   user,
+                   spaces,
+                   selectedSpaceId,
+                   setSelectedSpaceId,
+                   collapsed,
+                   setCollapsed,
+                   indexedRepoCount,
+                   indexedCount,
+                   codeChunkCount,
+                   webCount,
+                   fileCount,
+                   activeView,
+                   selectedRepository,
+                   selectedRepositoryId,
+                   codeFiles,
+                   fileQuery,
+                   setFileQuery,
+                   searchCodeFiles,
+                   openCodeFile,
+                   navigateTo,
 }) {
   const userLabel = formatBrandText(user.displayName || user.loginId || user.email);
   return (
@@ -401,6 +424,48 @@ function Sidebar({
           </div>
         </div>
       </div>
+      {activeView === 'code' && !collapsed && (
+          <div className="side-section sidebar-code-files">
+            <span className="section-label">코드 파일</span>
+
+            <small className="sidebar-note">
+              {selectedRepository
+                  ? `${codeFiles.length}개 파일 표시 중`
+                  : '저장소를 선택하세요'}
+            </small>
+
+            <form className="sidebar-file-search" onSubmit={searchCodeFiles}>
+              <input
+                  value={fileQuery}
+                  onChange={(event) => setFileQuery(event.target.value)}
+                  placeholder="파일 검색..."
+                  disabled={!selectedRepositoryId}
+              />
+              <button disabled={!selectedRepositoryId}>
+                <Search size={14} />
+              </button>
+            </form>
+
+            <div className="sidebar-file-list">
+              {codeFiles.map((fileItem) => (
+                  <button
+                      className="sidebar-file-row"
+                      key={fileItem.id}
+                      type="button"
+                      title={fileItem.filePath}
+                      onClick={() => openCodeFile(fileItem.repositoryId, fileItem.id)}
+                  >
+                    <span>{fileItem.filePath.split(/[\\/]/).pop()}</span>
+                    <small>{fileItem.language} · {fileItem.chunkCount} chunks</small>
+                  </button>
+              ))}
+
+              {selectedRepositoryId && !codeFiles.length && (
+                  <p className="empty sidebar-empty">파일이 없습니다.</p>
+              )}
+            </div>
+          </div>
+      )}
     </aside>
   );
 }

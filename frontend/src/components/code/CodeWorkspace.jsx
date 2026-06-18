@@ -189,32 +189,6 @@ function CodeWorkspace(props) {
             </label>
           </section>
         )}
-
-        <section className="panel file-browser-panel">
-          <div className="panel-title">
-            <FileCode2 size={18} />
-            <div>
-              <h2>코드 파일</h2>
-              <p>{selectedRepository ? `${codeFiles.length}개 파일 표시 중` : '저장소를 선택하면 파일 목록을 볼 수 있습니다.'}</p>
-            </div>
-          </div>
-          <form className="inline-control" onSubmit={searchCodeFiles}>
-            <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="MainWindow.xaml, Login, Controller..." disabled={!selectedRepositoryId} />
-            <button disabled={!selectedRepositoryId}>
-              <Search size={16} />
-              찾기
-            </button>
-          </form>
-          <div className="file-list">
-            {codeFiles.map((fileItem) => (
-              <button className="file-list-row" key={fileItem.id} type="button" onClick={() => openCodeFile(fileItem.repositoryId, fileItem.id)}>
-                <span>{fileItem.filePath}</span>
-                <small>{fileItem.language} · {fileItem.chunkCount} chunks</small>
-              </button>
-            ))}
-            {selectedRepositoryId && !codeFiles.length && <p className="empty">인덱싱된 파일이 없거나 검색 결과가 없습니다.</p>}
-          </div>
-        </section>
       </div>
 
       <div className="right-column">
