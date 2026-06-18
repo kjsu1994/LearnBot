@@ -312,7 +312,7 @@ public class CodeSearchService {
     private List<String> graphEdgeTypes(String query) {
         String normalized = normalizeCodeText(query);
         if (normalized.contains("flow") || normalized.contains("impact") || normalized.contains("call")
-                || normalized.contains("?먮쫫") || normalized.contains("?몄텧")) {
+                || normalized.contains("흐름") || normalized.contains("호출")) {
             return List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
         }
         if (isOverviewQuestion(query)) {
