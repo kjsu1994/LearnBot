@@ -96,7 +96,9 @@ public class CodeSearchService {
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
                 .limit(safeLimit)
                 .toList();
-        return expandRelated(repositoryId, ranked, safeLimit).stream()
+        List<CodeSearchResult> expanded = expandRelated(repositoryId, ranked, safeLimit);
+        expanded = expandGraph(repositoryId, safeQuery, expanded, safeLimit);
+        return expanded.stream()
                 .map(result -> boost(result, rerankBoost(safeQuery, result)))
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
                 .limit(safeLimit)
@@ -141,6 +143,36 @@ public class CodeSearchService {
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
                 .limit(limit)
                 .toList();
+    }
+
+    private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked, int limit) {
+        if (!properties.getCode().getGraph().isEnabled() || ranked == null || ranked.isEmpty()) {
+            return ranked;
+        }
+        try {
+            Map<UUID, CodeSearchResult> expanded = new LinkedHashMap<>();
+            for (CodeSearchResult result : ranked) {
+                merge(expanded, result);
+            }
+            List<UUID> seeds = ranked.stream()
+                    .limit(Math.min(ranked.size(), 8))
+                    .map(CodeSearchResult::chunkId)
+                    .toList();
+            for (CodeSearchResult related : repository.graphRelatedChunks(
+                    repositoryId,
+                    seeds,
+                    graphEdgeTypes(query),
+                    Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults())
+            )) {
+                merge(expanded, boost(related, graphBoost(query, related)));
+            }
+            return expanded.values().stream()
+                    .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
+                    .limit(Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults()))
+                    .toList();
+        } catch (RuntimeException ignored) {
+            return ranked;
+        }
     }
 
     private List<String> relatedPaths(String filePath) {
@@ -275,6 +307,30 @@ public class CodeSearchService {
                 || normalized.contains("\uC544\uD0A4\uD14D\uCC98")
                 || normalized.contains("\uBAA8\uB4C8")
                 || normalized.contains("\uAD6C\uC131");
+    }
+
+    private List<String> graphEdgeTypes(String query) {
+        String normalized = normalizeCodeText(query);
+        if (normalized.contains("flow") || normalized.contains("impact") || normalized.contains("call")
+                || normalized.contains("?먮쫫") || normalized.contains("?몄텧")) {
+            return List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
+        }
+        if (isOverviewQuestion(query)) {
+            return List.of("CONTAINS", "DEFINES", "REFERENCES", "DEPENDS_ON", "RELATED_TO");
+        }
+        return List.of("DEFINES", "CONTAINS", "CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
+    }
+
+    private double graphBoost(String query, CodeSearchResult result) {
+        Object edgeType = result.metadata() == null ? null : result.metadata().get("graphEdgeType");
+        String type = edgeType == null ? "" : String.valueOf(edgeType);
+        if ("CALLS".equals(type) || "HANDLES_EVENT".equals(type)) {
+            return 0.16;
+        }
+        if ("DEFINES".equals(type) || "CONTAINS".equals(type)) {
+            return isOverviewQuestion(query) ? 0.14 : 0.08;
+        }
+        return 0.06;
     }
 
     private boolean isStructured(String chunkType) {

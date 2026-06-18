@@ -40,6 +40,7 @@ public class CodeIndexingService {
     private final CodeContentReader contentReader;
     private final CodeChunkParser chunkParser;
     private final CodeProjectContextBuilder projectContextBuilder;
+    private final CodeGraphBuilder codeGraphBuilder;
     private final OllamaClient ollamaClient;
     private final CredentialEncryptionService credentialEncryptionService;
     private final LearnBotProperties properties;
@@ -57,6 +58,7 @@ public class CodeIndexingService {
             CodeContentReader contentReader,
             CodeChunkParser chunkParser,
             CodeProjectContextBuilder projectContextBuilder,
+            CodeGraphBuilder codeGraphBuilder,
             OllamaClient ollamaClient,
             CredentialEncryptionService credentialEncryptionService,
             LearnBotProperties properties,
@@ -70,6 +72,7 @@ public class CodeIndexingService {
         this.contentReader = contentReader;
         this.chunkParser = chunkParser;
         this.projectContextBuilder = projectContextBuilder;
+        this.codeGraphBuilder = codeGraphBuilder;
         this.ollamaClient = ollamaClient;
         this.credentialEncryptionService = credentialEncryptionService;
         this.properties = properties;
@@ -382,6 +385,7 @@ public class CodeIndexingService {
 
             totalChunks += addProjectContextChunks(record, jobId, projectContexts);
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
+            buildCodeGraph(record, jobId);
             if (totalChunks == 0) {
                 throw new IllegalArgumentException("No code chunks were created.");
             }
@@ -452,6 +456,23 @@ public class CodeIndexingService {
         } catch (RuntimeException ex) {
             repository.addJobFailure(record.id(), jobId, CodeProjectContextBuilder.CONTEXT_FILE_PATH, "PROJECT_CONTEXT", rootMessage(ex));
             return 0;
+        }
+    }
+
+    private void buildCodeGraph(CodeRepositoryRecord record, UUID jobId) {
+        if (!codeGraphBuilder.enabled()) {
+            return;
+        }
+        try {
+            ensureNotCancelled(jobId);
+            CodeGraph graph = codeGraphBuilder.build(repository.listChunksForIndex(record.id(), jobId));
+            if (!graph.nodes().isEmpty()) {
+                repository.replaceGraph(record.id(), jobId, graph);
+            }
+        } catch (CodeIndexCancelledException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            repository.addJobFailure(record.id(), jobId, null, "CODE_GRAPH", rootMessage(ex));
         }
     }
 

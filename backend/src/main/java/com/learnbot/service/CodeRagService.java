@@ -324,6 +324,7 @@ public class CodeRagService {
                             + nullable(" method=", result.methodName())
                             + nullable(" control=", result.controlName())
                             + nullable(" event=", result.eventName())
+                            + graphContext(result)
                             + "\n" + codeExcerpt(question, result, maxChars);
                 })
                 .collect(Collectors.joining("\n\n"));
@@ -539,6 +540,9 @@ public class CodeRagService {
         if (retrieval != null && !retrieval.assessment().sufficient()) {
             notes.add("Code evidence sufficiency check remained weak: " + String.join(", ", retrieval.assessment().reasons()));
         }
+        if (results.stream().anyMatch(this::isGraphExpanded)) {
+            notes.add("Code GraphRAG expanded related evidence through indexed code relationships.");
+        }
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
         }
@@ -641,6 +645,13 @@ public class CodeRagService {
         }
         if (mode == CodeQuestionMode.CALL_FLOW) {
             score += Math.max(0, 0.08 * (5 - flowRank(result)));
+        }
+        if (isGraphExpanded(result)) {
+            score += switch (mode) {
+                case CALL_FLOW, IMPACT -> 0.18;
+                case OVERVIEW -> 0.10;
+                default -> 0.05;
+            };
         }
         if (isLoginQuestion(question) && path.contains("git") && !path.contains("auth") && !path.contains("login")) {
             score -= 0.6;
@@ -938,6 +949,20 @@ public class CodeRagService {
 
     private boolean notBlank(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String graphContext(CodeSearchResult result) {
+        if (!isGraphExpanded(result)) {
+            return "";
+        }
+        Object edgeType = result.metadata().get("graphEdgeType");
+        Object graphPath = result.metadata().get("graphPath");
+        return " graph=" + safe(edgeType == null ? null : String.valueOf(edgeType), "RELATED")
+                + nullable(" path=", graphPath == null ? null : String.valueOf(graphPath));
+    }
+
+    private boolean isGraphExpanded(CodeSearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("graphExpanded"));
     }
 
     private String safe(String value, String fallback) {

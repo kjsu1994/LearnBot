@@ -538,6 +538,7 @@ public class LearnBotProperties {
         private String credentialSecret = "learnbot-local-dev-secret-change-me";
 
         private Context context = new Context();
+        private Graph graph = new Graph();
 
         public String getWorkspacePath() {
             return workspacePath;
@@ -611,6 +612,14 @@ public class LearnBotProperties {
             this.context = context;
         }
 
+        public Graph getGraph() {
+            return graph;
+        }
+
+        public void setGraph(Graph graph) {
+            this.graph = graph;
+        }
+
         public static class Context {
             private boolean enabled = true;
             private boolean llmSummaryEnabled = true;
@@ -662,6 +671,60 @@ public class LearnBotProperties {
 
             public void setMaxTreeDepth(int maxTreeDepth) {
                 this.maxTreeDepth = maxTreeDepth;
+            }
+        }
+
+        public static class Graph {
+            private boolean enabled = true;
+            private boolean llmRelationEnabled = true;
+
+            @Min(1)
+            private int maxHop = 2;
+
+            @Min(1)
+            private int maxExpandedResults = 12;
+
+            @Min(0)
+            private int maxLlmFiles = 80;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public boolean isLlmRelationEnabled() {
+                return llmRelationEnabled;
+            }
+
+            public void setLlmRelationEnabled(boolean llmRelationEnabled) {
+                this.llmRelationEnabled = llmRelationEnabled;
+            }
+
+            public int getMaxHop() {
+                return maxHop;
+            }
+
+            public void setMaxHop(int maxHop) {
+                this.maxHop = maxHop;
+            }
+
+            public int getMaxExpandedResults() {
+                return maxExpandedResults;
+            }
+
+            public void setMaxExpandedResults(int maxExpandedResults) {
+                this.maxExpandedResults = maxExpandedResults;
+            }
+
+            public int getMaxLlmFiles() {
+                return maxLlmFiles;
+            }
+
+            public void setMaxLlmFiles(int maxLlmFiles) {
+                this.maxLlmFiles = maxLlmFiles;
             }
         }
     }

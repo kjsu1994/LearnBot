@@ -10,6 +10,9 @@ import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.IndexingJobSummary;
 import com.learnbot.dto.IndexingJobFailureSummary;
 import com.learnbot.service.ActiveCodeFileSnapshot;
+import com.learnbot.service.CodeGraph;
+import com.learnbot.service.CodeGraphEdge;
+import com.learnbot.service.CodeGraphNode;
 import com.learnbot.service.CodeFileRecord;
 import com.learnbot.service.CodeRepositoryRecord;
 import com.learnbot.service.EncryptedGitCredential;
@@ -598,6 +601,109 @@ public class CodeRepository {
         }
     }
 
+    public List<CodeSearchResult> listChunksForIndex(UUID repositoryId, UUID indexVersion) {
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       0.0 AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id
+                WHERE c.repository_id = :repositoryId
+                  AND c.index_version = :indexVersion
+                ORDER BY c.file_path, c.chunk_index
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), this::mapSearchResult);
+    }
+
+    public void replaceGraph(UUID repositoryId, UUID indexVersion, CodeGraph graph) {
+        jdbc.update("""
+                DELETE FROM code_graph_edges
+                WHERE repository_id = :repositoryId
+                  AND index_version = :indexVersion
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion));
+        jdbc.update("""
+                DELETE FROM code_graph_nodes
+                WHERE repository_id = :repositoryId
+                  AND index_version = :indexVersion
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion));
+        if (graph == null || graph.nodes().isEmpty()) {
+            return;
+        }
+
+        Map<String, UUID> nodeIds = new java.util.LinkedHashMap<>();
+        for (CodeGraphNode node : graph.nodes()) {
+            UUID nodeId = UUID.randomUUID();
+            nodeIds.put(node.key(), nodeId);
+            jdbc.update("""
+                    INSERT INTO code_graph_nodes (
+                        id, repository_id, index_version, node_key, node_type, name, qualified_name,
+                        file_path, chunk_id, metadata, active
+                    )
+                    VALUES (
+                        :id, :repositoryId, :indexVersion, :nodeKey, :nodeType, :name, :qualifiedName,
+                        :filePath, :chunkId, CAST(:metadata AS jsonb), FALSE
+                    )
+                    """, new MapSqlParameterSource()
+                    .addValue("id", nodeId)
+                    .addValue("repositoryId", repositoryId)
+                    .addValue("indexVersion", indexVersion)
+                    .addValue("nodeKey", node.key())
+                    .addValue("nodeType", node.type())
+                    .addValue("name", node.name())
+                    .addValue("qualifiedName", node.qualifiedName())
+                    .addValue("filePath", node.filePath())
+                    .addValue("chunkId", node.chunkId())
+                    .addValue("metadata", toJson(node.metadata())));
+        }
+
+        for (CodeGraphEdge edge : graph.edges()) {
+            UUID sourceId = nodeIds.get(edge.sourceKey());
+            UUID targetId = nodeIds.get(edge.targetKey());
+            if (sourceId == null || targetId == null || sourceId.equals(targetId)) {
+                continue;
+            }
+            jdbc.update("""
+                    INSERT INTO code_graph_edges (
+                        id, repository_id, index_version, source_node_id, target_node_id,
+                        edge_type, confidence, evidence_chunk_id, metadata, active
+                    )
+                    VALUES (
+                        :id, :repositoryId, :indexVersion, :sourceNodeId, :targetNodeId,
+                        :edgeType, :confidence, :evidenceChunkId, CAST(:metadata AS jsonb), FALSE
+                    )
+                    """, new MapSqlParameterSource()
+                    .addValue("id", UUID.randomUUID())
+                    .addValue("repositoryId", repositoryId)
+                    .addValue("indexVersion", indexVersion)
+                    .addValue("sourceNodeId", sourceId)
+                    .addValue("targetNodeId", targetId)
+                    .addValue("edgeType", edge.type())
+                    .addValue("confidence", edge.confidence())
+                    .addValue("evidenceChunkId", edge.evidenceChunkId())
+                    .addValue("metadata", toJson(edge.metadata())));
+        }
+    }
+
     @Transactional
     public void activateIndex(UUID repositoryId, UUID indexVersion) {
         setActiveIndex(repositoryId, indexVersion);
@@ -615,6 +721,16 @@ public class CodeRepository {
                 WHERE repository_id = :repositoryId
                 """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
         jdbc.update("""
+                UPDATE code_graph_edges
+                SET active = FALSE
+                WHERE repository_id = :repositoryId
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
+        jdbc.update("""
+                UPDATE code_graph_nodes
+                SET active = FALSE
+                WHERE repository_id = :repositoryId
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId));
+        jdbc.update("""
                 UPDATE code_files
                 SET active = TRUE, updated_at = now()
                 WHERE repository_id = :repositoryId AND index_version = :indexVersion
@@ -623,6 +739,20 @@ public class CodeRepository {
                 .addValue("indexVersion", indexVersion));
         jdbc.update("""
                 UPDATE code_chunks
+                SET active = TRUE
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion));
+        jdbc.update("""
+                UPDATE code_graph_nodes
+                SET active = TRUE
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion));
+        jdbc.update("""
+                UPDATE code_graph_edges
                 SET active = TRUE
                 WHERE repository_id = :repositoryId AND index_version = :indexVersion
                 """, new MapSqlParameterSource()
@@ -888,6 +1018,80 @@ public class CodeRepository {
                   AND c.file_path IN (:filePaths)
                   AND c.chunk_index BETWEEN :minIndex AND :maxIndex
                 ORDER BY c.file_path, c.chunk_index
+                LIMIT :limit
+                """, params, this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> graphRelatedChunks(UUID repositoryId, List<UUID> seedChunkIds, List<String> edgeTypes, int limit) {
+        if (seedChunkIds == null || seedChunkIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> safeEdgeTypes = edgeTypes == null || edgeTypes.isEmpty()
+                ? List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "CONTAINS", "DEFINES", "DEPENDS_ON", "RELATED_TO")
+                : edgeTypes;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("seedChunkIds", seedChunkIds)
+                .addValue("edgeTypes", safeEdgeTypes)
+                .addValue("limit", Math.max(1, Math.min(limit, 80)));
+
+        return jdbc.query("""
+                WITH seed_nodes AS (
+                    SELECT DISTINCT n.id, n.name
+                    FROM code_graph_nodes n
+                    WHERE n.active
+                      AND n.chunk_id IN (:seedChunkIds)
+                      AND (CAST(:repositoryId AS uuid) IS NULL OR n.repository_id = CAST(:repositoryId AS uuid))
+                ),
+                related_nodes AS (
+                    SELECT e.target_node_id AS node_id,
+                           e.edge_type,
+                           e.confidence,
+                           sn.name || ' -> ' || tn.name AS graph_path
+                    FROM seed_nodes sn
+                    JOIN code_graph_edges e ON e.source_node_id = sn.id AND e.active
+                    JOIN code_graph_nodes tn ON tn.id = e.target_node_id AND tn.active
+                    WHERE e.edge_type IN (:edgeTypes)
+                    UNION ALL
+                    SELECT e.source_node_id AS node_id,
+                           e.edge_type,
+                           e.confidence,
+                           sn2.name || ' -> ' || sn.name AS graph_path
+                    FROM seed_nodes sn
+                    JOIN code_graph_edges e ON e.target_node_id = sn.id AND e.active
+                    JOIN code_graph_nodes sn2 ON sn2.id = e.source_node_id AND sn2.active
+                    WHERE e.edge_type IN (:edgeTypes)
+                )
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata || jsonb_build_object(
+                           'graphPath', rn.graph_path,
+                           'graphEdgeType', rn.edge_type,
+                           'graphExpanded', true
+                       ) AS metadata,
+                       (0.18 + LEAST(0.30, rn.confidence * 0.18)) AS score
+                FROM related_nodes rn
+                JOIN code_graph_nodes n ON n.id = rn.node_id AND n.active
+                JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                JOIN code_repositories r ON r.id = c.repository_id
+                WHERE c.id NOT IN (:seedChunkIds)
+                  AND r.deleted_at IS NULL
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY score DESC, c.file_path, c.line_start
                 LIMIT :limit
                 """, params, this::mapSearchResult);
     }

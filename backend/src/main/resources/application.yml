@@ -75,6 +75,12 @@ learnbot:
       max-file-summaries: ${LEARNBOT_CODE_CONTEXT_MAX_FILE_SUMMARIES:1500}
       max-llm-directory-summaries: ${LEARNBOT_CODE_CONTEXT_MAX_LLM_DIRECTORY_SUMMARIES:12}
       max-tree-depth: ${LEARNBOT_CODE_CONTEXT_MAX_TREE_DEPTH:4}
+    graph:
+      enabled: ${LEARNBOT_CODE_GRAPH_ENABLED:true}
+      llm-relation-enabled: ${LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED:true}
+      max-hop: ${LEARNBOT_CODE_GRAPH_MAX_HOP:2}
+      max-expanded-results: ${LEARNBOT_CODE_GRAPH_MAX_EXPANDED_RESULTS:12}
+      max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}
   auth:
     bootstrap-admin-email: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:jinsu.kim}
     bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:admin1234}
