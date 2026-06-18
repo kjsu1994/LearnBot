@@ -159,13 +159,31 @@ public class CodeGraphBuilder {
     }
 
     private String relationType(CodeSearchResult source, CodeSearchResult target) {
-        if (source.methodName() != null && target.methodName() != null) {
+        if (source.methodName() != null && target.methodName() != null && containsCallExpression(source.content(), target.methodName())) {
             return "CALLS";
         }
         if (source.filePath() != null && source.filePath().equals(target.filePath())) {
             return "CONTAINS";
         }
         return "REFERENCES";
+    }
+
+    private boolean containsCallExpression(String content, String methodName) {
+        if (content == null || methodName == null || methodName.isBlank()) {
+            return false;
+        }
+        String code = stripCommentsAndStrings(content);
+        Pattern callPattern = Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(methodName) + "\\s*\\(");
+        return callPattern.matcher(code).find();
+    }
+
+    private String stripCommentsAndStrings(String value) {
+        String code = value == null ? "" : value;
+        code = code.replaceAll("(?s)/\\*.*?\\*/", " ");
+        code = code.replaceAll("(?m)//.*$", " ");
+        code = code.replaceAll("\"(?:\\\\.|[^\"\\\\])*\"", "\"\"");
+        code = code.replaceAll("'(?:\\\\.|[^'\\\\])*'", "''");
+        return code;
     }
 
     private Set<String> identifiers(String content) {

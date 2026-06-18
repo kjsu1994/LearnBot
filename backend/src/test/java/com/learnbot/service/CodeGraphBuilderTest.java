@@ -33,6 +33,33 @@ class CodeGraphBuilderTest {
     }
 
     @Test
+    void onlyUsesCallsWhenMethodAppearsAsCallExpression() {
+        CodeGraphBuilder builder = new CodeGraphBuilder(new LearnBotProperties());
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult source = result(repositoryId, UUID.randomUUID(), "backend/AuthController.java", "method", "AuthController", "login", null, null,
+                """
+                        public void login() {
+                            String methodName = "authenticate";
+                            // authenticate should not be treated as a call here
+                            audit("authenticate");
+                        }
+                        """);
+        CodeSearchResult target = result(repositoryId, UUID.randomUUID(), "backend/AuthService.java", "method", "AuthService", "authenticate", null, null,
+                "public void authenticate() {}");
+
+        CodeGraph graph = builder.build(java.util.List.of(source, target));
+
+        assertThat(graph.edges()).noneSatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("CALLS");
+            assertThat(edge.targetKey()).contains("authenticate");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("REFERENCES");
+            assertThat(edge.targetKey()).contains("authenticate");
+        });
+    }
+
+    @Test
     void buildsXamlEventHandlerEdge() {
         CodeGraphBuilder builder = new CodeGraphBuilder(new LearnBotProperties());
         UUID repositoryId = UUID.randomUUID();

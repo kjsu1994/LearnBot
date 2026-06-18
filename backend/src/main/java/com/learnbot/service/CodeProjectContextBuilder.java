@@ -193,14 +193,15 @@ public class CodeProjectContextBuilder {
                 Chunk types: %s
                 Symbols: %s
                 Inferred role: %s
-                Search keywords: project architecture structure overview module component flow entrypoint service controller repository config ui
+                Search keywords: %s
                 """.formatted(
                 file.path(),
                 file.language(),
                 lineCount(file.content()),
                 chunkTypes(file.chunks()),
                 joinOrDash(symbols),
-                role(file.path())
+                role(file.path()),
+                roleKeywords(file.path())
         ).strip();
     }
 
@@ -332,6 +333,41 @@ public class CodeProjectContextBuilder {
         if (lower.endsWith(".xaml")) return "wpf ui markup";
         if (lower.endsWith("pom.xml") || lower.endsWith("package.json") || lower.endsWith("pubspec.yaml")) return "build/dependency manifest";
         return "supporting code";
+    }
+
+    private String roleKeywords(String path) {
+        String lower = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        if (lower.contains("/web/") || lower.contains("controller")) {
+            return "api endpoint request response route http validation controller";
+        }
+        if (lower.contains("/service/")) {
+            return "business logic workflow transaction validation orchestration service";
+        }
+        if (lower.contains("/repository/")) {
+            return "query database persistence sql jdbc storage repository";
+        }
+        if (lower.contains("/security/")) {
+            return "security auth authorization filter token session permission";
+        }
+        if (lower.contains("/config/")) {
+            return "config property bean setting wiring environment";
+        }
+        if (lower.contains("/dto/")) {
+            return "request response payload dto contract validation";
+        }
+        if (lower.startsWith("frontend/") || lower.contains("/components/") || lower.contains("/pages/")) {
+            return "page component state route ui event form frontend";
+        }
+        if (lower.contains("/domain/") || lower.contains("/entity/")) {
+            return "domain entity model state value persistence";
+        }
+        if (lower.contains("/test/") || lower.endsWith("test.java") || lower.endsWith(".spec.js") || lower.endsWith(".test.js")) {
+            return "test scenario assertion regression coverage";
+        }
+        if (lower.endsWith("pom.xml") || lower.endsWith("package.json") || lower.endsWith("pubspec.yaml")) {
+            return "build dependency manifest script plugin version";
+        }
+        return "supporting code utility helper integration";
     }
 
     private String topDirectory(String path) {
