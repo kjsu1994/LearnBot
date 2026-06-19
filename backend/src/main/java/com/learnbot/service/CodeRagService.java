@@ -21,9 +21,9 @@ import java.util.stream.IntStream;
 @Service
 public class CodeRagService {
     private static final int OVERVIEW_CONTEXT_LIMIT = 8;
-    private static final int DEFAULT_CONTEXT_LIMIT = 6;
-    private static final int OVERVIEW_CONTEXT_CHARS = 520;
-    private static final int DEFAULT_CONTEXT_CHARS = 720;
+    private static final int DEFAULT_CONTEXT_LIMIT = 12;
+    private static final int OVERVIEW_CONTEXT_CHARS = 900;
+    private static final int DEFAULT_CONTEXT_CHARS = 1200;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
 
     private final CodeSearchService searchService;
@@ -100,6 +100,15 @@ public class CodeRagService {
                 Mention file path and line range when explaining code.
                 If evidence is insufficient, say what is missing and list the closest files found.
                 Include a short reliability note when evidence is weak or indirect.
+                For code explanations, structure the answer as follows when applicable:
+                
+                1. Summary
+                2. Detailed explanation
+                3. Execution flow
+                4. Related classes and methods
+                5. Important implementation details
+                
+                Use markdown headings.
                 """ + "\n" + questionMode.instruction();
 
         String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
