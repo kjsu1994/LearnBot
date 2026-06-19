@@ -57,6 +57,13 @@ learnbot:
       llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_SUMMARY_ENABLED:true}
       max-source-documents: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SOURCE_DOCUMENTS:80}
       max-summary-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SUMMARY_INPUT_CHARS:9000}
+    overview:
+      enabled: ${LEARNBOT_RAG_OVERVIEW_ENABLED:true}
+      min-context-chunks: ${LEARNBOT_RAG_OVERVIEW_MIN_CONTEXT_CHUNKS:2}
+      min-original-chunks: ${LEARNBOT_RAG_OVERVIEW_MIN_ORIGINAL_CHUNKS:4}
+      max-documents: ${LEARNBOT_RAG_OVERVIEW_MAX_DOCUMENTS:12}
+      max-code-categories: ${LEARNBOT_RAG_OVERVIEW_MAX_CODE_CATEGORIES:10}
+      max-recursive-iterations: ${LEARNBOT_RAG_OVERVIEW_MAX_RECURSIVE_ITERATIONS:2}
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     access-key: ${S3_ACCESS_KEY:learnbot}

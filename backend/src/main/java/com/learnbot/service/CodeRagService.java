@@ -22,7 +22,7 @@ import java.util.stream.IntStream;
 public class CodeRagService {
     private static final int OVERVIEW_CONTEXT_LIMIT = 8;
     private static final int DEFAULT_CONTEXT_LIMIT = 12;
-    private static final int OVERVIEW_CONTEXT_CHARS = 900;
+    private static final int OVERVIEW_CONTEXT_CHARS = 620;
     private static final int DEFAULT_CONTEXT_CHARS = 1200;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
 
@@ -77,7 +77,7 @@ public class CodeRagService {
         if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
             return commitInsightService.answer(repositoryId, question);
         }
-        CodeQuestionMode questionMode = CodeQuestionMode.from(mode);
+        CodeQuestionMode questionMode = classifyCodeQuestion(question, mode);
         int safeLimit = safeLimit(questionMode, limit);
         CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);
         List<CodeSearchResult> results = retrieval.results();
@@ -151,7 +151,7 @@ public class CodeRagService {
                 answer,
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
-                diagnostics(results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval)
+                diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval)
         );
     }
 
@@ -160,6 +160,28 @@ public class CodeRagService {
                 ? Math.max(properties.getCode().getTopK(), 14)
                 : properties.getCode().getTopK();
         return limit == null ? defaultLimit : Math.max(1, Math.min(limit, 24));
+    }
+
+    private CodeQuestionMode classifyCodeQuestion(String question, String mode) {
+        CodeQuestionMode requested = CodeQuestionMode.from(mode);
+        if (!properties.getRag().getOverview().isEnabled()) {
+            return requested;
+        }
+        boolean explicitMode = mode != null && !mode.isBlank();
+        if (explicitMode && requested != CodeQuestionMode.OVERVIEW) {
+            return requested;
+        }
+        String normalized = normalizeCodeText(question);
+        if (containsAny(normalized, "flow", "workflow", "sequence", "request flow", "call flow", "흐름", "과정", "절차", "순서", "호출")) {
+            return CodeQuestionMode.CALL_FLOW;
+        }
+        if (containsAny(normalized, "impact", "영향", "변경 영향")) {
+            return CodeQuestionMode.IMPACT;
+        }
+        if (containsAny(normalized, "architecture", "structure", "overview", "module", "component", "아키텍처", "구조", "개요", "구성", "전체")) {
+            return CodeQuestionMode.OVERVIEW;
+        }
+        return requested;
     }
 
     private CodeRetrieval retrieveCodeEvidence(
@@ -173,6 +195,11 @@ public class CodeRagService {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
+            for (String query : codeOverviewQueries(question, questionMode)) {
+                collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+            }
+        }
         List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit);
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
                 question,
@@ -316,7 +343,38 @@ public class CodeRagService {
                 break;
             }
         }
-        return selected.values().stream().limit(limit).toList();
+        int categoryLimit = questionModeLimit(limit);
+        return selected.values().stream().limit(Math.min(limit, categoryLimit)).toList();
+    }
+
+    private int questionModeLimit(int limit) {
+        return Math.max(1, Math.min(limit, properties.getRag().getOverview().getMaxCodeCategories()));
+    }
+
+    private List<String> codeOverviewQueries(String question, CodeQuestionMode questionMode) {
+        String base = safe(question, "").trim();
+        if (questionMode == CodeQuestionMode.CALL_FLOW) {
+            return List.of(
+                    base + " controller service repository handler request response flow",
+                    "call flow execution sequence entrypoint service repository",
+                    "요청 처리 흐름 컨트롤러 서비스 저장소 핸들러"
+            );
+        }
+        return List.of(
+                base + " project structure architecture modules responsibilities",
+                "project structure repository summary module map architecture",
+                "아키텍처 구조 구성 모듈 책임 전체 개요"
+        );
+    }
+
+    private boolean containsAny(String value, String... needles) {
+        String safeValue = safe(value, "");
+        for (String needle : needles) {
+            if (safeValue.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String buildContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
@@ -530,6 +588,7 @@ public class CodeRagService {
     }
 
     private List<String> diagnostics(
+            CodeQuestionMode questionMode,
             List<CodeSearchResult> results,
             List<CodeSearchResult> answerResults,
             boolean llmUnavailable,
@@ -538,6 +597,13 @@ public class CodeRagService {
             CodeRetrieval retrieval
     ) {
         List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten));
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.IMPACT) {
+            long projectContext = answerResults.stream().filter(result -> isProjectContext(result.chunkType())).count();
+            long distinctFiles = answerResults.stream().map(CodeSearchResult::filePath).distinct().count();
+            notes.add("Code question mode was classified as " + questionMode.name()
+                    + "; answer context used " + projectContext + " project context chunks and "
+                    + distinctFiles + " distinct files.");
+        }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried code retrieval once because the first evidence set was weak.");
         }

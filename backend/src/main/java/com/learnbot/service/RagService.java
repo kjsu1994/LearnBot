@@ -76,8 +76,9 @@ public class RagService {
 
     public AskResponse ask(String question, SearchFilter filter, String mode, List<UUID> spaceIds, UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
-        int topK = retrievalLimit(question, answerMode);
-        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, topK, spaceIds, selectedSpaceId);
+        DocumentQuestionType questionType = classifyDocumentQuestion(question, answerMode);
+        int topK = retrievalLimit(question, answerMode, questionType);
+        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, questionType, topK, spaceIds, selectedSpaceId);
         List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
             return new AskResponse(
@@ -103,8 +104,8 @@ public class RagService {
             );
         }
 
-        String context = buildContext(question, answerMode, citations);
-        String systemPrompt = systemPrompt(answerMode);
+        String context = buildContext(question, answerMode, questionType, citations);
+        String systemPrompt = systemPrompt(answerMode, questionType);
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
         String answer;
@@ -156,7 +157,7 @@ public class RagService {
                 citations,
                 buildEvidence(citations),
                 confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
-                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval)
+                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType)
         );
     }
 
@@ -164,6 +165,7 @@ public class RagService {
             String question,
             SearchFilter filter,
             AnswerMode answerMode,
+            DocumentQuestionType questionType,
             int topK,
             List<UUID> spaceIds,
             UUID selectedSpaceId
@@ -173,7 +175,12 @@ public class RagService {
         int searchLimit = pipelineService.documentSearchLimit(topK);
 
         searchAndMergeDocuments(question, question, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
-        List<SearchResult> citations = selectAnswerCitations(question, answerMode, List.copyOf(merged.values()));
+        if (isOverviewQuestionType(questionType)) {
+            for (String query : overviewQueries(question, questionType)) {
+                searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+            }
+        }
+        List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
                 question,
                 citations,
@@ -189,7 +196,9 @@ public class RagService {
         );
         int iteration = 1;
 
-        if (!isCountQuestion(question) && !assessment.sufficient() && pipelineService.maxIterations() > 1) {
+        if (!isCountQuestion(question)
+                && (!assessment.sufficient() || needsMoreOverviewEvidence(citations, questionType))
+                && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
                     question,
                     RagPipelineService.Domain.DOCUMENT,
@@ -211,7 +220,7 @@ public class RagService {
                 }
             }
             iteration = 2;
-            citations = selectAnswerCitations(question, answerMode, List.copyOf(merged.values()));
+            citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
             assessment = pipelineService.assessDocuments(
                     question,
                     citations,
@@ -306,8 +315,14 @@ public class RagService {
         };
     }
 
-    private int retrievalLimit(String question, AnswerMode answerMode) {
+    private int retrievalLimit(String question, AnswerMode answerMode, DocumentQuestionType questionType) {
         int configured = properties.getRag().getTopK();
+        if (isOverviewQuestionType(questionType)) {
+            int overviewMin = properties.getRag().getOverview().getMinContextChunks()
+                    + properties.getRag().getOverview().getMinOriginalChunks()
+                    + 4;
+            return Math.max(configured, Math.max(overviewMin, 12));
+        }
         if (isCountQuestion(question) || answerMode == AnswerMode.TABLE) {
             return Math.max(configured, 12);
         }
@@ -317,7 +332,7 @@ public class RagService {
         return Math.max(configured, 8);
     }
 
-    private List<SearchResult> selectAnswerCitations(String question, AnswerMode answerMode, List<SearchResult> results) {
+    private List<SearchResult> selectAnswerCitations(String question, AnswerMode answerMode, DocumentQuestionType questionType, List<SearchResult> results) {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
@@ -329,8 +344,11 @@ public class RagService {
         List<SearchResult> ordered = results.stream()
                 .sorted(Comparator
                         .comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result))
-                        .reversed())
+                .reversed())
                 .toList();
+        if (isOverviewQuestionType(questionType)) {
+            return selectOverviewCitations(ordered, limit);
+        }
         if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
             List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
             if (!originals.isEmpty()) {
@@ -352,6 +370,47 @@ public class RagService {
             }
         }
         return selected;
+    }
+
+    private List<SearchResult> selectOverviewCitations(List<SearchResult> ordered, int limit) {
+        List<SearchResult> selected = new ArrayList<>();
+        Set<UUID> seenChunks = new HashSet<>();
+        int maxDocuments = Math.max(1, properties.getRag().getOverview().getMaxDocuments());
+        int minContext = Math.max(1, properties.getRag().getOverview().getMinContextChunks());
+        int minOriginal = Math.max(1, properties.getRag().getOverview().getMinOriginalChunks());
+
+        for (SearchResult result : ordered) {
+            if (isDocumentContext(result) && seenChunks.add(result.chunkId())) {
+                selected.add(result);
+            }
+            if (selected.stream().filter(this::isDocumentContext).count() >= minContext || selected.size() >= limit) {
+                break;
+            }
+        }
+        Set<UUID> selectedDocuments = new HashSet<>();
+        for (SearchResult result : selected) {
+            selectedDocuments.add(result.documentId());
+        }
+        for (SearchResult result : ordered) {
+            if (!isDocumentContext(result)
+                    && selectedDocuments.size() < maxDocuments
+                    && seenChunks.add(result.chunkId())) {
+                selected.add(result);
+                selectedDocuments.add(result.documentId());
+            }
+            if (selected.stream().filter(item -> !isDocumentContext(item)).count() >= minOriginal || selected.size() >= limit) {
+                break;
+            }
+        }
+        for (SearchResult result : ordered) {
+            if (seenChunks.add(result.chunkId())) {
+                selected.add(result);
+            }
+            if (selected.size() >= limit) {
+                break;
+            }
+        }
+        return selected.stream().limit(limit).toList();
     }
 
     private double answerRelevance(String question, AnswerMode answerMode, SearchResult result) {
@@ -395,13 +454,15 @@ public class RagService {
         return score;
     }
 
-    private String buildContext(String question, AnswerMode answerMode, List<SearchResult> results) {
+    private String buildContext(String question, AnswerMode answerMode, DocumentQuestionType questionType, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "No context retrieved.";
         }
 
-        int limit = Math.min(results.size(), contextLimit(answerMode));
-        int excerptChars = answerMode == AnswerMode.TABLE ? TABLE_CONTEXT_EXCERPT_CHARS : GENERAL_CONTEXT_EXCERPT_CHARS;
+        int limit = Math.min(results.size(), contextLimit(answerMode, questionType));
+        int excerptChars = answerMode == AnswerMode.TABLE
+                ? TABLE_CONTEXT_EXCERPT_CHARS
+                : isOverviewQuestionType(questionType) ? 620 : GENERAL_CONTEXT_EXCERPT_CHARS;
         return IntStream.range(0, limit)
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
@@ -414,7 +475,13 @@ public class RagService {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private int contextLimit(AnswerMode answerMode) {
+    private int contextLimit(AnswerMode answerMode, DocumentQuestionType questionType) {
+        if (isOverviewQuestionType(questionType)) {
+            return pipelineService.documentContextLimit(Math.max(8,
+                    properties.getRag().getOverview().getMinContextChunks()
+                            + properties.getRag().getOverview().getMinOriginalChunks()
+                            + 4));
+        }
         return switch (answerMode) {
             case SUMMARY, TABLE -> pipelineService.documentContextLimit(8);
             case QUOTE -> 6;
@@ -422,7 +489,16 @@ public class RagService {
         };
     }
 
-    private String systemPrompt(AnswerMode answerMode) {
+    private String systemPrompt(AnswerMode answerMode, DocumentQuestionType questionType) {
+        String overviewInstruction = isOverviewQuestionType(questionType)
+                ? """
+                For overview, structure, architecture, or process questions:
+                - First explain the overall map or flow before details.
+                - Use document/source context chunks to orient the answer, but support claims with original evidence chunks when available.
+                - Separate "전체 구조", "주요 흐름", "근거", and "한계" when useful.
+                - If evidence covers only part of the source, state that limitation explicitly.
+                """
+                : "";
         return """
                 You are LearnBot, a private RAG assistant.
                 Answer in Korean using Markdown.
@@ -431,7 +507,7 @@ public class RagService {
                 If the evidence is insufficient, say exactly which part is insufficient.
                 Do not invent sources, counts, filenames, pages, or legal clauses.
                 Do not answer with only a source list.
-                """ + "\n" + answerMode.instruction();
+                """ + "\n" + overviewInstruction + "\n" + answerMode.instruction();
     }
 
     private String fallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
@@ -1011,6 +1087,67 @@ public class RagService {
                 || normalized.contains("어디");
     }
 
+    private DocumentQuestionType classifyDocumentQuestion(String question, AnswerMode answerMode) {
+        if (!properties.getRag().getOverview().isEnabled()) {
+            return DocumentQuestionType.GENERAL;
+        }
+        if (answerMode == AnswerMode.SUMMARY) {
+            return DocumentQuestionType.OVERVIEW;
+        }
+        String normalized = normalizeForSearch(question);
+        String compact = safe(question).replaceAll("\\s+", "").toLowerCase();
+        if (containsAny(normalized, "architecture", "아키텍처", "구성도", "구성 방식", "전체 구조")) {
+            return DocumentQuestionType.ARCHITECTURE;
+        }
+        if (containsAny(normalized, "flow", "process", "workflow", "sequence", "흐름", "과정", "절차", "순서", "프로세스")) {
+            return DocumentQuestionType.PROCESS_FLOW;
+        }
+        if (isStructureQuestion(question) || containsAny(normalized, "구조", "목차", "섹션", "구성", "어떻게 되어")) {
+            return DocumentQuestionType.STRUCTURE;
+        }
+        if (containsAny(normalized, "overview", "summary", "summarize", "개요", "요약", "전체적으로", "큰 그림", "무엇을 다루", "어떤 내용")
+                || compact.contains("뭐하는")
+                || compact.contains("어떤문서")) {
+            return DocumentQuestionType.OVERVIEW;
+        }
+        return DocumentQuestionType.GENERAL;
+    }
+
+    private boolean isOverviewQuestionType(DocumentQuestionType questionType) {
+        return questionType != null && questionType != DocumentQuestionType.GENERAL;
+    }
+
+    private boolean needsMoreOverviewEvidence(List<SearchResult> results, DocumentQuestionType questionType) {
+        if (!isOverviewQuestionType(questionType)) {
+            return false;
+        }
+        long contextCount = results.stream().filter(this::isDocumentContext).count();
+        long originalCount = results.stream().filter(result -> !isDocumentContext(result)).count();
+        return contextCount < properties.getRag().getOverview().getMinContextChunks()
+                || originalCount < properties.getRag().getOverview().getMinOriginalChunks();
+    }
+
+    private List<String> overviewQueries(String question, DocumentQuestionType questionType) {
+        String base = safe(question).trim();
+        return switch (questionType) {
+            case ARCHITECTURE -> List.of(base + " architecture structure components", "source structure document map overview", "문서 구조 구성 아키텍처 개요");
+            case PROCESS_FLOW -> List.of(base + " process flow workflow steps", "source structure process sequence overview", "흐름 과정 절차 단계 구조");
+            case STRUCTURE -> List.of(base + " structure outline sections", "document structure source structure map", "구조 목차 섹션 구성 문서맵");
+            case OVERVIEW -> List.of(base + " overview summary main topics", "source summary document summary representative documents", "개요 요약 주요 내용 전체 구조");
+            default -> List.of();
+        };
+    }
+
+    private boolean containsAny(String value, String... needles) {
+        String safeValue = safe(value);
+        for (String needle : needles) {
+            if (safeValue.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isDocumentContext(SearchResult result) {
         return result != null && isDocumentContext(result.metadata());
     }
@@ -1107,9 +1244,18 @@ public class RagService {
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
-            DocumentRetrieval retrieval
+            DocumentRetrieval retrieval,
+            DocumentQuestionType questionType
     ) {
         List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten));
+        if (isOverviewQuestionType(questionType)) {
+            long contextCount = results.stream().filter(this::isDocumentContext).count();
+            long originalCount = results.size() - contextCount;
+            long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+            notes.add("Question type was classified as " + questionType.name()
+                    + "; overview retrieval used " + contextCount + " context chunks, "
+                    + originalCount + " original chunks, and " + distinctDocuments + " distinct documents.");
+        }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried retrieval once because the first evidence set was weak.");
         }
@@ -1322,5 +1468,13 @@ public class RagService {
         String instruction() {
             return instruction;
         }
+    }
+
+    private enum DocumentQuestionType {
+        GENERAL,
+        OVERVIEW,
+        STRUCTURE,
+        PROCESS_FLOW,
+        ARCHITECTURE
     }
 }

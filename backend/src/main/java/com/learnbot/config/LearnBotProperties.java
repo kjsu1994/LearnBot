@@ -344,6 +344,7 @@ public class LearnBotProperties {
 
         private Pipeline pipeline = new Pipeline();
         private DocumentContext documentContext = new DocumentContext();
+        private Overview overview = new Overview();
 
         public int getTopK() {
             return topK;
@@ -367,6 +368,14 @@ public class LearnBotProperties {
 
         public void setDocumentContext(DocumentContext documentContext) {
             this.documentContext = documentContext;
+        }
+
+        public Overview getOverview() {
+            return overview;
+        }
+
+        public void setOverview(Overview overview) {
+            this.overview = overview;
         }
 
         public static class Pipeline {
@@ -493,6 +502,73 @@ public class LearnBotProperties {
 
             public void setMaxSummaryInputChars(int maxSummaryInputChars) {
                 this.maxSummaryInputChars = maxSummaryInputChars;
+            }
+        }
+
+        public static class Overview {
+            private boolean enabled = true;
+
+            @Min(1)
+            private int minContextChunks = 2;
+
+            @Min(1)
+            private int minOriginalChunks = 4;
+
+            @Min(1)
+            private int maxDocuments = 12;
+
+            @Min(1)
+            private int maxCodeCategories = 10;
+
+            @Min(1)
+            private int maxRecursiveIterations = 2;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public int getMinContextChunks() {
+                return minContextChunks;
+            }
+
+            public void setMinContextChunks(int minContextChunks) {
+                this.minContextChunks = minContextChunks;
+            }
+
+            public int getMinOriginalChunks() {
+                return minOriginalChunks;
+            }
+
+            public void setMinOriginalChunks(int minOriginalChunks) {
+                this.minOriginalChunks = minOriginalChunks;
+            }
+
+            public int getMaxDocuments() {
+                return maxDocuments;
+            }
+
+            public void setMaxDocuments(int maxDocuments) {
+                this.maxDocuments = maxDocuments;
+            }
+
+            public int getMaxCodeCategories() {
+                return maxCodeCategories;
+            }
+
+            public void setMaxCodeCategories(int maxCodeCategories) {
+                this.maxCodeCategories = maxCodeCategories;
+            }
+
+            public int getMaxRecursiveIterations() {
+                return maxRecursiveIterations;
+            }
+
+            public void setMaxRecursiveIterations(int maxRecursiveIterations) {
+                this.maxRecursiveIterations = maxRecursiveIterations;
             }
         }
     }
