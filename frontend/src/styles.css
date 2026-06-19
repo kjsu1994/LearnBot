@@ -4576,3 +4576,62 @@ button:hover:not(:disabled),
   min-width: 50px;
   padding: 0px;
 }
+
+.repo-list .repo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "main actions"
+    "meta actions"
+    "job job";
+  align-items: start;
+  gap: 8px 12px;
+  min-height: unset;
+  overflow: visible;
+}
+
+.repo-list .repo-row .document-main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.repo-list .repo-row .document-meta {
+  grid-area: meta;
+  min-width: 0;
+}
+
+.repo-list .repo-row .document-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  align-self: start;
+}
+
+.repo-list .repo-row .job-strip {
+  grid-area: job;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #e5ece8;
+  overflow: visible;
+}
+
+.repo-list .repo-row .job-strip > span,
+.repo-list .repo-row .job-change-line,
+.repo-list .repo-row .document-main small,
+.repo-list .repo-row .document-meta small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-list .repo-row .progress-track {
+  width: 100%;
+}
