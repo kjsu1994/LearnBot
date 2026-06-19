@@ -14,8 +14,8 @@ function DocumentWorkspace(props) {
 
   return (
     <section className="workspace-grid">
+      {showSourceManagement && (
       <div className="left-column">
-        {showSourceManagement && (
         <section className="panel">
           <div className="panel-title">
             <Database size={18} />
@@ -85,7 +85,6 @@ function DocumentWorkspace(props) {
             {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
           </form>
         </section>
-        )}
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
         {props.documentPreviewOpen && (
@@ -97,8 +96,9 @@ function DocumentWorkspace(props) {
           />
         )}
       </div>
+      )}
 
-      <div className="right-column">
+      <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
         <form className="panel ask-panel" onSubmit={props.ask}>
           <div className="panel-title">
             <MessageSquare size={18} />
@@ -166,6 +166,17 @@ function DocumentWorkspace(props) {
           </div>
           <ResultList results={props.searchResults} title="검색 결과" />
         </form>
+        {!showSourceManagement && (
+          <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
+        )}
+        {!showSourceManagement && props.documentPreviewOpen && (
+          <DocumentPreviewModal
+            preview={props.documentPreview}
+            blobUrl={props.documentPreviewBlobUrl}
+            loading={props.documentPreviewLoading}
+            onClose={props.closeDocumentPreview}
+          />
+        )}
       </div>
     </section>
   );
