@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, GitPullRequest, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
@@ -10,238 +10,47 @@ import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
 function CodeWorkspace(props) {
   const {
-    repoForm,
-    setRepoForm,
-    zipForm,
-    setZipForm,
-    zipReplaceFile,
-    setZipReplaceFile,
-    indexCredential,
-    setIndexCredential,
-    repositories,
-    selectedRepositoryId,
-    setSelectedRepositoryId,
+    repositories = [],
+    selectedRepositoryId = '',
+    setSelectedRepositoryId = () => {},
     selectedRepository,
-    jobs,
-    jobFailures,
-    loadJobFailures,
-    codeFiles,
-    fileQuery,
-    setFileQuery,
     selectedCodeFile,
     highlightRange,
     codeModalOpen,
-    setCodeModalOpen,
-    codeQuestion,
-    setCodeQuestion,
-    codeMode,
-    setCodeMode,
+    setCodeModalOpen = () => {},
+    codeQuestion = '',
+    setCodeQuestion = () => {},
+    codeMode = 'overview',
+    setCodeMode = () => {},
     codeAnswer,
-    codeSearchQuery,
-    setCodeSearchQuery,
-    codeSearchResults,
-    referenceSymbol,
-    setReferenceSymbol,
+    codeSearchQuery = '',
+    setCodeSearchQuery = () => {},
+    codeSearchResults = [],
+    referenceSymbol = '',
+    setReferenceSymbol = () => {},
     referenceResult,
-    registerRepository,
-    uploadZipRepository,
-    replaceZipRepository,
-    indexRepository,
-    cancelIndex,
-    deleteRepository,
-    clearFailedJobs,
-    refreshJobs,
-    searchCodeFiles,
-    openCodeFile,
-    askCode,
-    searchCode,
-    findReferences,
-    loading,
-    codeFileLoading,
+    openCodeFile = () => {},
+    askCode = (event) => event.preventDefault(),
+    searchCode = (event) => event.preventDefault(),
+    findReferences = (event) => event.preventDefault(),
+    loading = () => false,
+    codeFileLoading = false,
+    showSourceManagement = true,
   } = props;
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
 
   return (
     <section className="workspace-grid code-grid">
-      <div className="left-column">
-        <section className="panel">
-          <div className="panel-title">
-            <GitBranch size={18} />
-            <div>
-              <h2>Git 저장소 등록</h2>
-              <p>GitHub, GitLab, 사내 Git 서버의 HTTP/HTTPS/SSH 저장소를 코드 RAG 대상으로 등록합니다.</p>
-            </div>
-          </div>
-          <form className="stack" onSubmit={registerRepository}>
-            <label htmlFor="git-url">Git URL</label>
-            <input id="git-url" value={repoForm.gitUrl} onChange={(event) => setRepoForm((current) => ({ ...current, gitUrl: event.target.value }))} placeholder="https://github.com/org/repo.git" />
-            <div className="form-grid two">
-              <div className="stack">
-                <label htmlFor="repo-name">표시 이름</label>
-                <input id="repo-name" value={repoForm.name} onChange={(event) => setRepoForm((current) => ({ ...current, name: event.target.value }))} placeholder="repo name" />
-              </div>
-              <div className="stack">
-                <label htmlFor="repo-branch">Branch</label>
-                <input id="repo-branch" value={repoForm.branch} onChange={(event) => setRepoForm((current) => ({ ...current, branch: event.target.value }))} placeholder="HEAD 또는 main" />
-              </div>
-            </div>
-            <div className="mode-control auth-control" aria-label="Git 인증 방식">
-              <button className={repoForm.authType === 'NONE' ? 'mode-button active' : 'mode-button'} type="button" onClick={() => setRepoForm((current) => ({ ...current, authType: 'NONE' }))}>인증 없음</button>
-              <button className={repoForm.authType === 'TOKEN' ? 'mode-button active' : 'mode-button'} type="button" onClick={() => setRepoForm((current) => ({ ...current, authType: 'TOKEN' }))}>토큰</button>
-            </div>
-            {repoForm.authType === 'TOKEN' && (
-              <>
-                <div className="form-grid two">
-                  <div className="stack">
-                    <label htmlFor="git-username">Username</label>
-                    <input id="git-username" value={repoForm.username} onChange={(event) => setRepoForm((current) => ({ ...current, username: event.target.value }))} placeholder="비워두면 oauth2" />
-                  </div>
-                  <div className="stack">
-                    <label htmlFor="git-token">Token</label>
-                    <input id="git-token" type="password" value={repoForm.token} onChange={(event) => setRepoForm((current) => ({ ...current, token: event.target.value }))} placeholder="개인 액세스 토큰" />
-                  </div>
-                </div>
-                <label className="checkbox-row" htmlFor="store-token">
-                  <input id="store-token" type="checkbox" checked={repoForm.storeToken} onChange={(event) => setRepoForm((current) => ({ ...current, storeToken: event.target.checked }))} />
-                  <span>토큰을 암호화해 저장하고 다음 인덱싱부터 재사용</span>
-                </label>
-              </>
-            )}
-            <div className="action-row">
-              <button disabled={!repoForm.gitUrl || loading('repo-register')}>
-                {loading('repo-register') ? <Loader2 className="spin" size={16} /> : <GitBranch size={16} />}
-                저장소 등록
-              </button>
-            </div>
-          </form>
-          <form className="stack" onSubmit={uploadZipRepository}>
-            <div className="panel-title">
-              <FileArchive size={18} />
-              <div>
-                <h2>ZIP 코드 스냅샷 업로드</h2>
-                <p>압축 파일을 업로드하면 코드 RAG 저장소로 등록하고 바로 인덱싱합니다.</p>
-              </div>
-            </div>
-            <label htmlFor="zip-file">ZIP 파일</label>
-            <div className="file-row">
-              <label className="file-picker" htmlFor="zip-file">
-                <FileArchive size={16} />
-                <span>{zipForm.file?.name || 'ZIP 파일 선택'}</span>
-              </label>
-              <input id="zip-file" className="visually-hidden" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipForm((current) => ({ ...current, file: event.target.files?.[0] || null }))} />
-              <button disabled={!zipForm.file || loading('repo-zip-upload')}>
-                {loading('repo-zip-upload') ? <Loader2 className="spin" size={16} /> : <FileArchive size={16} />}
-                업로드
-              </button>
-            </div>
-            <label htmlFor="zip-name">표시 이름</label>
-            <input id="zip-name" value={zipForm.name} onChange={(event) => setZipForm((current) => ({ ...current, name: event.target.value }))} placeholder={zipForm.file?.name?.replace(/\.zip$/i, '') || 'code snapshot'} />
-          </form>
-        </section>
+      {showSourceManagement && <CodeSourceManagementPanel {...props} />}
 
-        <section className="panel documents-panel">
-          <div className="panel-title">
-            <FileCode2 size={18} />
-            <div>
-              <h2>저장소 목록</h2>
-              <p>{repositories.length ? `${repositories.length}개 저장소` : '등록된 저장소가 없습니다.'}</p>
-            </div>
-          </div>
-          <div className="document-list scrollable-list">
-            {repositories.map((repo) => {
-              const latestJob = jobs[repo.id]?.[0];
-              const runningJob = jobs[repo.id]?.find((job) => job.status === 'RUNNING' || job.status === 'CANCELLING');
-              return (
-                <article className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'} key={repo.id} onClick={() => setSelectedRepositoryId(repo.id)}>
-                  <div className="document-main">
-                    <strong>{repo.name}</strong>
-                    <small>{repo.sourceType === 'ZIP' ? repo.sourceLabel : repo.gitUrl}</small>
-                    {repo.errorMessage && <small className="danger-note">{repo.errorMessage}</small>}
-                    {repo.credentialStored && <small className="success-note">암호화된 Git 토큰 저장됨</small>}
-                  </div>
-                  <div className="document-meta">
-                    <StatusBadge status={repo.status} />
-                    <small>{repo.branch} · {repo.activeFileCount} files · {repo.activeChunkCount} chunks</small>
-                  </div>
-                  <div className="document-actions">
-                    <IconButton title="작업 이력 새로고침" onClick={(event) => { event.stopPropagation(); refreshJobs(repo.id); }}>
-                      <Info size={15} />
-                    </IconButton>
-                    <IconButton title="실패/취소 이력 정리" disabled={loading(`repo-clear-jobs-${repo.id}`)} onClick={(event) => { event.stopPropagation(); clearFailedJobs(repo.id); }}>
-                      {loading(`repo-clear-jobs-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-                    </IconButton>
-                    {runningJob ? (
-                      <IconButton danger title="인덱싱 취소" disabled={runningJob.status === 'CANCELLING' || loading(`repo-cancel-${runningJob.id}`)} onClick={(event) => { event.stopPropagation(); cancelIndex(repo.id, runningJob.id); }}>
-                        {loading(`repo-cancel-${runningJob.id}`) ? <Loader2 className="spin" size={15} /> : <X size={15} />}
-                      </IconButton>
-                    ) : (
-                      <IconButton title="인덱싱 시작" disabled={loading(`repo-index-${repo.id}`)} onClick={(event) => { event.stopPropagation(); indexRepository(repo.id); }}>
-                        {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-                      </IconButton>
-                    )}
-                    <IconButton danger title="저장소 삭제" disabled={!!runningJob || loading(`repo-delete-${repo.id}`)} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id, repo.name); }}>
-                      {loading(`repo-delete-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-                    </IconButton>
-                  </div>
-                  {latestJob && (
-                    <JobStrip
-                      job={latestJob}
-                      repoId={repo.id}
-                      failures={jobFailures[latestJob.id]}
-                      loadFailures={loadJobFailures}
-                      loading={loading(`job-failures-${latestJob.id}`)}
-                    />
-                  )}
-                </article>
-              );
-            })}
-            {repositories.length === 0 && <p className="empty">Git URL을 등록한 뒤 인덱싱을 시작하세요.</p>}
-          </div>
-        </section>
-
-        {selectedRepository?.sourceType === 'ZIP' && (
-          <section className="panel compact-auth-panel">
-            <form className="stack" onSubmit={(event) => replaceZipRepository(selectedRepository.id, event)}>
-              <label htmlFor="replace-zip-file">새 ZIP 스냅샷</label>
-              <input id="replace-zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipReplaceFile(event.target.files?.[0] || null)} />
-              <div className="action-row">
-                <button disabled={!zipReplaceFile || loading(`repo-zip-replace-${selectedRepository.id}`)}>
-                  {loading(`repo-zip-replace-${selectedRepository.id}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-                  새 ZIP으로 재인덱싱
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        {selectedRepository?.authType === 'TOKEN' && (
-          <section className="panel compact-auth-panel">
-            <div className="form-grid two">
-              <div className="stack">
-                <label htmlFor="index-username">Username</label>
-                <input id="index-username" value={indexCredential.username} onChange={(event) => setIndexCredential((current) => ({ ...current, username: event.target.value }))} placeholder="비워두면 oauth2" />
-              </div>
-              <div className="stack">
-                <label htmlFor="index-token">Token</label>
-                <input id="index-token" type="password" value={indexCredential.token} onChange={(event) => setIndexCredential((current) => ({ ...current, token: event.target.value }))} placeholder={selectedRepository.credentialStored ? '새 토큰으로 갱신할 때만 입력' : '인덱싱에 사용할 token'} />
-              </div>
-            </div>
-            <label className="checkbox-row" htmlFor="index-store-token">
-              <input id="index-store-token" type="checkbox" checked={indexCredential.storeToken} onChange={(event) => setIndexCredential((current) => ({ ...current, storeToken: event.target.checked }))} />
-              <span>입력한 토큰을 암호화해 저장</span>
-            </label>
-          </section>
-        )}
-      </div>
-
-      <div className="right-column">
+      <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
         <form className="panel ask-panel" onSubmit={askCode}>
           <div className="panel-title">
             <MessageSquare size={18} />
             <div>
               <h2>코드에게 질문하기</h2>
-              <p>파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 답변합니다.</p>
+              <p>파일, 클래스, 메서드, UI 이벤트 이름을 실제 코드 근거와 함께 답합니다.</p>
             </div>
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
@@ -272,7 +81,7 @@ function CodeWorkspace(props) {
                   <CheckCircle2 size={16} />
                   <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
                 </div>
-                <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                <button className="icon-button answer-expand-button" type="button" title="전체 화면으로 보기" onClick={() => setAnswerModalOpen(true)}>
                   <Maximize2 size={15} />
                 </button>
               </div>
@@ -300,7 +109,7 @@ function CodeWorkspace(props) {
             <Search size={18} />
             <div>
               <h2>코드 검색</h2>
-              <p>키워드, 심볼, 임베딩 검색을 합쳐 근거 후보를 빠르게 찾습니다.</p>
+              <p>키워드 검색과 벡터 검색을 함께 사용해 코드 근거를 찾습니다.</p>
             </div>
           </div>
           <div className="inline-control">
@@ -343,14 +152,214 @@ function CodeWorkspace(props) {
     </section>
   );
 }
+function CodeSourceManagementPanel(props) {
+  const {
+    repoForm = { authType: 'NONE', gitUrl: '', name: '', branch: 'HEAD', username: '', token: '', storeToken: false },
+    setRepoForm = () => {},
+    zipForm = { file: null, name: '' },
+    setZipForm = () => {},
+    zipReplaceFile,
+    setZipReplaceFile = () => {},
+    indexCredential = { username: '', token: '', storeToken: true },
+    setIndexCredential = () => {},
+    repositories = [],
+    selectedRepositoryId = '',
+    setSelectedRepositoryId = () => {},
+    selectedRepository,
+    jobs = {},
+    jobFailures = {},
+    loadJobFailures = () => {},
+    registerRepository = (event) => event.preventDefault(),
+    uploadZipRepository = (event) => event.preventDefault(),
+    replaceZipRepository = () => {},
+    indexRepository = () => {},
+    cancelIndex = () => {},
+    deleteRepository = () => {},
+    clearFailedJobs = () => {},
+    refreshJobs = () => {},
+    loading = () => false,
+  } = props;
 
+  return (
+    <div className="left-column">
+      <section className="panel">
+        <div className="panel-title">
+          <GitBranch size={18} />
+          <div>
+            <h2>Git 저장소 등록</h2>
+            <p>GitHub, GitLab, 사내 Git 서버의 HTTP/HTTPS/SSH 저장소를 코드 RAG 대상으로 등록합니다.</p>
+          </div>
+        </div>
+        <form className="stack" onSubmit={registerRepository}>
+          <label htmlFor="git-url">Git URL</label>
+          <input id="git-url" value={repoForm.gitUrl} onChange={(event) => setRepoForm((current) => ({ ...current, gitUrl: event.target.value }))} placeholder="https://github.com/org/repo.git" />
+          <div className="form-grid two">
+            <div className="stack">
+              <label htmlFor="repo-name">표시 이름</label>
+              <input id="repo-name" value={repoForm.name} onChange={(event) => setRepoForm((current) => ({ ...current, name: event.target.value }))} placeholder="repo name" />
+            </div>
+            <div className="stack">
+              <label htmlFor="repo-branch">Branch</label>
+              <input id="repo-branch" value={repoForm.branch} onChange={(event) => setRepoForm((current) => ({ ...current, branch: event.target.value }))} placeholder="HEAD 또는 main" />
+            </div>
+          </div>
+          <div className="mode-control auth-control" aria-label="Git 인증 방식">
+            <button className={repoForm.authType === 'NONE' ? 'mode-button active' : 'mode-button'} type="button" onClick={() => setRepoForm((current) => ({ ...current, authType: 'NONE' }))}>인증 없음</button>
+            <button className={repoForm.authType === 'TOKEN' ? 'mode-button active' : 'mode-button'} type="button" onClick={() => setRepoForm((current) => ({ ...current, authType: 'TOKEN' }))}>토큰</button>
+          </div>
+          {repoForm.authType === 'TOKEN' && (
+            <>
+              <div className="form-grid two">
+                <div className="stack">
+                  <label htmlFor="git-username">Username</label>
+                  <input id="git-username" value={repoForm.username} onChange={(event) => setRepoForm((current) => ({ ...current, username: event.target.value }))} placeholder="비우면 oauth2" />
+                </div>
+                <div className="stack">
+                  <label htmlFor="git-token">Token</label>
+                  <input id="git-token" type="password" value={repoForm.token} onChange={(event) => setRepoForm((current) => ({ ...current, token: event.target.value }))} placeholder="개인 액세스 토큰" />
+                </div>
+              </div>
+              <label className="checkbox-row" htmlFor="store-token">
+                <input id="store-token" type="checkbox" checked={repoForm.storeToken} onChange={(event) => setRepoForm((current) => ({ ...current, storeToken: event.target.checked }))} />
+                <span>토큰을 암호화해 저장하고 다음 인덱싱에 재사용</span>
+              </label>
+            </>
+          )}
+          <div className="action-row">
+            <button disabled={!repoForm.gitUrl || loading('repo-register')}>
+              {loading('repo-register') ? <Loader2 className="spin" size={16} /> : <GitBranch size={16} />}
+              저장소 등록
+            </button>
+          </div>
+        </form>
+        <form className="stack" onSubmit={uploadZipRepository}>
+          <div className="panel-title">
+            <FileArchive size={18} />
+            <div>
+              <h2>ZIP 코드 스냅샷 업로드</h2>
+              <p>압축 파일을 업로드하면 코드 RAG 저장소로 등록하고 바로 인덱싱합니다.</p>
+            </div>
+          </div>
+          <label htmlFor="zip-file">ZIP 파일</label>
+          <div className="file-row">
+            <label className="file-picker" htmlFor="zip-file">
+              <FileArchive size={16} />
+              <span>{zipForm.file?.name || 'ZIP 파일 선택'}</span>
+            </label>
+            <input id="zip-file" className="visually-hidden" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipForm((current) => ({ ...current, file: event.target.files?.[0] || null }))} />
+            <button disabled={!zipForm.file || loading('repo-zip-upload')}>
+              {loading('repo-zip-upload') ? <Loader2 className="spin" size={16} /> : <FileArchive size={16} />}
+              업로드
+            </button>
+          </div>
+          <label htmlFor="zip-name">표시 이름</label>
+          <input id="zip-name" value={zipForm.name} onChange={(event) => setZipForm((current) => ({ ...current, name: event.target.value }))} placeholder={zipForm.file?.name?.replace(/\.zip$/i, '') || 'code snapshot'} />
+        </form>
+      </section>
+
+      <section className="panel documents-panel">
+        <div className="panel-title">
+          <FileCode2 size={18} />
+          <div>
+            <h2>저장소 목록</h2>
+            <p>{repositories.length ? `${repositories.length}개 저장소` : '등록된 저장소가 없습니다.'}</p>
+          </div>
+        </div>
+        <div className="document-list scrollable-list">
+          {repositories.map((repo) => {
+            const latestJob = jobs[repo.id]?.[0];
+            const runningJob = jobs[repo.id]?.find((job) => job.status === 'RUNNING' || job.status === 'CANCELLING');
+            return (
+              <article className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'} key={repo.id} onClick={() => setSelectedRepositoryId(repo.id)}>
+                <div className="document-main">
+                  <strong>{repo.name}</strong>
+                  <small>{repo.sourceType === 'ZIP' ? repo.sourceLabel : repo.gitUrl}</small>
+                  {repo.errorMessage && <small className="danger-note">{repo.errorMessage}</small>}
+                  {repo.credentialStored && <small className="success-note">암호화된 Git 토큰 저장됨</small>}
+                </div>
+                <div className="document-meta">
+                  <StatusBadge status={repo.status} />
+                  <small>{repo.branch} · {repo.activeFileCount} files · {repo.activeChunkCount} chunks</small>
+                </div>
+                <div className="document-actions">
+                  <IconButton title="작업 이력 새로고침" onClick={(event) => { event.stopPropagation(); refreshJobs(repo.id); }}>
+                    <Info size={15} />
+                  </IconButton>
+                  <IconButton title="실패/취소 이력 정리" disabled={loading(`repo-clear-jobs-${repo.id}`)} onClick={(event) => { event.stopPropagation(); clearFailedJobs(repo.id); }}>
+                    {loading(`repo-clear-jobs-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                  </IconButton>
+                  {runningJob ? (
+                    <IconButton danger title="인덱싱 취소" disabled={runningJob.status === 'CANCELLING' || loading(`repo-cancel-${runningJob.id}`)} onClick={(event) => { event.stopPropagation(); cancelIndex(repo.id, runningJob.id); }}>
+                      {loading(`repo-cancel-${runningJob.id}`) ? <Loader2 className="spin" size={15} /> : <X size={15} />}
+                    </IconButton>
+                  ) : (
+                    <IconButton title="인덱싱 시작" disabled={loading(`repo-index-${repo.id}`)} onClick={(event) => { event.stopPropagation(); indexRepository(repo.id); }}>
+                      {loading(`repo-index-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                    </IconButton>
+                  )}
+                  <IconButton danger title="저장소 삭제" disabled={!!runningJob || loading(`repo-delete-${repo.id}`)} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id, repo.name); }}>
+                    {loading(`repo-delete-${repo.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                  </IconButton>
+                </div>
+                {latestJob && (
+                  <JobStrip
+                    job={latestJob}
+                    repoId={repo.id}
+                    failures={jobFailures[latestJob.id]}
+                    loadFailures={loadJobFailures}
+                    loading={loading(`job-failures-${latestJob.id}`)}
+                  />
+                )}
+              </article>
+            );
+          })}
+          {repositories.length === 0 && <p className="empty">Git URL을 등록하거나 ZIP 파일을 업로드해 인덱싱을 시작하세요.</p>}
+        </div>
+      </section>
+
+      {selectedRepository?.sourceType === 'ZIP' && (
+        <section className="panel compact-auth-panel">
+          <form className="stack" onSubmit={(event) => replaceZipRepository(selectedRepository.id, event)}>
+            <label htmlFor="replace-zip-file">새 ZIP 스냅샷</label>
+            <input id="replace-zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipReplaceFile(event.target.files?.[0] || null)} />
+            <div className="action-row">
+              <button disabled={!zipReplaceFile || loading(`repo-zip-replace-${selectedRepository.id}`)}>
+                {loading(`repo-zip-replace-${selectedRepository.id}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                새 ZIP으로 재인덱싱
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {selectedRepository?.authType === 'TOKEN' && (
+        <section className="panel compact-auth-panel">
+          <div className="form-grid two">
+            <div className="stack">
+              <label htmlFor="index-username">Username</label>
+              <input id="index-username" value={indexCredential.username} onChange={(event) => setIndexCredential((current) => ({ ...current, username: event.target.value }))} placeholder="비우면 oauth2" />
+            </div>
+            <div className="stack">
+              <label htmlFor="index-token">Token</label>
+              <input id="index-token" type="password" value={indexCredential.token} onChange={(event) => setIndexCredential((current) => ({ ...current, token: event.target.value }))} placeholder={selectedRepository.credentialStored ? '새 토큰으로 갱신할 때만 입력' : '인덱싱에 사용할 token'} />
+            </div>
+          </div>
+          <label className="checkbox-row" htmlFor="index-store-token">
+            <input id="index-store-token" type="checkbox" checked={indexCredential.storeToken} onChange={(event) => setIndexCredential((current) => ({ ...current, storeToken: event.target.checked }))} />
+            <span>입력한 토큰을 암호화해 저장</span>
+          </label>
+        </section>
+      )}
+    </div>
+  );
+}
 function JobStrip({ job, repoId, failures, loadFailures, loading }) {
   const canShowFailures = job.failedFiles > 0 || job.status === 'FAILED' || job.errorMessage;
   return (
     <div className="job-strip">
       <span>
-        {getStatusLabel(job.status)} · {job.processedFiles}/{job.totalFiles || '-'} files · {job.totalChunks} chunks
-        {job.failedFiles > 0 ? ` · 실패 ${job.failedFiles}` : ''}
+        {getStatusLabel(job.status)} 쨌 {job.processedFiles}/{job.totalFiles || '-'} files 쨌 {job.totalChunks} chunks
+        {job.failedFiles > 0 ? ` 쨌 ?ㅽ뙣 ${job.failedFiles}` : ''}
       </span>
       {jobChangeText(job) && <small className="job-change-line">{jobChangeText(job)}</small>}
       <div className="progress-track" aria-label="인덱싱 진행률">
@@ -360,7 +369,7 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
       {canShowFailures && (
         <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadFailures(repoId, job.id); }}>
           {loading ? <Loader2 className="spin" size={14} /> : <Eye size={14} />}
-          실패 사유
+          ?ㅽ뙣 ?ъ쑀
         </button>
       )}
       {failures && <JobFailureList failures={failures} />}
@@ -370,14 +379,14 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
 
 function JobFailureList({ failures }) {
   if (!failures.length) {
-    return <p className="empty compact-empty">기록된 파일별 실패 사유가 없습니다. 저장소 수준 오류 메시지를 확인하세요.</p>;
+    return <p className="empty compact-empty">湲곕줉???뚯씪蹂??ㅽ뙣 ?ъ쑀媛 ?놁뒿?덈떎. ??μ냼 ?섏? ?ㅻ쪟 硫붿떆吏瑜??뺤씤?섏꽭??</p>;
   }
   return (
     <div className="failure-list">
       {failures.map((failure) => (
         <div className="failure-item" key={failure.id}>
           <strong>{failure.filePath || 'repository'}</strong>
-          <small>{failure.stage} · {formatDate(failure.createdAt)}</small>
+          <small>{failure.stage} 쨌 {formatDate(failure.createdAt)}</small>
           <span>{failure.message}</span>
         </div>
       ))}
@@ -405,14 +414,14 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
   useEffect(() => {
     setExpanded(false);
   }, [evidenceKey]);
-  if (!evidence.length) return <p className="empty compact-empty">표시할 코드 근거가 없습니다.</p>;
+  if (!evidence.length) return <p className="empty compact-empty">?쒖떆??肄붾뱶 洹쇨굅媛 ?놁뒿?덈떎.</p>;
   const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
   const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
-        <strong>코드 근거</strong>
-        <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
+        <strong>肄붾뱶 洹쇨굅</strong>
+        <small>{visibleEvidence.length}/{evidence.length}媛??쒖떆</small>
       </div>
       <div className="evidence-list">
         {visibleEvidence.map((item) => {
@@ -422,8 +431,8 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
             ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
             : null;
           const metaText = isCommitDiff
-            ? `${item.metadata?.changeType || item.chunkType} · +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
-            : `${item.lineStart}-${item.lineEnd} · ${item.chunkType}`;
+            ? `${item.metadata?.changeType || item.chunkType} 쨌 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
+            : `${item.lineStart}-${item.lineEnd} 쨌 ${item.chunkType}`;
           return (
             <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
               <div className="result-heading">
@@ -431,7 +440,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
                 {canOpen && (
                   <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
                     <Eye size={14} />
-                    열기
+                    ?닿린
                   </button>
                 )}
               </div>
@@ -444,7 +453,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
       {evidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '핵심 근거만 보기' : `전체 근거 ${evidence.length}개 보기`}
+          {expanded ? '?듭떖 洹쇨굅留?蹂닿린' : `?꾩껜 洹쇨굅 ${evidence.length}媛?蹂닿린`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
@@ -461,14 +470,14 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              열기
+              ?닿린
             </button>
           </div>
-          <small>{item.repositoryName} · {item.lineStart}-{item.lineEnd} · score {Number(item.score || 0).toFixed(3)}</small>
+          <small>{item.repositoryName} 쨌 {item.lineStart}-{item.lineEnd} 쨌 score {Number(item.score || 0).toFixed(3)}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!results.length && <p className="empty">코드 검색 결과가 없습니다.</p>}
+      {!results.length && <p className="empty">肄붾뱶 寃??寃곌낵媛 ?놁뒿?덈떎.</p>}
     </div>
   );
 }
@@ -476,8 +485,8 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
 function CodeReferenceResults({ result, onOpenEvidence }) {
   return (
     <div className="reference-results">
-      <ReferenceGroup title="정의" items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
-      <ReferenceGroup title="참조" items={result.references || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title="?뺤쓽" items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title="李몄“" items={result.references || []} onOpenEvidence={onOpenEvidence} />
     </div>
   );
 }
@@ -492,14 +501,14 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              열기
+              ?닿린
             </button>
           </div>
-          <small>{item.lineStart}-{item.lineEnd} · {item.chunkType}</small>
+          <small>{item.lineStart}-{item.lineEnd} 쨌 {item.chunkType}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!items.length && <p className="empty compact-empty">결과 없음</p>}
+      {!items.length && <p className="empty compact-empty">寃곌낵 ?놁쓬</p>}
     </div>
   );
 }
@@ -540,10 +549,10 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
             <FileCode2 size={18} />
             <div>
               <h2 id="code-modal-title">{fileName}</h2>
-              <p>{detail?.filePath || '코드 파일을 불러오는 중입니다.'}</p>
+              <p>{detail?.filePath || '肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.'}</p>
             </div>
           </div>
-          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+          <button className="icon-button code-modal-close" type="button" title="?リ린" onClick={() => onClose?.()}>
             <X size={18} />
           </button>
         </header>
@@ -558,14 +567,14 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
           {loading && (
             <div className="code-modal-state">
               <Loader2 className="spin" size={22} />
-              <strong>코드 파일을 불러오는 중입니다.</strong>
+              <strong>肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.</strong>
             </div>
           )}
 
           {!loading && !detail && (
             <div className="code-modal-state">
               <FileCode2 size={22} />
-              <strong>표시할 코드가 없습니다.</strong>
+              <strong>?쒖떆??肄붾뱶媛 ?놁뒿?덈떎.</strong>
             </div>
           )}
 
@@ -608,8 +617,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>코드 미리보기</h2>
-            <p>파일을 불러오는 중입니다.</p>
+            <h2>肄붾뱶 誘몃━蹂닿린</h2>
+            <p>?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.</p>
           </div>
         </div>
       </section>
@@ -621,8 +630,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>코드 미리보기</h2>
-            <p>파일이나 근거를 선택하면 원문 코드를 확인할 수 있습니다.</p>
+            <h2>肄붾뱶 誘몃━蹂닿린</h2>
+            <p>?뚯씪?대굹 洹쇨굅瑜??좏깮?섎㈃ ?먮Ц 肄붾뱶瑜??뺤씤?????덉뒿?덈떎.</p>
           </div>
         </div>
       </section>
@@ -635,7 +644,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <FileCode2 size={18} />
         <div>
           <h2>{detail.filePath}</h2>
-          <p>{detail.language} · {detail.chunks?.length || 0} chunks</p>
+          <p>{detail.language} 쨌 {detail.chunks?.length || 0} chunks</p>
         </div>
       </div>
       <pre className="code-viewer">
@@ -655,4 +664,4 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
   );
 }
 
-export { CodeWorkspace };
+export { CodeSourceManagementPanel, CodeWorkspace };

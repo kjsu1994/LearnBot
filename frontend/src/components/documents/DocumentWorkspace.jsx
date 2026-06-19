@@ -10,10 +10,12 @@ import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
+  const showSourceManagement = props.showSourceManagement !== false;
 
   return (
     <section className="workspace-grid">
       <div className="left-column">
+        {showSourceManagement && (
         <section className="panel">
           <div className="panel-title">
             <Database size={18} />
@@ -83,6 +85,7 @@ function DocumentWorkspace(props) {
             {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
           </form>
         </section>
+        )}
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
         {props.documentPreviewOpen && (
@@ -164,6 +167,114 @@ function DocumentWorkspace(props) {
           <ResultList results={props.searchResults} title="검색 결과" />
         </form>
       </div>
+    </section>
+  );
+}
+
+function DocumentSourcePanel(props) {
+  const {
+    webUrl = '',
+    setWebUrl = () => {},
+    webRecursive = true,
+    setWebRecursive = () => {},
+    webMaxDepth = 2,
+    setWebMaxDepth = () => {},
+    webMaxPages = 30,
+    setWebMaxPages = () => {},
+    files = [],
+    setFiles = () => {},
+    fileBatchResult,
+    ingestWeb = (event) => event.preventDefault(),
+    ingestFile = (event) => event.preventDefault(),
+    loading = () => false,
+  } = props;
+
+  return (
+    <section className="panel">
+      <div className="panel-title">
+        <Database size={18} />
+        <div>
+          <h2>문서 소스 추가</h2>
+          <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
+        </div>
+      </div>
+      <form className="stack" onSubmit={ingestWeb}>
+        <label htmlFor="admin-web-url">웹 URL</label>
+        <div className="inline-control">
+          <input
+            id="admin-web-url"
+            value={webUrl}
+            onChange={(event) => setWebUrl(event.target.value)}
+            placeholder="https://example.com/docs 또는 example.com/docs"
+          />
+          <button disabled={!webUrl || loading('web')}>
+            {loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+            인덱싱
+          </button>
+        </div>
+        <label className="checkbox-row" htmlFor="admin-web-recursive">
+          <input
+            id="admin-web-recursive"
+            type="checkbox"
+            checked={webRecursive}
+            onChange={(event) => setWebRecursive(event.target.checked)}
+          />
+          <span>시작 URL의 하위 경로를 재귀 수집</span>
+        </label>
+        <div className="form-grid two">
+          <div className="stack">
+            <label htmlFor="admin-web-max-depth">깊이</label>
+            <input
+              id="admin-web-max-depth"
+              type="number"
+              min="0"
+              max="2"
+              value={webMaxDepth}
+              disabled={!webRecursive}
+              onChange={(event) => setWebMaxDepth(event.target.value)}
+            />
+          </div>
+          <div className="stack">
+            <label htmlFor="admin-web-max-pages">최대 페이지</label>
+            <input
+              id="admin-web-max-pages"
+              type="number"
+              min="1"
+              max="30"
+              value={webMaxPages}
+              disabled={!webRecursive}
+              onChange={(event) => setWebMaxPages(event.target.value)}
+            />
+          </div>
+        </div>
+      </form>
+      <form className="stack" onSubmit={ingestFile}>
+        <label htmlFor="admin-file-upload">파일 업로드</label>
+        <div className="file-row">
+          <label className="file-picker" htmlFor="admin-file-upload">
+            <FileUp size={16} />
+            <span>{formatSelectedFiles(files)}</span>
+          </label>
+          <input
+            id="admin-file-upload"
+            className="visually-hidden"
+            type="file"
+            accept=".pdf,.docx,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx"
+            multiple
+            onChange={(event) => setFiles(Array.from(event.target.files || []))}
+          />
+          <button disabled={!files?.length || loading('file')}>
+            {loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
+            업로드
+          </button>
+        </div>
+        {files?.length > 1 && (
+          <div className="selected-file-list">
+            {files.map((item) => <span key={`${item.name}-${item.size}`}>{item.name}</span>)}
+          </div>
+        )}
+        {fileBatchResult && <FileBatchResult result={fileBatchResult} />}
+      </form>
     </section>
   );
 }
@@ -538,4 +649,4 @@ function PreviewTable({ rows = [] }) {
   );
 }
 
-export { DocumentWorkspace };
+export { DocumentSourcePanel, DocumentWorkspace };

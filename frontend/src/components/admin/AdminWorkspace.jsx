@@ -3,6 +3,8 @@ import { AlertTriangle, Bot, CheckCircle2, Database, Download, FileUp, Globe, In
 import { defaultSpaceId } from '../../config/constants.js';
 import { formatBrandText, formatDate, formatFileSize, formatTransferCounts } from '../../lib/formatters.js';
 import { IconButton, StatusBadge } from '../common/Common.jsx';
+import { CodeSourceManagementPanel } from '../code/CodeWorkspace.jsx';
+import { DocumentSourcePanel } from '../documents/DocumentWorkspace.jsx';
 
 function AdminWorkspace({
   currentUser,
@@ -31,7 +33,10 @@ function AdminWorkspace({
   testAdminLlmSettings,
   refreshAdmin,
   loading,
+  codeSourceProps,
+  documentSourceProps,
 }) {
+  const [activeAdminTab, setActiveAdminTab] = useState('settings');
   const [editingSpaceId, setEditingSpaceId] = useState('');
   const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
   const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
@@ -217,8 +222,46 @@ function AdminWorkspace({
   const transferSpaceName = spaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
   const allowedDomains = adminSettings?.allowedDomains || [];
   const allowedDomainPreview = allowedDomains.slice(0, 6);
+  const adminTabs = (
+    <div className="admin-tabs" role="tablist" aria-label="관리자 메뉴">
+      <button
+        className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
+        type="button"
+        role="tab"
+        aria-selected={activeAdminTab === 'settings'}
+        onClick={() => setActiveAdminTab('settings')}
+      >
+        관리자 설정
+      </button>
+      <button
+        className={activeAdminTab === 'sources' ? 'mode-button active' : 'mode-button'}
+        type="button"
+        role="tab"
+        aria-selected={activeAdminTab === 'sources'}
+        onClick={() => setActiveAdminTab('sources')}
+      >
+        코드/문서 등록
+      </button>
+    </div>
+  );
+
+  if (activeAdminTab === 'sources') {
+    return (
+      <>
+        {adminTabs}
+        <section className="workspace-grid admin-source-grid">
+          <CodeSourceManagementPanel {...(codeSourceProps || {})} loading={loading} />
+          <div className="right-column">
+            <DocumentSourcePanel {...(documentSourceProps || {})} loading={loading} />
+          </div>
+        </section>
+      </>
+    );
+  }
 
   return (
+    <>
+    {adminTabs}
     <section className="workspace-grid">
       <div className="left-column">
         <section className="panel">
@@ -793,6 +836,7 @@ function AdminWorkspace({
         </AdminUserModal>
       )}
     </section>
+    </>
   );
 }
 

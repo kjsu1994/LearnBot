@@ -570,11 +570,33 @@ h3 {
   grid-template-columns: minmax(360px, 0.95fr) minmax(440px, 1.25fr);
 }
 
+.admin-tabs {
+  background: #fff;
+  border: 1px solid #dfe6e2;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding: 6px;
+}
+
+.admin-tabs .mode-button {
+  min-height: 36px;
+}
+
+.admin-source-grid {
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+}
+
 .left-column,
 .right-column {
   display: grid;
   gap: 20px;
   min-width: 0;
+}
+
+.full-column {
+  grid-column: 1 / -1;
 }
 
 .panel {

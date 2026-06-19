@@ -957,6 +957,7 @@ export default function App() {
             findReferences={findReferences}
             loading={loading}
             codeFileLoading={busy.startsWith('code-file-')}
+            showSourceManagement={false}
           />
         )}
 
@@ -998,6 +999,7 @@ export default function App() {
             search={search}
             searchResults={searchResults}
             loading={loading}
+            showSourceManagement={false}
           />
         )}
 
@@ -1029,6 +1031,46 @@ export default function App() {
             testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
+            codeSourceProps={{
+              repoForm,
+              setRepoForm,
+              indexCredential,
+              setIndexCredential,
+              repositories,
+              selectedRepositoryId,
+              setSelectedRepositoryId,
+              selectedRepository,
+              jobs,
+              jobFailures,
+              loadJobFailures,
+              registerRepository,
+              uploadZipRepository,
+              zipForm,
+              setZipForm,
+              zipReplaceFile,
+              setZipReplaceFile,
+              replaceZipRepository,
+              indexRepository,
+              cancelIndex,
+              deleteRepository,
+              clearFailedJobs,
+              refreshJobs,
+            }}
+            documentSourceProps={{
+              webUrl,
+              setWebUrl,
+              webRecursive,
+              setWebRecursive,
+              webMaxDepth,
+              setWebMaxDepth,
+              webMaxPages,
+              setWebMaxPages,
+              files,
+              setFiles: updateUploadFiles,
+              fileBatchResult,
+              ingestWeb,
+              ingestFile,
+            }}
           />
         )}
     </WorkspaceShell>
