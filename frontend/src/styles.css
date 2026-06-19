@@ -942,12 +942,25 @@ h3 {
 
 .admin-source-grid .repo-row {
   align-items: stretch;
+  cursor: pointer;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-source-grid .repo-row-header {
+  align-items: start;
+  display: grid;
+  gap: 10px;
   grid-template-columns: minmax(0, 1fr);
 }
 
 .admin-source-grid .repo-row .document-meta {
   align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   justify-items: start;
+  justify-content: flex-start;
 }
 
 .admin-source-grid .repo-row .document-actions {
@@ -957,6 +970,13 @@ h3 {
 
 .admin-source-grid .repo-row .job-strip {
   grid-column: auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-source-grid .repo-row .job-strip .compact-action {
+  justify-self: start;
+  width: auto;
 }
 
 .space-admin-row {

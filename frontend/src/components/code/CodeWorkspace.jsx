@@ -265,7 +265,7 @@ function CodeSourceManagementPanel(props) {
             <p>{repositories.length ? `${repositories.length}개 저장소` : '등록된 저장소가 없습니다.'}</p>
           </div>
         </div>
-        <div className="document-list scrollable-list">
+        <div className="document-list scrollable-list repo-list">
           {repositories.map((repo) => {
             const latestJob = jobs[repo.id]?.[0];
             const runningJob = jobs[repo.id]?.find((job) => job.status === 'RUNNING' || job.status === 'CANCELLING');
@@ -358,18 +358,18 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
   return (
     <div className="job-strip">
       <span>
-        {getStatusLabel(job.status)} 쨌 {job.processedFiles}/{job.totalFiles || '-'} files 쨌 {job.totalChunks} chunks
-        {job.failedFiles > 0 ? ` 쨌 ?ㅽ뙣 ${job.failedFiles}` : ''}
+        {getStatusLabel(job.status)} {'\u00B7'} {job.processedFiles}/{job.totalFiles || '-'} files {'\u00B7'} {job.totalChunks} chunks
+        {job.failedFiles > 0 ? ` \u00B7 ${'\uC2E4\uD328'} ${job.failedFiles}` : ''}
       </span>
       {jobChangeText(job) && <small className="job-change-line">{jobChangeText(job)}</small>}
-      <div className="progress-track" aria-label="인덱싱 진행률">
+      <div className="progress-track" aria-label={'\uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
         <span style={{ width: `${jobPercent(job)}%` }} />
       </div>
       {job.errorMessage && <div className="failure-line"><AlertTriangle size={14} />{job.errorMessage}</div>}
       {canShowFailures && (
         <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadFailures(repoId, job.id); }}>
           {loading ? <Loader2 className="spin" size={14} /> : <Eye size={14} />}
-          ?ㅽ뙣 ?ъ쑀
+          {'\uC2E4\uD328 \uC0AC\uC720'}
         </button>
       )}
       {failures && <JobFailureList failures={failures} />}
@@ -379,14 +379,14 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
 
 function JobFailureList({ failures }) {
   if (!failures.length) {
-    return <p className="empty compact-empty">湲곕줉???뚯씪蹂??ㅽ뙣 ?ъ쑀媛 ?놁뒿?덈떎. ??μ냼 ?섏? ?ㅻ쪟 硫붿떆吏瑜??뺤씤?섏꽭??</p>;
+    return <p className="empty compact-empty">{'\uAE30\uB85D\uB41C \uD30C\uC77C\uBCC4 \uC2E4\uD328 \uC0AC\uC720\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uC18C \uC218\uC900 \uC624\uB958 \uBA54\uC2DC\uC9C0\uB97C \uD655\uC778\uD558\uC138\uC694.'}</p>;
   }
   return (
     <div className="failure-list">
       {failures.map((failure) => (
         <div className="failure-item" key={failure.id}>
           <strong>{failure.filePath || 'repository'}</strong>
-          <small>{failure.stage} 쨌 {formatDate(failure.createdAt)}</small>
+          <small>{failure.stage} {'\u00B7'} {formatDate(failure.createdAt)}</small>
           <span>{failure.message}</span>
         </div>
       ))}
@@ -414,14 +414,14 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
   useEffect(() => {
     setExpanded(false);
   }, [evidenceKey]);
-  if (!evidence.length) return <p className="empty compact-empty">?쒖떆??肄붾뱶 洹쇨굅媛 ?놁뒿?덈떎.</p>;
+  if (!evidence.length) return <p className="empty compact-empty">{'\uD45C\uC2DC\uD560 \uCF54\uB4DC \uADFC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>;
   const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
   const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
-        <strong>肄붾뱶 洹쇨굅</strong>
-        <small>{visibleEvidence.length}/{evidence.length}媛??쒖떆</small>
+        <strong>{'\uCF54\uB4DC \uADFC\uAC70'}</strong>
+        <small>{visibleEvidence.length}/{evidence.length}{'\uAC1C \uD45C\uC2DC'}</small>
       </div>
       <div className="evidence-list">
         {visibleEvidence.map((item) => {
@@ -431,8 +431,8 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
             ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
             : null;
           const metaText = isCommitDiff
-            ? `${item.metadata?.changeType || item.chunkType} 쨌 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
-            : `${item.lineStart}-${item.lineEnd} 쨌 ${item.chunkType}`;
+            ? `${item.metadata?.changeType || item.chunkType} \u00B7 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
+            : `${item.lineStart}-${item.lineEnd} \u00B7 ${item.chunkType}`;
           return (
             <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
               <div className="result-heading">
@@ -440,7 +440,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
                 {canOpen && (
                   <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
                     <Eye size={14} />
-                    ?닿린
+                    {'\uC5F4\uAE30'}
                   </button>
                 )}
               </div>
@@ -453,7 +453,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
       {evidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '?듭떖 洹쇨굅留?蹂닿린' : `?꾩껜 洹쇨굅 ${evidence.length}媛?蹂닿린`}
+          {expanded ? '\uD575\uC2EC \uADFC\uAC70\uB9CC \uBCF4\uAE30' : `\uC804\uCCB4 \uADFC\uAC70 ${evidence.length}\uAC1C \uBCF4\uAE30`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
@@ -470,14 +470,14 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              ?닿린
+              {'\uC5F4\uAE30'}
             </button>
           </div>
-          <small>{item.repositoryName} 쨌 {item.lineStart}-{item.lineEnd} 쨌 score {Number(item.score || 0).toFixed(3)}</small>
+          <small>{item.repositoryName} {'\u00B7'} {item.lineStart}-{item.lineEnd} {'\u00B7'} score {Number(item.score || 0).toFixed(3)}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!results.length && <p className="empty">肄붾뱶 寃??寃곌낵媛 ?놁뒿?덈떎.</p>}
+      {!results.length && <p className="empty">{'\uCF54\uB4DC \uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>}
     </div>
   );
 }
@@ -485,8 +485,8 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
 function CodeReferenceResults({ result, onOpenEvidence }) {
   return (
     <div className="reference-results">
-      <ReferenceGroup title="?뺤쓽" items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
-      <ReferenceGroup title="李몄“" items={result.references || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title={'\uC815\uC758'} items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title={'\uCC38\uC870'} items={result.references || []} onOpenEvidence={onOpenEvidence} />
     </div>
   );
 }
@@ -501,14 +501,14 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              ?닿린
+              {'\uC5F4\uAE30'}
             </button>
           </div>
-          <small>{item.lineStart}-{item.lineEnd} 쨌 {item.chunkType}</small>
+          <small>{item.lineStart}-{item.lineEnd} {'\u00B7'} {item.chunkType}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!items.length && <p className="empty compact-empty">寃곌낵 ?놁쓬</p>}
+      {!items.length && <p className="empty compact-empty">{'\uACB0\uACFC \uC5C6\uC74C'}</p>}
     </div>
   );
 }
@@ -549,10 +549,10 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
             <FileCode2 size={18} />
             <div>
               <h2 id="code-modal-title">{fileName}</h2>
-              <p>{detail?.filePath || '肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.'}</p>
+              <p>{detail?.filePath || '\uCF54\uB4DC \uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</p>
             </div>
           </div>
-          <button className="icon-button code-modal-close" type="button" title="?リ린" onClick={() => onClose?.()}>
+          <button className="icon-button code-modal-close" type="button" title={'\uB2EB\uAE30'} onClick={() => onClose?.()}>
             <X size={18} />
           </button>
         </header>
@@ -567,14 +567,14 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
           {loading && (
             <div className="code-modal-state">
               <Loader2 className="spin" size={22} />
-              <strong>肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.</strong>
+              <strong>{'\uCF54\uB4DC \uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</strong>
             </div>
           )}
 
           {!loading && !detail && (
             <div className="code-modal-state">
               <FileCode2 size={22} />
-              <strong>?쒖떆??肄붾뱶媛 ?놁뒿?덈떎.</strong>
+              <strong>{'\uD45C\uC2DC\uD560 \uCF54\uB4DC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</strong>
             </div>
           )}
 
@@ -617,8 +617,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>肄붾뱶 誘몃━蹂닿린</h2>
-            <p>?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.</p>
+            <h2>{'\uCF54\uB4DC \uBBF8\uB9AC\uBCF4\uAE30'}</h2>
+            <p>{'\uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</p>
           </div>
         </div>
       </section>
@@ -630,8 +630,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>肄붾뱶 誘몃━蹂닿린</h2>
-            <p>?뚯씪?대굹 洹쇨굅瑜??좏깮?섎㈃ ?먮Ц 肄붾뱶瑜??뺤씤?????덉뒿?덈떎.</p>
+            <h2>{'\uCF54\uB4DC \uBBF8\uB9AC\uBCF4\uAE30'}</h2>
+            <p>{'\uD30C\uC77C\uC774\uB098 \uADFC\uAC70\uB97C \uC120\uD0DD\uD558\uBA74 \uC6D0\uBB38 \uCF54\uB4DC\uB97C \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}</p>
           </div>
         </div>
       </section>
@@ -644,7 +644,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <FileCode2 size={18} />
         <div>
           <h2>{detail.filePath}</h2>
-          <p>{detail.language} 쨌 {detail.chunks?.length || 0} chunks</p>
+          <p>{detail.language} {'\u00B7'} {detail.chunks?.length || 0} chunks</p>
         </div>
       </div>
       <pre className="code-viewer">
