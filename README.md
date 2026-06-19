@@ -43,7 +43,7 @@ Open:
 
 - Frontend Nginx: http://localhost:8083
 - Backend: http://localhost:8080
-- Ollama: http://localhost:11434
+- Ollama: http://localhost:11436
 - MinIO API: http://localhost:19000
 - MinIO Console: http://localhost:19001
 

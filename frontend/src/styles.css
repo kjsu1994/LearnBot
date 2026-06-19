@@ -4533,3 +4533,46 @@ button:hover:not(:disabled),
   display: flex;
   gap: 5px;
 }
+
+.admin-source-grid > .left-column,
+.admin-source-grid > .right-column {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-source-grid .panel {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-source-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.admin-source-grid > .left-column,
+.admin-source-grid > .right-column {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-source-grid .panel {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-source-grid .inline-control,
+.admin-source-grid .file-row {
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  min-width: 0;
+}
+
+.admin-source-grid input,
+.admin-source-grid .file-picker {
+  min-width: 0;
+}
+
+.admin-source-grid .inline-control button,
+.admin-source-grid .file-row button {
+  min-width: 50px;
+  padding: 0px;
+}

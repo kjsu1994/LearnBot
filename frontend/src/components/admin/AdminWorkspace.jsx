@@ -250,7 +250,9 @@ function AdminWorkspace({
       <>
         {adminTabs}
         <section className="workspace-grid admin-source-grid">
+          <div className="left-column">
           <CodeSourceManagementPanel {...(codeSourceProps || {})} loading={loading} />
+          </div>
           <div className="right-column">
             <DocumentSourcePanel {...(documentSourceProps || {})} loading={loading} />
           </div>
