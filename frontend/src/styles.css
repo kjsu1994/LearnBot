@@ -1701,6 +1701,15 @@ h3 {
   max-width: 980px;
 }
 
+.code-answer-modal {
+  height: min(90vh, 940px);
+  width: min(96vw, 1320px);
+}
+
+.code-answer-modal-body {
+  overscroll-behavior: contain;
+}
+
 .code-modal-state {
   align-items: center;
   color: #aebec8;
@@ -4074,6 +4083,33 @@ button:hover:not(:disabled),
 .evidence-section-expanded .evidence-card p,
 .evidence-section-expanded .code-evidence p {
   -webkit-line-clamp: 7;
+}
+
+.code-answer {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.code-answer .answer-body {
+  max-height: clamp(220px, 38vh, 540px);
+  min-height: 0;
+}
+
+.code-answer .evidence-list {
+  max-height: clamp(180px, 34vh, 460px);
+}
+
+.code-answer .evidence-section-expanded .evidence-list {
+  max-height: clamp(220px, 44vh, 620px);
+}
+
+.code-answer .code-evidence p {
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
 }
 
 .results,

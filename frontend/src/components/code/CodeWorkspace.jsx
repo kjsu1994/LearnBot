@@ -266,7 +266,7 @@ function CodeWorkspace(props) {
             </div>
           )}
           {codeAnswer && (
-            <div className="answer">
+            <div className="answer code-answer">
               <div className="answer-title">
                 <div className="answer-title-main">
                   <CheckCircle2 size={16} />
@@ -288,6 +288,8 @@ function CodeWorkspace(props) {
               title={`${getCodeModeLabel(codeAnswer.mode)} 답변`}
               subtitle={selectedRepository?.name || '코드 답변'}
               answer={codeAnswer.answer}
+              className="code-answer-modal"
+              bodyClassName="code-answer-modal-body"
               onClose={() => setAnswerModalOpen(false)}
             />
           )}

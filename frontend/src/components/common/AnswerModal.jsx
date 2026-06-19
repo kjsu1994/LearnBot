@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { MessageSquare, X } from 'lucide-react';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
-function AnswerModal({ title = '답변', subtitle = '', answer = '', onClose }) {
+function AnswerModal({ title = '답변', subtitle = '', answer = '', className = '', bodyClassName = '', onClose }) {
   useEffect(() => {
     function handleKeyDown(event) {
       if (event.key === 'Escape') onClose?.();
@@ -13,7 +13,7 @@ function AnswerModal({ title = '답변', subtitle = '', answer = '', onClose }) 
 
   return (
     <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
-      <section className="code-modal answer-modal" role="dialog" aria-modal="true" aria-labelledby="answer-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className={`code-modal answer-modal ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby="answer-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
             <MessageSquare size={18} />
@@ -30,7 +30,7 @@ function AnswerModal({ title = '답변', subtitle = '', answer = '', onClose }) 
           <span className="active-tab">답변</span>
           <span>expanded view</span>
         </div>
-        <div className="code-modal-body answer-modal-body">
+        <div className={`code-modal-body answer-modal-body ${bodyClassName}`.trim()}>
           <MarkdownAnswer text={answer} />
         </div>
       </section>
