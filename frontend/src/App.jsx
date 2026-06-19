@@ -8,6 +8,7 @@ import { AdminWorkspace } from './components/admin/AdminWorkspace.jsx';
 import { CodeWorkspace } from './components/code/CodeWorkspace.jsx';
 import { DocumentWorkspace } from './components/documents/DocumentWorkspace.jsx';
 import { HomePage, LoginScreen, WorkspaceShell } from './components/layout/Layout.jsx';
+import { SavedAnswersWorkspace } from './components/saved/SavedAnswersWorkspace.jsx';
 import { getProgressMessage } from './lib/formatters.js';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
   const [answerMode, setAnswerMode] = useState('qa');
   const [searchResults, setSearchResults] = useState([]);
   const [answer, setAnswer] = useState(null);
+  const [answerSavedId, setAnswerSavedId] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [documentDetail, setDocumentDetail] = useState(null);
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
@@ -73,10 +75,15 @@ export default function App() {
   const [codeQuestion, setCodeQuestion] = useState('');
   const [codeMode, setCodeMode] = useState('overview');
   const [codeAnswer, setCodeAnswer] = useState(null);
+  const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeSearchQuery, setCodeSearchQuery] = useState('');
   const [codeSearchResults, setCodeSearchResults] = useState([]);
   const [referenceSymbol, setReferenceSymbol] = useState('');
   const [referenceResult, setReferenceResult] = useState(null);
+  const [savedAnswers, setSavedAnswers] = useState([]);
+  const [selectedSavedAnswer, setSelectedSavedAnswer] = useState(null);
+  const [savedAnswerQuery, setSavedAnswerQuery] = useState('');
+  const [savedAnswerType, setSavedAnswerType] = useState('');
 
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminSettings, setAdminSettings] = useState({
@@ -180,6 +187,12 @@ export default function App() {
     }
   }, [activeView, user?.role]);
 
+  useEffect(() => {
+    if (activeView === 'saved' && user && activeSpaceId) {
+      refreshSavedAnswers();
+    }
+  }, [activeView, user?.id, activeSpaceId, savedAnswerType]);
+
   useEffect(() => () => {
     if (documentPreviewBlobUrl) {
       URL.revokeObjectURL(documentPreviewBlobUrl);
@@ -248,6 +261,10 @@ export default function App() {
     setCodeModalOpen(false);
     setFiles([]);
     setFileBatchResult(null);
+    setSavedAnswers([]);
+    setSelectedSavedAnswer(null);
+    setAnswerSavedId('');
+    setCodeAnswerSavedId('');
     setDocumentPreviewOpen(false);
     setDocumentPreview(null);
     setDocumentPreviewBlobUrl((current) => {
@@ -428,6 +445,30 @@ export default function App() {
         json: { question, mode: answerMode, spaceId: activeSpaceId },
       });
       setAnswer(data);
+      setAnswerSavedId('');
+    });
+  }
+
+  async function saveAnswer() {
+    if (!answer) return;
+    await run('save-answer', async () => {
+      const saved = await request('/api/saved-answers', {
+        method: 'POST',
+        json: {
+          spaceId: activeSpaceId,
+          answerType: 'DOCUMENT',
+          question,
+          mode: answer.mode,
+          answer: answer.answer,
+          citations: answer.citations || [],
+          evidence: answer.evidence || [],
+          confidence: answer.confidence,
+          diagnostics: answer.diagnostics || [],
+        },
+      });
+      setAnswerSavedId(saved.id);
+      setSavedAnswers((current) => [savedSummary(saved), ...current.filter((item) => item.id !== saved.id)]);
+      setSelectedSavedAnswer(saved);
     });
   }
 
@@ -591,6 +632,79 @@ export default function App() {
         },
       });
       setCodeAnswer(data);
+      setCodeAnswerSavedId('');
+    });
+  }
+
+  async function saveCodeAnswer() {
+    if (!codeAnswer) return;
+    await run('save-code-answer', async () => {
+      const saved = await request('/api/saved-answers', {
+        method: 'POST',
+        json: {
+          spaceId: activeSpaceId,
+          answerType: 'CODE',
+          question: codeQuestion,
+          mode: codeAnswer.mode,
+          answer: codeAnswer.answer,
+          citations: [],
+          evidence: codeAnswer.evidence || [],
+          confidence: codeAnswer.confidence,
+          diagnostics: codeAnswer.diagnostics || [],
+          repositoryId: selectedRepositoryId || null,
+        },
+      });
+      setCodeAnswerSavedId(saved.id);
+      setSavedAnswers((current) => [savedSummary(saved), ...current.filter((item) => item.id !== saved.id)]);
+      setSelectedSavedAnswer(saved);
+    });
+  }
+
+  async function refreshSavedAnswers() {
+    if (!activeSpaceId) return;
+    const params = new URLSearchParams();
+    params.set('spaceId', activeSpaceId);
+    params.set('limit', '80');
+    if (savedAnswerType) params.set('type', savedAnswerType);
+    if (savedAnswerQuery.trim()) params.set('query', savedAnswerQuery.trim());
+    await run('saved-list', async () => {
+      const data = await request(`/api/saved-answers?${params.toString()}`);
+      setSavedAnswers(data || []);
+      setSelectedSavedAnswer((current) => {
+        if (!current) return null;
+        return data?.some((item) => item.id === current.id) ? current : null;
+      });
+    });
+  }
+
+  async function loadSavedAnswer(savedAnswerId) {
+    await run(`saved-detail-${savedAnswerId}`, async () => {
+      const data = await request(`/api/saved-answers/${savedAnswerId}`);
+      setSelectedSavedAnswer(data);
+    });
+  }
+
+  async function updateSavedAnswerTitle(savedAnswerId, title) {
+    await run(`saved-title-${savedAnswerId}`, async () => {
+      const data = await request(`/api/saved-answers/${savedAnswerId}`, {
+        method: 'PATCH',
+        json: { title },
+      });
+      setSelectedSavedAnswer(data);
+      setSavedAnswers((current) => current.map((item) => (
+        item.id === data.id ? savedSummary(data) : item
+      )));
+    });
+  }
+
+  async function deleteSavedAnswer(savedAnswerId) {
+    if (!window.confirm('Delete this saved answer?')) return;
+    await run(`saved-delete-${savedAnswerId}`, async () => {
+      await request(`/api/saved-answers/${savedAnswerId}`, { method: 'DELETE' });
+      setSavedAnswers((current) => current.filter((item) => item.id !== savedAnswerId));
+      setSelectedSavedAnswer((current) => (current?.id === savedAnswerId ? null : current));
+      setAnswerSavedId((current) => (current === savedAnswerId ? '' : current));
+      setCodeAnswerSavedId((current) => (current === savedAnswerId ? '' : current));
     });
   }
 
@@ -858,6 +972,22 @@ export default function App() {
     });
   }
 
+  function savedSummary(saved) {
+    return {
+      id: saved.id,
+      spaceId: saved.spaceId,
+      answerType: saved.answerType,
+      question: saved.question,
+      mode: saved.mode,
+      answerPreview: saved.answerPreview || saved.answer,
+      confidence: saved.confidence,
+      repositoryId: saved.repositoryId,
+      title: saved.title,
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    };
+  }
+
   const loading = (name) => busy === name;
   const runningDocumentJobs = documentJobs.filter((job) => job.status === 'RUNNING');
   const documentProgressMessage = runningDocumentJobs.length
@@ -943,6 +1073,8 @@ export default function App() {
             codeMode={codeMode}
             setCodeMode={setCodeMode}
             codeAnswer={codeAnswer}
+            answerSavedId={codeAnswerSavedId}
+            saveAnswer={saveCodeAnswer}
             codeSearchQuery={codeSearchQuery}
             setCodeSearchQuery={setCodeSearchQuery}
             codeSearchResults={codeSearchResults}
@@ -1005,12 +1137,30 @@ export default function App() {
             setQuestion={setQuestion}
             ask={ask}
             answer={answer}
+            answerSavedId={answerSavedId}
+            saveAnswer={saveAnswer}
             query={query}
             setQuery={setQuery}
             search={search}
             searchResults={searchResults}
             loading={loading}
             showSourceManagement={false}
+          />
+        )}
+
+        {activeView === 'saved' && (
+          <SavedAnswersWorkspace
+            savedAnswers={savedAnswers}
+            selectedSavedAnswer={selectedSavedAnswer}
+            savedAnswerQuery={savedAnswerQuery}
+            setSavedAnswerQuery={setSavedAnswerQuery}
+            savedAnswerType={savedAnswerType}
+            setSavedAnswerType={setSavedAnswerType}
+            refreshSavedAnswers={refreshSavedAnswers}
+            loadSavedAnswer={loadSavedAnswer}
+            updateSavedAnswerTitle={updateSavedAnswerTitle}
+            deleteSavedAnswer={deleteSavedAnswer}
+            loading={loading}
           />
         )}
 

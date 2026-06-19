@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
@@ -81,9 +81,14 @@ function CodeWorkspace(props) {
                   <CheckCircle2 size={16} />
                   <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
                 </div>
-                <button className="icon-button answer-expand-button" type="button" title="전체 화면으로 보기" onClick={() => setAnswerModalOpen(true)}>
-                  <Maximize2 size={15} />
-                </button>
+                <div className="answer-actions">
+                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || loading('save-code-answer')} onClick={props.saveAnswer}>
+                    {loading('save-code-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
+                  </button>
+                  <button className="icon-button answer-expand-button" type="button" title="전체 화면으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                    <Maximize2 size={15} />
+                  </button>
+                </div>
               </div>
               <AnswerStatus confidence={codeAnswer.confidence} diagnostics={codeAnswer.diagnostics} />
               <div className="answer-body">

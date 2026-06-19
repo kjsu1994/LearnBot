@@ -10,6 +10,7 @@ function normalizeRoute(pathname = '/') {
 
 function routeToView(pathname) {
   if (pathname === routePaths.docs) return 'docs';
+  if (pathname === routePaths.saved) return 'saved';
   if (pathname === routePaths.admin) return 'admin';
   return 'code';
 }

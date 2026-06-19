@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, Trash2 } from 'lucide-react';
+import { Bot, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, Trash2 } from 'lucide-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
@@ -318,7 +318,7 @@ function WorkspaceShell({
           </div>
         </header>
 
-        <div className={user.role === 'ADMIN' ? 'view-tabs three-tabs' : 'view-tabs'} aria-label="작업 영역">
+        <div className={user.role === 'ADMIN' ? 'view-tabs workspace-tabs-admin' : 'view-tabs workspace-tabs-user'} aria-label="작업 영역">
           <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.code)}>
             <Code2 size={16} />
             코드
@@ -326,6 +326,10 @@ function WorkspaceShell({
           <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.docs)}>
             <Database size={16} />
             문서
+          </button>
+          <button className={activeView === 'saved' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.saved)}>
+            <Bookmark size={16} />
+            저장됨
           </button>
           {user.role === 'ADMIN' && (
             <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.admin)}>

@@ -477,6 +477,14 @@ h3 {
   width: fit-content;
 }
 
+.workspace-tabs-user {
+  grid-template-columns: repeat(3, minmax(0, 160px));
+}
+
+.workspace-tabs-admin {
+  grid-template-columns: repeat(4, minmax(0, 150px));
+}
+
 .tab-button {
   background: transparent;
   border: 0;
@@ -851,6 +859,48 @@ h3 {
   color: #13715f;
   display: flex;
   gap: 7px;
+}
+
+.answer-title-main,
+.answer-actions {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.answer-actions {
+  margin-left: auto;
+}
+
+.saved-grid {
+  grid-template-columns: minmax(320px, 0.75fr) minmax(440px, 1.45fr);
+}
+
+.saved-answer-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.saved-answer-list {
+  max-height: 560px;
+}
+
+.saved-answer-detail .detail-box p {
+  color: #34424c;
+  line-height: 1.55;
+}
+
+.saved-answer-body {
+  white-space: normal;
+}
+
+.saved-diagnostics {
+  color: #53616a;
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .results {

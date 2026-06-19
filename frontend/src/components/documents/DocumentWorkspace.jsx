@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Database, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
 import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
@@ -128,9 +128,14 @@ function DocumentWorkspace(props) {
                   <CheckCircle2 size={16} />
                   <strong>답변</strong>
                 </div>
-                <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
-                  <Maximize2 size={15} />
-                </button>
+                <div className="answer-actions">
+                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.loading('save-answer')} onClick={props.saveAnswer}>
+                    {props.loading('save-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
+                  </button>
+                  <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                    <Maximize2 size={15} />
+                  </button>
+                </div>
               </div>
               <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
               <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />

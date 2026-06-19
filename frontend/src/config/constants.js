@@ -6,6 +6,7 @@ export const routePaths = {
   home: '/app',
   code: '/code',
   docs: '/docs',
+  saved: '/saved',
   admin: '/admin',
 };
 

@@ -20,8 +20,8 @@ import java.util.stream.IntStream;
 
 @Service
 public class CodeRagService {
-    private static final int OVERVIEW_CONTEXT_LIMIT = 8;
-    private static final int DEFAULT_CONTEXT_LIMIT = 12;
+    private static final int OVERVIEW_CONTEXT_LIMIT = 12;
+    private static final int DEFAULT_CONTEXT_LIMIT = 8;
     private static final int OVERVIEW_CONTEXT_CHARS = 620;
     private static final int DEFAULT_CONTEXT_CHARS = 1200;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
@@ -110,6 +110,7 @@ public class CodeRagService {
                 Use markdown headings.
                 Prefer detailed explanations over brief summaries.
                 Explain not only what the code does, but also why it exists and how it interacts with related components.
+                Do not speculate beyond the provided evidence.
                 """ + "\n" + questionMode.instruction();
 
         String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
