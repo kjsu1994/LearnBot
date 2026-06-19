@@ -101,14 +101,15 @@ public class CodeRagService {
                 If evidence is insufficient, say what is missing and list the closest files found.
                 Include a short reliability note when evidence is weak or indirect.
                 For code explanations, structure the answer as follows when applicable:
-                
                 1. Summary
                 2. Detailed explanation
                 3. Execution flow
-                4. Related classes and methods
+                4. Related files, classes, and methods
                 5. Important implementation details
                 
                 Use markdown headings.
+                Prefer detailed explanations over brief summaries.
+                Explain not only what the code does, but also why it exists and how it interacts with related components.
                 """ + "\n" + questionMode.instruction();
 
         String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
