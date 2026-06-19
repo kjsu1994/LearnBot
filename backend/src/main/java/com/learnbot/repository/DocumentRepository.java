@@ -2,9 +2,11 @@ package com.learnbot.repository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.domain.SourceStatus;
 import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
+import com.learnbot.dto.DocumentIndexingJobSummary;
 import com.learnbot.dto.CrawlAuditSummary;
 import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
@@ -30,10 +32,12 @@ import java.util.UUID;
 public class DocumentRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final LearnBotProperties properties;
 
-    public DocumentRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+    public DocumentRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, LearnBotProperties properties) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.properties = properties;
     }
 
     public UUID createSource(SourceType type, String name, String location, UUID spaceId, UUID createdBy) {
@@ -53,33 +57,44 @@ public class DocumentRepository {
     }
 
     public UUID createDocument(UUID sourceId, String title, String sourceUri, String contentType, Map<String, Object> metadata) {
+        return createDocument(sourceId, title, sourceUri, contentType, metadata, null);
+    }
+
+    public UUID createDocument(UUID sourceId, String title, String sourceUri, String contentType, Map<String, Object> metadata, String contentHash) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO documents (id, source_id, title, source_uri, content_type, metadata)
-                VALUES (:id, :sourceId, :title, :sourceUri, :contentType, CAST(:metadata AS jsonb))
+                INSERT INTO documents (id, source_id, title, source_uri, content_type, metadata, content_hash)
+                VALUES (:id, :sourceId, :title, :sourceUri, :contentType, CAST(:metadata AS jsonb), :contentHash)
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("sourceId", sourceId)
                 .addValue("title", title)
                 .addValue("sourceUri", sourceUri)
                 .addValue("contentType", contentType)
-                .addValue("metadata", toJson(metadata)));
+                .addValue("metadata", toJson(metadata))
+                .addValue("contentHash", contentHash));
         return id;
     }
 
     public void addChunks(UUID documentId, List<Chunk> chunks, List<List<Double>> embeddings) {
-        for (int i = 0; i < chunks.size(); i++) {
-            Chunk chunk = chunks.get(i);
-            jdbc.update("""
+        int batchSize = Math.max(1, properties.getEmbedding().getInsertBatchSize());
+        for (int start = 0; start < chunks.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, chunks.size());
+            MapSqlParameterSource[] batch = new MapSqlParameterSource[end - start];
+            for (int i = start; i < end; i++) {
+                Chunk chunk = chunks.get(i);
+                batch[i - start] = new MapSqlParameterSource()
+                        .addValue("id", UUID.randomUUID())
+                        .addValue("documentId", documentId)
+                        .addValue("chunkIndex", chunk.index())
+                        .addValue("content", chunk.content())
+                        .addValue("metadata", toJson(chunk.metadata()))
+                        .addValue("embedding", vectorLiteral(embeddings.get(i)));
+            }
+            jdbc.batchUpdate("""
                     INSERT INTO document_chunks (id, document_id, chunk_index, content, metadata, embedding)
                     VALUES (:id, :documentId, :chunkIndex, :content, CAST(:metadata AS jsonb), CAST(:embedding AS vector))
-                    """, new MapSqlParameterSource()
-                    .addValue("id", UUID.randomUUID())
-                    .addValue("documentId", documentId)
-                    .addValue("chunkIndex", chunk.index())
-                    .addValue("content", chunk.content())
-                    .addValue("metadata", toJson(chunk.metadata()))
-                    .addValue("embedding", vectorLiteral(embeddings.get(i))));
+                    """, batch);
         }
     }
 
@@ -137,6 +152,20 @@ public class DocumentRepository {
                 """, new MapSqlParameterSource().addValue("sourceId", sourceId));
     }
 
+    public void deleteDocumentsForSourceExcept(UUID sourceId, List<UUID> preservedDocumentIds) {
+        if (preservedDocumentIds == null || preservedDocumentIds.isEmpty()) {
+            deleteDocumentsForSource(sourceId);
+            return;
+        }
+        jdbc.update("""
+                DELETE FROM documents
+                WHERE source_id = :sourceId
+                  AND id NOT IN (:preservedDocumentIds)
+                """, new MapSqlParameterSource()
+                .addValue("sourceId", sourceId)
+                .addValue("preservedDocumentIds", preservedDocumentIds));
+    }
+
     public int countDocumentsForSource(UUID sourceId) {
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*)
@@ -144,6 +173,143 @@ public class DocumentRepository {
                 WHERE source_id = :sourceId
                 """, new MapSqlParameterSource().addValue("sourceId", sourceId), Integer.class);
         return count == null ? 0 : count;
+    }
+
+    public Optional<ReusableDocument> findReusableDocument(UUID sourceId, String sourceUri, String contentHash) {
+        if (contentHash == null || contentHash.isBlank()) {
+            return Optional.empty();
+        }
+        List<ReusableDocument> documents = jdbc.query("""
+                SELECT d.id, COUNT(c.id) AS chunk_count
+                FROM documents d
+                LEFT JOIN document_chunks c ON c.document_id = d.id
+                WHERE d.source_id = :sourceId
+                  AND d.source_uri = :sourceUri
+                  AND d.content_hash = :contentHash
+                GROUP BY d.id, d.created_at
+                ORDER BY d.created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("sourceId", sourceId)
+                .addValue("sourceUri", sourceUri)
+                .addValue("contentHash", contentHash), (rs, rowNum) -> new ReusableDocument(
+                rs.getObject("id", UUID.class),
+                rs.getInt("chunk_count")
+        ));
+        return documents.stream().findFirst();
+    }
+
+    public int copyReusableDocumentChunks(UUID oldDocumentId, UUID newDocumentId) {
+        return jdbc.update("""
+                INSERT INTO document_chunks (id, document_id, chunk_index, content, metadata, embedding)
+                SELECT gen_random_uuid(), :newDocumentId, chunk_index, content, metadata, embedding
+                FROM document_chunks
+                WHERE document_id = :oldDocumentId
+                  AND metadata ->> 'kind' IS DISTINCT FROM 'document_context'
+                """, new MapSqlParameterSource()
+                .addValue("oldDocumentId", oldDocumentId)
+                .addValue("newDocumentId", newDocumentId));
+    }
+
+    public UUID createDocumentJob(UUID sourceId, UUID spaceId, String jobType) {
+        UUID jobId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO document_indexing_jobs (id, source_id, space_id, job_type, status, started_at)
+                VALUES (:id, :sourceId, :spaceId, :jobType, 'RUNNING', now())
+                """, new MapSqlParameterSource()
+                .addValue("id", jobId)
+                .addValue("sourceId", sourceId)
+                .addValue("spaceId", spaceId)
+                .addValue("jobType", jobType));
+        return jobId;
+    }
+
+    public void updateDocumentJobProgress(
+            UUID jobId,
+            int totalDocuments,
+            int processedDocuments,
+            int totalChunks,
+            int reusedChunks,
+            int embeddedChunks
+    ) {
+        jdbc.update("""
+                UPDATE document_indexing_jobs
+                SET total_documents = :totalDocuments,
+                    processed_documents = :processedDocuments,
+                    total_chunks = :totalChunks,
+                    reused_chunks = :reusedChunks,
+                    embedded_chunks = :embeddedChunks
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("totalDocuments", totalDocuments)
+                .addValue("processedDocuments", processedDocuments)
+                .addValue("totalChunks", totalChunks)
+                .addValue("reusedChunks", reusedChunks)
+                .addValue("embeddedChunks", embeddedChunks));
+    }
+
+    public void finishDocumentJob(UUID jobId, String status, String errorMessage) {
+        jdbc.update("""
+                UPDATE document_indexing_jobs
+                SET status = :status,
+                    error_message = :errorMessage,
+                    finished_at = now()
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("status", status)
+                .addValue("errorMessage", errorMessage));
+    }
+
+    public List<DocumentIndexingJobSummary> listDocumentJobs(List<UUID> spaceIds, UUID selectedSpaceId) {
+        return jdbc.query("""
+                SELECT id, source_id, space_id, job_type, status, total_documents, processed_documents,
+                       total_chunks, reused_chunks, embedded_chunks, error_message, started_at, finished_at, created_at
+                FROM document_indexing_jobs
+                WHERE space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR space_id = CAST(:selectedSpaceId AS uuid))
+                ORDER BY created_at DESC
+                LIMIT 100
+                """, new MapSqlParameterSource()
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapDocumentJobSummary);
+    }
+
+    public Optional<DocumentIndexingJobSummary> findDocumentJob(UUID jobId, List<UUID> spaceIds) {
+        List<DocumentIndexingJobSummary> jobs = jdbc.query("""
+                SELECT id, source_id, space_id, job_type, status, total_documents, processed_documents,
+                       total_chunks, reused_chunks, embedded_chunks, error_message, started_at, finished_at, created_at
+                FROM document_indexing_jobs
+                WHERE id = :jobId
+                  AND space_id IN (:spaceIds)
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("spaceIds", spaceIds), this::mapDocumentJobSummary);
+        return jobs.stream().findFirst();
+    }
+
+    public void resetInterruptedDocumentJobs() {
+        jdbc.update("""
+                UPDATE document_indexing_jobs
+                SET status = 'FAILED',
+                    error_message = 'Document indexing was interrupted by server restart.',
+                    finished_at = now()
+                WHERE status = 'RUNNING'
+                """, new MapSqlParameterSource());
+        jdbc.update("""
+                UPDATE data_sources
+                SET status = 'FAILED',
+                    error_message = 'Document indexing was interrupted by server restart.',
+                    updated_at = now()
+                WHERE status = 'INDEXING'
+                  AND id IN (
+                      SELECT source_id
+                      FROM document_indexing_jobs
+                      WHERE status = 'FAILED'
+                        AND error_message = 'Document indexing was interrupted by server restart.'
+                  )
+                """, new MapSqlParameterSource());
     }
 
     public void createSourceObject(UUID sourceId, StoredObject object) {
@@ -440,6 +606,25 @@ public class DocumentRepository {
         }
     }
 
+    private DocumentIndexingJobSummary mapDocumentJobSummary(ResultSet rs, int rowNum) throws SQLException {
+        return new DocumentIndexingJobSummary(
+                rs.getObject("id", UUID.class),
+                rs.getObject("source_id", UUID.class),
+                rs.getObject("space_id", UUID.class),
+                rs.getString("job_type"),
+                rs.getString("status"),
+                rs.getInt("total_documents"),
+                rs.getInt("processed_documents"),
+                rs.getInt("total_chunks"),
+                rs.getInt("reused_chunks"),
+                rs.getInt("embedded_chunks"),
+                rs.getString("error_message"),
+                rs.getObject("started_at", OffsetDateTime.class),
+                rs.getObject("finished_at", OffsetDateTime.class),
+                rs.getObject("created_at", OffsetDateTime.class)
+        );
+    }
+
     private Map<String, Object> fromJson(String metadata) {
         if (metadata == null || metadata.isBlank()) {
             return Map.of();
@@ -470,5 +655,8 @@ public class DocumentRepository {
     private String cleanUpper(String value) {
         String clean = clean(value);
         return clean == null ? null : clean.toUpperCase();
+    }
+
+    public record ReusableDocument(UUID documentId, int chunkCount) {
     }
 }

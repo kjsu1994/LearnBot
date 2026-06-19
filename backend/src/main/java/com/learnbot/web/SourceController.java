@@ -2,6 +2,7 @@ package com.learnbot.web;
 
 import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.DocumentDetail;
+import com.learnbot.dto.DocumentIndexingJobSummary;
 import com.learnbot.dto.DocumentPreviewResponse;
 import com.learnbot.dto.FileBatchIngestResponse;
 import com.learnbot.dto.FileIngestItemResponse;
@@ -91,6 +92,16 @@ public class SourceController {
     @GetMapping("/documents")
     List<DocumentSummary> listDocuments(@RequestParam(required = false) UUID spaceId) {
         return ingestionService.listDocuments(currentUserProvider.currentUser(), spaceId);
+    }
+
+    @GetMapping("/document-indexing/jobs")
+    List<DocumentIndexingJobSummary> listDocumentJobs(@RequestParam(required = false) UUID spaceId) {
+        return ingestionService.listDocumentJobs(currentUserProvider.currentUser(), spaceId);
+    }
+
+    @GetMapping("/document-indexing/jobs/{jobId}")
+    DocumentIndexingJobSummary getDocumentJob(@PathVariable UUID jobId) {
+        return ingestionService.getDocumentJob(currentUserProvider.currentUser(), jobId);
     }
 
     @GetMapping("/documents/{documentId}")

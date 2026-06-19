@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, Trash2 } from 'lucide-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
@@ -259,7 +259,6 @@ function WorkspaceShell({
   selectedDocumentId,
   loadDocumentDetail,
   openDocumentPreview,
-  reindexDocument,
   deleteDocument,
   loading,
 }) {
@@ -290,7 +289,6 @@ function WorkspaceShell({
         selectedDocumentId={selectedDocumentId}
         loadDocumentDetail={loadDocumentDetail}
         openDocumentPreview={openDocumentPreview}
-        reindexDocument={reindexDocument}
         deleteDocument={deleteDocument}
         loading={loading}
       />
@@ -375,7 +373,6 @@ function Sidebar({
   selectedDocumentId,
   loadDocumentDetail,
   openDocumentPreview,
-  reindexDocument,
   deleteDocument,
   loading,
 }) {
@@ -520,23 +517,11 @@ function Sidebar({
                         <Eye size={14} />
                       </IconButton>
 
-                      <IconButton
-                          title="재색인"
-                          disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            reindexDocument(doc.id);
-                          }}
-                      >
-                        {loading(`reindex-${doc.id}`)
-                            ? <Loader2 className="spin" size={14} />
-                            : <RefreshCw size={14} />}
-                      </IconButton>
 
                       <IconButton
                           danger
                           title="삭제"
-                          disabled={loading(`reindex-${doc.id}`) || loading(`delete-${doc.id}`)}
+                          disabled={loading(`delete-${doc.id}`)}
                           onClick={(event) => {
                             event.stopPropagation();
                             deleteDocument(doc.id, doc.title);

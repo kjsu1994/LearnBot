@@ -155,7 +155,7 @@ public class CodeSearchService {
                 merge(expanded, result);
             }
             List<UUID> seeds = ranked.stream()
-                    .limit(Math.min(ranked.size(), 8))
+                    .limit(Math.min(ranked.size(), 5))
                     .map(CodeSearchResult::chunkId)
                     .toList();
             for (CodeSearchResult related : repository.graphRelatedChunks(

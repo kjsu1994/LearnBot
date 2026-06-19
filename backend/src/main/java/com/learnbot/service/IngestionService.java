@@ -5,8 +5,11 @@ import com.learnbot.domain.SourceStatus;
 import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.DocumentDetail;
+import com.learnbot.dto.DocumentIndexingJobSummary;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.repository.DocumentRepository;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,9 +17,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class IngestionService {
@@ -28,11 +37,12 @@ public class IngestionService {
     private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
     private final DocumentContextBuilder documentContextBuilder;
-    private final OllamaClient ollamaClient;
+    private final EmbeddingService embeddingService;
     private final LearnBotProperties properties;
     private final AuthService authService;
     private final AuditService auditService;
     private final TransactionTemplate transactionTemplate;
+    private final ExecutorService executor;
 
     public IngestionService(
             DocumentRepository repository,
@@ -43,7 +53,7 @@ public class IngestionService {
             ObjectStorageService objectStorageService,
             Chunker chunker,
             DocumentContextBuilder documentContextBuilder,
-            OllamaClient ollamaClient,
+            EmbeddingService embeddingService,
             LearnBotProperties properties,
             AuthService authService,
             AuditService auditService,
@@ -57,11 +67,22 @@ public class IngestionService {
         this.objectStorageService = objectStorageService;
         this.chunker = chunker;
         this.documentContextBuilder = documentContextBuilder;
-        this.ollamaClient = ollamaClient;
+        this.embeddingService = embeddingService;
         this.properties = properties;
         this.authService = authService;
         this.auditService = auditService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.executor = Executors.newFixedThreadPool(properties.getDocument().getIndexThreads());
+    }
+
+    @PostConstruct
+    void resetInterruptedJobs() {
+        repository.resetInterruptedDocumentJobs();
+    }
+
+    @PreDestroy
+    void shutdown() {
+        executor.shutdownNow();
     }
 
     public IngestResponse ingestWeb(AppUser user, UUID spaceId, String url) {
@@ -79,51 +100,41 @@ public class IngestionService {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String normalizedUrl = webUrlNormalizer.normalize(url);
         UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id());
-        IngestResponse response;
-        try {
-            WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages);
-            response = indexAll(
-                    sourceId,
-                    resolvedSpaceId,
-                    documents.documents(),
-                    documents.pageCount(),
-                    documents.skippedCount()
-            );
-        } catch (RuntimeException ex) {
-            recordFailure(user, sourceId, resolvedSpaceId, "DOCUMENT_INGEST_FAILED", ex);
-            throw ex;
-        }
-        auditService.log(
-                user,
-                "DOCUMENT_INGESTED",
-                "DOCUMENT",
-                response.documentId(),
-                resolvedSpaceId,
-                "Web document was indexed."
-        );
-        return response;
+        UUID jobId = repository.createDocumentJob(sourceId, resolvedSpaceId, "INITIAL_INDEX");
+        executor.submit(() -> runWebIndex(user, sourceId, resolvedSpaceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages, jobId, false));
+        auditService.log(user, "DOCUMENT_INGEST_STARTED", "SOURCE", sourceId, resolvedSpaceId, "Web document indexing started.");
+        return new IngestResponse(sourceId, null, resolvedSpaceId, 0, SourceStatus.INDEXING.name(), 0, 0, 0);
     }
 
     public IngestResponse ingestFile(AppUser user, UUID spaceId, MultipartFile file) {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String name = file.getOriginalFilename() == null ? "uploaded-file" : file.getOriginalFilename();
         UUID sourceId = repository.createSource(SourceType.FILE, name, name, resolvedSpaceId, user.id());
-        IngestResponse response;
         try {
             StoredObject storedObject = objectStorageService.store(sourceId, file);
-            ExtractedDocument document = fileExtractor.extract(file);
-            response = indexStoredFile(sourceId, resolvedSpaceId, storedObject, document);
+            UUID jobId = repository.createDocumentJob(sourceId, resolvedSpaceId, "INITIAL_INDEX");
+            executor.submit(() -> runFileIndex(user, sourceId, resolvedSpaceId, storedObject, jobId, false));
         } catch (RuntimeException ex) {
             recordFailure(user, sourceId, resolvedSpaceId, "DOCUMENT_INGEST_FAILED", ex);
             throw ex;
         }
-        auditService.log(user, "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), resolvedSpaceId, "File document was indexed.");
-        return response;
+        auditService.log(user, "DOCUMENT_INGEST_STARTED", "SOURCE", sourceId, resolvedSpaceId, "File document indexing started.");
+        return new IngestResponse(sourceId, null, resolvedSpaceId, 0, SourceStatus.INDEXING.name(), 0, 1, 0);
     }
 
     public List<DocumentSummary> listDocuments(AppUser user, UUID spaceId) {
         UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
         return repository.listDocuments(authService.accessibleSpaceIds(user), selectedSpaceId);
+    }
+
+    public List<DocumentIndexingJobSummary> listDocumentJobs(AppUser user, UUID spaceId) {
+        UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
+        return repository.listDocumentJobs(authService.accessibleSpaceIds(user), selectedSpaceId);
+    }
+
+    public DocumentIndexingJobSummary getDocumentJob(AppUser user, UUID jobId) {
+        return repository.findDocumentJob(jobId, authService.accessibleSpaceIds(user))
+                .orElseThrow(() -> new IllegalArgumentException("Document indexing job was not found."));
     }
 
     public DocumentDetail getDocument(AppUser user, UUID documentId) {
@@ -153,48 +164,73 @@ public class IngestionService {
         StoredSource source = repository.findSourceByDocumentId(documentId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document was not found."));
         repository.updateSourceStatus(source.id(), SourceStatus.INDEXING, null);
+        UUID jobId = repository.createDocumentJob(source.id(), summary.spaceId(), "REINDEX");
+        executor.submit(() -> runReindex(user, source, summary.spaceId(), jobId));
+        auditService.log(user, "DOCUMENT_REINDEX_STARTED", "SOURCE", source.id(), summary.spaceId(), "Document reindexing started.");
+        return new IngestResponse(source.id(), documentId, summary.spaceId(), 0, SourceStatus.INDEXING.name(), 0, 0, 0);
+    }
 
-        IngestResponse response;
+    private void runWebIndex(
+            AppUser user,
+            UUID sourceId,
+            UUID spaceId,
+            String normalizedUrl,
+            boolean recursive,
+            Integer maxDepth,
+            Integer maxPages,
+            UUID jobId,
+            boolean allowReuse
+    ) {
+        try {
+            WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, recursive, maxDepth, maxPages);
+            IngestResponse response = indexAll(sourceId, spaceId, documents.documents(), documents.pageCount(), documents.skippedCount(), jobId, allowReuse);
+            repository.finishDocumentJob(jobId, "SUCCEEDED", null);
+            auditService.log(user, allowReuse ? "DOCUMENT_REINDEXED" : "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), spaceId, "Web document was indexed.");
+        } catch (RuntimeException ex) {
+            repository.finishDocumentJob(jobId, "FAILED", failureMessage(ex));
+            recordFailure(user, sourceId, spaceId, allowReuse ? "DOCUMENT_REINDEX_FAILED" : "DOCUMENT_INGEST_FAILED", ex);
+        }
+    }
+
+    private void runFileIndex(
+            AppUser user,
+            UUID sourceId,
+            UUID spaceId,
+            StoredObject storedObject,
+            UUID jobId,
+            boolean allowReuse
+    ) {
+        try {
+            ExtractedDocument document = fileExtractor.extract(objectStorageService.load(storedObject));
+            IngestResponse response = indexStoredFile(sourceId, spaceId, storedObject, document, jobId, allowReuse);
+            repository.finishDocumentJob(jobId, "SUCCEEDED", null);
+            auditService.log(user, allowReuse ? "DOCUMENT_REINDEXED" : "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), spaceId, "File document was indexed.");
+        } catch (RuntimeException ex) {
+            repository.finishDocumentJob(jobId, "FAILED", failureMessage(ex));
+            recordFailure(user, sourceId, spaceId, allowReuse ? "DOCUMENT_REINDEX_FAILED" : "DOCUMENT_INGEST_FAILED", ex);
+        }
+    }
+
+    private void runReindex(AppUser user, StoredSource source, UUID spaceId, UUID jobId) {
         try {
             int previousDocumentCount = repository.countDocumentsForSource(source.id());
-            response = switch (source.type()) {
+            switch (source.type()) {
                 case WEB -> {
                     String normalizedUrl = webUrlNormalizer.normalize(source.location());
-                    WebDocuments documents = extractWebDocuments(
-                            source.id(),
-                            normalizedUrl,
-                            previousDocumentCount > 1,
-                            null,
-                            null
-                    );
-                    yield reindexAll(
-                            source.id(),
-                            summary.spaceId(),
-                            documents.documents(),
-                            documents.pageCount(),
-                            documents.skippedCount()
-                    );
+                    runWebIndex(user, source.id(), spaceId, normalizedUrl, previousDocumentCount > 1, null, null, jobId, true);
                 }
                 case FILE -> {
                     StoredObject object = repository.findSourceObject(source.id())
                             .orElseThrow(() -> new IllegalArgumentException(
                                     "Original file is not stored. Upload the file again before reindexing."
                             ));
-                    yield reindexAll(
-                            source.id(),
-                            summary.spaceId(),
-                            List.of(fileExtractor.extract(objectStorageService.load(object))),
-                            1,
-                            0
-                    );
+                    runFileIndex(user, source.id(), spaceId, object, jobId, true);
                 }
-            };
+            }
         } catch (RuntimeException ex) {
-            recordFailure(user, source.id(), summary.spaceId(), "DOCUMENT_REINDEX_FAILED", ex);
-            throw ex;
+            repository.finishDocumentJob(jobId, "FAILED", failureMessage(ex));
+            recordFailure(user, source.id(), spaceId, "DOCUMENT_REINDEX_FAILED", ex);
         }
-        auditService.log(user, "DOCUMENT_REINDEXED", "DOCUMENT", response.documentId(), summary.spaceId(), "Document was reindexed.");
-        return response;
     }
 
     private IngestResponse indexAll(
@@ -202,37 +238,25 @@ public class IngestionService {
             UUID spaceId,
             List<ExtractedDocument> documents,
             int pageCount,
-            int skippedCount
+            int skippedCount,
+            UUID jobId,
+            boolean allowReuse
     ) {
-        List<IndexedDocument> indexedDocuments = prepareIndex(documents);
+        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, documents, allowReuse);
         return transactionTemplate.execute(status ->
-                persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount)
+                persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount, jobId, allowReuse)
         );
     }
 
-    private IngestResponse indexStoredFile(UUID sourceId, UUID spaceId, StoredObject storedObject, ExtractedDocument document) {
-        List<IndexedDocument> indexedDocuments = prepareIndex(List.of(document));
+    private IngestResponse indexStoredFile(UUID sourceId, UUID spaceId, StoredObject storedObject, ExtractedDocument document, UUID jobId, boolean allowReuse) {
+        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, List.of(document), allowReuse);
         return transactionTemplate.execute(status -> {
             repository.createSourceObject(sourceId, storedObject);
-            return persistIndex(sourceId, spaceId, indexedDocuments, 1, 0);
+            return persistIndex(sourceId, spaceId, indexedDocuments, 1, 0, jobId, allowReuse);
         });
     }
 
-    private IngestResponse reindexAll(
-            UUID sourceId,
-            UUID spaceId,
-            List<ExtractedDocument> documents,
-            int pageCount,
-            int skippedCount
-    ) {
-        List<IndexedDocument> indexedDocuments = prepareIndex(documents);
-        return transactionTemplate.execute(status -> {
-            repository.deleteDocumentsForSource(sourceId);
-            return persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount);
-        });
-    }
-
-    private List<IndexedDocument> prepareIndex(List<ExtractedDocument> documents) {
+    private List<IndexedDocument> prepareIndex(UUID sourceId, List<ExtractedDocument> documents, boolean allowReuse) {
         List<PreparedDocument> preparedDocuments = new ArrayList<>();
         for (ExtractedDocument document : documents) {
             List<Chunk> chunks = chunker.split(document);
@@ -250,10 +274,25 @@ public class IngestionService {
         List<IndexedDocument> indexedDocuments = new ArrayList<>();
         for (PreparedDocument preparedDocument : enrichedDocuments) {
             List<Chunk> chunks = preparedDocument.chunks();
-            List<String> chunkTexts = chunks.stream().map(Chunk::content).toList();
-            List<List<Double>> embeddings = embedInBatches(chunkTexts);
-            validateEmbeddings(embeddings, chunks.size());
-            indexedDocuments.add(new IndexedDocument(preparedDocument.document(), chunks, embeddings));
+            String contentHash = contentHash(preparedDocument.document());
+            UUID reusableDocumentId = null;
+            int reusableChunkCount = 0;
+            List<Chunk> chunksToEmbed = chunks;
+            if (allowReuse) {
+                var reusable = repository.findReusableDocument(sourceId, preparedDocument.document().sourceUri(), contentHash);
+                if (reusable.isPresent()) {
+                    reusableDocumentId = reusable.get().documentId();
+                    List<Chunk> contextChunks = chunks.stream()
+                            .filter(chunk -> isDocumentContext(chunk.metadata()))
+                            .toList();
+                    chunksToEmbed = contextChunks;
+                    reusableChunkCount = reusable.get().chunkCount();
+                }
+            }
+            List<List<Double>> embeddings = chunksToEmbed.isEmpty()
+                    ? List.of()
+                    : embeddingService.embed(chunksToEmbed.stream().map(Chunk::content).toList());
+            indexedDocuments.add(new IndexedDocument(preparedDocument.document(), contentHash, chunksToEmbed, embeddings, reusableDocumentId, reusableChunkCount));
         }
 
         return indexedDocuments;
@@ -292,26 +331,21 @@ public class IngestionService {
         return reindexed;
     }
 
-    private List<List<Double>> embedInBatches(List<String> texts) {
-        List<List<Double>> embeddings = new ArrayList<>();
-        int batchSize = 32;
-        for (int start = 0; start < texts.size(); start += batchSize) {
-            int end = Math.min(start + batchSize, texts.size());
-            embeddings.addAll(ollamaClient.embed(texts.subList(start, end)));
-        }
-        return embeddings;
-    }
-
     private IngestResponse persistIndex(
             UUID sourceId,
             UUID spaceId,
             List<IndexedDocument> indexedDocuments,
             int pageCount,
-            int skippedCount
+            int skippedCount,
+            UUID jobId,
+            boolean replaceExisting
     ) {
         UUID firstDocumentId = null;
         int documentCount = 0;
         int totalChunkCount = 0;
+        int reusedChunkCount = 0;
+        int embeddedChunkCount = 0;
+        List<UUID> newDocumentIds = new ArrayList<>();
 
         for (IndexedDocument indexedDocument : indexedDocuments) {
             ExtractedDocument document = indexedDocument.document();
@@ -320,15 +354,38 @@ public class IngestionService {
                     document.title(),
                     document.sourceUri(),
                     document.contentType(),
-                    document.metadata()
+                    document.metadata(),
+                    indexedDocument.contentHash()
             );
+            newDocumentIds.add(documentId);
             if (firstDocumentId == null) {
                 firstDocumentId = documentId;
             }
 
-            repository.addChunks(documentId, indexedDocument.chunks(), indexedDocument.embeddings());
+            int documentReusedChunks = 0;
+            if (indexedDocument.reusableDocumentId() != null) {
+                documentReusedChunks = repository.copyReusableDocumentChunks(indexedDocument.reusableDocumentId(), documentId);
+                reusedChunkCount += documentReusedChunks;
+            }
+            if (!indexedDocument.chunks().isEmpty()) {
+                repository.addChunks(documentId, indexedDocument.chunks(), indexedDocument.embeddings());
+                embeddedChunkCount += indexedDocument.chunks().size();
+            }
             documentCount++;
-            totalChunkCount += indexedDocument.chunks().size();
+            totalChunkCount += documentReusedChunks + indexedDocument.chunks().size();
+            if (jobId != null) {
+                repository.updateDocumentJobProgress(
+                        jobId,
+                        indexedDocuments.size(),
+                        documentCount,
+                        totalChunkCount,
+                        reusedChunkCount,
+                        embeddedChunkCount
+                );
+            }
+        }
+        if (replaceExisting) {
+            repository.deleteDocumentsForSourceExcept(sourceId, newDocumentIds);
         }
         repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
         return new IngestResponse(
@@ -362,24 +419,6 @@ public class IngestionService {
         return new WebDocuments(result.documents(), result.fetchedCount(), result.skippedCount());
     }
 
-    private void validateEmbeddings(List<List<Double>> embeddings) {
-        for (List<Double> embedding : embeddings) {
-            if (embedding.size() != properties.getEmbedding().getDimensions()) {
-                throw new IllegalArgumentException("Embedding dimension mismatch. Expected "
-                        + properties.getEmbedding().getDimensions() + " but got " + embedding.size()
-                        + ". Recreate the vector column and reindex when changing embedding models.");
-            }
-        }
-    }
-
-    private void validateEmbeddings(List<List<Double>> embeddings, int expectedCount) {
-        if (embeddings.size() != expectedCount) {
-            throw new IllegalArgumentException("Embedding count mismatch. Expected "
-                    + expectedCount + " but got " + embeddings.size() + ".");
-        }
-        validateEmbeddings(embeddings);
-    }
-
     private void recordFailure(AppUser user, UUID sourceId, UUID spaceId, String action, RuntimeException ex) {
         String message = failureMessage(ex);
         try {
@@ -411,10 +450,44 @@ public class IngestionService {
         return "document_context".equals(value == null ? "" : String.valueOf(value));
     }
 
+    private String contentHash(ExtractedDocument document) {
+        String value = safe(document.sourceUri()) + "\n"
+                + safe(document.contentType()) + "\n"
+                + normalizeContent(document.content());
+        return sha256(value);
+    }
+
+    private String normalizeContent(String content) {
+        return safe(content)
+                .replace("\u0000", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String sha256(String content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(content.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available.", ex);
+        }
+    }
+
     private record WebDocuments(List<ExtractedDocument> documents, int pageCount, int skippedCount) {
     }
 
-    private record IndexedDocument(ExtractedDocument document, List<Chunk> chunks, List<List<Double>> embeddings) {
+    private record IndexedDocument(
+            ExtractedDocument document,
+            String contentHash,
+            List<Chunk> chunks,
+            List<List<Double>> embeddings,
+            UUID reusableDocumentId,
+            int reusableChunkCount
+    ) {
     }
 
     private record PreparedDocument(ExtractedDocument document, List<Chunk> chunks) {

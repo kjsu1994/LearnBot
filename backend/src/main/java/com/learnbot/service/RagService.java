@@ -195,8 +195,20 @@ public class RagService {
                     RagPipelineService.Domain.DOCUMENT,
                     searchService.expandedQueries(question)
             );
-            for (String query : queryPlan.queries()) {
-                searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+            List<String> retryQueries = queryPlan.queries().stream()
+                    .map(query -> safe(query).trim())
+                    .filter(query -> !query.isBlank())
+                    .filter(query -> !queriesUsed.contains(query))
+                    .distinct()
+                    .toList();
+            List<QuerySearchResults> retryResults = retryQueries.parallelStream()
+                    .map(query -> searchDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId))
+                    .toList();
+            for (QuerySearchResults result : retryResults) {
+                queriesUsed.add(result.query());
+                for (SearchResult searchResult : result.results()) {
+                    mergeDocument(merged, result.query().equals(question) ? searchResult : boostDocument(searchResult, 0.03));
+                }
             }
             iteration = 2;
             citations = selectAnswerCitations(question, answerMode, List.copyOf(merged.values()));
@@ -241,6 +253,26 @@ public class RagService {
             }
         } catch (RuntimeException ex) {
             log.warn("RAG retrieval query failed query={} question={}", abbreviate(safeQuery), abbreviate(originalQuestion), ex);
+        }
+    }
+
+    private QuerySearchResults searchDocuments(
+            String originalQuestion,
+            String query,
+            SearchFilter filter,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        String safeQuery = safe(query).trim();
+        try {
+            return new QuerySearchResults(
+                    safeQuery,
+                    searchService.search(safeQuery, filter, limit, spaceIds, selectedSpaceId)
+            );
+        } catch (RuntimeException ex) {
+            log.warn("RAG retrieval query failed query={} question={}", abbreviate(safeQuery), abbreviate(originalQuestion), ex);
+            return new QuerySearchResults(safeQuery, List.of());
         }
     }
 
@@ -1227,6 +1259,9 @@ public class RagService {
             int candidateCount,
             int queryCount
     ) {
+    }
+
+    private record QuerySearchResults(String query, List<SearchResult> results) {
     }
 
     private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {

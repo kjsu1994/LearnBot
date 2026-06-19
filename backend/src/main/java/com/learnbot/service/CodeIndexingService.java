@@ -41,7 +41,7 @@ public class CodeIndexingService {
     private final CodeChunkParser chunkParser;
     private final CodeProjectContextBuilder projectContextBuilder;
     private final CodeGraphBuilder codeGraphBuilder;
-    private final OllamaClient ollamaClient;
+    private final EmbeddingService embeddingService;
     private final CredentialEncryptionService credentialEncryptionService;
     private final LearnBotProperties properties;
     private final AuthService authService;
@@ -59,7 +59,7 @@ public class CodeIndexingService {
             CodeChunkParser chunkParser,
             CodeProjectContextBuilder projectContextBuilder,
             CodeGraphBuilder codeGraphBuilder,
-            OllamaClient ollamaClient,
+            EmbeddingService embeddingService,
             CredentialEncryptionService credentialEncryptionService,
             LearnBotProperties properties,
             AuthService authService,
@@ -73,7 +73,7 @@ public class CodeIndexingService {
         this.chunkParser = chunkParser;
         this.projectContextBuilder = projectContextBuilder;
         this.codeGraphBuilder = codeGraphBuilder;
-        this.ollamaClient = ollamaClient;
+        this.embeddingService = embeddingService;
         this.credentialEncryptionService = credentialEncryptionService;
         this.properties = properties;
         this.authService = authService;
@@ -349,9 +349,8 @@ public class CodeIndexingService {
                         continue;
                     }
 
-                    List<List<Double>> embeddings = embedInBatches(chunks.stream().map(ParsedCodeChunk::content).toList());
+                    List<List<Double>> embeddings = embeddingService.embed(chunks.stream().map(ParsedCodeChunk::content).toList());
                     ensureNotCancelled(jobId);
-                    validateEmbeddings(embeddings);
 
                     UUID fileId = repository.createFile(
                             repositoryId,
@@ -436,9 +435,8 @@ public class CodeIndexingService {
             if (chunks.isEmpty()) {
                 return 0;
             }
-            List<List<Double>> embeddings = embedInBatches(chunks.stream().map(ParsedCodeChunk::content).toList());
+            List<List<Double>> embeddings = embeddingService.embed(chunks.stream().map(ParsedCodeChunk::content).toList());
             ensureNotCancelled(jobId);
-            validateEmbeddings(embeddings);
             String combinedContent = chunks.stream()
                     .map(ParsedCodeChunk::content)
                     .reduce("", (left, right) -> left + "\n\n" + right);
@@ -551,29 +549,8 @@ public class CodeIndexingService {
         );
     }
 
-    private void validateEmbeddings(List<List<Double>> embeddings) {
-        for (List<Double> embedding : embeddings) {
-            if (embedding.size() != properties.getEmbedding().getDimensions()) {
-                throw new IllegalArgumentException("Embedding dimension mismatch. Expected "
-                        + properties.getEmbedding().getDimensions() + " but got " + embedding.size()
-                        + ". Recreate the vector column and reindex when changing embedding models.");
-            }
-        }
-    }
-
-    private List<List<Double>> embedInBatches(List<String> texts) {
-        List<List<Double>> embeddings = new java.util.ArrayList<>();
-        int batchSize = 32;
-        for (int start = 0; start < texts.size(); start += batchSize) {
-            int end = Math.min(start + batchSize, texts.size());
-            embeddings.addAll(ollamaClient.embed(texts.subList(start, end)));
-        }
-        return embeddings;
-    }
-
     private void ensureEmbeddingAvailable() {
-        List<List<Double>> embeddings = ollamaClient.embed(List.of("learnbot embedding healthcheck"));
-        validateEmbeddings(embeddings);
+        embeddingService.embed(List.of("learnbot embedding healthcheck"));
     }
 
     private void ensureNotCancelled(UUID jobId) {

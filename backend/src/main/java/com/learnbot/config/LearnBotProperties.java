@@ -18,6 +18,7 @@ public class LearnBotProperties {
     private Rag rag = new Rag();
     private Storage storage = new Storage();
     private Code code = new Code();
+    private Document document = new Document();
     private Auth auth = new Auth();
     private Transfer transfer = new Transfer();
 
@@ -75,6 +76,14 @@ public class LearnBotProperties {
 
     public void setCode(Code code) {
         this.code = code;
+    }
+
+    public Document getDocument() {
+        return document;
+    }
+
+    public void setDocument(Document document) {
+        this.document = document;
     }
 
     public Auth getAuth() {
@@ -198,12 +207,45 @@ public class LearnBotProperties {
         @Min(1)
         private int dimensions = 1024;
 
+        @Min(1)
+        private int batchSize = 64;
+
+        @Min(1)
+        private int minBatchSize = 8;
+
+        @Min(1)
+        private int insertBatchSize = 200;
+
         public int getDimensions() {
             return dimensions;
         }
 
         public void setDimensions(int dimensions) {
             this.dimensions = dimensions;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public int getMinBatchSize() {
+            return minBatchSize;
+        }
+
+        public void setMinBatchSize(int minBatchSize) {
+            this.minBatchSize = minBatchSize;
+        }
+
+        public int getInsertBatchSize() {
+            return insertBatchSize;
+        }
+
+        public void setInsertBatchSize(int insertBatchSize) {
+            this.insertBatchSize = insertBatchSize;
         }
     }
 
@@ -726,6 +768,19 @@ public class LearnBotProperties {
             public void setMaxLlmFiles(int maxLlmFiles) {
                 this.maxLlmFiles = maxLlmFiles;
             }
+        }
+    }
+
+    public static class Document {
+        @Min(1)
+        private int indexThreads = 2;
+
+        public int getIndexThreads() {
+            return indexThreads;
+        }
+
+        public void setIndexThreads(int indexThreads) {
+            this.indexThreads = indexThreads;
         }
     }
 

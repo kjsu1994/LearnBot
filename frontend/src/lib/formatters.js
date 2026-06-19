@@ -196,7 +196,6 @@ function getProgressMessage(busy) {
   if (busy.startsWith('repo-clear-jobs-')) return '실패/취소 인덱싱 이력을 정리하는 중입니다.';
   if (busy.startsWith('job-failures-')) return '인덱싱 실패 사유를 불러오는 중입니다.';
   if (busy.startsWith('code-file-')) return '코드 파일을 불러오는 중입니다.';
-  if (busy.startsWith('reindex-')) return '문서를 재색인하는 중입니다.';
   if (busy.startsWith('delete-')) return '문서를 삭제하는 중입니다.';
   if (busy.startsWith('user-delete-')) return '사용자 계정을 삭제하는 중입니다.';
   if (busy.startsWith('user-update-')) return '사용자 계정을 저장하는 중입니다.';

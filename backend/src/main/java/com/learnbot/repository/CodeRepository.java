@@ -3,6 +3,7 @@ package com.learnbot.repository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeChunkSummary;
 import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
@@ -34,10 +35,12 @@ import java.util.UUID;
 public class CodeRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final LearnBotProperties properties;
 
-    public CodeRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+    public CodeRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, LearnBotProperties properties) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.properties = properties;
     }
 
     public CodeRepositoryRecord createRepository(String name, String gitUrl, String branch, String authType, String localPath, UUID spaceId, UUID createdBy) {
@@ -566,9 +569,33 @@ public class CodeRepository {
     }
 
     public void addChunks(UUID repositoryId, UUID fileId, UUID indexVersion, String filePath, List<ParsedCodeChunk> chunks, List<List<Double>> embeddings) {
-        for (int i = 0; i < chunks.size(); i++) {
-            ParsedCodeChunk chunk = chunks.get(i);
-            jdbc.update("""
+        int batchSize = Math.max(1, properties.getEmbedding().getInsertBatchSize());
+        for (int start = 0; start < chunks.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, chunks.size());
+            MapSqlParameterSource[] batch = new MapSqlParameterSource[end - start];
+            for (int i = start; i < end; i++) {
+                ParsedCodeChunk chunk = chunks.get(i);
+                batch[i - start] = new MapSqlParameterSource()
+                        .addValue("id", UUID.randomUUID())
+                        .addValue("repositoryId", repositoryId)
+                        .addValue("fileId", fileId)
+                        .addValue("indexVersion", indexVersion)
+                        .addValue("filePath", filePath)
+                        .addValue("chunkIndex", chunk.chunkIndex())
+                        .addValue("chunkType", chunk.chunkType())
+                        .addValue("symbolName", chunk.symbolName())
+                        .addValue("className", chunk.className())
+                        .addValue("methodName", chunk.methodName())
+                        .addValue("namespaceName", chunk.namespaceName())
+                        .addValue("controlName", chunk.controlName())
+                        .addValue("eventName", chunk.eventName())
+                        .addValue("lineStart", chunk.lineStart())
+                        .addValue("lineEnd", chunk.lineEnd())
+                        .addValue("content", chunk.content())
+                        .addValue("metadata", toJson(chunk.metadata()))
+                        .addValue("embedding", vectorLiteral(embeddings.get(i)));
+            }
+            jdbc.batchUpdate("""
                     INSERT INTO code_chunks (
                         id, repository_id, file_id, index_version, file_path, chunk_index, chunk_type,
                         symbol_name, class_name, method_name, namespace_name, control_name, event_name,
@@ -579,25 +606,7 @@ public class CodeRepository {
                         :symbolName, :className, :methodName, :namespaceName, :controlName, :eventName,
                         :lineStart, :lineEnd, :content, CAST(:metadata AS jsonb), CAST(:embedding AS vector), FALSE
                     )
-                    """, new MapSqlParameterSource()
-                    .addValue("id", UUID.randomUUID())
-                    .addValue("repositoryId", repositoryId)
-                    .addValue("fileId", fileId)
-                    .addValue("indexVersion", indexVersion)
-                    .addValue("filePath", filePath)
-                    .addValue("chunkIndex", chunk.chunkIndex())
-                    .addValue("chunkType", chunk.chunkType())
-                    .addValue("symbolName", chunk.symbolName())
-                    .addValue("className", chunk.className())
-                    .addValue("methodName", chunk.methodName())
-                    .addValue("namespaceName", chunk.namespaceName())
-                    .addValue("controlName", chunk.controlName())
-                    .addValue("eventName", chunk.eventName())
-                    .addValue("lineStart", chunk.lineStart())
-                    .addValue("lineEnd", chunk.lineEnd())
-                    .addValue("content", chunk.content())
-                    .addValue("metadata", toJson(chunk.metadata()))
-                    .addValue("embedding", vectorLiteral(embeddings.get(i))));
+                    """, batch);
         }
     }
 

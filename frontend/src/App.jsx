@@ -21,6 +21,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [documents, setDocuments] = useState([]);
+  const [documentJobs, setDocumentJobs] = useState([]);
   const [repositories, setRepositories] = useState([]);
   const [jobs, setJobs] = useState({});
   const [jobFailures, setJobFailures] = useState({});
@@ -134,6 +135,7 @@ export default function App() {
   useEffect(() => {
     if (!user || !activeSpaceId) return;
     refreshDocuments();
+    refreshDocumentJobs();
     refreshRepositories();
   }, [user?.id, activeSpaceId]);
 
@@ -161,6 +163,16 @@ export default function App() {
     }, 2500);
     return () => window.clearInterval(timer);
   }, [repositories]);
+
+  useEffect(() => {
+    const runningJobs = documentJobs.filter((job) => job.status === 'RUNNING');
+    if (!runningJobs.length) return undefined;
+    const timer = window.setInterval(() => {
+      refreshDocumentJobs();
+      refreshDocuments();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [documentJobs]);
 
   useEffect(() => {
     if (activeView === 'admin' && user?.role === 'ADMIN') {
@@ -226,6 +238,7 @@ export default function App() {
     setSpaces([]);
     setSelectedSpaceId('');
     setDocuments([]);
+    setDocumentJobs([]);
     setRepositories([]);
     setJobs({});
     setJobFailures({});
@@ -335,6 +348,11 @@ export default function App() {
     setDocuments(data || []);
   }
 
+  async function refreshDocumentJobs() {
+    const data = await request(spacePath('/api/document-indexing/jobs'));
+    setDocumentJobs(data || []);
+  }
+
   async function refreshRepositories() {
     const data = await request(spacePath('/api/code/repositories'));
     setRepositories(data || []);
@@ -358,7 +376,7 @@ export default function App() {
         },
       });
       setWebUrl('');
-      await refreshDocuments();
+      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
     });
   }
 
@@ -384,7 +402,7 @@ export default function App() {
       }
       setFiles([]);
       form.reset();
-      await refreshDocuments();
+      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
       if (firstDocumentId) {
         await loadDocumentDetail(firstDocumentId);
       }
@@ -624,15 +642,6 @@ export default function App() {
     });
   }
 
-  async function reindexDocument(documentId) {
-    await run(`reindex-${documentId}`, async () => {
-      const result = await request(`/api/documents/${documentId}/reindex`, { method: 'POST' });
-      await refreshDocuments();
-      setSelectedDocumentId(result.documentId);
-      await loadDocumentDetail(result.documentId);
-    });
-  }
-
   async function loadDocumentDetail(documentId) {
     setSelectedDocumentId(documentId);
     await run(`detail-${documentId}`, async () => {
@@ -850,7 +859,11 @@ export default function App() {
   }
 
   const loading = (name) => busy === name;
-  const progressMessage = getProgressMessage(busy);
+  const runningDocumentJobs = documentJobs.filter((job) => job.status === 'RUNNING');
+  const documentProgressMessage = runningDocumentJobs.length
+    ? `문서 인덱싱 ${runningDocumentJobs.length}건이 백그라운드에서 진행 중입니다.`
+    : '';
+  const progressMessage = getProgressMessage(busy) || documentProgressMessage;
 
   if (routePath === routePaths.home) {
     return <HomePage user={user} bootstrapping={bootstrapping} navigateTo={navigateTo} logout={logout} />;
@@ -901,7 +914,6 @@ export default function App() {
       selectedDocumentId={selectedDocumentId}
       loadDocumentDetail={loadDocumentDetail}
       openDocumentPreview={openDocumentPreview}
-      reindexDocument={reindexDocument}
       deleteDocument={deleteDocument}
       loading={loading}
     >
@@ -979,7 +991,6 @@ export default function App() {
             documents={documents}
             selectedDocumentId={selectedDocumentId}
             loadDocumentDetail={loadDocumentDetail}
-            reindexDocument={reindexDocument}
             deleteDocument={deleteDocument}
             openDocumentPreview={openDocumentPreview}
             documentDetail={documentDetail}
