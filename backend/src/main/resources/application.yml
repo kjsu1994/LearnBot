@@ -24,6 +24,12 @@ learnbot:
     max-depth: ${LEARNBOT_CRAWLER_MAX_DEPTH:2}
     min-content-chars: ${LEARNBOT_CRAWLER_MIN_CONTENT_CHARS:200}
     respect-robots-txt: ${LEARNBOT_CRAWLER_RESPECT_ROBOTS_TXT:true}
+    crawl-scope: ${LEARNBOT_CRAWLER_SCOPE:START_PATH}
+    robots-failure-policy: ${LEARNBOT_CRAWLER_ROBOTS_FAILURE_POLICY:FAIL_CLOSED}
+    include-attachments: ${LEARNBOT_CRAWLER_INCLUDE_ATTACHMENTS:false}
+    use-sitemap: ${LEARNBOT_CRAWLER_USE_SITEMAP:false}
+    render-mode: ${LEARNBOT_CRAWLER_RENDER_MODE:STATIC}
+    max-attachment-bytes: ${LEARNBOT_CRAWLER_MAX_ATTACHMENT_BYTES:25000000}
   chunking:
     size: ${LEARNBOT_CHUNK_SIZE:1200}
     overlap: ${LEARNBOT_CHUNK_OVERLAP:150}

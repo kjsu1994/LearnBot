@@ -37,6 +37,11 @@ export default function App() {
   const [webRecursive, setWebRecursive] = useState(true);
   const [webMaxDepth, setWebMaxDepth] = useState(2);
   const [webMaxPages, setWebMaxPages] = useState(30);
+  const [webCrawlScope, setWebCrawlScope] = useState('START_PATH');
+  const [webRobotsFailurePolicy, setWebRobotsFailurePolicy] = useState('FAIL_CLOSED');
+  const [webIncludeAttachments, setWebIncludeAttachments] = useState(false);
+  const [webUseSitemap, setWebUseSitemap] = useState(false);
+  const [webRenderMode, setWebRenderMode] = useState('STATIC');
   const [files, setFiles] = useState([]);
   const [fileBatchResult, setFileBatchResult] = useState(null);
   const [query, setQuery] = useState('');
@@ -391,6 +396,11 @@ export default function App() {
           recursive: webRecursive,
           maxDepth: Number(webMaxDepth),
           maxPages: Number(webMaxPages),
+          crawlScope: webCrawlScope,
+          robotsFailurePolicy: webRobotsFailurePolicy,
+          includeAttachments: webIncludeAttachments,
+          useSitemap: webUseSitemap,
+          renderMode: webRenderMode,
         },
       });
       setWebUrl('');
@@ -1125,6 +1135,16 @@ export default function App() {
             setWebMaxDepth={setWebMaxDepth}
             webMaxPages={webMaxPages}
             setWebMaxPages={setWebMaxPages}
+            webCrawlScope={webCrawlScope}
+            setWebCrawlScope={setWebCrawlScope}
+            webRobotsFailurePolicy={webRobotsFailurePolicy}
+            setWebRobotsFailurePolicy={setWebRobotsFailurePolicy}
+            webIncludeAttachments={webIncludeAttachments}
+            setWebIncludeAttachments={setWebIncludeAttachments}
+            webUseSitemap={webUseSitemap}
+            setWebUseSitemap={setWebUseSitemap}
+            webRenderMode={webRenderMode}
+            setWebRenderMode={setWebRenderMode}
             files={files}
             setFiles={updateUploadFiles}
             fileBatchResult={fileBatchResult}
@@ -1236,6 +1256,16 @@ export default function App() {
               setWebMaxDepth,
               webMaxPages,
               setWebMaxPages,
+              webCrawlScope,
+              setWebCrawlScope,
+              webRobotsFailurePolicy,
+              setWebRobotsFailurePolicy,
+              webIncludeAttachments,
+              setWebIncludeAttachments,
+              webUseSitemap,
+              setWebUseSitemap,
+              webRenderMode,
+              setWebRenderMode,
               files,
               setFiles: updateUploadFiles,
               fileBatchResult,

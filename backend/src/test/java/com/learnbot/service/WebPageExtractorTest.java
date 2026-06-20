@@ -6,8 +6,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,15 +25,6 @@ class WebPageExtractorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Domain is not allowed");
 
-        verify(repository).createCrawlAuditLog(
-                isNull(),
-                any(),
-                any(),
-                anyBoolean(),
-                isNull(),
-                isNull(),
-                anyBoolean(),
-                any()
-        );
+        verify(repository).createCrawlAuditLog(any(CrawlAuditEvent.class));
     }
 }

@@ -86,7 +86,7 @@ public class IngestionService {
     }
 
     public IngestResponse ingestWeb(AppUser user, UUID spaceId, String url) {
-        return ingestWeb(user, spaceId, url, false, null, null);
+        return ingestWeb(user, spaceId, url, false, null, null, null, null, null, null, null);
     }
 
     public IngestResponse ingestWeb(
@@ -95,13 +95,19 @@ public class IngestionService {
             String url,
             Boolean recursive,
             Integer maxDepth,
-            Integer maxPages
+            Integer maxPages,
+            String crawlScope,
+            String robotsFailurePolicy,
+            Boolean includeAttachments,
+            Boolean useSitemap,
+            String renderMode
     ) {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String normalizedUrl = webUrlNormalizer.normalize(url);
+        CrawlOptions crawlOptions = crawlOptions(crawlScope, robotsFailurePolicy, includeAttachments, useSitemap, renderMode);
         UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id());
         UUID jobId = repository.createDocumentJob(sourceId, resolvedSpaceId, "INITIAL_INDEX");
-        executor.submit(() -> runWebIndex(user, sourceId, resolvedSpaceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages, jobId, false));
+        executor.submit(() -> runWebIndex(user, sourceId, resolvedSpaceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages, crawlOptions, jobId, false));
         auditService.log(user, "DOCUMENT_INGEST_STARTED", "SOURCE", sourceId, resolvedSpaceId, "Web document indexing started.");
         return new IngestResponse(sourceId, null, resolvedSpaceId, 0, SourceStatus.INDEXING.name(), 0, 0, 0);
     }
@@ -178,11 +184,12 @@ public class IngestionService {
             boolean recursive,
             Integer maxDepth,
             Integer maxPages,
+            CrawlOptions crawlOptions,
             UUID jobId,
             boolean allowReuse
     ) {
         try {
-            WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, recursive, maxDepth, maxPages);
+            WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, recursive, maxDepth, maxPages, crawlOptions);
             IngestResponse response = indexAll(sourceId, spaceId, documents.documents(), documents.pageCount(), documents.skippedCount(), jobId, allowReuse);
             repository.finishDocumentJob(jobId, "SUCCEEDED", null);
             auditService.log(user, allowReuse ? "DOCUMENT_REINDEXED" : "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), spaceId, "Web document was indexed.");
@@ -217,7 +224,7 @@ public class IngestionService {
             switch (source.type()) {
                 case WEB -> {
                     String normalizedUrl = webUrlNormalizer.normalize(source.location());
-                    runWebIndex(user, source.id(), spaceId, normalizedUrl, previousDocumentCount > 1, null, null, jobId, true);
+                    runWebIndex(user, source.id(), spaceId, normalizedUrl, previousDocumentCount > 1, null, null, defaultCrawlOptions(), jobId, true);
                 }
                 case FILE -> {
                     StoredObject object = repository.findSourceObject(source.id())
@@ -405,18 +412,48 @@ public class IngestionService {
             String url,
             boolean recursive,
             Integer maxDepth,
-            Integer maxPages
+            Integer maxPages,
+            CrawlOptions crawlOptions
     ) {
+        CrawlOptions safeOptions = crawlOptions == null ? defaultCrawlOptions() : crawlOptions.normalized();
         if (!recursive) {
-            return new WebDocuments(List.of(webPageExtractor.extract(sourceId, url)), 1, 0);
+            return new WebDocuments(List.of(webPageExtractor.extract(sourceId, url, safeOptions)), 1, 0);
         }
         WebCrawler.CrawlResult result = webCrawler.crawl(
                 sourceId,
                 url,
                 maxDepth == null ? properties.getCrawler().getMaxDepth() : maxDepth,
-                maxPages == null ? properties.getCrawler().getMaxPagesPerRequest() : maxPages
+                maxPages == null ? properties.getCrawler().getMaxPagesPerRequest() : maxPages,
+                safeOptions
         );
         return new WebDocuments(result.documents(), result.fetchedCount(), result.skippedCount());
+    }
+
+    private CrawlOptions crawlOptions(
+            String crawlScope,
+            String robotsFailurePolicy,
+            Boolean includeAttachments,
+            Boolean useSitemap,
+            String renderMode
+    ) {
+        CrawlOptions defaults = defaultCrawlOptions();
+        return new CrawlOptions(
+                crawlScope == null || crawlScope.isBlank() ? defaults.scope() : CrawlScope.from(crawlScope),
+                robotsFailurePolicy == null || robotsFailurePolicy.isBlank() ? defaults.robotsFailurePolicy() : RobotsFailurePolicy.from(robotsFailurePolicy),
+                includeAttachments == null ? defaults.includeAttachments() : includeAttachments,
+                useSitemap == null ? defaults.useSitemap() : useSitemap,
+                renderMode == null || renderMode.isBlank() ? defaults.renderMode() : WebRenderMode.from(renderMode)
+        ).normalized();
+    }
+
+    private CrawlOptions defaultCrawlOptions() {
+        return new CrawlOptions(
+                CrawlScope.from(properties.getCrawler().getCrawlScope()),
+                RobotsFailurePolicy.from(properties.getCrawler().getRobotsFailurePolicy()),
+                properties.getCrawler().isIncludeAttachments(),
+                properties.getCrawler().isUseSitemap(),
+                WebRenderMode.from(properties.getCrawler().getRenderMode())
+        ).normalized();
     }
 
     private void recordFailure(AppUser user, UUID sourceId, UUID spaceId, String action, RuntimeException ex) {

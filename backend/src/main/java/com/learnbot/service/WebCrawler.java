@@ -37,6 +37,11 @@ public class WebCrawler {
     }
 
     public CrawlResult crawl(UUID sourceId, String startUrl, int maxDepth, int maxPages) {
+        return crawl(sourceId, startUrl, maxDepth, maxPages, CrawlOptions.defaults());
+    }
+
+    public CrawlResult crawl(UUID sourceId, String startUrl, int maxDepth, int maxPages, CrawlOptions options) {
+        CrawlOptions safeOptions = options == null ? CrawlOptions.defaults() : options.normalized();
         URI startUri = normalizeUri(URI.create(startUrl));
         String rootHost = requireHost(startUri);
         String scopePath = scopePath(startUri);
@@ -51,59 +56,150 @@ public class WebCrawler {
         int skippedCount = 0;
 
         enqueue(queue, queuedOrVisited, startUri, 0);
+        if (safeOptions.useSitemap()) {
+            for (URI sitemapUri : extractor.sitemapUrls(startUri)) {
+                URI normalized;
+                try {
+                    normalized = normalizeUri(sitemapUri);
+                } catch (RuntimeException ex) {
+                    skippedCount++;
+                    extractor.auditSkipped(sourceId, sitemapUri, "INVALID_URL", 0, startUri.toString(), null,
+                            ex.getMessage(), Map.of("seedSource", "sitemap"));
+                    continue;
+                }
+                ScopeDecision scopeDecision = scopeDecision(startUri, rootHost, scopePath, normalized, safeOptions.scope());
+                if (!scopeDecision.allowed()) {
+                    skippedCount++;
+                    extractor.auditSkipped(sourceId, normalized, scopeDecision.reasonCode(), 0, startUri.toString(), null,
+                            scopeDecision.message(), Map.of("seedSource", "sitemap"));
+                    continue;
+                }
+                ExclusionDecision exclusionDecision = exclusionDecision(normalized, safeOptions);
+                if (exclusionDecision.excluded() && !exclusionDecision.attachment()) {
+                    skippedCount++;
+                    extractor.auditSkipped(sourceId, normalized, exclusionDecision.reasonCode(), 0, startUri.toString(), null,
+                            exclusionDecision.message(), Map.of("seedSource", "sitemap"));
+                    continue;
+                }
+                enqueue(queue, queuedOrVisited, normalized, 0, startUri);
+            }
+        }
         while (!queue.isEmpty() && fetchedCount < safeMaxPages) {
             CrawlUrl current = queue.removeFirst();
-            if (!isInScope(startUri, rootHost, scopePath, current.uri())) {
+            ScopeDecision currentScope = scopeDecision(startUri, rootHost, scopePath, current.uri(), safeOptions.scope());
+            if (!currentScope.allowed()) {
+                skippedCount++;
+                extractor.auditSkipped(sourceId, current.uri(), currentScope.reasonCode(), current.depth(),
+                        current.referrer() == null ? null : current.referrer().toString(), null, currentScope.message(), Map.of());
+                continue;
+            }
+            ExclusionDecision currentExclusion = exclusionDecision(current.uri(), safeOptions);
+            if (currentExclusion.excluded()) {
+                if (currentExclusion.attachment() && safeOptions.includeAttachments()) {
+                    ExtractedDocument attachment = extractor.fetchAttachment(
+                            sourceId,
+                            current.uri(),
+                            current.referrer() == null ? null : current.referrer().toString(),
+                            safeOptions
+                    );
+                    if (attachment != null) {
+                        documents.add(withCrawlMetadata(attachment, startUri, current.depth(), current.referrer()));
+                    } else {
+                        skippedCount++;
+                    }
+                } else {
+                    skippedCount++;
+                    extractor.auditSkipped(sourceId, current.uri(), currentExclusion.reasonCode(), current.depth(),
+                            current.referrer() == null ? null : current.referrer().toString(), null, currentExclusion.message(), Map.of());
+                }
                 continue;
             }
 
             WebPageExtractor.FetchedPage page;
             try {
-                page = extractor.fetchPage(sourceId, current.uri().toString());
+                page = extractor.fetchPage(sourceId, current.uri().toString(), safeOptions);
                 fetchedCount++;
             } catch (RuntimeException ex) {
                 skippedCount++;
+                extractor.auditSkipped(sourceId, current.uri(), "FETCH_FAILED", current.depth(),
+                        current.referrer() == null ? null : current.referrer().toString(), null, ex.getMessage(), Map.of());
                 continue;
             }
 
             for (URI link : page.links()) {
                 if (current.depth() < safeDepth) {
-                    enqueueIfCrawlable(queue, queuedOrVisited, startUri, rootHost, scopePath, link, current.depth() + 1);
+                    skippedCount += enqueueIfCrawlable(
+                            queue,
+                            queuedOrVisited,
+                            sourceId,
+                            startUri,
+                            rootHost,
+                            scopePath,
+                            link,
+                            current.depth() + 1,
+                            current.uri(),
+                            safeOptions
+                    );
                 }
             }
 
             String skipReason = skipReason(page.document(), contentSignatures);
             if (skipReason != null) {
                 skippedCount++;
-                extractor.auditSkipped(sourceId, page.uri(), skipReason);
+                String reasonCode = skipReason.startsWith("Skipped page because extractable body text is too short")
+                        ? "LOW_CONTENT"
+                        : "DUPLICATE_CONTENT";
+                extractor.auditSkipped(sourceId, page.uri(), reasonCode, current.depth(),
+                        current.referrer() == null ? null : current.referrer().toString(), page.document().contentType(), skipReason, Map.of());
                 continue;
             }
-            documents.add(withCrawlMetadata(page.document(), startUri, current.depth()));
+            documents.add(withCrawlMetadata(page.document(), startUri, current.depth(), current.referrer()));
         }
 
         return new CrawlResult(documents, fetchedCount, skippedCount);
     }
 
-    private void enqueueIfCrawlable(
+    private int enqueueIfCrawlable(
             ArrayDeque<CrawlUrl> queue,
             Set<String> queuedOrVisited,
+            UUID sourceId,
             URI startUri,
             String rootHost,
             String scopePath,
             URI link,
-            int depth
+            int depth,
+            URI referrer,
+            CrawlOptions options
     ) {
-        URI normalized = normalizeUri(link);
-        if (!isInScope(startUri, rootHost, scopePath, normalized) || isExcluded(normalized)) {
-            return;
+        URI normalized;
+        try {
+            normalized = normalizeUri(link);
+        } catch (RuntimeException ex) {
+            extractor.auditSkipped(sourceId, link, "INVALID_URL", depth, referrer.toString(), null, ex.getMessage(), Map.of());
+            return 1;
         }
-        enqueue(queue, queuedOrVisited, normalized, depth);
+        ScopeDecision scopeDecision = scopeDecision(startUri, rootHost, scopePath, normalized, options.scope());
+        if (!scopeDecision.allowed()) {
+            extractor.auditSkipped(sourceId, normalized, scopeDecision.reasonCode(), depth, referrer.toString(), null, scopeDecision.message(), Map.of());
+            return 1;
+        }
+        ExclusionDecision exclusionDecision = exclusionDecision(normalized, options);
+        if (exclusionDecision.excluded() && !(exclusionDecision.attachment() && options.includeAttachments())) {
+            extractor.auditSkipped(sourceId, normalized, exclusionDecision.reasonCode(), depth, referrer.toString(), null, exclusionDecision.message(), Map.of());
+            return 1;
+        }
+        enqueue(queue, queuedOrVisited, normalized, depth, referrer);
+        return 0;
     }
 
     private void enqueue(ArrayDeque<CrawlUrl> queue, Set<String> queuedOrVisited, URI uri, int depth) {
+        enqueue(queue, queuedOrVisited, uri, depth, null);
+    }
+
+    private void enqueue(ArrayDeque<CrawlUrl> queue, Set<String> queuedOrVisited, URI uri, int depth, URI referrer) {
         String key = uri.toString();
         if (queuedOrVisited.add(key)) {
-            queue.add(new CrawlUrl(uri, depth));
+            queue.add(new CrawlUrl(uri, depth, referrer));
         }
     }
 
@@ -136,13 +232,16 @@ public class WebCrawler {
         return normalized.length() <= 2000 ? normalized : normalized.substring(0, 2000);
     }
 
-    private ExtractedDocument withCrawlMetadata(ExtractedDocument document, URI rootUri, int depth) {
+    private ExtractedDocument withCrawlMetadata(ExtractedDocument document, URI rootUri, int depth, URI referrer) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (document.metadata() != null) {
             metadata.putAll(document.metadata());
         }
         metadata.put("rootUrl", rootUri.toString());
         metadata.put("crawlDepth", depth);
+        if (referrer != null) {
+            metadata.put("referrerUrl", referrer.toString());
+        }
         return new ExtractedDocument(
                 document.title(),
                 document.sourceUri(),
@@ -152,19 +251,34 @@ public class WebCrawler {
         );
     }
 
-    private boolean isInScope(URI startUri, String rootHost, String scopePath, URI candidate) {
+    private ScopeDecision scopeDecision(URI startUri, String rootHost, String scopePath, URI candidate, CrawlScope scope) {
         if (!sameScheme(startUri, candidate)) {
-            return false;
+            return new ScopeDecision(false, "SCHEME_MISMATCH", "Skipped URL because scheme is outside crawl scope.");
         }
         String candidateHost = candidate.getHost() == null ? "" : candidate.getHost().toLowerCase(Locale.ROOT);
+        if (scope == CrawlScope.ALLOWLIST) {
+            return new ScopeDecision(true, null, "");
+        }
+        if (scope == CrawlScope.SAME_SITE) {
+            if (!siteDomain(rootHost).equals(siteDomain(candidateHost))) {
+                return new ScopeDecision(false, "SITE_MISMATCH", "Skipped URL because site domain is outside crawl scope.");
+            }
+            return new ScopeDecision(true, null, "");
+        }
         if (!rootHost.equals(candidateHost)) {
-            return false;
+            return new ScopeDecision(false, "HOST_MISMATCH", "Skipped URL because host is outside crawl scope.");
+        }
+        if (scope == CrawlScope.SAME_HOST) {
+            return new ScopeDecision(true, null, "");
         }
         String path = normalizedPath(candidate);
         if ("/".equals(scopePath)) {
-            return true;
+            return new ScopeDecision(true, null, "");
         }
-        return path.equals(scopePath) || path.startsWith(scopePath.endsWith("/") ? scopePath : scopePath + "/");
+        boolean allowed = path.equals(scopePath) || path.startsWith(scopePath.endsWith("/") ? scopePath : scopePath + "/");
+        return allowed
+                ? new ScopeDecision(true, null, "")
+                : new ScopeDecision(false, "PATH_SCOPE_MISMATCH", "Skipped URL because path is outside the start URL subtree.");
     }
 
     private boolean sameScheme(URI startUri, URI candidate) {
@@ -173,16 +287,46 @@ public class WebCrawler {
                 && startUri.getScheme().equalsIgnoreCase(candidate.getScheme());
     }
 
-    private boolean isExcluded(URI uri) {
+    private ExclusionDecision exclusionDecision(URI uri, CrawlOptions options) {
         String path = normalizedPath(uri).toLowerCase(Locale.ROOT);
         if (EXCLUDED_EXTENSIONS.stream().anyMatch(path::endsWith)) {
-            return true;
+            boolean attachment = isAttachment(path);
+            if (attachment && options.includeAttachments()) {
+                return new ExclusionDecision(true, true, "ATTACHMENT_QUEUED", "Queued supported attachment for extraction.");
+            }
+            return new ExclusionDecision(true, attachment, attachment ? "ATTACHMENT_DISABLED" : "EXTENSION_EXCLUDED",
+                    attachment ? "Skipped attachment because attachment collection is disabled." : "Skipped URL because extension is excluded.");
         }
         if (EXCLUDED_PATH_PARTS.stream().anyMatch(path::contains)) {
-            return true;
+            if (options.includeAttachments() && isLikelyAttachmentPath(path)) {
+                return new ExclusionDecision(false, true, null, "");
+            }
+            return new ExclusionDecision(true, false, "PATH_EXCLUDED", "Skipped URL because path is excluded.");
         }
         String query = uri.getRawQuery();
-        return query != null && query.toLowerCase(Locale.ROOT).matches(".*(^|&)(q|query|search|replytocom|share)=.*");
+        if (query != null && query.toLowerCase(Locale.ROOT).matches(".*(^|&)(q|query|search|replytocom|share)=.*")) {
+            return new ExclusionDecision(true, false, "QUERY_EXCLUDED", "Skipped URL because query parameters are excluded.");
+        }
+        return new ExclusionDecision(false, false, null, "");
+    }
+
+    private boolean isAttachment(String path) {
+        return path.endsWith(".doc") || path.endsWith(".docx") || path.endsWith(".pdf")
+                || path.endsWith(".ppt") || path.endsWith(".pptx")
+                || path.endsWith(".xls") || path.endsWith(".xlsx")
+                || path.endsWith(".csv") || path.endsWith(".txt") || path.endsWith(".md") || path.endsWith(".markdown");
+    }
+
+    private boolean isLikelyAttachmentPath(String path) {
+        return path.contains("/attachment") || path.contains("/attachments") || path.contains("/download") || path.contains("/uploads");
+    }
+
+    private String siteDomain(String host) {
+        String[] parts = host == null ? new String[0] : host.toLowerCase(Locale.ROOT).split("\\.");
+        if (parts.length < 2) {
+            return host == null ? "" : host.toLowerCase(Locale.ROOT);
+        }
+        return parts[parts.length - 2] + "." + parts[parts.length - 1];
     }
 
     private URI normalizeUri(URI uri) {
@@ -236,6 +380,12 @@ public class WebCrawler {
     public record CrawlResult(List<ExtractedDocument> documents, int fetchedCount, int skippedCount) {
     }
 
-    private record CrawlUrl(URI uri, int depth) {
+    private record ScopeDecision(boolean allowed, String reasonCode, String message) {
+    }
+
+    private record ExclusionDecision(boolean excluded, boolean attachment, String reasonCode, String message) {
+    }
+
+    private record CrawlUrl(URI uri, int depth, URI referrer) {
     }
 }

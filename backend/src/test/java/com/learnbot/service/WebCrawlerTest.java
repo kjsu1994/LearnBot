@@ -27,7 +27,7 @@ class WebCrawlerTest {
         WebCrawler crawler = new WebCrawler(properties, extractor);
         UUID sourceId = UUID.randomUUID();
 
-        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"))).thenReturn(page(
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"), any())).thenReturn(page(
                 "https://example.com/docs",
                 text("Root", "Root documentation content with enough useful body text."),
                 List.of(
@@ -37,7 +37,7 @@ class WebCrawlerTest {
                         URI.create("https://example.com/docs/manual.pdf")
                 )
         ));
-        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/install"))).thenReturn(page(
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/install"), any())).thenReturn(page(
                 "https://example.com/docs/install",
                 text("Install", "Install documentation content with enough useful body text."),
                 List.of()
@@ -48,7 +48,7 @@ class WebCrawlerTest {
         assertThat(result.documents()).extracting(ExtractedDocument::sourceUri)
                 .containsExactly("https://example.com/docs", "https://example.com/docs/install");
         assertThat(result.fetchedCount()).isEqualTo(2);
-        assertThat(result.skippedCount()).isZero();
+        assertThat(result.skippedCount()).isEqualTo(3);
         verify(extractor, never()).fetchPage(eq(sourceId), eq("https://example.com/other"));
         verify(extractor, never()).fetchPage(eq(sourceId), eq("https://other.example.com/docs/install"));
         verify(extractor, never()).fetchPage(eq(sourceId), eq("https://example.com/docs/manual.pdf"));
@@ -65,17 +65,17 @@ class WebCrawlerTest {
         UUID sourceId = UUID.randomUUID();
         String duplicateBody = "Shared documentation content that is long enough but duplicated.";
 
-        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"))).thenReturn(page(
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"), any())).thenReturn(page(
                 "https://example.com/docs",
                 text("Root", duplicateBody),
                 List.of(URI.create("https://example.com/docs/short"), URI.create("https://example.com/docs/copy"))
         ));
-        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/short"))).thenReturn(page(
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/short"), any())).thenReturn(page(
                 "https://example.com/docs/short",
                 text("Short", "too short"),
                 List.of()
         ));
-        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/copy"))).thenReturn(page(
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs/copy"), any())).thenReturn(page(
                 "https://example.com/docs/copy",
                 text("Copy", duplicateBody),
                 List.of()
@@ -87,8 +87,10 @@ class WebCrawlerTest {
                 .containsExactly("https://example.com/docs");
         assertThat(result.fetchedCount()).isEqualTo(3);
         assertThat(result.skippedCount()).isEqualTo(2);
-        verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs/short")), any());
-        verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs/copy")), any());
+        verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs/short")),
+                eq("LOW_CONTENT"), eq(1), eq("https://example.com/docs"), eq("text/html"), any(), any());
+        verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs/copy")),
+                eq("DUPLICATE_CONTENT"), eq(1), eq("https://example.com/docs"), eq("text/html"), any(), any());
     }
 
     private WebPageExtractor.FetchedPage page(String url, ExtractedDocument document, List<URI> links) {

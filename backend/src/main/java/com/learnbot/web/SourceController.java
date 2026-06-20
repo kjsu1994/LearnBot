@@ -57,7 +57,12 @@ public class SourceController {
                 request.url(),
                 request.recursive(),
                 request.maxDepth(),
-                request.maxPages()
+                request.maxPages(),
+                request.crawlScope(),
+                request.robotsFailurePolicy(),
+                request.includeAttachments(),
+                request.useSitemap(),
+                request.renderMode()
         );
     }
 

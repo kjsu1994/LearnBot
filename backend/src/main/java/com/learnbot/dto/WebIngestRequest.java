@@ -9,6 +9,11 @@ public record WebIngestRequest(
         UUID spaceId,
         Boolean recursive,
         Integer maxDepth,
-        Integer maxPages
+        Integer maxPages,
+        String crawlScope,
+        String robotsFailurePolicy,
+        Boolean includeAttachments,
+        Boolean useSitemap,
+        String renderMode
 ) {
 }

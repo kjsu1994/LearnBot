@@ -53,6 +53,28 @@ public class FileExtractor {
         }
     }
 
+    public ExtractedDocument extract(String fileName, String sourceUri, String contentType, byte[] content, Map<String, Object> metadata) {
+        try {
+            ExtractedDocument extracted = extract(fileName, new ByteArrayInputStream(content));
+            Map<String, Object> merged = new java.util.LinkedHashMap<>();
+            if (extracted.metadata() != null) {
+                merged.putAll(extracted.metadata());
+            }
+            if (metadata != null) {
+                merged.putAll(metadata);
+            }
+            return new ExtractedDocument(
+                    extracted.title(),
+                    sourceUri == null || sourceUri.isBlank() ? extracted.sourceUri() : sourceUri,
+                    contentType == null || contentType.isBlank() ? extracted.contentType() : contentType,
+                    extracted.content(),
+                    merged
+            );
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Could not extract file: " + ex.getMessage(), ex);
+        }
+    }
+
     private ExtractedDocument extract(String fileName, InputStream inputStream) throws Exception {
         String lower = fileName.toLowerCase();
 

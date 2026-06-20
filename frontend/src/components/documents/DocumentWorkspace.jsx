@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
 import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
@@ -10,6 +10,7 @@ import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
+  const [webIngestHelpOpen, setWebIngestHelpOpen] = useState(false);
   const showSourceManagement = props.showSourceManagement !== false;
 
   return (
@@ -23,6 +24,9 @@ function DocumentWorkspace(props) {
               <h2>문서 소스 추가</h2>
               <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
             </div>
+            <button className="icon-button" type="button" title="웹 수집 옵션 도움말" onClick={() => setWebIngestHelpOpen(true)}>
+              <HelpCircle size={16} />
+            </button>
           </div>
           <form className="stack" onSubmit={props.ingestWeb}>
             <label htmlFor="web-url">웹 URL</label>
@@ -37,6 +41,20 @@ function DocumentWorkspace(props) {
               <input id="web-recursive" type="checkbox" checked={props.webRecursive} onChange={(event) => props.setWebRecursive(event.target.checked)} />
               <span>시작 URL의 하위 경로를 재귀 수집</span>
             </label>
+            <WebCrawlAdvancedOptions
+              prefix="web"
+              recursive={props.webRecursive}
+              crawlScope={props.webCrawlScope}
+              setCrawlScope={props.setWebCrawlScope}
+              robotsFailurePolicy={props.webRobotsFailurePolicy}
+              setRobotsFailurePolicy={props.setWebRobotsFailurePolicy}
+              includeAttachments={props.webIncludeAttachments}
+              setIncludeAttachments={props.setWebIncludeAttachments}
+              useSitemap={props.webUseSitemap}
+              setUseSitemap={props.setWebUseSitemap}
+              renderMode={props.webRenderMode}
+              setRenderMode={props.setWebRenderMode}
+            />
             <div className="form-grid two">
               <div className="stack">
                 <label htmlFor="web-max-depth">깊이</label>
@@ -95,6 +113,7 @@ function DocumentWorkspace(props) {
             onClose={props.closeDocumentPreview}
           />
         )}
+        {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
       </div>
       )}
 
@@ -197,6 +216,16 @@ function DocumentSourcePanel(props) {
     setWebMaxDepth = () => {},
     webMaxPages = 30,
     setWebMaxPages = () => {},
+    webCrawlScope = 'START_PATH',
+    setWebCrawlScope = () => {},
+    webRobotsFailurePolicy = 'FAIL_CLOSED',
+    setWebRobotsFailurePolicy = () => {},
+    webIncludeAttachments = false,
+    setWebIncludeAttachments = () => {},
+    webUseSitemap = false,
+    setWebUseSitemap = () => {},
+    webRenderMode = 'STATIC',
+    setWebRenderMode = () => {},
     files = [],
     setFiles = () => {},
     fileBatchResult,
@@ -204,6 +233,7 @@ function DocumentSourcePanel(props) {
     ingestFile = (event) => event.preventDefault(),
     loading = () => false,
   } = props;
+  const [webIngestHelpOpen, setWebIngestHelpOpen] = useState(false);
 
   return (
     <section className="panel">
@@ -213,6 +243,9 @@ function DocumentSourcePanel(props) {
           <h2>문서 소스 추가</h2>
           <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
         </div>
+        <button className="icon-button" type="button" title="웹 수집 옵션 도움말" onClick={() => setWebIngestHelpOpen(true)}>
+          <HelpCircle size={16} />
+        </button>
       </div>
       <form className="stack" onSubmit={ingestWeb}>
         <label htmlFor="admin-web-url">웹 URL</label>
@@ -237,6 +270,20 @@ function DocumentSourcePanel(props) {
           />
           <span>시작 URL의 하위 경로를 재귀 수집</span>
         </label>
+        <WebCrawlAdvancedOptions
+          prefix="admin-web"
+          recursive={webRecursive}
+          crawlScope={webCrawlScope}
+          setCrawlScope={setWebCrawlScope}
+          robotsFailurePolicy={webRobotsFailurePolicy}
+          setRobotsFailurePolicy={setWebRobotsFailurePolicy}
+          includeAttachments={webIncludeAttachments}
+          setIncludeAttachments={setWebIncludeAttachments}
+          useSitemap={webUseSitemap}
+          setUseSitemap={setWebUseSitemap}
+          renderMode={webRenderMode}
+          setRenderMode={setWebRenderMode}
+        />
         <div className="form-grid two">
           <div className="stack">
             <label htmlFor="admin-web-max-depth">깊이</label>
@@ -291,7 +338,142 @@ function DocumentSourcePanel(props) {
         )}
         {fileBatchResult && <FileBatchResult result={fileBatchResult} />}
       </form>
+      {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
     </section>
+  );
+}
+
+function WebIngestHelpModal({ onClose }) {
+  return (
+    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+      <section className="code-modal document-preview-modal" role="dialog" aria-modal="true" aria-labelledby="web-ingest-help-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="code-modal-header">
+          <div className="code-modal-title">
+            <HelpCircle size={18} />
+            <div>
+              <h2 id="web-ingest-help-title">웹 문서 수집 옵션</h2>
+              <p>수집 범위와 실패 처리 방식에 따라 인덱싱되는 문서 수와 품질이 달라집니다.</p>
+            </div>
+          </div>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="code-modal-body document-preview-body">
+          <div className="document-reader">
+            <h3>재귀 수집</h3>
+            <p>꺼져 있으면 입력한 URL 한 페이지만 수집합니다. 켜면 페이지 안의 링크를 따라가며 여러 문서를 같은 소스로 묶어 인덱싱합니다. 문서 사이트, 도움말 센터, 정책 페이지처럼 관련 문서가 여러 페이지로 나뉜 경우 켜는 것이 좋습니다.</p>
+
+            <h3>수집 범위</h3>
+            <p><strong>시작 경로 하위</strong>는 가장 안전한 기본값입니다. 예를 들어 /docs에서 시작하면 /docs/install은 수집하지만 /blog는 제외합니다.</p>
+            <p><strong>같은 호스트 전체</strong>는 같은 도메인의 다른 경로까지 수집합니다. 문서가 /guide, /reference처럼 여러 경로에 나뉘어 있을 때 유용하지만 불필요한 페이지도 늘 수 있습니다.</p>
+            <p><strong>같은 사이트</strong>는 하위 도메인까지 넓게 봅니다. docs.example.com과 help.example.com을 함께 수집해야 할 때 사용합니다.</p>
+            <p><strong>허용 도메인 전체</strong>는 관리자 설정의 허용 도메인 안에서 교차 링크를 따라갑니다. 가장 넓은 범위라 운영자가 신뢰하는 도메인만 허용 목록에 넣었을 때 사용하세요.</p>
+
+            <h3>robots.txt 조회 실패</h3>
+            <p>관리자 설정의 robots.txt 정책 준수가 켜져 있을 때 적용됩니다. <strong>실패 시 차단</strong>은 가장 보수적인 기본값입니다. robots.txt를 읽지 못하면 수집하지 않습니다.</p>
+            <p><strong>조회 실패만 허용</strong>은 robots.txt 서버가 일시적으로 실패하거나 느린 경우 문서 수집을 계속합니다. 단, robots.txt가 정상적으로 읽히고 명시적으로 차단한 URL은 계속 수집하지 않습니다.</p>
+            <p><strong>robots.txt 무시</strong>는 해당 수집 요청에서 robots 검사를 건너뜁니다. 관리자 정책과 중복될 수 있으므로 내부 문서나 명확히 허가된 사이트에서만 사용하는 것이 안전합니다.</p>
+
+            <h3>sitemap.xml 활용</h3>
+            <p>사이트가 sitemap.xml을 제공하면 링크를 클릭해서 찾기 어려운 문서도 seed로 추가합니다. 문서 사이트의 누락을 줄이는 데 효과적입니다. sitemap을 못 읽어도 전체 작업은 실패하지 않고 일반 링크 수집으로 폴백합니다.</p>
+
+            <h3>첨부파일 수집</h3>
+            <p>웹 페이지에 연결된 PDF, DOCX, PPTX, XLSX, CSV, TXT, Markdown 파일을 함께 인덱싱합니다. 기본값은 꺼짐입니다. 켜면 답변 근거가 풍부해지지만 수집 시간이 길어지고 저장 용량이 늘 수 있습니다. 파일 크기와 형식 제한은 서버 설정을 따릅니다.</p>
+
+            <h3>렌더링 방식</h3>
+            <p><strong>정적 HTML</strong>은 빠르고 안정적인 기본값입니다. 서버가 내려준 HTML만 파싱합니다.</p>
+            <p><strong>필요 시 Playwright 폴백</strong>은 정적 HTML에 본문이 거의 없거나 SPA 페이지로 보일 때 브라우저 렌더링을 시도하는 모드입니다.</p>
+            <p><strong>Playwright 우선</strong>은 처음부터 브라우저 렌더링을 우선합니다. JavaScript로 본문을 만드는 사이트에 유리하지만 느리고 자원 사용량이 큽니다. 현재 런타임에 Playwright가 준비되지 않은 경우 정적 HTML 수집으로 안전하게 폴백하고 audit에 기록됩니다.</p>
+
+            <h3>추천 시작값</h3>
+            <p>처음에는 재귀 수집을 켜고, 수집 범위는 <strong>시작 경로 하위</strong>, robots.txt 조회 실패는 <strong>실패 시 차단</strong>, 렌더링 방식은 <strong>정적 HTML</strong>로 시작하세요. 결과가 부족하면 sitemap.xml 활용을 켜고, 문서가 여러 경로에 흩어져 있으면 수집 범위를 같은 호스트 전체로 넓히는 순서가 안전합니다.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function WebCrawlAdvancedOptions({
+  prefix,
+  recursive,
+  crawlScope = 'START_PATH',
+  setCrawlScope = () => {},
+  robotsFailurePolicy = 'FAIL_CLOSED',
+  setRobotsFailurePolicy = () => {},
+  includeAttachments = false,
+  setIncludeAttachments = () => {},
+  useSitemap = false,
+  setUseSitemap = () => {},
+  renderMode = 'STATIC',
+  setRenderMode = () => {},
+}) {
+  return (
+    <div className="detail-box compact-box">
+      <div className="form-grid two">
+        <div className="stack">
+          <label htmlFor={`${prefix}-crawl-scope`}>수집 범위</label>
+          <select
+            id={`${prefix}-crawl-scope`}
+            value={crawlScope}
+            disabled={!recursive}
+            onChange={(event) => setCrawlScope(event.target.value)}
+          >
+            <option value="START_PATH">시작 경로 하위</option>
+            <option value="SAME_HOST">같은 호스트 전체</option>
+            <option value="SAME_SITE">같은 사이트</option>
+            <option value="ALLOWLIST">허용 도메인 전체</option>
+          </select>
+        </div>
+        <div className="stack">
+          <label htmlFor={`${prefix}-robots-policy`}>robots.txt 조회 실패</label>
+          <select
+            id={`${prefix}-robots-policy`}
+            value={robotsFailurePolicy}
+            onChange={(event) => setRobotsFailurePolicy(event.target.value)}
+          >
+            <option value="FAIL_CLOSED">실패 시 차단</option>
+            <option value="ALLOW_ON_ERROR">조회 실패만 허용</option>
+            <option value="IGNORE">robots.txt 무시</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-grid two">
+        <label className="checkbox-row" htmlFor={`${prefix}-sitemap`}>
+          <input
+            id={`${prefix}-sitemap`}
+            type="checkbox"
+            checked={useSitemap}
+            disabled={!recursive}
+            onChange={(event) => setUseSitemap(event.target.checked)}
+          />
+          <span>sitemap.xml 활용</span>
+        </label>
+        <label className="checkbox-row" htmlFor={`${prefix}-attachments`}>
+          <input
+            id={`${prefix}-attachments`}
+            type="checkbox"
+            checked={includeAttachments}
+            disabled={!recursive}
+            onChange={(event) => setIncludeAttachments(event.target.checked)}
+          />
+          <span>첨부파일 수집</span>
+        </label>
+      </div>
+      <div className="stack">
+        <label htmlFor={`${prefix}-render-mode`}>렌더링 방식</label>
+        <select
+          id={`${prefix}-render-mode`}
+          value={renderMode}
+          onChange={(event) => setRenderMode(event.target.value)}
+        >
+          <option value="STATIC">정적 HTML</option>
+          <option value="PLAYWRIGHT_FALLBACK">필요 시 Playwright 폴백</option>
+          <option value="PLAYWRIGHT_ALWAYS">Playwright 우선</option>
+        </select>
+      </div>
+    </div>
   );
 }
 
@@ -355,6 +537,22 @@ function DocumentDetailPanel({ detail, loading }) {
           <dd>{detail.storedObject?.originalFilename || '-'}</dd>
         </div>
       </dl>
+      {detail.crawlAudits?.length > 0 && (
+        <div className="results audit-list">
+          {detail.crawlAudits.slice(0, 8).map((audit) => (
+            <article className="result" key={audit.id}>
+              <div className="result-heading">
+                <strong>{audit.reasonCode || (audit.success ? 'FETCHED' : 'SKIPPED')}</strong>
+                <span>{audit.statusCode || '-'}</span>
+              </div>
+              <small title={audit.url}>
+                {audit.host || '-'}{audit.depth != null ? ` · depth ${audit.depth}` : ''}{audit.referrerUrl ? ` · from ${audit.referrerUrl}` : ''}
+              </small>
+              <p>{audit.message || audit.url}</p>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

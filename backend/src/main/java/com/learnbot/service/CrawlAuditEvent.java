@@ -1,10 +1,10 @@
-package com.learnbot.dto;
+package com.learnbot.service;
 
-import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
-public record CrawlAuditSummary(
-        UUID id,
+public record CrawlAuditEvent(
+        UUID sourceId,
         String url,
         String host,
         boolean allowedDomain,
@@ -16,9 +16,7 @@ public record CrawlAuditSummary(
         String referrerUrl,
         String normalizedUrl,
         String contentType,
-        java.util.Map<String, Object> metadata,
-        String message,
-        OffsetDateTime startedAt,
-        OffsetDateTime finishedAt
+        Map<String, Object> metadata,
+        String message
 ) {
 }

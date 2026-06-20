@@ -13,6 +13,7 @@ import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.dto.StoredObjectSummary;
 import com.learnbot.service.Chunk;
+import com.learnbot.service.CrawlAuditEvent;
 import com.learnbot.service.StoredObject;
 import com.learnbot.service.StoredSource;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -360,23 +361,50 @@ public class DocumentRepository {
             boolean success,
             String message
     ) {
+        createCrawlAuditLog(new CrawlAuditEvent(
+                sourceId,
+                url,
+                host,
+                allowedDomain,
+                robotsAllowed,
+                statusCode,
+                success,
+                null,
+                null,
+                null,
+                url,
+                null,
+                Map.of(),
+                message
+        ));
+    }
+
+    public void createCrawlAuditLog(CrawlAuditEvent event) {
         jdbc.update("""
                 INSERT INTO crawl_audit_logs (
-                    id, source_id, url, host, allowed_domain, robots_allowed, status_code, success, message
+                    id, source_id, url, host, allowed_domain, robots_allowed, status_code, success,
+                    reason_code, depth, referrer_url, normalized_url, content_type, metadata, message
                 )
                 VALUES (
-                    :id, :sourceId, :url, :host, :allowedDomain, :robotsAllowed, :statusCode, :success, :message
+                    :id, :sourceId, :url, :host, :allowedDomain, :robotsAllowed, :statusCode, :success,
+                    :reasonCode, :depth, :referrerUrl, :normalizedUrl, :contentType, CAST(:metadata AS jsonb), :message
                 )
                 """, new MapSqlParameterSource()
                 .addValue("id", UUID.randomUUID())
-                .addValue("sourceId", sourceId)
-                .addValue("url", url)
-                .addValue("host", host)
-                .addValue("allowedDomain", allowedDomain)
-                .addValue("robotsAllowed", robotsAllowed)
-                .addValue("statusCode", statusCode)
-                .addValue("success", success)
-                .addValue("message", message));
+                .addValue("sourceId", event.sourceId())
+                .addValue("url", event.url())
+                .addValue("host", event.host())
+                .addValue("allowedDomain", event.allowedDomain())
+                .addValue("robotsAllowed", event.robotsAllowed())
+                .addValue("statusCode", event.statusCode())
+                .addValue("success", event.success())
+                .addValue("reasonCode", event.reasonCode())
+                .addValue("depth", event.depth())
+                .addValue("referrerUrl", event.referrerUrl())
+                .addValue("normalizedUrl", event.normalizedUrl())
+                .addValue("contentType", event.contentType())
+                .addValue("metadata", toJson(event.metadata()))
+                .addValue("message", event.message()));
     }
 
     public List<DocumentSummary> listDocuments(List<UUID> spaceIds, UUID selectedSpaceId) {
@@ -448,7 +476,9 @@ public class DocumentRepository {
 
     public List<CrawlAuditSummary> listCrawlAudits(UUID sourceId) {
         return jdbc.query("""
-                SELECT id, url, host, allowed_domain, robots_allowed, status_code, success, message, started_at, finished_at
+                SELECT id, url, host, allowed_domain, robots_allowed, status_code, success,
+                       reason_code, depth, referrer_url, normalized_url, content_type, metadata::text AS metadata,
+                       message, started_at, finished_at
                 FROM crawl_audit_logs
                 WHERE source_id = :sourceId
                 ORDER BY started_at DESC
@@ -461,6 +491,12 @@ public class DocumentRepository {
                 rs.getObject("robots_allowed", Boolean.class),
                 rs.getObject("status_code", Integer.class),
                 rs.getBoolean("success"),
+                rs.getString("reason_code"),
+                rs.getObject("depth", Integer.class),
+                rs.getString("referrer_url"),
+                rs.getString("normalized_url"),
+                rs.getString("content_type"),
+                fromJson(rs.getString("metadata")),
                 rs.getString("message"),
                 rs.getObject("started_at", OffsetDateTime.class),
                 rs.getObject("finished_at", OffsetDateTime.class)

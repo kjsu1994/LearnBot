@@ -122,6 +122,19 @@ public class LearnBotProperties {
 
         private boolean respectRobotsTxt = true;
 
+        private String crawlScope = "START_PATH";
+
+        private String robotsFailurePolicy = "FAIL_CLOSED";
+
+        private boolean includeAttachments = false;
+
+        private boolean useSitemap = false;
+
+        private String renderMode = "STATIC";
+
+        @Min(1)
+        private long maxAttachmentBytes = 25_000_000L;
+
         public List<String> getAllowedDomains() {
             return allowedDomains;
         }
@@ -176,6 +189,54 @@ public class LearnBotProperties {
 
         public void setRespectRobotsTxt(boolean respectRobotsTxt) {
             this.respectRobotsTxt = respectRobotsTxt;
+        }
+
+        public String getCrawlScope() {
+            return crawlScope;
+        }
+
+        public void setCrawlScope(String crawlScope) {
+            this.crawlScope = crawlScope;
+        }
+
+        public String getRobotsFailurePolicy() {
+            return robotsFailurePolicy;
+        }
+
+        public void setRobotsFailurePolicy(String robotsFailurePolicy) {
+            this.robotsFailurePolicy = robotsFailurePolicy;
+        }
+
+        public boolean isIncludeAttachments() {
+            return includeAttachments;
+        }
+
+        public void setIncludeAttachments(boolean includeAttachments) {
+            this.includeAttachments = includeAttachments;
+        }
+
+        public boolean isUseSitemap() {
+            return useSitemap;
+        }
+
+        public void setUseSitemap(boolean useSitemap) {
+            this.useSitemap = useSitemap;
+        }
+
+        public String getRenderMode() {
+            return renderMode;
+        }
+
+        public void setRenderMode(String renderMode) {
+            this.renderMode = renderMode;
+        }
+
+        public long getMaxAttachmentBytes() {
+            return maxAttachmentBytes;
+        }
+
+        public void setMaxAttachmentBytes(long maxAttachmentBytes) {
+            this.maxAttachmentBytes = maxAttachmentBytes;
         }
     }
 
