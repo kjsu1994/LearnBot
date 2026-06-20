@@ -1382,7 +1382,7 @@ public class RagService {
             return "";
         }
         String compact = content.replaceAll("\\s+", " ").trim();
-        return compact.length() <= 260 ? compact : compact.substring(0, 260) + "...";
+        return compact.length() <= 420 ? compact : compact.substring(0, 420) + "...";
     }
 
     private String abbreviate(String value) {

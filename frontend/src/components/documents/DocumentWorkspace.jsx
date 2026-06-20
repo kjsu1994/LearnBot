@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
 import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
@@ -142,7 +142,7 @@ function DocumentWorkspace(props) {
               <div className="answer-body">
                 <MarkdownAnswer text={props.answer.answer} />
               </div>
-              <EvidenceList evidence={props.answer.evidence} />
+              <EvidenceList evidence={props.answer.evidence} onOpenEvidence={props.openDocumentPreview} />
             </div>
           )}
           {answerModalOpen && props.answer && (
@@ -377,39 +377,77 @@ function ResultList({ results, title }) {
   );
 }
 
-function EvidenceList({ evidence = [] }) {
+function EvidenceList({ evidence = [], onOpenEvidence }) {
   const [expanded, setExpanded] = useState(false);
   const evidenceKey = evidence.map((item) => item.chunkId || item.citationNumber).join('|');
   useEffect(() => {
     setExpanded(false);
   }, [evidenceKey]);
   if (!evidence.length) return <p className="empty compact-empty">표시할 근거가 없습니다.</p>;
-  const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
-  const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
+  const groupedEvidence = groupDocumentEvidence(evidence);
+  const visibleEvidence = expanded ? groupedEvidence : groupedEvidence.slice(0, evidencePreviewLimit);
+  const hiddenCount = Math.max(groupedEvidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
         <strong>근거 문서</strong>
-        <small>{visibleEvidence.length}/{evidence.length}개 표시</small>
+        <small>{visibleEvidence.length}/{groupedEvidence.length}개 문서 표시</small>
       </div>
       <div className="evidence-list document-evidence-scroll" tabIndex={0}>
         {visibleEvidence.map((item) => (
-          <article className="evidence-card" key={`${item.citationNumber}-${item.chunkId}`}>
-            <strong title={item.title}>[{item.citationNumber}] {item.title}</strong>
-            <small title={item.sourceUri}>{item.sourceUri} · chunk {item.chunkIndex}</small>
+          <article className="evidence-card document-evidence" key={item.evidenceKey}>
+            <div className="result-heading">
+              <strong title={item.title}>[{item.citationNumbers.join(', ')}] {item.title}</strong>
+              {item.documentId && (
+                <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.documentId)}>
+                  <Eye size={14} />
+                  열기
+                </button>
+              )}
+            </div>
+            <small title={item.sourceUri}>
+              {item.sourceUri} · {item.matchedChunkCount > 1 ? `관련 청크 ${item.matchedChunkCount}개` : `chunk ${item.chunkIndex}`}
+            </small>
             <p>{item.preview}</p>
           </article>
         ))}
       </div>
-      {evidence.length > evidencePreviewLimit && (
+      {groupedEvidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '핵심 근거만 보기' : `전체 근거 ${evidence.length}개 보기`}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 문서 ${groupedEvidence.length}개 보기`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
     </div>
   );
+}
+
+function groupDocumentEvidence(evidence) {
+  const grouped = new Map();
+  evidence.forEach((item, index) => {
+    const key = item.documentId || item.sourceUri || item.title || item.chunkId || `evidence-${index}`;
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, {
+        ...item,
+        evidenceKey: String(key),
+        citationNumbers: [item.citationNumber],
+        matchedChunkCount: 1,
+      });
+      return;
+    }
+    current.matchedChunkCount += 1;
+    if (!current.citationNumbers.includes(item.citationNumber)) {
+      current.citationNumbers.push(item.citationNumber);
+    }
+    if (Number(item.score || 0) > Number(current.score || 0)) {
+      current.preview = item.preview;
+      current.chunkIndex = item.chunkIndex;
+      current.score = item.score;
+    }
+  });
+  return Array.from(grouped.values());
 }
 
 function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {

@@ -469,6 +469,9 @@ button:hover:not(:disabled),
 
 .evidence-toggle {
   justify-self: start;
+  max-width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 .evidence-toggle span {
@@ -547,7 +550,10 @@ button:hover:not(:disabled),
   border-color: #d7e5df;
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
   max-height: calc(100vh - 48px);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .answer-title {
@@ -577,8 +583,8 @@ button:hover:not(:disabled),
   background: #fbfdfc;
   border: 1px solid #e4ece7;
   border-radius: 8px;
-  max-height: min(76vh, 1040px);
-  min-height: 420px;
+  max-height: min(52vh, 1040px);
+  min-height: clamp(180px, 38vh, 420px);
   padding: 12px 14px;
 }
 
@@ -650,6 +656,14 @@ button:hover:not(:disabled),
 .evidence-section-expanded .evidence-card p,
 .evidence-section-expanded .code-evidence p {
   -webkit-line-clamp: 7;
+}
+
+.evidence-section-expanded .document-evidence p {
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
 }
 
 .code-answer {
@@ -762,6 +776,21 @@ button:hover:not(:disabled),
 
   .detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1101px) and (max-height: 760px) {
+  .answer {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .answer-body {
+    max-height: 42dvh;
+    min-height: 180px;
+  }
+
+  .answer .evidence-list {
+    max-height: min(30dvh, 232px);
   }
 }
 
