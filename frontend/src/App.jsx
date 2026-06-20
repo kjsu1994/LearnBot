@@ -775,6 +775,13 @@ export default function App() {
     });
   }
 
+  async function reindexDocument(documentId) {
+    await run(`document-reindex-${documentId}`, async () => {
+      await request(`/api/documents/${documentId}/reindex`, { method: 'POST' });
+      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
+    });
+  }
+
   async function loadDocumentDetail(documentId) {
     setSelectedDocumentId(documentId);
     await run(`detail-${documentId}`, async () => {
@@ -1161,9 +1168,11 @@ export default function App() {
             ingestWeb={ingestWeb}
             ingestFile={ingestFile}
             documents={documents}
+            documentJobs={documentJobs}
             selectedDocumentId={selectedDocumentId}
             loadDocumentDetail={loadDocumentDetail}
             deleteDocument={deleteDocument}
+            reindexDocument={reindexDocument}
             openDocumentPreview={openDocumentPreview}
             documentDetail={documentDetail}
             documentPreviewOpen={documentPreviewOpen}
@@ -1283,6 +1292,13 @@ export default function App() {
               fileBatchResult,
               ingestWeb,
               ingestFile,
+              documents,
+              documentJobs,
+              selectedDocumentId,
+              loadDocumentDetail,
+              openDocumentPreview,
+              reindexDocument,
+              deleteDocument,
             }}
           />
         )}

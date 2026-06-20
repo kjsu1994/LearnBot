@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
@@ -104,6 +104,17 @@ function DocumentWorkspace(props) {
             {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
           </form>
         </section>
+
+        <DocumentSourceList
+          documents={props.documents}
+          jobs={props.documentJobs}
+          selectedDocumentId={props.selectedDocumentId}
+          loadDocumentDetail={props.loadDocumentDetail}
+          openDocumentPreview={props.openDocumentPreview}
+          reindexDocument={props.reindexDocument}
+          deleteDocument={props.deleteDocument}
+          loading={props.loading}
+        />
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
         {props.documentPreviewOpen && (
@@ -230,6 +241,13 @@ function DocumentSourcePanel(props) {
     setWebRenderMode = () => {},
     files = [],
     setFiles = () => {},
+    documents = [],
+    documentJobs = [],
+    selectedDocumentId = '',
+    loadDocumentDetail = () => {},
+    openDocumentPreview = () => {},
+    reindexDocument = () => {},
+    deleteDocument = () => {},
     fileBatchResult,
     ingestWeb = (event) => event.preventDefault(),
     ingestFile = (event) => event.preventDefault(),
@@ -341,9 +359,122 @@ function DocumentSourcePanel(props) {
         )}
         {fileBatchResult && <FileBatchResult result={fileBatchResult} />}
       </form>
+      <DocumentSourceList
+        documents={documents}
+        jobs={documentJobs}
+        selectedDocumentId={selectedDocumentId}
+        loadDocumentDetail={loadDocumentDetail}
+        openDocumentPreview={openDocumentPreview}
+        reindexDocument={reindexDocument}
+        deleteDocument={deleteDocument}
+        loading={loading}
+      />
       {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
     </section>
   );
+}
+
+function DocumentSourceList({
+  documents = [],
+  jobs = [],
+  selectedDocumentId = '',
+  loadDocumentDetail = () => {},
+  openDocumentPreview = () => {},
+  reindexDocument = () => {},
+  deleteDocument = () => {},
+  loading = () => false,
+}) {
+  const latestJobBySource = latestDocumentJobsBySource(jobs);
+  return (
+    <section className="panel documents-panel">
+      <div className="panel-title">
+        <FileCode2 size={18} />
+        <div>
+          <h2>{'\uBB38\uC11C \uC800\uC7A5\uC18C \uBAA9\uB85D'}</h2>
+          <p>{documents.length ? `${documents.length}\uAC1C \uBB38\uC11C` : '\uB4F1\uB85D\uB41C \uBB38\uC11C\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>
+        </div>
+      </div>
+      <div className="document-list scrollable-list repo-list document-source-list">
+        {documents.map((document) => {
+          const latestJob = latestJobBySource.get(document.sourceId) || latestJobBySource.get(document.id);
+          const runningJob = latestJob && (latestJob.status === 'RUNNING' || latestJob.status === 'CANCELLING') ? latestJob : null;
+          return (
+            <article
+              className={document.id === selectedDocumentId ? 'document-row selected repo-row' : 'document-row repo-row'}
+              key={document.id}
+              onClick={() => loadDocumentDetail(document.id)}
+            >
+              <div className="document-main">
+                <strong>{document.title || document.sourceUri || '\uBB38\uC11C'}</strong>
+                <small>{document.sourceUri || document.contentType || '-'}</small>
+              </div>
+              <div className="document-meta">
+                <StatusBadge status={document.sourceStatus} />
+                <small>{getSourceLabel(document.sourceType)} {'\u00B7'} {formatDate(document.createdAt)}</small>
+              </div>
+              <div className="document-actions">
+                <IconButton title={'\uBBF8\uB9AC\uBCF4\uAE30'} onClick={(event) => { event.stopPropagation(); openDocumentPreview(document.id); }}>
+                  <Eye size={15} />
+                </IconButton>
+                <IconButton title={'\uC7AC\uC778\uB371\uC2F1'} disabled={!!runningJob || loading(`document-reindex-${document.id}`)} onClick={(event) => { event.stopPropagation(); reindexDocument(document.id); }}>
+                  {loading(`document-reindex-${document.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                </IconButton>
+                <IconButton danger title={'\uBB38\uC11C \uC0AD\uC81C'} disabled={!!runningJob || loading(`delete-${document.id}`)} onClick={(event) => { event.stopPropagation(); deleteDocument(document.id, document.title || document.sourceUri); }}>
+                  {loading(`delete-${document.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                </IconButton>
+              </div>
+              {latestJob && <DocumentJobStrip job={latestJob} />}
+            </article>
+          );
+        })}
+        {documents.length === 0 && <p className="empty">{'\uC6F9 URL\uC744 \uB4F1\uB85D\uD558\uAC70\uB098 \uD30C\uC77C\uC744 \uC5C5\uB85C\uB4DC\uD574 \uC778\uB371\uC2F1\uC744 \uC2DC\uC791\uD558\uC138\uC694.'}</p>}
+      </div>
+    </section>
+  );
+}
+
+function DocumentJobStrip({ job }) {
+  return (
+    <div className="job-strip">
+      <span>{documentJobSummary(job)}</span>
+      <div className="progress-track" aria-label={'\uBB38\uC11C \uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
+        <span style={{ width: `${documentJobPercent(job)}%` }} />
+      </div>
+      {job.errorMessage && <div className="failure-line">{job.errorMessage}</div>}
+    </div>
+  );
+}
+
+function latestDocumentJobsBySource(jobs = []) {
+  const sorted = [...jobs].sort((a, b) => new Date(b.createdAt || b.startedAt || 0) - new Date(a.createdAt || a.startedAt || 0));
+  const latest = new Map();
+  sorted.forEach((job) => {
+    const key = job.sourceId;
+    if (key && !latest.has(key)) {
+      latest.set(key, job);
+    }
+  });
+  return latest;
+}
+
+function documentJobSummary(job) {
+  const status = getStatusLabel(job?.status);
+  const processed = Number(job?.processedDocuments || 0);
+  const total = Number(job?.totalDocuments || 0);
+  const chunks = Number(job?.totalChunks || 0);
+  const embedded = Number(job?.embeddedChunks || 0);
+  const reused = Number(job?.reusedChunks || 0);
+  const parts = [`${status} \u00B7 ${processed}/${total || '-'} files \u00B7 ${chunks} chunks`];
+  if (embedded > 0) parts.push(`\uCD94\uAC00 ${embedded}`);
+  if (reused > 0) parts.push(`\uC7AC\uC0AC\uC6A9 ${reused}`);
+  return parts.join(' \u00B7 ');
+}
+
+function documentJobPercent(job) {
+  if (job?.status === 'SUCCEEDED') return 100;
+  const total = Number(job?.totalDocuments || 0);
+  if (!total) return job?.status === 'RUNNING' ? 8 : 0;
+  return Math.max(5, Math.min(100, Math.round((Number(job?.processedDocuments || 0) / total) * 100)));
 }
 
 function WebIngestHelpModal({ onClose }) {
