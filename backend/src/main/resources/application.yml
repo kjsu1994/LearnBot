@@ -19,7 +19,7 @@ learnbot:
   crawler:
     allowed-domains: ${LEARNBOT_CRAWLER_ALLOWED_DOMAINS:example.com}
     timeout-seconds: ${LEARNBOT_CRAWLER_TIMEOUT_SECONDS:15}
-    rate-limit-millis: ${LEARNBOT_CRAWLER_RATE_LIMIT_MILLIS:1000}
+    rate-limit-millis: ${LEARNBOT_CRAWLER_RATE_LIMIT_MILLIS:500}
     max-pages-per-request: ${LEARNBOT_CRAWLER_MAX_PAGES_PER_REQUEST:30}
     max-depth: ${LEARNBOT_CRAWLER_MAX_DEPTH:2}
     min-content-chars: ${LEARNBOT_CRAWLER_MIN_CONTENT_CHARS:200}
@@ -30,6 +30,12 @@ learnbot:
     use-sitemap: ${LEARNBOT_CRAWLER_USE_SITEMAP:false}
     render-mode: ${LEARNBOT_CRAWLER_RENDER_MODE:STATIC}
     max-attachment-bytes: ${LEARNBOT_CRAWLER_MAX_ATTACHMENT_BYTES:25000000}
+    playwright-enabled: ${LEARNBOT_CRAWLER_PLAYWRIGHT_ENABLED:false}
+    playwright-timeout-seconds: ${LEARNBOT_CRAWLER_PLAYWRIGHT_TIMEOUT_SECONDS:20}
+    playwright-wait-until: ${LEARNBOT_CRAWLER_PLAYWRIGHT_WAIT_UNTIL:networkidle}
+    playwright-min-static-chars: ${LEARNBOT_CRAWLER_PLAYWRIGHT_MIN_STATIC_CHARS:300}
+    recursive-min-content-chars: ${LEARNBOT_CRAWLER_RECURSIVE_MIN_CONTENT_CHARS:450}
+    min-text-density: ${LEARNBOT_CRAWLER_MIN_TEXT_DENSITY:0.18}
   chunking:
     size: ${LEARNBOT_CHUNK_SIZE:1200}
     overlap: ${LEARNBOT_CHUNK_OVERLAP:150}
@@ -61,13 +67,21 @@ learnbot:
       document-adjacent-chunk-radius: ${RAG_PIPELINE_DOCUMENT_ADJACENT_CHUNK_RADIUS:1}
       min-top-score: ${RAG_PIPELINE_MIN_TOP_SCORE:0.30}
       min-coverage: ${RAG_PIPELINE_MIN_COVERAGE:0.15}
+      reranker:
+        enabled: ${LEARNBOT_RERANKER_ENABLED:false}
+        base-url: ${LEARNBOT_RERANKER_BASE_URL:http://localhost:8081}
+        top-n: ${LEARNBOT_RERANKER_TOP_N:30}
+        timeout-seconds: ${LEARNBOT_RERANKER_TIMEOUT_SECONDS:8}
     document-context:
       enabled: ${LEARNBOT_DOCUMENT_CONTEXT_ENABLED:true}
       llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_SUMMARY_ENABLED:true}
       max-source-documents: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SOURCE_DOCUMENTS:80}
       max-summary-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SUMMARY_INPUT_CHARS:9000}
       map-reduce-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_MAP_REDUCE_ENABLED:true}
+      recursive-llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_RECURSIVE_LLM_SUMMARY_ENABLED:false}
+      recursive-map-reduce-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_RECURSIVE_MAP_REDUCE_ENABLED:false}
       max-map-windows-per-document: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_MAP_WINDOWS_PER_DOCUMENT:8}
+      recursive-max-source-documents: ${LEARNBOT_DOCUMENT_CONTEXT_RECURSIVE_MAX_SOURCE_DOCUMENTS:40}
       map-window-chunks: ${LEARNBOT_DOCUMENT_CONTEXT_MAP_WINDOW_CHUNKS:6}
       max-map-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_MAP_INPUT_CHARS:7000}
       max-reduce-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_REDUCE_INPUT_CHARS:12000}
@@ -122,8 +136,20 @@ learnbot:
       evidence-ranking-debug: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG:false}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}
+    ocr:
+      enabled: ${LEARNBOT_DOCUMENT_OCR_ENABLED:false}
+      command: ${LEARNBOT_DOCUMENT_OCR_COMMAND:ocrmypdf}
+      languages: ${LEARNBOT_DOCUMENT_OCR_LANGS:kor+eng}
+      min-text-chars-per-page: ${LEARNBOT_DOCUMENT_OCR_MIN_TEXT_CHARS_PER_PAGE:80}
+      max-pages: ${LEARNBOT_DOCUMENT_OCR_MAX_PAGES:80}
+      timeout-seconds: ${LEARNBOT_DOCUMENT_OCR_TIMEOUT_SECONDS:180}
+    graph:
+      enabled: ${LEARNBOT_DOCUMENT_GRAPH_ENABLED:true}
+      max-hop: ${LEARNBOT_DOCUMENT_GRAPH_MAX_HOP:1}
+      max-expanded-results: ${LEARNBOT_DOCUMENT_GRAPH_MAX_EXPANDED_RESULTS:12}
+      debug: ${LEARNBOT_DOCUMENT_GRAPH_DEBUG:false}
     preview:
-      office-render-enabled: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_RENDER_ENABLED:true}
+      office-render-enabled: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_RENDER_ENABLED:false}
       office-command: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_COMMAND:soffice}
       office-timeout-seconds: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_TIMEOUT_SECONDS:45}
       office-max-file-bytes: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_MAX_FILE_BYTES:100000000}

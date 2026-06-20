@@ -2,6 +2,11 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.repository.DocumentRepository;
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.LoadState;
 import org.jsoup.Jsoup;
 import org.jsoup.Connection;
 import org.jsoup.nodes.Element;
@@ -110,11 +115,6 @@ public class WebPageExtractor {
         }
 
         try {
-            if (safeOptions.renderMode() == WebRenderMode.PLAYWRIGHT_ALWAYS) {
-                audit(new CrawlAuditEvent(sourceId, url, host, true, robotsAllowed, null, false,
-                        "PLAYWRIGHT_UNAVAILABLE_STATIC_FALLBACK", null, null, url, null, Map.of("renderMode", safeOptions.renderMode().name()),
-                        "Playwright rendering is not installed in this runtime; falling back to static HTML fetch."));
-            }
             waitForRateLimit(host);
             Connection.Response response = Jsoup.connect(url)
                     .timeout(properties.getCrawler().getTimeoutSeconds() * 1000)
@@ -128,6 +128,11 @@ public class WebPageExtractor {
             }
             Document doc = response.parse();
             doc.setBaseUri(url);
+            RenderOutcome renderOutcome = maybeRender(sourceId, url, host, robotsAllowed, doc, safeOptions);
+            if (renderOutcome.rendered()) {
+                doc = renderOutcome.document();
+                doc.setBaseUri(url);
+            }
             List<URI> links = extractLinks(doc);
 
             String canonicalUrl = canonicalUrl(doc, url);
@@ -172,12 +177,15 @@ public class WebPageExtractor {
             metadata.put("heading", heading);
             metadata.put("headings", headings);
             metadata.put("bodyTextLength", bodyText.length());
+            metadata.put("htmlTextDensity", textDensity(doc, bodyText));
             metadata.put("selectorUsed", rootSelection.selector());
             metadata.put("extractionStrategy", rootSelection.strategy());
             metadata.put("contentType", responseContentType);
             metadata.put("outboundLinkCount", links.size());
             metadata.put("imageCount", images.size());
             metadata.put("renderMode", safeOptions.renderMode().name());
+            metadata.put("renderedByPlaywright", renderOutcome.rendered());
+            metadata.put("renderFallbackReason", renderOutcome.fallbackReason());
             metadata.put("webPreviewVersion", 1);
             metadata.put("webPreviewBlocks", previewBlocks);
             metadata.put("webPreviewLinks", webLinks(doc));
@@ -191,7 +199,7 @@ public class WebPageExtractor {
             );
             audit(new CrawlAuditEvent(sourceId, url, host, true, robotsAllowed, statusCode, true,
                     "FETCHED", null, null, response.url() == null ? url : response.url().toString(), responseContentType,
-                    Map.of("bodyTextLength", bodyText.length(), "renderMode", safeOptions.renderMode().name()),
+                    Map.of("bodyTextLength", bodyText.length(), "renderMode", safeOptions.renderMode().name(), "renderedByPlaywright", renderOutcome.rendered()),
                     "Fetched page."));
             return new FetchedPage(uri, extracted, links, host, robotsAllowed, statusCode);
         } catch (Exception ex) {
@@ -295,6 +303,90 @@ public class WebPageExtractor {
                 .map(this::toUriOrNull)
                 .filter(uri -> uri != null)
                 .toList();
+    }
+
+    private RenderOutcome maybeRender(UUID sourceId, String url, String host, Boolean robotsAllowed, Document staticDoc, CrawlOptions options) {
+        if (options.renderMode() == WebRenderMode.STATIC) {
+            return RenderOutcome.staticOnly(staticDoc);
+        }
+        String staticText = staticDoc.body() == null ? "" : cleanText(staticDoc.body().text());
+        boolean shouldRender = options.renderMode() == WebRenderMode.PLAYWRIGHT_ALWAYS
+                || staticText.length() < properties.getCrawler().getPlaywrightMinStaticChars()
+                || looksLikeSpaShell(staticDoc);
+        if (!shouldRender) {
+            return RenderOutcome.staticOnly(staticDoc);
+        }
+        if (!properties.getCrawler().isPlaywrightEnabled()) {
+            String reason = "PLAYWRIGHT_DISABLED_STATIC_FALLBACK";
+            audit(new CrawlAuditEvent(sourceId, url, host, true, robotsAllowed, null, false,
+                    reason, null, null, url, null, Map.of("renderMode", options.renderMode().name()),
+                    "Playwright rendering is disabled; static HTML was used."));
+            return new RenderOutcome(staticDoc, false, reason);
+        }
+        try {
+            Document rendered = renderWithPlaywright(url);
+            audit(new CrawlAuditEvent(sourceId, url, host, true, robotsAllowed, null, true,
+                    "PLAYWRIGHT_RENDERED", null, null, url, "text/html", Map.of("renderMode", options.renderMode().name()),
+                    "Fetched page with Playwright rendering."));
+            return new RenderOutcome(rendered, true, "");
+        } catch (RuntimeException ex) {
+            String reason = "PLAYWRIGHT_RENDER_FAILED_STATIC_FALLBACK";
+            audit(new CrawlAuditEvent(sourceId, url, host, true, robotsAllowed, null, false,
+                    reason, null, null, url, null, Map.of("renderMode", options.renderMode().name(), "error", ex.getMessage()),
+                    "Playwright rendering failed; static HTML was used."));
+            return new RenderOutcome(staticDoc, false, reason);
+        }
+    }
+
+    private Document renderWithPlaywright(String url) {
+        try (Playwright playwright = Playwright.create()) {
+            BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(true);
+            java.nio.file.Path chromiumPath = chromiumPathOrNull();
+            if (chromiumPath != null) {
+                options.setExecutablePath(chromiumPath);
+            }
+            try (Browser browser = playwright.chromium().launch(options)) {
+            Page page = browser.newPage();
+            page.navigate(url, new Page.NavigateOptions().setTimeout(properties.getCrawler().getPlaywrightTimeoutSeconds() * 1000.0));
+            page.waitForLoadState(loadState(), new Page.WaitForLoadStateOptions().setTimeout(properties.getCrawler().getPlaywrightTimeoutSeconds() * 1000.0));
+            return Jsoup.parse(page.content(), url);
+            }
+        }
+    }
+
+    private java.nio.file.Path chromiumPathOrNull() {
+        for (String candidate : List.of("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome")) {
+            java.nio.file.Path path = java.nio.file.Path.of(candidate);
+            if (java.nio.file.Files.isExecutable(path)) {
+                return path;
+            }
+        }
+        return null;
+    }
+
+    private LoadState loadState() {
+        String value = properties.getCrawler().getPlaywrightWaitUntil();
+        if ("domcontentloaded".equalsIgnoreCase(value)) {
+            return LoadState.DOMCONTENTLOADED;
+        }
+        if ("load".equalsIgnoreCase(value)) {
+            return LoadState.LOAD;
+        }
+        return LoadState.NETWORKIDLE;
+    }
+
+    private boolean looksLikeSpaShell(Document doc) {
+        String bodyText = doc.body() == null ? "" : cleanText(doc.body().text());
+        return bodyText.length() < 800
+                && (doc.select("#app, #root, [data-reactroot], script[src*=bundle], script[src*=app]").size() > 0);
+    }
+
+    private double textDensity(Document doc, String bodyText) {
+        int htmlLength = doc == null ? 0 : doc.outerHtml().length();
+        if (htmlLength <= 0) {
+            return 0.0;
+        }
+        return Math.min(1.0, (double) cleanText(bodyText).length() / htmlLength);
     }
 
     private URI toUriOrNull(String value) {
@@ -761,6 +853,12 @@ public class WebPageExtractor {
     }
 
     private record RootSelection(Element root, String selector, String strategy) {
+    }
+
+    private record RenderOutcome(Document document, boolean rendered, String fallbackReason) {
+        static RenderOutcome staticOnly(Document document) {
+            return new RenderOutcome(document, false, "");
+        }
     }
 
     private record RobotsDecision(boolean allowed, String reasonCode, String message) {

@@ -143,14 +143,12 @@ public class WebCrawler {
                 }
             }
 
-            String skipReason = skipReason(page.document(), contentSignatures);
-            if (skipReason != null) {
+            SkipDecision skipDecision = skipDecision(page.document(), contentSignatures, current.depth());
+            if (skipDecision != null) {
                 skippedCount++;
-                String reasonCode = skipReason.startsWith("Skipped page because extractable body text is too short")
-                        ? "LOW_CONTENT"
-                        : "DUPLICATE_CONTENT";
-                extractor.auditSkipped(sourceId, page.uri(), reasonCode, current.depth(),
-                        current.referrer() == null ? null : current.referrer().toString(), page.document().contentType(), skipReason, Map.of());
+                extractor.auditSkipped(sourceId, page.uri(), skipDecision.reasonCode(), current.depth(),
+                        current.referrer() == null ? null : current.referrer().toString(), page.document().contentType(),
+                        skipDecision.message(), skipDecision.metadata());
                 continue;
             }
             documents.add(withCrawlMetadata(page.document(), startUri, current.depth(), current.referrer()));
@@ -203,14 +201,35 @@ public class WebCrawler {
         }
     }
 
-    private String skipReason(ExtractedDocument document, Set<String> contentSignatures) {
-        int bodyLength = bodyTextLength(document);
-        if (bodyLength < properties.getCrawler().getMinContentChars()) {
-            return "Skipped page because extractable body text is too short: " + bodyLength + " chars.";
-        }
+    private SkipDecision skipDecision(ExtractedDocument document, Set<String> contentSignatures, int depth) {
         String signature = contentSignature(document.content());
-        if (!contentSignatures.add(signature)) {
-            return "Skipped page because normalized text is duplicated.";
+        boolean duplicate = !contentSignatures.add(signature);
+        int bodyLength = bodyTextLength(document);
+        int minContent = depth > 0
+                ? Math.max(properties.getCrawler().getMinContentChars(), properties.getCrawler().getRecursiveMinContentChars())
+                : properties.getCrawler().getMinContentChars();
+        if (duplicate && bodyLength >= Math.min(40, minContent)) {
+            return new SkipDecision("DUPLICATE_CONTENT", "Skipped page because normalized text is duplicated.", Map.of());
+        }
+        if (bodyLength < minContent) {
+            return new SkipDecision("LOW_CONTENT",
+                    "Skipped page because extractable body text is too short: " + bodyLength + " chars.",
+                    Map.of("bodyTextLength", bodyLength, "minContentChars", minContent));
+        }
+        double density = textDensity(document);
+        if (depth > 0 && density > 0 && density < properties.getCrawler().getMinTextDensity()) {
+            return new SkipDecision("LOW_TEXT_DENSITY",
+                    "Skipped page because text density is too low: " + String.format(Locale.ROOT, "%.3f", density) + ".",
+                    Map.of("bodyTextLength", bodyLength, "textDensity", density, "minTextDensity", properties.getCrawler().getMinTextDensity()));
+        }
+        int previewBlockCount = previewBlockCount(document);
+        if (depth > 0 && previewBlockCount >= 0 && previewBlockCount <= 1 && bodyLength < minContent * 2) {
+            return new SkipDecision("NAVIGATION_ONLY_PAGE",
+                    "Skipped page because it appears to contain navigation or shell content only.",
+                    Map.of("bodyTextLength", bodyLength, "previewBlockCount", previewBlockCount));
+        }
+        if (duplicate) {
+            return new SkipDecision("DUPLICATE_CONTENT", "Skipped page because normalized text is duplicated.", Map.of());
         }
         return null;
     }
@@ -221,6 +240,19 @@ public class WebCrawler {
             return number.intValue();
         }
         return document.content() == null ? 0 : document.content().length();
+    }
+
+    private double textDensity(ExtractedDocument document) {
+        Object value = document.metadata() == null ? null : document.metadata().get("htmlTextDensity");
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return 0.0;
+    }
+
+    private int previewBlockCount(ExtractedDocument document) {
+        Object value = document.metadata() == null ? null : document.metadata().get("webPreviewBlocks");
+        return value instanceof List<?> list ? list.size() : -1;
     }
 
     private String contentSignature(String content) {
@@ -387,5 +419,8 @@ public class WebCrawler {
     }
 
     private record CrawlUrl(URI uri, int depth, URI referrer) {
+    }
+
+    private record SkipDecision(String reasonCode, String message, Map<String, Object> metadata) {
     }
 }

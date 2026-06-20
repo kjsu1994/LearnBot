@@ -109,7 +109,7 @@ public class LearnBotProperties {
         private int timeoutSeconds = 15;
 
         @Min(0)
-        private long rateLimitMillis = 1000;
+        private long rateLimitMillis = 500;
 
         @Min(1)
         private int maxPagesPerRequest = 30;
@@ -118,7 +118,7 @@ public class LearnBotProperties {
         private int maxDepth = 2;
 
         @Min(0)
-        private int minContentChars = 200;
+        private int minContentChars = 80;
 
         private boolean respectRobotsTxt = true;
 
@@ -134,6 +134,21 @@ public class LearnBotProperties {
 
         @Min(1)
         private long maxAttachmentBytes = 25_000_000L;
+
+        private boolean playwrightEnabled = false;
+
+        @Min(1)
+        private int playwrightTimeoutSeconds = 20;
+
+        private String playwrightWaitUntil = "networkidle";
+
+        @Min(0)
+        private int playwrightMinStaticChars = 300;
+
+        @Min(0)
+        private int recursiveMinContentChars = 0;
+
+        private double minTextDensity = 0.18;
 
         public List<String> getAllowedDomains() {
             return allowedDomains;
@@ -237,6 +252,54 @@ public class LearnBotProperties {
 
         public void setMaxAttachmentBytes(long maxAttachmentBytes) {
             this.maxAttachmentBytes = maxAttachmentBytes;
+        }
+
+        public boolean isPlaywrightEnabled() {
+            return playwrightEnabled;
+        }
+
+        public void setPlaywrightEnabled(boolean playwrightEnabled) {
+            this.playwrightEnabled = playwrightEnabled;
+        }
+
+        public int getPlaywrightTimeoutSeconds() {
+            return playwrightTimeoutSeconds;
+        }
+
+        public void setPlaywrightTimeoutSeconds(int playwrightTimeoutSeconds) {
+            this.playwrightTimeoutSeconds = playwrightTimeoutSeconds;
+        }
+
+        public String getPlaywrightWaitUntil() {
+            return playwrightWaitUntil;
+        }
+
+        public void setPlaywrightWaitUntil(String playwrightWaitUntil) {
+            this.playwrightWaitUntil = playwrightWaitUntil;
+        }
+
+        public int getPlaywrightMinStaticChars() {
+            return playwrightMinStaticChars;
+        }
+
+        public void setPlaywrightMinStaticChars(int playwrightMinStaticChars) {
+            this.playwrightMinStaticChars = playwrightMinStaticChars;
+        }
+
+        public int getRecursiveMinContentChars() {
+            return recursiveMinContentChars;
+        }
+
+        public void setRecursiveMinContentChars(int recursiveMinContentChars) {
+            this.recursiveMinContentChars = recursiveMinContentChars;
+        }
+
+        public double getMinTextDensity() {
+            return minTextDensity;
+        }
+
+        public void setMinTextDensity(double minTextDensity) {
+            this.minTextDensity = minTextDensity;
         }
     }
 
@@ -463,6 +526,7 @@ public class LearnBotProperties {
 
             private double minTopScore = 0.30;
             private double minCoverage = 0.15;
+            private Reranker reranker = new Reranker();
 
             public boolean isRewriteEnabled() {
                 return rewriteEnabled;
@@ -551,6 +615,59 @@ public class LearnBotProperties {
             public void setMinCoverage(double minCoverage) {
                 this.minCoverage = minCoverage;
             }
+
+            public Reranker getReranker() {
+                return reranker;
+            }
+
+            public void setReranker(Reranker reranker) {
+                this.reranker = reranker;
+            }
+
+            public static class Reranker {
+                private boolean enabled = false;
+
+                @NotBlank
+                private String baseUrl = "http://localhost:8081";
+
+                @Min(1)
+                private int topN = 30;
+
+                @Min(1)
+                private int timeoutSeconds = 8;
+
+                public boolean isEnabled() {
+                    return enabled;
+                }
+
+                public void setEnabled(boolean enabled) {
+                    this.enabled = enabled;
+                }
+
+                public String getBaseUrl() {
+                    return baseUrl;
+                }
+
+                public void setBaseUrl(String baseUrl) {
+                    this.baseUrl = baseUrl;
+                }
+
+                public int getTopN() {
+                    return topN;
+                }
+
+                public void setTopN(int topN) {
+                    this.topN = topN;
+                }
+
+                public int getTimeoutSeconds() {
+                    return timeoutSeconds;
+                }
+
+                public void setTimeoutSeconds(int timeoutSeconds) {
+                    this.timeoutSeconds = timeoutSeconds;
+                }
+            }
         }
 
         public static class DocumentContext {
@@ -564,9 +681,13 @@ public class LearnBotProperties {
             private int maxSummaryInputChars = 9000;
 
             private boolean mapReduceEnabled = true;
+            private boolean recursiveLlmSummaryEnabled = false;
+            private boolean recursiveMapReduceEnabled = false;
 
             @Min(1)
             private int maxMapWindowsPerDocument = 8;
+            @Min(1)
+            private int recursiveMaxSourceDocuments = 40;
 
             @Min(1)
             private int mapWindowChunks = 6;
@@ -617,12 +738,36 @@ public class LearnBotProperties {
                 this.mapReduceEnabled = mapReduceEnabled;
             }
 
+            public boolean isRecursiveLlmSummaryEnabled() {
+                return recursiveLlmSummaryEnabled;
+            }
+
+            public void setRecursiveLlmSummaryEnabled(boolean recursiveLlmSummaryEnabled) {
+                this.recursiveLlmSummaryEnabled = recursiveLlmSummaryEnabled;
+            }
+
+            public boolean isRecursiveMapReduceEnabled() {
+                return recursiveMapReduceEnabled;
+            }
+
+            public void setRecursiveMapReduceEnabled(boolean recursiveMapReduceEnabled) {
+                this.recursiveMapReduceEnabled = recursiveMapReduceEnabled;
+            }
+
             public int getMaxMapWindowsPerDocument() {
                 return maxMapWindowsPerDocument;
             }
 
             public void setMaxMapWindowsPerDocument(int maxMapWindowsPerDocument) {
                 this.maxMapWindowsPerDocument = maxMapWindowsPerDocument;
+            }
+
+            public int getRecursiveMaxSourceDocuments() {
+                return recursiveMaxSourceDocuments;
+            }
+
+            public void setRecursiveMaxSourceDocuments(int recursiveMaxSourceDocuments) {
+                this.recursiveMaxSourceDocuments = recursiveMaxSourceDocuments;
             }
 
             public int getMapWindowChunks() {
@@ -1070,6 +1215,8 @@ public class LearnBotProperties {
         @Min(1)
         private int indexThreads = 2;
         private Preview preview = new Preview();
+        private Ocr ocr = new Ocr();
+        private Graph graph = new Graph();
 
         public int getIndexThreads() {
             return indexThreads;
@@ -1087,8 +1234,24 @@ public class LearnBotProperties {
             this.preview = preview;
         }
 
+        public Ocr getOcr() {
+            return ocr;
+        }
+
+        public void setOcr(Ocr ocr) {
+            this.ocr = ocr;
+        }
+
+        public Graph getGraph() {
+            return graph;
+        }
+
+        public void setGraph(Graph graph) {
+            this.graph = graph;
+        }
+
         public static class Preview {
-            private boolean officeRenderEnabled = true;
+            private boolean officeRenderEnabled = false;
 
             @NotBlank
             private String officeCommand = "soffice";
@@ -1130,6 +1293,55 @@ public class LearnBotProperties {
             public void setOfficeMaxFileBytes(long officeMaxFileBytes) {
                 this.officeMaxFileBytes = officeMaxFileBytes;
             }
+        }
+
+        public static class Ocr {
+            private boolean enabled = false;
+            private String command = "ocrmypdf";
+            private String languages = "kor+eng";
+
+            @Min(0)
+            private int minTextCharsPerPage = 80;
+
+            @Min(1)
+            private int maxPages = 80;
+
+            @Min(1)
+            private int timeoutSeconds = 180;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public String getCommand() { return command; }
+            public void setCommand(String command) { this.command = command; }
+            public String getLanguages() { return languages; }
+            public void setLanguages(String languages) { this.languages = languages; }
+            public int getMinTextCharsPerPage() { return minTextCharsPerPage; }
+            public void setMinTextCharsPerPage(int minTextCharsPerPage) { this.minTextCharsPerPage = minTextCharsPerPage; }
+            public int getMaxPages() { return maxPages; }
+            public void setMaxPages(int maxPages) { this.maxPages = maxPages; }
+            public int getTimeoutSeconds() { return timeoutSeconds; }
+            public void setTimeoutSeconds(int timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+        }
+
+        public static class Graph {
+            private boolean enabled = true;
+
+            @Min(1)
+            private int maxHop = 1;
+
+            @Min(1)
+            private int maxExpandedResults = 12;
+
+            private boolean debug = false;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public int getMaxHop() { return maxHop; }
+            public void setMaxHop(int maxHop) { this.maxHop = maxHop; }
+            public int getMaxExpandedResults() { return maxExpandedResults; }
+            public void setMaxExpandedResults(int maxExpandedResults) { this.maxExpandedResults = maxExpandedResults; }
+            public boolean isDebug() { return debug; }
+            public void setDebug(boolean debug) { this.debug = debug; }
         }
     }
 

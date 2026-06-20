@@ -190,7 +190,7 @@ public class IngestionService {
     ) {
         try {
             WebDocuments documents = extractWebDocuments(sourceId, normalizedUrl, recursive, maxDepth, maxPages, crawlOptions);
-            IngestResponse response = indexAll(sourceId, spaceId, documents.documents(), documents.pageCount(), documents.skippedCount(), jobId, allowReuse);
+            IngestResponse response = indexAll(sourceId, spaceId, documents.documents(), documents.pageCount(), documents.skippedCount(), jobId, allowReuse, recursive);
             repository.finishDocumentJob(jobId, "SUCCEEDED", null);
             auditService.log(user, allowReuse ? "DOCUMENT_REINDEXED" : "DOCUMENT_INGESTED", "DOCUMENT", response.documentId(), spaceId, "Web document was indexed.");
         } catch (RuntimeException ex) {
@@ -247,23 +247,24 @@ public class IngestionService {
             int pageCount,
             int skippedCount,
             UUID jobId,
-            boolean allowReuse
+            boolean allowReuse,
+            boolean recursiveWeb
     ) {
-        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, documents, allowReuse);
+        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, documents, allowReuse, recursiveWeb);
         return transactionTemplate.execute(status ->
                 persistIndex(sourceId, spaceId, indexedDocuments, pageCount, skippedCount, jobId, allowReuse)
         );
     }
 
     private IngestResponse indexStoredFile(UUID sourceId, UUID spaceId, StoredObject storedObject, ExtractedDocument document, UUID jobId, boolean allowReuse) {
-        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, List.of(document), allowReuse);
+        List<IndexedDocument> indexedDocuments = prepareIndex(sourceId, List.of(document), allowReuse, false);
         return transactionTemplate.execute(status -> {
             repository.createSourceObject(sourceId, storedObject);
             return persistIndex(sourceId, spaceId, indexedDocuments, 1, 0, jobId, allowReuse);
         });
     }
 
-    private List<IndexedDocument> prepareIndex(UUID sourceId, List<ExtractedDocument> documents, boolean allowReuse) {
+    private List<IndexedDocument> prepareIndex(UUID sourceId, List<ExtractedDocument> documents, boolean allowReuse, boolean recursiveWeb) {
         List<PreparedDocument> preparedDocuments = new ArrayList<>();
         for (ExtractedDocument document : documents) {
             List<Chunk> chunks = chunker.split(document);
@@ -277,7 +278,7 @@ public class IngestionService {
             throw new IllegalArgumentException("No extractable text was found.");
         }
 
-        List<PreparedDocument> enrichedDocuments = enrichWithDocumentContext(preparedDocuments);
+        List<PreparedDocument> enrichedDocuments = enrichWithDocumentContext(preparedDocuments, recursiveWeb);
         List<IndexedDocument> indexedDocuments = new ArrayList<>();
         for (PreparedDocument preparedDocument : enrichedDocuments) {
             List<Chunk> chunks = preparedDocument.chunks();
@@ -305,7 +306,7 @@ public class IngestionService {
         return indexedDocuments;
     }
 
-    private List<PreparedDocument> enrichWithDocumentContext(List<PreparedDocument> documents) {
+    private List<PreparedDocument> enrichWithDocumentContext(List<PreparedDocument> documents, boolean recursiveWeb) {
         if (!documentContextBuilder.enabled()) {
             return documents;
         }
@@ -313,12 +314,12 @@ public class IngestionService {
             List<DocumentContextBuilder.DocumentContextInput> inputs = documents.stream()
                     .map(document -> new DocumentContextBuilder.DocumentContextInput(document.document(), document.chunks()))
                     .toList();
-            List<Chunk> sourceContext = documentContextBuilder.buildSourceContext(inputs);
+            List<Chunk> sourceContext = documentContextBuilder.buildSourceContext(inputs, recursiveWeb);
             List<PreparedDocument> enriched = new ArrayList<>();
             for (int i = 0; i < documents.size(); i++) {
                 PreparedDocument prepared = documents.get(i);
                 List<Chunk> chunks = new ArrayList<>(prepared.chunks());
-                chunks.addAll(documentContextBuilder.buildDocumentContext(prepared.document(), prepared.chunks()));
+                chunks.addAll(documentContextBuilder.buildDocumentContext(prepared.document(), prepared.chunks(), recursiveWeb));
                 if (i == 0) {
                     chunks.addAll(sourceContext);
                 }
@@ -393,6 +394,13 @@ public class IngestionService {
         }
         if (replaceExisting) {
             repository.deleteDocumentsForSourceExcept(sourceId, newDocumentIds);
+        }
+        if (properties.getDocument().getGraph().isEnabled()) {
+            try {
+                repository.rebuildDocumentGraph(sourceId);
+            } catch (RuntimeException ignored) {
+                // Document graph is retrieval enrichment only; indexing remains valid without it.
+            }
         }
         repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
         return new IngestResponse(

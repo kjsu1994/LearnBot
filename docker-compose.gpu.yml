@@ -4,3 +4,30 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  backend:
+    build:
+      args:
+        INSTALL_OFFICE: "true"
+        INSTALL_CRAWLER_TOOLS: "true"
+    environment:
+      LEARNBOT_CRAWLER_PLAYWRIGHT_ENABLED: ${LEARNBOT_CRAWLER_PLAYWRIGHT_ENABLED:-true}
+      LEARNBOT_RERANKER_ENABLED: ${LEARNBOT_RERANKER_ENABLED:-true}
+      LEARNBOT_DOCUMENT_OCR_ENABLED: ${LEARNBOT_DOCUMENT_OCR_ENABLED:-true}
+      LEARNBOT_DOCUMENT_PREVIEW_OFFICE_RENDER_ENABLED: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_RENDER_ENABLED:-true}
+    depends_on:
+      reranker:
+        condition: service_started
+  reranker:
+    build:
+      context: ./reranker
+    image: learnbot-reranker:latest
+    container_name: learnbot-reranker
+    restart: unless-stopped
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+      RERANKER_DEVICE: cuda
+    ports:
+      - "127.0.0.1:18081:8081"

@@ -181,6 +181,7 @@ public class RagService {
             }
         }
         expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
+        expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
         List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
                 question,
@@ -222,6 +223,7 @@ public class RagService {
             }
             iteration = 2;
             expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
+            expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
             citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
             assessment = pipelineService.assessDocuments(
                     question,
@@ -352,6 +354,44 @@ public class RagService {
                 log.warn("RAG adjacent chunk expansion failed document={} chunk={} question={}",
                         seed.documentId(), seed.chunkIndex(), abbreviate(question), ex);
             }
+        }
+    }
+
+    private void expandGraphDocumentChunks(
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            Map<UUID, SearchResult> merged
+    ) {
+        if (!properties.getDocument().getGraph().isEnabled()
+                || merged.isEmpty()
+                || spaceIds == null
+                || spaceIds.isEmpty()) {
+            return;
+        }
+        List<UUID> seedChunkIds = merged.values().stream()
+                .filter(result -> !isDocumentContext(result))
+                .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
+                .limit(12)
+                .map(SearchResult::chunkId)
+                .toList();
+        if (seedChunkIds.isEmpty()) {
+            return;
+        }
+        try {
+            int limit = Math.max(1, properties.getDocument().getGraph().getMaxExpandedResults());
+            for (SearchResult expanded : documentRepository.graphExpandedChunks(seedChunkIds, limit, spaceIds, selectedSpaceId)) {
+                if (merged.containsKey(expanded.chunkId())) {
+                    continue;
+                }
+                mergeDocument(merged, withMetadata(expanded, Map.of(
+                        "documentGraphExpanded", true,
+                        "evidenceRole", "document_graph",
+                        "evidenceRankReason", "Expanded from related document graph node"
+                ), Math.max(0.0, expanded.score() * 0.75)));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("RAG document graph expansion failed seeds={}", seedChunkIds.size(), ex);
         }
     }
 
@@ -1669,6 +1709,9 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "evidenceRankReason");
         copyMetadata(result.metadata(), metadata, "adjacentExpanded");
         copyMetadata(result.metadata(), metadata, "adjacentDistance");
+        copyMetadata(result.metadata(), metadata, "rerankerUsed");
+        copyMetadata(result.metadata(), metadata, "rerankerScore");
+        copyMetadata(result.metadata(), metadata, "documentGraphExpanded");
         return metadata;
     }
 

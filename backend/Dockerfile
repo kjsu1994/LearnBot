@@ -14,8 +14,12 @@ FROM mcr.microsoft.com/dotnet/runtime:8.0 AS dotnet-runtime
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
+ARG INSTALL_OFFICE=false
+ARG INSTALL_CRAWLER_TOOLS=false
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk fontconfig \
+    && apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-noto-cjk \
+    && if [ "$INSTALL_OFFICE" = "true" ]; then apt-get install -y --no-install-recommends libreoffice; fi \
+    && if [ "$INSTALL_CRAWLER_TOOLS" = "true" ]; then apt-get install -y --no-install-recommends chromium tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng ocrmypdf; fi \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/target/learnbot-backend-0.1.0.jar app.jar
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet

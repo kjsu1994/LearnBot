@@ -24,6 +24,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -40,6 +41,17 @@ import java.util.Map;
 
 @Component
 public class FileExtractor {
+    private final PdfOcrService pdfOcrService;
+
+    public FileExtractor() {
+        this(null);
+    }
+
+    @Autowired
+    public FileExtractor(PdfOcrService pdfOcrService) {
+        this.pdfOcrService = pdfOcrService;
+    }
+
     public ExtractedDocument extract(MultipartFile file) {
         String fileName = file.getOriginalFilename() == null ? "uploaded-file" : file.getOriginalFilename();
         try {
@@ -198,9 +210,10 @@ public class FileExtractor {
     private ExtractedDocument pdf(InputStream inputStream, String fileName) throws Exception {
         byte[] bytes = inputStream.readAllBytes();
         StringBuilder content = new StringBuilder();
+        int pageCount;
         try (PDDocument document = Loader.loadPDF(bytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
-            int pageCount = document.getNumberOfPages();
+            pageCount = document.getNumberOfPages();
             for (int page = 1; page <= pageCount; page++) {
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
@@ -215,13 +228,38 @@ public class FileExtractor {
                 content.append(new PDFTextStripper().getText(document));
             }
         }
+        boolean ocrAttempted = false;
+        boolean ocrSucceeded = false;
+        if (pdfOcrService != null && pdfOcrService.shouldAttempt(pageCount, content.length())) {
+            ocrAttempted = true;
+            var ocr = pdfOcrService.extractText(bytes, fileName, pageCount, content.length());
+            if (ocr.isPresent()) {
+                content.setLength(0);
+                content.append(numberedOcrPages(ocr.get().text()));
+                ocrSucceeded = true;
+            }
+        }
         return new ExtractedDocument(
                 fileName,
                 "file://" + fileName,
                 "application/pdf",
                 content.toString(),
-                Map.of("fileName", fileName, "pageSource", "pdfbox")
+                Map.of(
+                        "fileName", fileName,
+                        "pageSource", ocrSucceeded ? "ocr" : "pdfbox",
+                        "ocrAttempted", ocrAttempted,
+                        "ocrSucceeded", ocrSucceeded,
+                        "textSource", ocrSucceeded ? "ocr" : "pdfbox"
+                )
         );
+    }
+
+    private String numberedOcrPages(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isBlank() || clean.matches("(?s).*^Page\\s+\\d+:.*")) {
+            return clean;
+        }
+        return "Page 1:\n" + clean;
     }
 
     private ExtractedDocument docx(InputStream inputStream, String fileName) throws Exception {

@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -17,10 +18,17 @@ import java.util.UUID;
 public class SearchService {
     private final DocumentRepository repository;
     private final OllamaClient ollamaClient;
+    private final DocumentReranker documentReranker;
 
     public SearchService(DocumentRepository repository, OllamaClient ollamaClient) {
+        this(repository, ollamaClient, null);
+    }
+
+    @Autowired
+    public SearchService(DocumentRepository repository, OllamaClient ollamaClient, DocumentReranker documentReranker) {
         this.repository = repository;
         this.ollamaClient = ollamaClient;
+        this.documentReranker = documentReranker;
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit) {
@@ -53,9 +61,12 @@ public class SearchService {
             }
         }
 
-        return merged.values().stream()
+        List<SearchResult> ranked = merged.values().stream()
                 .map(result -> boost(result, rerankBoost(query, result)))
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
+                .toList();
+        List<SearchResult> reranked = documentReranker == null ? ranked : documentReranker.rerank(query, ranked);
+        return reranked.stream()
                 .limit(safeLimit)
                 .toList();
     }
