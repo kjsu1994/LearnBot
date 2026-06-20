@@ -201,6 +201,34 @@ class CodeRagServiceTest {
         );
     }
 
+    @Test
+    void ranksGraphCallFlowEvidenceAboveWeakTextMatch() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult noisy = result("backend/src/main/java/com/learnbot/service/ReportService.java", "method", "render", 0.95);
+        CodeSearchResult graph = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.42, "CALLS", 0.96, 1);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(noisy, graph));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "login call flow",
+                "flow",
+                4
+        );
+
+        assertThat(response.evidence()).isNotEmpty();
+        assertThat(response.evidence().get(0).filePath()).contains("AuthService");
+        assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceScoreParts", "evidenceRankReason");
+        assertThat(String.valueOf(response.evidence().get(0).metadata().get("evidenceRankReason"))).contains("graph CALLS");
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
@@ -225,6 +253,38 @@ class CodeRagServiceTest {
                 content,
                 score,
                 Map.of("language", "java")
+        );
+    }
+
+    private CodeSearchResult graphResult(String filePath, String chunkType, String methodName, double score,
+                                         String edgeType, double pathScore, int depth) {
+        return new CodeSearchResult(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "LearnBot",
+                filePath,
+                chunkType,
+                methodName,
+                "AuthController",
+                methodName,
+                "com.learnbot.service",
+                null,
+                null,
+                1,
+                10,
+                24,
+                "File: " + filePath + "\npublic LoginResponse login(...) { return tokenService.issue(...); }",
+                score,
+                Map.of(
+                        "language", "java",
+                        "graphExpanded", true,
+                        "graphEdgeType", edgeType,
+                        "graphPathScore", pathScore,
+                        "graphDepth", depth,
+                        "graphPath", "AuthController -> AuthService",
+                        "graphEdgeTypes", List.of(edgeType)
+                )
         );
     }
 }

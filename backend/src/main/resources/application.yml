@@ -104,6 +104,8 @@ learnbot:
       max-traversal-rows: ${LEARNBOT_CODE_GRAPH_MAX_TRAVERSAL_ROWS:1000}
       max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}
       enrichment-lease-seconds: ${LEARNBOT_CODE_GRAPH_ENRICHMENT_LEASE_SECONDS:300}
+      evidence-ranking-enabled: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_ENABLED:true}
+      evidence-ranking-debug: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG:false}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}
   auth:

@@ -837,6 +837,9 @@ public class LearnBotProperties {
             @Min(1)
             private int enrichmentLeaseSeconds = 300;
 
+            private boolean evidenceRankingEnabled = true;
+            private boolean evidenceRankingDebug = false;
+
             public boolean isEnabled() {
                 return enabled;
             }
@@ -911,6 +914,10 @@ public class LearnBotProperties {
 
             public int getEnrichmentLeaseSeconds() { return enrichmentLeaseSeconds; }
             public void setEnrichmentLeaseSeconds(int enrichmentLeaseSeconds) { this.enrichmentLeaseSeconds = enrichmentLeaseSeconds; }
+            public boolean isEvidenceRankingEnabled() { return evidenceRankingEnabled; }
+            public void setEvidenceRankingEnabled(boolean evidenceRankingEnabled) { this.evidenceRankingEnabled = evidenceRankingEnabled; }
+            public boolean isEvidenceRankingDebug() { return evidenceRankingDebug; }
+            public void setEvidenceRankingDebug(boolean evidenceRankingDebug) { this.evidenceRankingDebug = evidenceRankingDebug; }
         }
     }
 

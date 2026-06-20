@@ -142,8 +142,9 @@ LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED=true
 LEARNBOT_CODE_GRAPH_MAX_LLM_FILES=80
 LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH=/app/roslyn/LearnBot.RoslynAnalyzer.dll
 LEARNBOT_CODE_GRAPH_ROSLYN_MODE=AUTO
-LEARNBOT_CODE_GRAPH_ROSLYN_MODE=AUTO
 LEARNBOT_CODE_GRAPH_ROSLYN_TIMEOUT_SECONDS=120
+LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_ENABLED=true
+LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG=false
 LEARNBOT_CODE_GRAPH_DEPENDENCY_RESOLUTION_ENABLED=true
 LEARNBOT_CODE_GRAPH_DEPENDENCY_ALLOWED_REPOSITORIES=https://repo.maven.apache.org/maven2
 LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_ARTIFACTS=256
@@ -152,6 +153,8 @@ LEARNBOT_CODE_GRAPH_DEPENDENCY_TIMEOUT_SECONDS=120
 ```
 
 `LEARNBOT_CODE_GRAPH_MAX_HOP` is constrained to 1-4 during traversal. When a traversal budget is reached, the best bounded results are returned with `graphTraversalTruncated` metadata instead of failing the search.
+
+Code GraphRAG evidence ranking is deterministic and enabled by default. It combines hybrid search score, query term matches, graph path score, relationship type, graph depth, question intent, structured code evidence, and diversity penalties into `evidenceScore` metadata while preserving the original search `score`.
 
 Roslyn `AUTO` mode selects `SAFE_SOLUTION`, `SAFE_PROJECT`, or `SIMPLE` from repository contents. `SAFE_*` modes parse project and solution descriptors statically; MSBuild targets, source generators, and repository code are never executed. Legacy `PROJECT` and `SOLUTION` config values are accepted as aliases for `SAFE_PROJECT` and `SAFE_SOLUTION`. A future `MSBUILD_WORKSPACE` mode must run only in an explicitly enabled isolated worker with network, time, and memory limits. Java dependency resolution also parses Maven/Gradle declarations without running the build. It uses the persistent `.dependency-cache` under the code workspace and only downloads release artifacts from configured HTTPS repository allow lists.
 
