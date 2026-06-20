@@ -320,6 +320,13 @@ function CodeSourceManagementPanel(props) {
                     diagnosticsLoading={loading(`job-diagnostics-${latestJob.id}`)}
                   />
                 )}
+                {repo.id === selectedRepositoryId && repo.authType === 'TOKEN' && (
+                  <RepoCredentialInlinePanel
+                    repository={repo}
+                    indexCredential={indexCredential}
+                    setIndexCredential={setIndexCredential}
+                  />
+                )}
               </article>
             );
           })}
@@ -342,27 +349,53 @@ function CodeSourceManagementPanel(props) {
         </section>
       )}
 
-      {selectedRepository?.authType === 'TOKEN' && (
-        <section className="panel compact-auth-panel">
-          <div className="form-grid two">
-            <div className="stack">
-              <label htmlFor="index-username">Username</label>
-              <input id="index-username" value={indexCredential.username} onChange={(event) => setIndexCredential((current) => ({ ...current, username: event.target.value }))} placeholder="비우면 oauth2" />
-            </div>
-            <div className="stack">
-              <label htmlFor="index-token">Token</label>
-              <input id="index-token" type="password" value={indexCredential.token} onChange={(event) => setIndexCredential((current) => ({ ...current, token: event.target.value }))} placeholder={selectedRepository.credentialStored ? '새 토큰으로 갱신할 때만 입력' : '인덱싱에 사용할 token'} />
-            </div>
-          </div>
-          <label className="checkbox-row" htmlFor="index-store-token">
-            <input id="index-store-token" type="checkbox" checked={indexCredential.storeToken} onChange={(event) => setIndexCredential((current) => ({ ...current, storeToken: event.target.checked }))} />
-            <span>입력한 토큰을 암호화해 저장</span>
-          </label>
-        </section>
-      )}
     </div>
   );
 }
+
+function RepoCredentialInlinePanel({ repository, indexCredential, setIndexCredential }) {
+  return (
+    <div className="detail-box compact-box" onClick={(event) => event.stopPropagation()}>
+      <strong>인덱싱 인증</strong>
+      <small>
+        {repository.credentialStored
+          ? '저장된 토큰을 사용합니다. 새 토큰으로 교체할 때만 입력하세요.'
+          : '저장된 토큰이 없습니다. 비공개 저장소를 인덱싱하려면 토큰을 입력하세요.'}
+      </small>
+      <div className="form-grid two">
+        <div className="stack">
+          <label htmlFor={`index-username-${repository.id}`}>Username</label>
+          <input
+            id={`index-username-${repository.id}`}
+            value={indexCredential.username}
+            onChange={(event) => setIndexCredential((current) => ({ ...current, username: event.target.value }))}
+            placeholder="비우면 oauth2"
+          />
+        </div>
+        <div className="stack">
+          <label htmlFor={`index-token-${repository.id}`}>Token</label>
+          <input
+            id={`index-token-${repository.id}`}
+            type="password"
+            value={indexCredential.token}
+            onChange={(event) => setIndexCredential((current) => ({ ...current, token: event.target.value }))}
+            placeholder={repository.credentialStored ? '새 토큰으로 갱신할 때만 입력' : '인덱싱에 사용할 token'}
+          />
+        </div>
+      </div>
+      <label className="checkbox-row" htmlFor={`index-store-token-${repository.id}`}>
+        <input
+          id={`index-store-token-${repository.id}`}
+          type="checkbox"
+          checked={indexCredential.storeToken}
+          onChange={(event) => setIndexCredential((current) => ({ ...current, storeToken: event.target.checked }))}
+        />
+        <span>입력한 토큰을 암호화해 저장</span>
+      </label>
+    </div>
+  );
+}
+
 function JobStrip({ job, repoId, failures, loadFailures, loading, diagnostics, loadDiagnostics, diagnosticsLoading }) {
   const canShowFailures = job.failedFiles > 0 || job.status === 'FAILED' || job.errorMessage;
   return (

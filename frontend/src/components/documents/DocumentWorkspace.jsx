@@ -44,6 +44,7 @@ function DocumentWorkspace(props) {
             <WebCrawlAdvancedOptions
               prefix="web"
               recursive={props.webRecursive}
+              allowIgnoreRobots={false}
               crawlScope={props.webCrawlScope}
               setCrawlScope={props.setWebCrawlScope}
               robotsFailurePolicy={props.webRobotsFailurePolicy}
@@ -273,6 +274,7 @@ function DocumentSourcePanel(props) {
         <WebCrawlAdvancedOptions
           prefix="admin-web"
           recursive={webRecursive}
+          allowIgnoreRobots
           crawlScope={webCrawlScope}
           setCrawlScope={setWebCrawlScope}
           robotsFailurePolicy={webRobotsFailurePolicy}
@@ -373,7 +375,7 @@ function WebIngestHelpModal({ onClose }) {
             <h3>robots.txt 조회 실패</h3>
             <p>관리자 설정의 robots.txt 정책 준수가 켜져 있을 때 적용됩니다. <strong>실패 시 차단</strong>은 가장 보수적인 기본값입니다. robots.txt를 읽지 못하면 수집하지 않습니다.</p>
             <p><strong>조회 실패만 허용</strong>은 robots.txt 서버가 일시적으로 실패하거나 느린 경우 문서 수집을 계속합니다. 단, robots.txt가 정상적으로 읽히고 명시적으로 차단한 URL은 계속 수집하지 않습니다.</p>
-            <p><strong>robots.txt 무시</strong>는 해당 수집 요청에서 robots 검사를 건너뜁니다. 관리자 정책과 중복될 수 있으므로 내부 문서나 명확히 허가된 사이트에서만 사용하는 것이 안전합니다.</p>
+            <p><strong>robots.txt 무시</strong>는 관리자 소스 등록 화면에서만 선택할 수 있습니다. 해당 수집 요청에서 robots 검사를 건너뛰므로 내부 문서나 명확히 허가된 사이트에서만 사용하는 것이 안전합니다.</p>
 
             <h3>sitemap.xml 활용</h3>
             <p>사이트가 sitemap.xml을 제공하면 링크를 클릭해서 찾기 어려운 문서도 seed로 추가합니다. 문서 사이트의 누락을 줄이는 데 효과적입니다. sitemap을 못 읽어도 전체 작업은 실패하지 않고 일반 링크 수집으로 폴백합니다.</p>
@@ -398,6 +400,7 @@ function WebIngestHelpModal({ onClose }) {
 function WebCrawlAdvancedOptions({
   prefix,
   recursive,
+  allowIgnoreRobots = false,
   crawlScope = 'START_PATH',
   setCrawlScope = () => {},
   robotsFailurePolicy = 'FAIL_CLOSED',
@@ -409,6 +412,16 @@ function WebCrawlAdvancedOptions({
   renderMode = 'STATIC',
   setRenderMode = () => {},
 }) {
+  useEffect(() => {
+    if (!allowIgnoreRobots && robotsFailurePolicy === 'IGNORE') {
+      setRobotsFailurePolicy('FAIL_CLOSED');
+    }
+  }, [allowIgnoreRobots, robotsFailurePolicy, setRobotsFailurePolicy]);
+
+  const visibleRobotsFailurePolicy = allowIgnoreRobots || robotsFailurePolicy !== 'IGNORE'
+    ? robotsFailurePolicy
+    : 'FAIL_CLOSED';
+
   return (
     <div className="detail-box compact-box">
       <div className="form-grid two">
@@ -430,12 +443,12 @@ function WebCrawlAdvancedOptions({
           <label htmlFor={`${prefix}-robots-policy`}>robots.txt 조회 실패</label>
           <select
             id={`${prefix}-robots-policy`}
-            value={robotsFailurePolicy}
+            value={visibleRobotsFailurePolicy}
             onChange={(event) => setRobotsFailurePolicy(event.target.value)}
           >
             <option value="FAIL_CLOSED">실패 시 차단</option>
             <option value="ALLOW_ON_ERROR">조회 실패만 허용</option>
-            <option value="IGNORE">robots.txt 무시</option>
+            {allowIgnoreRobots && <option value="IGNORE">robots.txt 무시</option>}
           </select>
         </div>
       </div>
