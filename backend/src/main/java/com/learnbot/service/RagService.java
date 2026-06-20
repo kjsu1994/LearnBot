@@ -140,10 +140,10 @@ public class RagService {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
                 String retryPrompt = userPrompt
-                        + "\n\nPrevious answer failed quality check: " + qualityReason + "."
-                        + "\nRewrite the answer using only the cited context. Cite every factual claim with [n].";
+                        + "\n\n이전 답변은 품질 검사에 실패했습니다. 실패 사유: " + qualityReason + "."
+                        + "\n인용된 문맥만 사용해 한국어로 다시 작성하세요. 모든 사실 주장에는 [n] 형식의 근거 번호를 붙이세요.";
                 long retryStarted = System.nanoTime();
-                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
+                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\n반드시 한국어로 간결하게 답하고, 사실 주장마다 근거 번호를 엄격하게 붙이세요.", retryPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
                 llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
                 if (qualityFailureReason(retryAnswer, citations.size(), retryResult.doneReason()) == null) {
@@ -1491,13 +1491,13 @@ public class RagService {
                 .collect(Collectors.joining("\n\n"));
 
         String systemPrompt = """
-                You are LearnBot, a private RAG assistant.
-                Answer in Korean.
-                The numeric facts below were computed deterministically by the server. Do not change the count.
-                Write a concise natural-language answer for the user.
-                Include the exact total count and a short explanation of the counting basis.
-                Cite evidence with bracket numbers like [1].
-                Use the same unit as the user when possible. For people use 명; for generic items use 개 or 건.
+                당신은 사내 문서 RAG 도우미 LearnBot입니다.
+                반드시 한국어로 답하세요.
+                아래 숫자 정보는 서버가 결정적으로 계산한 값입니다. 숫자를 바꾸지 마세요.
+                사용자가 이해하기 쉬운 자연어 답변으로 간결하게 작성하세요.
+                정확한 총계와 계산 기준을 짧게 설명하세요.
+                근거는 [1] 같은 대괄호 번호로 표시하세요.
+                사용자가 쓴 단위를 우선 사용하고, 사람 수는 '명', 일반 항목은 '개' 또는 '건'을 사용하세요.
                 """;
         String userPrompt = "Question:\n" + question
                 + "\n\nComputed facts:\nExpected total: " + expectedTotal
@@ -2028,10 +2028,10 @@ public class RagService {
     }
 
     private enum AnswerMode {
-        QA("qa", "Answer the question directly. Start with the conclusion, then add 2-5 concise supporting bullets when useful. Cite each factual claim."),
-        SUMMARY("summary", "Summarize the retrieved context into Korean Markdown bullets. Group related points and cite important points."),
-        TABLE("table", "Extract table-like facts from the context. Prefer a compact Markdown table. Do not invent missing rows, columns, counts, or values."),
-        QUOTE("quote", "Prefer short direct excerpts from the context. Put each excerpt in a Markdown blockquote, then explain its meaning briefly. Cite every excerpt.");
+        QA("qa", "질문에 직접 답하세요. 먼저 결론을 한국어로 쓰고, 필요하면 핵심 근거를 2~5개 bullet로 덧붙이세요. 모든 사실 주장에는 근거 번호를 붙이세요."),
+        SUMMARY("summary", "검색된 문맥을 한국어 Markdown bullet로 요약하세요. 관련 항목을 묶고 중요한 주장에는 근거 번호를 붙이세요."),
+        TABLE("table", "문맥에서 표 형태로 정리할 수 있는 사실만 추출하세요. 가능하면 간결한 Markdown 표를 사용하세요. 없는 행, 열, 개수, 값을 만들지 마세요."),
+        QUOTE("quote", "문맥의 짧은 직접 인용을 우선 사용하세요. 각 인용은 Markdown blockquote로 쓰고, 바로 아래에 의미를 한국어로 짧게 설명하세요. 모든 인용에는 근거 번호를 붙이세요.");
 
         private final String value;
         private final String instruction;
