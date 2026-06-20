@@ -676,6 +676,9 @@ public class LearnBotProperties {
                 @Min(1)
                 private int timeoutSeconds = 8;
 
+                @Min(1)
+                private int failureBackoffSeconds = 60;
+
                 public boolean isEnabled() {
                     return enabled;
                 }
@@ -706,6 +709,14 @@ public class LearnBotProperties {
 
                 public void setTimeoutSeconds(int timeoutSeconds) {
                     this.timeoutSeconds = timeoutSeconds;
+                }
+
+                public int getFailureBackoffSeconds() {
+                    return failureBackoffSeconds;
+                }
+
+                public void setFailureBackoffSeconds(int failureBackoffSeconds) {
+                    this.failureBackoffSeconds = failureBackoffSeconds;
                 }
             }
         }

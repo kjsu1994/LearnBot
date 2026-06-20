@@ -41,6 +41,10 @@ public class SearchService {
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId) {
+        return search(query, filter, limit, spaceIds, selectedSpaceId, "BALANCED");
+    }
+
+    public List<SearchResult> search(String query, SearchFilter filter, int limit, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId, String speedProfile) {
         int safeLimit = Math.max(1, Math.min(limit, 20));
         List<java.util.UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
                 ? List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
@@ -70,10 +74,33 @@ public class SearchService {
                 .map(result -> boost(result, rerankBoost(query, result)))
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .toList();
-        List<SearchResult> reranked = documentReranker == null ? ranked : documentReranker.rerank(query, ranked);
+        List<SearchResult> reranked = rerankDocuments(query, ranked, speedProfile);
         return reranked.stream()
                 .limit(safeLimit)
                 .toList();
+    }
+
+    private List<SearchResult> rerankDocuments(String query, List<SearchResult> ranked, String speedProfile) {
+        if (documentReranker == null) {
+            return ranked;
+        }
+        String profile = speedProfile == null ? "BALANCED" : speedProfile.trim().toUpperCase(Locale.ROOT);
+        if ("FAST".equals(profile)) {
+            return documentReranker.skip(ranked, "fast_profile");
+        }
+        if (!"DEEP".equals(profile) && hasClearWinner(ranked)) {
+            return documentReranker.skip(ranked, "clear_winner");
+        }
+        return documentReranker.rerank(query, ranked);
+    }
+
+    private boolean hasClearWinner(List<SearchResult> ranked) {
+        if (ranked == null || ranked.size() < 2) {
+            return true;
+        }
+        double first = ranked.get(0).score();
+        double second = ranked.get(1).score();
+        return first >= 0.75 || first - second >= 0.18;
     }
 
     public List<String> expandedQueries(String query) {

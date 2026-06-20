@@ -79,6 +79,7 @@ public class RagService {
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
+        long askStarted = System.nanoTime();
         AnswerMode answerMode = AnswerMode.from(mode);
         DocumentSpeedProfile requestedSpeedProfile = DocumentSpeedProfile.from(
                 speedProfile,
@@ -86,7 +87,9 @@ public class RagService {
         );
         DocumentQuestionType questionType = classifyDocumentQuestion(question, answerMode);
         int topK = retrievalLimit(question, answerMode, questionType, requestedSpeedProfile);
+        long retrievalStarted = System.nanoTime();
         DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, questionType, requestedSpeedProfile, topK, spaceIds, selectedSpaceId);
+        long retrievalMs = elapsedMs(retrievalStarted);
         List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
             return new AskResponse(
@@ -112,8 +115,10 @@ public class RagService {
             );
         }
 
+        long contextStarted = System.nanoTime();
         String context = buildContext(question, answerMode, questionType, retrieval.effectiveProfile(), citations);
         String systemPrompt = systemPrompt(answerMode, questionType);
+        long contextMs = elapsedMs(contextStarted);
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
         String answer;
@@ -121,8 +126,13 @@ public class RagService {
         boolean answerRewritten = false;
         boolean answerRetried = false;
         String answerDoneReason = null;
+        OllamaClient.ChatResult finalChatResult = null;
+        long llmMs = 0;
         try {
-            OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            long llmStarted = System.nanoTime();
+            OllamaClient.ChatResult chatResult = chatWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
+            llmMs += elapsedMs(llmStarted);
+            finalChatResult = chatResult;
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
             String qualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
@@ -132,11 +142,14 @@ public class RagService {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited context. Cite every factual claim with [n].";
-                OllamaClient.ChatResult retryResult = ollamaClient.chatResult(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                long retryStarted = System.nanoTime();
+                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
+                llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
                 if (qualityFailureReason(retryAnswer, citations.size(), retryResult.doneReason()) == null) {
                     answer = retryAnswer;
                     answerDoneReason = retryResult.doneReason();
+                    finalChatResult = retryResult;
                     answerRetried = true;
                 }
             }
@@ -159,13 +172,32 @@ public class RagService {
             answer = fallbackAnswer(answerMode, question, citations);
             answerRewritten = true;
         }
+        AnswerTiming timing = new AnswerTiming(
+                retrievalMs,
+                contextMs,
+                llmMs,
+                elapsedMs(askStarted),
+                finalChatResult == null ? 0 : finalChatResult.promptEvalCount(),
+                finalChatResult == null ? 0 : finalChatResult.evalCount()
+        );
+        log.info("RAG answer timing domain=document profile={} effectiveProfile={} retrievalMs={} contextMs={} llmMs={} totalMs={} promptTokens={} outputTokens={} citations={} question={}",
+                requestedSpeedProfile.name(),
+                retrieval.effectiveProfile().name(),
+                timing.retrievalMs(),
+                timing.contextMs(),
+                timing.llmMs(),
+                timing.totalMs(),
+                timing.promptTokens(),
+                timing.outputTokens(),
+                citations.size(),
+                abbreviate(question));
         return new AskResponse(
                 answerMode.value(),
                 answer,
                 citations,
                 buildEvidence(citations),
                 confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
-                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType)
+                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType, timing)
         );
     }
 
@@ -185,10 +217,10 @@ public class RagService {
         boolean profileEscalated = false;
         int searchLimit = documentSearchLimit(topK, effectiveProfile);
 
-        searchAndMergeDocuments(question, question, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+        searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
         if (isOverviewQuestionType(questionType)) {
             for (String query : overviewQueries(question, questionType, effectiveProfile)) {
-                searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+                searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
             }
         }
         expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
@@ -229,8 +261,9 @@ public class RagService {
                     .distinct()
                     .toList();
             int retrySearchLimit = searchLimit;
+            DocumentSpeedProfile retryProfile = effectiveProfile;
             List<QuerySearchResults> retryResults = retryQueries.parallelStream()
-                    .map(query -> searchDocuments(question, query, filter, retrySearchLimit, spaceIds, selectedSpaceId))
+                    .map(query -> searchDocuments(question, query, filter, retrySearchLimit, retryProfile, spaceIds, selectedSpaceId))
                     .toList();
             for (QuerySearchResults result : retryResults) {
                 queriesUsed.add(result.query());
@@ -241,7 +274,7 @@ public class RagService {
             iteration = 2;
             if (isOverviewQuestionType(questionType)) {
                 for (String query : overviewQueries(question, questionType, effectiveProfile)) {
-                    searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+                    searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
                 }
             }
             expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
@@ -272,6 +305,7 @@ public class RagService {
             String query,
             SearchFilter filter,
             int limit,
+            DocumentSpeedProfile speedProfile,
             List<UUID> spaceIds,
             UUID selectedSpaceId,
             Map<UUID, SearchResult> merged,
@@ -283,7 +317,7 @@ public class RagService {
         }
         queriesUsed.add(safeQuery);
         try {
-            for (SearchResult result : searchService.search(safeQuery, filter, limit, spaceIds, selectedSpaceId)) {
+            for (SearchResult result : searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile)) {
                 mergeDocument(merged, safeQuery.equals(originalQuestion) ? result : boostDocument(result, 0.03));
             }
         } catch (RuntimeException ex) {
@@ -296,6 +330,7 @@ public class RagService {
             String query,
             SearchFilter filter,
             int limit,
+            DocumentSpeedProfile speedProfile,
             List<UUID> spaceIds,
             UUID selectedSpaceId
     ) {
@@ -303,12 +338,31 @@ public class RagService {
         try {
             return new QuerySearchResults(
                     safeQuery,
-                    searchService.search(safeQuery, filter, limit, spaceIds, selectedSpaceId)
+                    searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile)
             );
         } catch (RuntimeException ex) {
             log.warn("RAG retrieval query failed query={} question={}", abbreviate(safeQuery), abbreviate(originalQuestion), ex);
             return new QuerySearchResults(safeQuery, List.of());
         }
+    }
+
+    private List<SearchResult> searchWithProfile(
+            String query,
+            SearchFilter filter,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            DocumentSpeedProfile speedProfile
+    ) {
+        if (speedProfile == DocumentSpeedProfile.BALANCED) {
+            return searchService.search(query, filter, limit, spaceIds, selectedSpaceId);
+        }
+        return searchService.search(query, filter, limit, spaceIds, selectedSpaceId, speedProfile.name());
+    }
+
+    private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
+        OllamaClient.ChatResult result = ollamaClient.chatResult(systemPrompt, userPrompt, maxOutputTokens);
+        return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
     }
 
     private void mergeDocument(Map<UUID, SearchResult> merged, SearchResult result) {
@@ -857,26 +911,37 @@ public class RagService {
     private String systemPrompt(AnswerMode answerMode, DocumentQuestionType questionType) {
         String overviewInstruction = isOverviewQuestionType(questionType)
                 ? """
-                For overview, structure, architecture, or process questions:
-                - First explain the overall map or flow before details.
-                - Use document/source context chunks to orient the answer, but support claims with original evidence chunks when available.
-                - Separate "전체 구조", "주요 흐름", "근거", and "한계" when useful.
-                - If evidence covers only part of the source, state that limitation explicitly.
+                개요, 구조, 아키텍처, 프로세스 질문에 대한 추가 규칙:
+                - 먼저 전체 구조나 흐름을 한국어로 설명하세요.
+                - 문서/소스 컨텍스트 청크는 방향을 잡는 데 사용하되, 중요한 주장은 원문 근거 청크로 뒷받침하세요.
+                - 필요하면 "전체 구조", "주요 흐름", "근거", "한계" 섹션으로 나누세요.
+                - 근거가 일부 문서에만 한정된다면 그 한계를 명확히 말하세요.
                 """
                 : "";
         return """
-                You are LearnBot, a private RAG assistant.
-                Answer in Korean using Markdown.
-                Use only the provided context.
-                Cite factual claims with bracket numbers such as [1].
-                If the evidence is insufficient, say exactly which part is insufficient.
-                Do not invent sources, counts, filenames, pages, or legal clauses.
-                Do not answer with only a source list.
-                Prefer a structured answer over short bullet extraction.
-                For QA, use "결론", "근거", and "한계" when useful.
-                For summaries, group by topic and cite representative evidence.
-                For tables, extract only fields present in evidence.
-                For quotes, quote briefly and explain why the quote matters.
+                당신은 LearnBot이라는 사내 문서 RAG 답변 도우미입니다.
+                 반드시 지켜야 할 답변 규칙:
+                 - 답변은 반드시 한국어로 작성하세요.
+                 - 사용자가 영어로 질문해도, 최종 답변은 한국어로 작성하세요.
+                 - 문서 제목, 코드명, API명, 제품명, 고유명사는 원문 표기를 유지해도 됩니다.
+                 - 본문 설명, 결론, 근거, 한계는 한국어로 작성하세요.
+                 - Markdown 형식으로 답변하세요.
+                 - 제공된 Context 안의 내용만 사용하세요.
+                 - 사실 주장에는 [1], [2] 같은 근거 번호를 붙이세요.
+                 - 근거가 부족하면 어떤 부분의 근거가 부족한지 한국어로 말하세요.
+                 - 출처, 개수, 파일명, 페이지, 조항을 임의로 만들지 마세요.
+                 - 출처 목록만 나열하지 말고, 결론과 근거를 포함한 자연스러운 답변을 작성하세요.
+                 - QA 답변은 가능하면 "결론", "근거", "한계" 구조를 사용하세요.
+                 - 요약 답변은 주제별로 묶고 대표 근거를 표시하세요.
+                 - 표 추출은 근거에 실제로 있는 필드만 사용하세요.
+                 - 원문 인용은 짧게 인용하고 왜 중요한지 설명하세요.
+                
+                 출력 언어 규칙:
+                 - 최종 답변의 기본 언어는 한국어입니다.
+                 - 영어 문장을 그대로 번역 없이 길게 출력하지 마세요.
+                 - Context가 영어여도 한국어로 요약·설명하세요.
+                 - 답변 전체가 영어로 작성되면 잘못된 답변입니다.
+                 - 단, 고유명사, 클래스명, 메서드명, URL, 표 컬럼명은 원문을 유지할 수 있습니다.
                 """ + "\n" + overviewInstruction + "\n" + answerMode.instruction();
     }
 
@@ -1694,9 +1759,18 @@ public class RagService {
             boolean answerRewritten,
             boolean answerRetried,
             DocumentRetrieval retrieval,
-            DocumentQuestionType questionType
+            DocumentQuestionType questionType,
+            AnswerTiming timing
     ) {
         List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten));
+        if (timing != null) {
+            notes.add("Document RAG timing: retrieval=" + timing.retrievalMs()
+                    + "ms, context=" + timing.contextMs()
+                    + "ms, llm=" + timing.llmMs()
+                    + "ms, total=" + timing.totalMs()
+                    + "ms, promptTokens=" + timing.promptTokens()
+                    + ", outputTokens=" + timing.outputTokens() + ".");
+        }
         if (isOverviewQuestionType(questionType)) {
             long contextCount = results.stream().filter(this::isDocumentContext).count();
             long originalCount = results.size() - contextCount;
@@ -1726,6 +1800,29 @@ public class RagService {
             notes.add("Answer self-check retried generation once before returning the final answer.");
         }
         return notes;
+    }
+
+    private long elapsedMs(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
+    }
+
+    private int maxOutputTokens(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        int configured = properties.getOllama().getMaxOutputTokens();
+        if (configured > 0) {
+            return configured;
+        }
+        if (answerMode == AnswerMode.TABLE || answerMode == AnswerMode.SUMMARY || isOverviewQuestionType(questionType)) {
+            return switch (speedProfile) {
+                case FAST -> 768;
+                case DEEP -> 1536;
+                default -> 1024;
+            };
+        }
+        return switch (speedProfile) {
+            case FAST -> 512;
+            case DEEP -> 1280;
+            default -> 896;
+        };
     }
 
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
@@ -1844,6 +1941,8 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "adjacentDistance");
         copyMetadata(result.metadata(), metadata, "rerankerUsed");
         copyMetadata(result.metadata(), metadata, "rerankerScore");
+        copyMetadata(result.metadata(), metadata, "rerankerStatus");
+        copyMetadata(result.metadata(), metadata, "rerankerDurationMs");
         copyMetadata(result.metadata(), metadata, "documentGraphExpanded");
         return metadata;
     }
@@ -1897,6 +1996,16 @@ public class RagService {
     }
 
     private record EvidenceScore(double value, String role, String reason) {
+    }
+
+    private record AnswerTiming(
+            long retrievalMs,
+            long contextMs,
+            long llmMs,
+            long totalMs,
+            int promptTokens,
+            int outputTokens
+    ) {
     }
 
     private record SpreadsheetStats(

@@ -76,6 +76,7 @@ learnbot:
         base-url: ${LEARNBOT_RERANKER_BASE_URL:http://localhost:8081}
         top-n: ${LEARNBOT_RERANKER_TOP_N:30}
         timeout-seconds: ${LEARNBOT_RERANKER_TIMEOUT_SECONDS:8}
+        failure-backoff-seconds: ${LEARNBOT_RERANKER_FAILURE_BACKOFF_SECONDS:60}
     document-context:
       enabled: ${LEARNBOT_DOCUMENT_CONTEXT_ENABLED:true}
       llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_SUMMARY_ENABLED:true}

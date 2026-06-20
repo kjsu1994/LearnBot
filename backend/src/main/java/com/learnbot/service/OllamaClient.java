@@ -64,12 +64,20 @@ public class OllamaClient {
     }
 
     public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role) {
+        return chatResult(systemPrompt, userPrompt, role, null);
+    }
+
+    public ChatResult chatResult(String systemPrompt, String userPrompt, int maxOutputTokens) {
+        return chatResult(systemPrompt, userPrompt, ChatRole.PRIMARY, maxOutputTokens);
+    }
+
+    public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role, Integer maxOutputTokens) {
         List<AdminSettingsService.LlmSettings> candidates = candidates(role);
         RuntimeException lastFailure = null;
         for (int index = 0; index < candidates.size(); index++) {
             AdminSettingsService.LlmSettings settings = candidates.get(index);
             try {
-                return chatResultWith(settings, systemPrompt, userPrompt, index > 0);
+                return chatResultWith(settings, systemPrompt, userPrompt, index > 0, maxOutputTokens);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
                 if (index < candidates.size() - 1) {
@@ -89,12 +97,13 @@ public class OllamaClient {
         throw lastFailure == null ? new IllegalArgumentException("Ollama chat failed.") : lastFailure;
     }
 
-    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed) {
+    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens) {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("temperature", properties.getOllama().getTemperature());
         options.put("num_ctx", properties.getOllama().getContextWindow());
-        if (properties.getOllama().getMaxOutputTokens() > 0) {
-            options.put("num_predict", properties.getOllama().getMaxOutputTokens());
+        int requestedMaxOutputTokens = maxOutputTokens == null ? properties.getOllama().getMaxOutputTokens() : maxOutputTokens;
+        if (requestedMaxOutputTokens > 0) {
+            options.put("num_predict", requestedMaxOutputTokens);
         }
 
         ChatResponse response = webClientBuilder.clone()
