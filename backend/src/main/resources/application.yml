@@ -88,6 +88,7 @@ learnbot:
     graph:
       enabled: ${LEARNBOT_CODE_GRAPH_ENABLED:true}
       llm-relation-enabled: ${LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED:true}
+      roslyn-analyzer-path: ${LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH:/app/roslyn/LearnBot.RoslynAnalyzer.dll}
       max-hop: ${LEARNBOT_CODE_GRAPH_MAX_HOP:2}
       max-expanded-results: ${LEARNBOT_CODE_GRAPH_MAX_EXPANDED_RESULTS:12}
       max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}

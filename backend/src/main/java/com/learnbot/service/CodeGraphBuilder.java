@@ -3,7 +3,9 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -22,9 +24,21 @@ public class CodeGraphBuilder {
     private static final int MAX_REFERENCES_PER_CHUNK = 24;
 
     private final LearnBotProperties properties;
+    private final JavaSemanticGraphAnalyzer javaAnalyzer;
+    private final RoslynSemanticGraphAnalyzer roslynAnalyzer;
+    private final CodeGraphLlmEnricher llmEnricher;
 
     public CodeGraphBuilder(LearnBotProperties properties) {
+        this(properties, null, null, null);
+    }
+
+    @Autowired
+    public CodeGraphBuilder(LearnBotProperties properties, JavaSemanticGraphAnalyzer javaAnalyzer,
+                            RoslynSemanticGraphAnalyzer roslynAnalyzer, CodeGraphLlmEnricher llmEnricher) {
         this.properties = properties;
+        this.javaAnalyzer = javaAnalyzer;
+        this.roslynAnalyzer = roslynAnalyzer;
+        this.llmEnricher = llmEnricher;
     }
 
     public boolean enabled() {
@@ -32,6 +46,10 @@ public class CodeGraphBuilder {
     }
 
     public CodeGraph build(List<CodeSearchResult> chunks) {
+        return build(null, chunks);
+    }
+
+    public CodeGraph build(Path repositoryRoot, List<CodeSearchResult> chunks) {
         if (!enabled() || chunks == null || chunks.isEmpty()) {
             return new CodeGraph(List.of(), List.of());
         }
@@ -71,7 +89,7 @@ public class CodeGraphBuilder {
                 for (CodeSearchResult target : targets.stream().limit(3).toList()) {
                     String targetKey = bestNodeKey(target);
                     if (targetKey != null && !sourceKey.equals(targetKey)) {
-                        addEdge(edges, sourceKey, targetKey, relationType(chunk, target), 0.72, chunk.chunkId(), Map.of(
+                        addEdge(edges, sourceKey, targetKey, "REFERENCES", 0.55, chunk.chunkId(), Map.of(
                                 "identifier", identifier,
                                 "source", "deterministic_text_reference"
                         ));
@@ -85,7 +103,39 @@ public class CodeGraphBuilder {
                 }
             }
         }
-        return new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
+        if (javaAnalyzer != null && repositoryRoot != null) {
+            try {
+                merge(nodes, edges, javaAnalyzer.analyze(repositoryRoot, chunks));
+            } catch (RuntimeException ignored) {
+                // The conservative chunk graph remains available when semantic analysis fails.
+            }
+        }
+        if (roslynAnalyzer != null && repositoryRoot != null) {
+            try {
+                merge(nodes, edges, roslynAnalyzer.analyze(repositoryRoot, chunks));
+            } catch (RuntimeException ignored) {
+                // C# projects keep the conservative chunk graph when Roslyn is unavailable.
+            }
+        }
+        CodeGraph graph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
+        if (llmEnricher != null) {
+            try {
+                return llmEnricher.enrich(graph, chunks);
+            } catch (RuntimeException ignored) {
+                // Deterministic graph creation must not depend on LLM availability.
+            }
+        }
+        return graph;
+    }
+
+    private void merge(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, CodeGraph graph) {
+        if (graph == null) {
+            return;
+        }
+        graph.nodes().forEach(node -> nodes.putIfAbsent(node.key(), node));
+        graph.edges().forEach(edge -> edges.putIfAbsent(
+                edge.sourceKey() + "|" + edge.type() + "|" + edge.targetKey(), edge
+        ));
     }
 
     private Map<String, List<CodeSearchResult>> symbolIndex(List<CodeSearchResult> chunks) {
@@ -156,34 +206,6 @@ public class CodeGraphBuilder {
                 }
             }
         }
-    }
-
-    private String relationType(CodeSearchResult source, CodeSearchResult target) {
-        if (source.methodName() != null && target.methodName() != null && containsCallExpression(source.content(), target.methodName())) {
-            return "CALLS";
-        }
-        if (source.filePath() != null && source.filePath().equals(target.filePath())) {
-            return "CONTAINS";
-        }
-        return "REFERENCES";
-    }
-
-    private boolean containsCallExpression(String content, String methodName) {
-        if (content == null || methodName == null || methodName.isBlank()) {
-            return false;
-        }
-        String code = stripCommentsAndStrings(content);
-        Pattern callPattern = Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(methodName) + "\\s*\\(");
-        return callPattern.matcher(code).find();
-    }
-
-    private String stripCommentsAndStrings(String value) {
-        String code = value == null ? "" : value;
-        code = code.replaceAll("(?s)/\\*.*?\\*/", " ");
-        code = code.replaceAll("(?m)//.*$", " ");
-        code = code.replaceAll("\"(?:\\\\.|[^\"\\\\])*\"", "\"\"");
-        code = code.replaceAll("'(?:\\\\.|[^'\\\\])*'", "''");
-        return code;
     }
 
     private Set<String> identifiers(String content) {

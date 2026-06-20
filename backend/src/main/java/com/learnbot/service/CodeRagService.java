@@ -1034,7 +1034,11 @@ public class CodeRagService {
         }
         Object edgeType = result.metadata().get("graphEdgeType");
         Object graphPath = result.metadata().get("graphPath");
+        Object edgeTypes = result.metadata().get("graphEdgeTypes");
+        Object depth = result.metadata().get("graphDepth");
         return " graph=" + safe(edgeType == null ? null : String.valueOf(edgeType), "RELATED")
+                + nullable(" edges=", edgeTypes == null ? null : String.valueOf(edgeTypes))
+                + nullable(" depth=", depth == null ? null : String.valueOf(depth))
                 + nullable(" path=", graphPath == null ? null : String.valueOf(graphPath));
     }
 

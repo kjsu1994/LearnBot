@@ -463,7 +463,10 @@ public class CodeIndexingService {
         }
         try {
             ensureNotCancelled(jobId);
-            CodeGraph graph = codeGraphBuilder.build(repository.listChunksForIndex(record.id(), jobId));
+            CodeGraph graph = codeGraphBuilder.build(
+                    Path.of(record.localPath()),
+                    repository.listChunksForIndex(record.id(), jobId)
+            );
             if (!graph.nodes().isEmpty()) {
                 repository.replaceGraph(record.id(), jobId, graph);
             }

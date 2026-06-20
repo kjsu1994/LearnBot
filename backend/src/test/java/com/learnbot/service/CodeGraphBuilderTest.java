@@ -3,7 +3,10 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 
@@ -11,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CodeGraphBuilderTest {
     @Test
-    void buildsClassMethodAndCallEdges() {
+    void conservativeChunkFallbackDoesNotClaimResolvedCalls() {
         CodeGraphBuilder builder = new CodeGraphBuilder(new LearnBotProperties());
         UUID repositoryId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
@@ -27,8 +30,56 @@ class CodeGraphBuilderTest {
             assertThat(node.name()).isEqualTo("login");
         });
         assertThat(graph.edges()).anySatisfy(edge -> {
-            assertThat(edge.type()).isEqualTo("CALLS");
+            assertThat(edge.type()).isEqualTo("REFERENCES");
             assertThat(edge.targetKey()).contains("authenticate");
+        });
+    }
+
+    @Test
+    void javaSemanticAnalyzerUsesQualifiedSignaturesAndResolvedRelations(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("AuthService.java"), """
+                package sample;
+                interface Service { void authenticate(); }
+                public class AuthService implements Service {
+                    @Override public void authenticate() {}
+                }
+                """);
+        Files.writeString(sourceRoot.resolve("AuthController.java"), """
+                package sample;
+                public class AuthController {
+                    private final AuthService service;
+                    public AuthController(AuthService service) { this.service = service; }
+                    public void login() { service.authenticate(); }
+                }
+                """);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult controller = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/AuthController.java",
+                "method", "AuthController", "login", null, null, "public void login() { service.authenticate(); }");
+        CodeSearchResult service = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/AuthService.java",
+                "method", "AuthService", "authenticate", null, null, "public void authenticate() {}");
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer().analyze(root, java.util.List.of(controller, service));
+
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.key()).startsWith("method:java:sample.AuthController.login(");
+            assertThat(node.qualifiedName()).contains("sample.AuthController.login(");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("CALLS");
+            assertThat(edge.sourceKey()).contains("sample.AuthController.login(");
+            assertThat(edge.targetKey()).contains("sample.AuthService.authenticate(");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("IMPLEMENTS");
+            assertThat(edge.sourceKey()).contains("sample.AuthService");
+            assertThat(edge.targetKey()).contains("sample.Service");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("INJECTS");
+            assertThat(edge.sourceKey()).contains("sample.AuthController");
+            assertThat(edge.targetKey()).contains("sample.AuthService");
         });
     }
 

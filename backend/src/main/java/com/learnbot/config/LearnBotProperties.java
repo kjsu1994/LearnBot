@@ -795,6 +795,7 @@ public class LearnBotProperties {
         public static class Graph {
             private boolean enabled = true;
             private boolean llmRelationEnabled = true;
+            private String roslynAnalyzerPath = "/app/roslyn/LearnBot.RoslynAnalyzer.dll";
 
             @Min(1)
             private int maxHop = 2;
@@ -819,6 +820,14 @@ public class LearnBotProperties {
 
             public void setLlmRelationEnabled(boolean llmRelationEnabled) {
                 this.llmRelationEnabled = llmRelationEnabled;
+            }
+
+            public String getRoslynAnalyzerPath() {
+                return roslynAnalyzerPath;
+            }
+
+            public void setRoslynAnalyzerPath(String roslynAnalyzerPath) {
+                this.roslynAnalyzerPath = roslynAnalyzerPath;
             }
 
             public int getMaxHop() {

@@ -15,7 +15,9 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CodeSearchServiceTest {
@@ -64,6 +66,27 @@ class CodeSearchServiceTest {
 
         assertThat(results).hasSize(2);
         assertThat(results.get(0).filePath()).contains("AuthController");
+    }
+
+    @Test
+    void passesConfiguredHopAndFlowDirectionToGraphTraversal() {
+        CodeRepository repository = mock(CodeRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getCode().getGraph().setMaxHop(2);
+        CodeSearchService searchService = new CodeSearchService(repository, ollamaClient, properties);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult seed = result("backend/AuthController.java", "method", "login", 0.9);
+        when(repository.keywordSearch(eq(repositoryId), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(seed));
+        when(repository.relatedChunks(any(), anyList(), anyInt(), anyInt())).thenReturn(List.of());
+        when(repository.graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt()))
+                .thenReturn(List.of());
+        when(ollamaClient.embed(anyList())).thenThrow(new RuntimeException("embedding unavailable"));
+
+        searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
+
+        verify(repository).graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt());
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score) {

@@ -58,6 +58,11 @@ public class CodeSearchService {
     }
 
     public List<CodeSearchResult> search(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
+        return search(repositoryId, query, limit, spaceIds, selectedSpaceId, GraphSearchIntent.DEFAULT);
+    }
+
+    public List<CodeSearchResult> search(UUID repositoryId, String query, int limit, List<UUID> spaceIds,
+                                         UUID selectedSpaceId, GraphSearchIntent graphIntent) {
         String safeQuery = query == null ? "" : query.trim();
         if (safeQuery.isBlank()) {
             return List.of();
@@ -97,7 +102,7 @@ public class CodeSearchService {
                 .limit(safeLimit)
                 .toList();
         List<CodeSearchResult> expanded = expandRelated(repositoryId, ranked, safeLimit);
-        expanded = expandGraph(repositoryId, safeQuery, expanded, safeLimit);
+        expanded = expandGraph(repositoryId, safeQuery, expanded, safeLimit, resolveIntent(safeQuery, graphIntent));
         return expanded.stream()
                 .map(result -> boost(result, rerankBoost(safeQuery, result)))
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
@@ -145,7 +150,8 @@ public class CodeSearchService {
                 .toList();
     }
 
-    private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked, int limit) {
+    private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked,
+                                               int limit, GraphSearchIntent intent) {
         if (!properties.getCode().getGraph().isEnabled() || ranked == null || ranked.isEmpty()) {
             return ranked;
         }
@@ -161,7 +167,9 @@ public class CodeSearchService {
             for (CodeSearchResult related : repository.graphRelatedChunks(
                     repositoryId,
                     seeds,
-                    graphEdgeTypes(query),
+                    graphEdgeTypes(query, intent),
+                    graphMaxHop(intent),
+                    graphDirection(intent),
                     Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults())
             )) {
                 merge(expanded, boost(related, graphBoost(query, related)));
@@ -309,7 +317,19 @@ public class CodeSearchService {
                 || normalized.contains("\uAD6C\uC131");
     }
 
-    private List<String> graphEdgeTypes(String query) {
+    private List<String> graphEdgeTypes(String query, GraphSearchIntent intent) {
+        if (intent == GraphSearchIntent.FLOW) {
+            return List.of("EXPOSES_ENDPOINT", "CALLS", "INJECTS", "RETURNS", "HANDLES_EVENT");
+        }
+        if (intent == GraphSearchIntent.IMPACT) {
+            return List.of("CALLS", "OVERRIDES", "IMPLEMENTS", "EXTENDS", "INJECTS", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY");
+        }
+        if (intent == GraphSearchIntent.UI_EVENT) {
+            return List.of("HANDLES_EVENT", "BINDS_TO", "EXPOSES_ENDPOINT", "CALLS", "READS_FIELD", "WRITES_FIELD");
+        }
+        if (intent == GraphSearchIntent.OVERVIEW) {
+            return List.of("CONTAINS", "DEFINES", "EXTENDS", "IMPLEMENTS", "INJECTS", "ANNOTATED_BY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT");
+        }
         String normalized = normalizeCodeText(query);
         if (normalized.contains("flow") || normalized.contains("impact") || normalized.contains("call")
                 || normalized.contains("흐름") || normalized.contains("호출")) {
@@ -319,6 +339,34 @@ public class CodeSearchService {
             return List.of("CONTAINS", "DEFINES", "REFERENCES", "DEPENDS_ON", "RELATED_TO");
         }
         return List.of("DEFINES", "CONTAINS", "CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
+    }
+
+    private int graphMaxHop(GraphSearchIntent intent) {
+        int configured = Math.max(1, Math.min(properties.getCode().getGraph().getMaxHop(), 4));
+        return switch (intent) {
+            case LOCATE, EXPLAIN -> 1;
+            default -> configured;
+        };
+    }
+
+    private String graphDirection(GraphSearchIntent intent) {
+        return switch (intent) {
+            case FLOW -> "FORWARD";
+            case IMPACT -> "REVERSE";
+            default -> "BOTH";
+        };
+    }
+
+    private GraphSearchIntent resolveIntent(String query, GraphSearchIntent requested) {
+        if (requested != null && requested != GraphSearchIntent.DEFAULT) {
+            return requested;
+        }
+        String normalized = normalizeCodeText(query);
+        if (normalized.contains("impact") || normalized.contains("영향")) return GraphSearchIntent.IMPACT;
+        if (normalized.contains("flow") || normalized.contains("call") || normalized.contains("호출")) return GraphSearchIntent.FLOW;
+        if (normalized.contains("event") || normalized.contains("xaml") || normalized.contains("이벤트")) return GraphSearchIntent.UI_EVENT;
+        if (isOverviewQuestion(query)) return GraphSearchIntent.OVERVIEW;
+        return GraphSearchIntent.LOCATE;
     }
 
     private double graphBoost(String query, CodeSearchResult result) {
