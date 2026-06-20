@@ -90,7 +90,7 @@ function DocumentWorkspace(props) {
                 <FileUp size={16} />
                 <span>{formatSelectedFiles(props.files)}</span>
               </label>
-              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
+              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.ppt,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
               <button disabled={!props.files?.length || props.loading('file')}>
                 {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
                 업로드
@@ -324,7 +324,7 @@ function DocumentSourcePanel(props) {
             id="admin-file-upload"
             className="visually-hidden"
             type="file"
-            accept=".pdf,.docx,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx"
+            accept=".pdf,.docx,.ppt,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx"
             multiple
             onChange={(event) => setFiles(Array.from(event.target.files || []))}
           />
@@ -725,8 +725,11 @@ function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {
 }
 
 function DocumentPreviewContent({ preview, blobUrl }) {
-  if (preview.previewType === 'pdf') {
+  if (preview.previewType === 'pdf' || preview.previewType === 'presentation_pdf') {
     if (!blobUrl) {
+      if (preview.previewType === 'presentation_pdf' && ((preview.blocks || []).length || preview.text)) {
+        return <PresentationReader blocks={preview.blocks || []} fallbackText={preview.text} />;
+      }
       return (
         <div className="code-modal-state">
           <Loader2 className="spin" size={22} />

@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -30,7 +31,8 @@ class DocumentPreviewServiceTest {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
         AuthService authService = mock(AuthService.class);
-        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
         AppUser user = user();
         UUID documentId = UUID.randomUUID();
         UUID sourceId = UUID.randomUUID();
@@ -57,7 +59,8 @@ class DocumentPreviewServiceTest {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
         AuthService authService = mock(AuthService.class);
-        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
         AppUser user = user();
         UUID documentId = UUID.randomUUID();
         UUID sourceId = UUID.randomUUID();
@@ -83,7 +86,8 @@ class DocumentPreviewServiceTest {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
         AuthService authService = mock(AuthService.class);
-        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
         AppUser user = user();
         UUID documentId = UUID.randomUUID();
         UUID sourceId = UUID.randomUUID();
@@ -107,11 +111,47 @@ class DocumentPreviewServiceTest {
     }
 
     @Test
+    void pptxPreviewUsesRenderedPdfWhenOfficeRenderSucceeds() throws Exception {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
+        AuthService authService = mock(AuthService.class);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
+        AppUser user = user();
+        UUID documentId = UUID.randomUUID();
+        UUID sourceId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        DocumentSummary summary = summary(documentId, sourceId, spaceId, "FILE", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        StoredObject object = new StoredObject("bucket", "key", "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", 256);
+
+        when(authService.accessibleSpaceIds(user)).thenReturn(List.of(spaceId));
+        when(repository.findDocument(eq(documentId), anyList())).thenReturn(Optional.of(summary));
+        when(repository.findSourceObject(sourceId)).thenReturn(Optional.of(object));
+        when(objectStorageService.load(object)).thenReturn(new StoredFile("deck.pptx", object.contentType(), pptxBytes()));
+        when(renderer.renderPdf(any())).thenReturn(Optional.of(
+                new PresentationPreviewRenderer.RenderedPresentation("deck.pdf", "application/pdf", "%PDF".getBytes())
+        ));
+
+        DocumentPreviewResponse response = service.preview(user, documentId);
+        StoredFile rendered = service.renderedPreview(user, documentId);
+
+        assertThat(response.previewType()).isEqualTo("presentation_pdf");
+        assertThat(response.renderedAvailable()).isTrue();
+        assertThat(response.renderedContentType()).isEqualTo("application/pdf");
+        assertThat(response.blocks()).extracting("type").contains("heading", "paragraph");
+        assertThat(rendered.filename()).isEqualTo("deck.pdf");
+        assertThat(rendered.contentType()).isEqualTo("application/pdf");
+    }
+
+    @Test
     void pptxPreviewFallsBackToChunksWhenStoredOriginalCannotBeParsed() {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
         AuthService authService = mock(AuthService.class);
-        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
         AppUser user = user();
         UUID documentId = UUID.randomUUID();
         UUID sourceId = UUID.randomUUID();
@@ -141,7 +181,8 @@ class DocumentPreviewServiceTest {
         DocumentRepository repository = mock(DocumentRepository.class);
         ObjectStorageService objectStorageService = mock(ObjectStorageService.class);
         AuthService authService = mock(AuthService.class);
-        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService);
+        PresentationPreviewRenderer renderer = mock(PresentationPreviewRenderer.class);
+        DocumentPreviewService service = new DocumentPreviewService(repository, objectStorageService, authService, renderer);
         AppUser user = user();
         UUID documentId = UUID.randomUUID();
         UUID sourceId = UUID.randomUUID();

@@ -9,6 +9,9 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextParagraph;
+import org.apache.poi.hslf.usermodel.HSLFTextRun;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -32,6 +35,7 @@ import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -92,6 +96,9 @@ public class FileExtractor {
         }
         if (lower.endsWith(".docx")) {
             return docx(inputStream, fileName);
+        }
+        if (lower.endsWith(".ppt")) {
+            return ppt(inputStream, fileName);
         }
         if (lower.endsWith(".pptx")) {
             return pptx(inputStream, fileName);
@@ -173,7 +180,7 @@ public class FileExtractor {
     private ExtractedDocument genericText(InputStream inputStream, String fileName) throws Exception {
         byte[] bytes = inputStream.readAllBytes();
         if (looksBinary(bytes)) {
-            throw new IllegalArgumentException("Unsupported binary file. Supported structured files: CSV, XLS, XLSX, PDF, DOCX, PPTX, Markdown, and TXT.");
+            throw new IllegalArgumentException("Unsupported binary file. Supported structured files: CSV, XLS, XLSX, PDF, DOCX, PPT, PPTX, Markdown, and TXT.");
         }
         String content = decodeUtf8(bytes);
         if (content.isBlank()) {
@@ -278,6 +285,35 @@ public class FileExtractor {
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 content.toString(),
                 Map.of("fileName", fileName, "slideSource", "poi")
+        );
+    }
+
+    private ExtractedDocument ppt(InputStream inputStream, String fileName) throws Exception {
+        StringBuilder content = new StringBuilder();
+        try (HSLFSlideShow slideShow = new HSLFSlideShow(inputStream)) {
+            int slideIndex = 1;
+            for (var slide : slideShow.getSlides()) {
+                content.append("Slide ").append(slideIndex++).append(":\n");
+                for (List<HSLFTextParagraph> paragraphs : slide.getTextParagraphs()) {
+                    for (HSLFTextParagraph paragraph : paragraphs) {
+                        for (HSLFTextRun run : paragraph.getTextRuns()) {
+                            String text = run.getRawText();
+                            if (text != null && !text.isBlank()) {
+                                content.append(text.replaceAll("\\s+", " ").trim()).append(' ');
+                            }
+                        }
+                        content.append('\n');
+                    }
+                }
+                content.append('\n');
+            }
+        }
+        return new ExtractedDocument(
+                fileName,
+                "file://" + fileName,
+                "application/vnd.ms-powerpoint",
+                content.toString(),
+                Map.of("fileName", fileName, "slideSource", "poi-hslf")
         );
     }
 

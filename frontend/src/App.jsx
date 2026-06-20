@@ -798,6 +798,15 @@ export default function App() {
         const blob = await requestBlob(`/api/documents/${documentId}/original`);
         const nextUrl = URL.createObjectURL(blob);
         setDocumentPreviewBlobUrl(nextUrl);
+      } else if (preview?.previewType === 'presentation_pdf' && preview.renderedAvailable) {
+        try {
+          const blob = await requestBlob(`/api/documents/${documentId}/preview/rendered`);
+          const nextUrl = URL.createObjectURL(blob);
+          setDocumentPreviewBlobUrl(nextUrl);
+        } catch (err) {
+          setDocumentPreview({ ...preview, renderedAvailable: false, previewFallbackReason: 'PRESENTATION_RENDER_FETCH_FAILED' });
+          setError(err.message || 'Presentation preview rendering failed. Showing extracted text instead.');
+        }
       }
     } catch (err) {
       setDocumentPreview(null);

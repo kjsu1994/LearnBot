@@ -1069,6 +1069,7 @@ public class LearnBotProperties {
     public static class Document {
         @Min(1)
         private int indexThreads = 2;
+        private Preview preview = new Preview();
 
         public int getIndexThreads() {
             return indexThreads;
@@ -1076,6 +1077,59 @@ public class LearnBotProperties {
 
         public void setIndexThreads(int indexThreads) {
             this.indexThreads = indexThreads;
+        }
+
+        public Preview getPreview() {
+            return preview;
+        }
+
+        public void setPreview(Preview preview) {
+            this.preview = preview;
+        }
+
+        public static class Preview {
+            private boolean officeRenderEnabled = true;
+
+            @NotBlank
+            private String officeCommand = "soffice";
+
+            @Min(1)
+            private int officeTimeoutSeconds = 45;
+
+            @Min(1)
+            private long officeMaxFileBytes = 100_000_000L;
+
+            public boolean isOfficeRenderEnabled() {
+                return officeRenderEnabled;
+            }
+
+            public void setOfficeRenderEnabled(boolean officeRenderEnabled) {
+                this.officeRenderEnabled = officeRenderEnabled;
+            }
+
+            public String getOfficeCommand() {
+                return officeCommand;
+            }
+
+            public void setOfficeCommand(String officeCommand) {
+                this.officeCommand = officeCommand;
+            }
+
+            public int getOfficeTimeoutSeconds() {
+                return officeTimeoutSeconds;
+            }
+
+            public void setOfficeTimeoutSeconds(int officeTimeoutSeconds) {
+                this.officeTimeoutSeconds = officeTimeoutSeconds;
+            }
+
+            public long getOfficeMaxFileBytes() {
+                return officeMaxFileBytes;
+            }
+
+            public void setOfficeMaxFileBytes(long officeMaxFileBytes) {
+                this.officeMaxFileBytes = officeMaxFileBytes;
+            }
         }
     }
 

@@ -222,7 +222,9 @@ function splitReaderParagraphs(text = '') {
 function getPreviewTypeLabel(type) {
   const labels = {
     pdf: 'PDF',
+    presentation_pdf: 'PPT/PPTX PDF',
     docx: 'DOCX',
+    ppt: 'PPT',
     pptx: 'PPTX',
     excel: 'Excel',
     csv: 'CSV',

@@ -18,6 +18,9 @@ public record DocumentPreviewResponse(
         List<String> paragraphs,
         List<DocumentPreviewTable> tables,
         List<DocumentPreviewSheet> sheets,
-        List<DocumentPreviewBlock> blocks
+        List<DocumentPreviewBlock> blocks,
+        boolean renderedAvailable,
+        String renderedContentType,
+        String previewFallbackReason
 ) {
 }

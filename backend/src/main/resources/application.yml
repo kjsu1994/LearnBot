@@ -122,6 +122,11 @@ learnbot:
       evidence-ranking-debug: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG:false}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}
+    preview:
+      office-render-enabled: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_RENDER_ENABLED:true}
+      office-command: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_COMMAND:soffice}
+      office-timeout-seconds: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_TIMEOUT_SECONDS:45}
+      office-max-file-bytes: ${LEARNBOT_DOCUMENT_PREVIEW_OFFICE_MAX_FILE_BYTES:100000000}
   auth:
     bootstrap-admin-email: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:jinsu.kim}
     bootstrap-admin-password: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:admin1234}

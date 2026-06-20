@@ -14,6 +14,9 @@ FROM mcr.microsoft.com/dotnet/runtime:8.0 AS dotnet-runtime
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk fontconfig \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/target/learnbot-backend-0.1.0.jar app.jar
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 COPY --from=dotnet-runtime /usr/lib/x86_64-linux-gnu/libicudata.so.72* /usr/lib/x86_64-linux-gnu/

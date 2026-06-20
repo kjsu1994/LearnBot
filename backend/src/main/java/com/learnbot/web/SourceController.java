@@ -132,6 +132,19 @@ public class SourceController {
                 .body(file.content());
     }
 
+    @GetMapping("/documents/{documentId}/preview/rendered")
+    ResponseEntity<byte[]> renderedPreviewDocument(@PathVariable UUID documentId) {
+        StoredFile file = documentPreviewService.renderedPreview(currentUserProvider.currentUser(), documentId);
+        MediaType mediaType = mediaType(file.contentType());
+        ContentDisposition disposition = ContentDisposition.inline()
+                .filename(file.filename(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(file.content());
+    }
+
     @DeleteMapping("/documents/{documentId}")
     void deleteDocument(@PathVariable UUID documentId) {
         ingestionService.deleteDocument(currentUserProvider.currentUser(), documentId);

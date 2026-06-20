@@ -34,7 +34,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class DocumentPreviewService {
@@ -45,15 +48,19 @@ public class DocumentPreviewService {
     private final DocumentRepository repository;
     private final ObjectStorageService objectStorageService;
     private final AuthService authService;
+    private final PresentationPreviewRenderer presentationPreviewRenderer;
+    private final ConcurrentMap<UUID, CachedRenderedPreview> renderedPreviewCache = new ConcurrentHashMap<>();
 
     public DocumentPreviewService(
             DocumentRepository repository,
             ObjectStorageService objectStorageService,
-            AuthService authService
+            AuthService authService,
+            PresentationPreviewRenderer presentationPreviewRenderer
     ) {
         this.repository = repository;
         this.objectStorageService = objectStorageService;
         this.authService = authService;
+        this.presentationPreviewRenderer = presentationPreviewRenderer;
     }
 
     public DocumentPreviewResponse preview(AppUser user, UUID documentId) {
@@ -75,7 +82,7 @@ public class DocumentPreviewService {
             case "excel" -> excel(summary, file, object);
             case "csv" -> csv(summary, file, object);
             case "markdown", "text" -> text(summary, file, object, type);
-            case "pptx" -> pptx(summary, file, object);
+            case "ppt", "pptx" -> presentation(summary, file, object, type);
             default -> fromChunks(summary, "text", true);
         };
     }
@@ -85,6 +92,19 @@ public class DocumentPreviewService {
         StoredObject object = repository.findSourceObject(summary.sourceId())
                 .orElseThrow(() -> new IllegalArgumentException("Original file is not available for this document."));
         return objectStorageService.load(object);
+    }
+
+    public StoredFile renderedPreview(AppUser user, UUID documentId) {
+        DocumentSummary summary = findDocument(user, documentId);
+        StoredObject object = repository.findSourceObject(summary.sourceId())
+                .orElseThrow(() -> new IllegalArgumentException("Original file is not available for this document."));
+        StoredFile file = objectStorageService.load(object);
+        if (!isPresentation(previewType(file.filename(), summary.contentType()))) {
+            throw new IllegalArgumentException("Rendered preview is not available for this document type.");
+        }
+        return renderPresentation(summary.id(), object, file)
+                .map(PresentationPreviewRenderer.RenderedPresentation::asStoredFile)
+                .orElseThrow(() -> new IllegalArgumentException("Rendered preview is not available for this document."));
     }
 
     private DocumentSummary findDocument(AppUser user, UUID documentId) {
@@ -193,7 +213,26 @@ public class DocumentPreviewService {
         return base(summary, "docx", file.filename(), object.sizeBytes(), true, truncated, null, paragraphs, tables, List.of(), List.of());
     }
 
-    private DocumentPreviewResponse pptx(DocumentSummary summary, StoredFile file, StoredObject object) {
+    private DocumentPreviewResponse presentation(DocumentSummary summary, StoredFile file, StoredObject object, String sourcePreviewType) {
+        PresentationTextPreview textPreview = presentationText(file);
+        Optional<PresentationPreviewRenderer.RenderedPresentation> rendered = renderPresentation(summary.id(), object, file);
+        if (rendered.isPresent()) {
+            PresentationPreviewRenderer.RenderedPresentation pdf = rendered.get();
+            LimitedText limited = limitText(textPreview.text());
+            return base(summary, "presentation_pdf", pdf.filename(), (long) pdf.content().length, true, limited.truncated(),
+                    limited.text(), List.of(), List.of(), List.of(), textPreview.blocks(),
+                    true, pdf.contentType(), null);
+        }
+        if (!textPreview.blocks().isEmpty()) {
+            LimitedText limited = limitText(textPreview.text());
+            return base(summary, sourcePreviewType, file.filename(), object.sizeBytes(), true, limited.truncated(),
+                    limited.text(), List.of(), List.of(), List.of(), textPreview.blocks(),
+                    false, null, "PRESENTATION_RENDER_UNAVAILABLE");
+        }
+        return fromChunks(summary, sourcePreviewType, true, "PRESENTATION_TEXT_FALLBACK");
+    }
+
+    private PresentationTextPreview presentationText(StoredFile file) {
         List<DocumentPreviewBlock> blocks = new ArrayList<>();
         StringBuilder text = new StringBuilder();
         try (XMLSlideShow slideShow = new XMLSlideShow(new ByteArrayInputStream(file.content()))) {
@@ -220,14 +259,20 @@ public class DocumentPreviewService {
                 slideIndex++;
             }
         } catch (Exception ex) {
-            return fromChunks(summary, "pptx", true);
+            return new PresentationTextPreview(List.of(), "");
         }
-        if (blocks.isEmpty()) {
-            return fromChunks(summary, "pptx", true);
+        return new PresentationTextPreview(blocks, text.toString());
+    }
+
+    private Optional<PresentationPreviewRenderer.RenderedPresentation> renderPresentation(UUID documentId, StoredObject object, StoredFile file) {
+        String fingerprint = object.objectKey() + ":" + object.sizeBytes();
+        CachedRenderedPreview cached = renderedPreviewCache.get(documentId);
+        if (cached != null && cached.fingerprint().equals(fingerprint)) {
+            return Optional.of(cached.rendered());
         }
-        LimitedText limited = limitText(text.toString());
-        return base(summary, "pptx", file.filename(), object.sizeBytes(), true, limited.truncated(),
-                limited.text(), List.of(), List.of(), List.of(), blocks);
+        Optional<PresentationPreviewRenderer.RenderedPresentation> rendered = presentationPreviewRenderer.renderPdf(file);
+        rendered.ifPresent(value -> renderedPreviewCache.put(documentId, new CachedRenderedPreview(fingerprint, value)));
+        return rendered;
     }
 
     private List<String> docxRow(XWPFTableRow row) {
@@ -253,6 +298,10 @@ public class DocumentPreviewService {
     }
 
     private DocumentPreviewResponse fromChunks(DocumentSummary summary, String previewType, boolean originalAvailable) {
+        return fromChunks(summary, previewType, originalAvailable, null);
+    }
+
+    private DocumentPreviewResponse fromChunks(DocumentSummary summary, String previewType, boolean originalAvailable, String previewFallbackReason) {
         StringBuilder text = new StringBuilder();
         for (DocumentChunkDetail chunk : repository.listDocumentChunks(summary.id())) {
             if (isDocumentContext(chunk.metadata())) {
@@ -268,7 +317,8 @@ public class DocumentPreviewService {
         }
         LimitedText limited = limitText(text.toString());
         return base(summary, previewType, null, null, originalAvailable, limited.truncated(),
-                limited.text(), List.of(), List.of(), List.of(), List.of());
+                limited.text(), List.of(), List.of(), List.of(), List.of(),
+                false, null, previewFallbackReason);
     }
 
     private boolean isDocumentContext(Map<String, Object> metadata) {
@@ -289,6 +339,26 @@ public class DocumentPreviewService {
             List<DocumentPreviewSheet> sheets,
             List<DocumentPreviewBlock> blocks
     ) {
+        return base(summary, previewType, filename, sizeBytes, originalAvailable, truncated, text, paragraphs, tables, sheets, blocks,
+                false, null, null);
+    }
+
+    private DocumentPreviewResponse base(
+            DocumentSummary summary,
+            String previewType,
+            String filename,
+            Long sizeBytes,
+            boolean originalAvailable,
+            boolean truncated,
+            String text,
+            List<String> paragraphs,
+            List<DocumentPreviewTable> tables,
+            List<DocumentPreviewSheet> sheets,
+            List<DocumentPreviewBlock> blocks,
+            boolean renderedAvailable,
+            String renderedContentType,
+            String previewFallbackReason
+    ) {
         return new DocumentPreviewResponse(
                 summary.id(),
                 summary.title(),
@@ -304,7 +374,10 @@ public class DocumentPreviewService {
                 paragraphs,
                 tables,
                 sheets,
-                blocks
+                blocks,
+                renderedAvailable,
+                renderedContentType,
+                previewFallbackReason
         );
     }
 
@@ -415,6 +488,9 @@ public class DocumentPreviewService {
         if (lowerName.endsWith(".docx") || lowerType.contains("wordprocessingml")) {
             return "docx";
         }
+        if (lowerName.endsWith(".ppt") || lowerType.contains("powerpoint")) {
+            return "ppt";
+        }
         if (lowerName.endsWith(".pptx") || lowerType.contains("presentationml")) {
             return "pptx";
         }
@@ -445,5 +521,15 @@ public class DocumentPreviewService {
     }
 
     private record LimitedText(String text, boolean truncated) {
+    }
+
+    private record PresentationTextPreview(List<DocumentPreviewBlock> blocks, String text) {
+    }
+
+    private record CachedRenderedPreview(String fingerprint, PresentationPreviewRenderer.RenderedPresentation rendered) {
+    }
+
+    private boolean isPresentation(String previewType) {
+        return "ppt".equals(previewType) || "pptx".equals(previewType);
     }
 }
