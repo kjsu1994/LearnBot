@@ -59,8 +59,8 @@ learnbot:
       rewrite-enabled: ${RAG_PIPELINE_REWRITE_ENABLED:true}
       self-check-enabled: ${RAG_PIPELINE_SELF_CHECK_ENABLED:true}
       max-iterations: ${RAG_PIPELINE_MAX_ITERATIONS:2}
-      rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:30}
-      document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:12}
+      rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:20}
+      document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:8}
       code-context-limit: ${RAG_PIPELINE_CODE_CONTEXT_LIMIT:12}
       document-evidence-ranking-enabled: ${RAG_PIPELINE_DOCUMENT_EVIDENCE_RANKING_ENABLED:true}
       document-adjacent-expansion-enabled: ${RAG_PIPELINE_DOCUMENT_ADJACENT_EXPANSION_ENABLED:true}
@@ -70,11 +70,11 @@ learnbot:
       default-document-speed-profile: ${RAG_PIPELINE_DEFAULT_DOCUMENT_SPEED_PROFILE:BALANCED}
       query-embedding-cache-enabled: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_ENABLED:true}
       query-embedding-cache-max-entries: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_MAX_ENTRIES:1024}
-      query-embedding-cache-ttl-seconds: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_TTL_SECONDS:600}
+      query-embedding-cache-ttl-seconds: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_TTL_SECONDS:3600}
       reranker:
         enabled: ${LEARNBOT_RERANKER_ENABLED:false}
         base-url: ${LEARNBOT_RERANKER_BASE_URL:http://localhost:8081}
-        top-n: ${LEARNBOT_RERANKER_TOP_N:30}
+        top-n: ${LEARNBOT_RERANKER_TOP_N:20}
         timeout-seconds: ${LEARNBOT_RERANKER_TIMEOUT_SECONDS:8}
         failure-backoff-seconds: ${LEARNBOT_RERANKER_FAILURE_BACKOFF_SECONDS:60}
     document-context:
@@ -149,7 +149,7 @@ learnbot:
       max-pages: ${LEARNBOT_DOCUMENT_OCR_MAX_PAGES:80}
       timeout-seconds: ${LEARNBOT_DOCUMENT_OCR_TIMEOUT_SECONDS:180}
     graph:
-      enabled: ${LEARNBOT_DOCUMENT_GRAPH_ENABLED:true}
+      enabled: ${LEARNBOT_DOCUMENT_GRAPH_ENABLED:false}
       max-hop: ${LEARNBOT_DOCUMENT_GRAPH_MAX_HOP:1}
       max-expanded-results: ${LEARNBOT_DOCUMENT_GRAPH_MAX_EXPANDED_RESULTS:12}
       debug: ${LEARNBOT_DOCUMENT_GRAPH_DEBUG:false}

@@ -177,19 +177,28 @@ public class RagService {
                 contextMs,
                 llmMs,
                 elapsedMs(askStarted),
+                context.length(),
                 finalChatResult == null ? 0 : finalChatResult.promptEvalCount(),
                 finalChatResult == null ? 0 : finalChatResult.evalCount()
         );
-        log.info("RAG answer timing domain=document profile={} effectiveProfile={} retrievalMs={} contextMs={} llmMs={} totalMs={} promptTokens={} outputTokens={} citations={} question={}",
+        log.info("RAG answer timing domain=document profile={} effectiveProfile={} retrievalMs={} embeddingMs={} vectorSearchMs={} keywordSearchMs={} rerankMs={} adjacentMs={} graphExpansionMs={} contextMs={} llmMs={} totalMs={} contextChars={} promptTokens={} outputTokens={} citations={} queryCount={} question={}",
                 requestedSpeedProfile.name(),
                 retrieval.effectiveProfile().name(),
                 timing.retrievalMs(),
+                retrieval.timing().embeddingMs(),
+                retrieval.timing().vectorSearchMs(),
+                retrieval.timing().keywordSearchMs(),
+                retrieval.timing().rerankMs(),
+                retrieval.timing().adjacentMs(),
+                retrieval.timing().graphExpansionMs(),
                 timing.contextMs(),
                 timing.llmMs(),
                 timing.totalMs(),
+                timing.contextChars(),
                 timing.promptTokens(),
                 timing.outputTokens(),
                 citations.size(),
+                retrieval.queryCount(),
                 abbreviate(question));
         return new AskResponse(
                 answerMode.value(),
@@ -213,18 +222,25 @@ public class RagService {
     ) {
         Map<UUID, SearchResult> merged = new LinkedHashMap<>();
         List<String> queriesUsed = new ArrayList<>();
+        RetrievalTimingAccumulator timing = new RetrievalTimingAccumulator();
         DocumentSpeedProfile effectiveProfile = speedProfile == null ? DocumentSpeedProfile.BALANCED : speedProfile;
         boolean profileEscalated = false;
         int searchLimit = documentSearchLimit(topK, effectiveProfile);
 
-        searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
+        searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
         if (isOverviewQuestionType(questionType)) {
             for (String query : overviewQueries(question, questionType, effectiveProfile)) {
-                searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
+                searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
             }
         }
+        long adjacentStarted = System.nanoTime();
         expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
-        expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
+        timing.addAdjacentMs(elapsedMs(adjacentStarted));
+        if (effectiveProfile != DocumentSpeedProfile.FAST) {
+            long graphStarted = System.nanoTime();
+            expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
+            timing.addGraphExpansionMs(elapsedMs(graphStarted));
+        }
         List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, effectiveProfile, List.copyOf(merged.values()));
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
                 question,
@@ -243,12 +259,8 @@ public class RagService {
 
         if (!isCountQuestion(question)
                 && (!assessment.sufficient() || needsMoreOverviewEvidence(citations, questionType))
-                && (pipelineService.maxIterations() > 1 || speedProfile == DocumentSpeedProfile.FAST)) {
-            if (speedProfile == DocumentSpeedProfile.FAST) {
-                effectiveProfile = DocumentSpeedProfile.BALANCED;
-                profileEscalated = true;
-                searchLimit = documentSearchLimit(topK, effectiveProfile);
-            }
+                && speedProfile != DocumentSpeedProfile.FAST
+                && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
                     question,
                     RagPipelineService.Domain.DOCUMENT,
@@ -267,6 +279,7 @@ public class RagService {
                     .toList();
             for (QuerySearchResults result : retryResults) {
                 queriesUsed.add(result.query());
+                timing.add(result.timing());
                 for (SearchResult searchResult : result.results()) {
                     mergeDocument(merged, result.query().equals(question) ? searchResult : boostDocument(searchResult, 0.03));
                 }
@@ -274,11 +287,17 @@ public class RagService {
             iteration = 2;
             if (isOverviewQuestionType(questionType)) {
                 for (String query : overviewQueries(question, questionType, effectiveProfile)) {
-                    searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed);
+                    searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
                 }
             }
+            adjacentStarted = System.nanoTime();
             expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
-            expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
+            timing.addAdjacentMs(elapsedMs(adjacentStarted));
+            if (effectiveProfile != DocumentSpeedProfile.FAST) {
+                long graphStarted = System.nanoTime();
+                expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
+                timing.addGraphExpansionMs(elapsedMs(graphStarted));
+            }
             citations = selectAnswerCitations(question, answerMode, questionType, effectiveProfile, List.copyOf(merged.values()));
             assessment = pipelineService.assessDocuments(
                     question,
@@ -297,7 +316,7 @@ public class RagService {
                 queryPlan.rewriteFailed(),
                 String.format(java.util.Locale.ROOT, "%.2f", assessment.coverage()),
                 abbreviate(question));
-        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated);
+        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated, timing.snapshot());
     }
 
     private void searchAndMergeDocuments(
@@ -309,7 +328,8 @@ public class RagService {
             List<UUID> spaceIds,
             UUID selectedSpaceId,
             Map<UUID, SearchResult> merged,
-            List<String> queriesUsed
+            List<String> queriesUsed,
+            RetrievalTimingAccumulator timing
     ) {
         String safeQuery = safe(query).trim();
         if (safeQuery.isBlank() || queriesUsed.contains(safeQuery)) {
@@ -317,7 +337,9 @@ public class RagService {
         }
         queriesUsed.add(safeQuery);
         try {
-            for (SearchResult result : searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile)) {
+            SearchService.SearchResponse response = searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile);
+            timing.add(response.timing());
+            for (SearchResult result : response.results()) {
                 mergeDocument(merged, safeQuery.equals(originalQuestion) ? result : boostDocument(result, 0.03));
             }
         } catch (RuntimeException ex) {
@@ -336,17 +358,19 @@ public class RagService {
     ) {
         String safeQuery = safe(query).trim();
         try {
+            SearchService.SearchResponse response = searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile);
             return new QuerySearchResults(
                     safeQuery,
-                    searchWithProfile(safeQuery, filter, limit, spaceIds, selectedSpaceId, speedProfile)
+                    response.results(),
+                    response.timing()
             );
         } catch (RuntimeException ex) {
             log.warn("RAG retrieval query failed query={} question={}", abbreviate(safeQuery), abbreviate(originalQuestion), ex);
-            return new QuerySearchResults(safeQuery, List.of());
+            return new QuerySearchResults(safeQuery, List.of(), SearchService.SearchTiming.empty());
         }
     }
 
-    private List<SearchResult> searchWithProfile(
+    private SearchService.SearchResponse searchWithProfile(
             String query,
             SearchFilter filter,
             int limit,
@@ -355,9 +379,15 @@ public class RagService {
             DocumentSpeedProfile speedProfile
     ) {
         if (speedProfile == DocumentSpeedProfile.BALANCED) {
-            return searchService.search(query, filter, limit, spaceIds, selectedSpaceId);
+            SearchService.SearchResponse response = searchService.searchDetailed(query, filter, limit, spaceIds, selectedSpaceId, DocumentSpeedProfile.BALANCED.name());
+            return response == null
+                    ? new SearchService.SearchResponse(searchService.search(query, filter, limit, spaceIds, selectedSpaceId), SearchService.SearchTiming.empty())
+                    : response;
         }
-        return searchService.search(query, filter, limit, spaceIds, selectedSpaceId, speedProfile.name());
+        SearchService.SearchResponse response = searchService.searchDetailed(query, filter, limit, spaceIds, selectedSpaceId, speedProfile.name());
+        return response == null
+                ? new SearchService.SearchResponse(searchService.search(query, filter, limit, spaceIds, selectedSpaceId, speedProfile.name()), SearchService.SearchTiming.empty())
+                : response;
     }
 
     private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
@@ -1765,11 +1795,21 @@ public class RagService {
         List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten));
         if (timing != null) {
             notes.add("Document RAG timing: retrieval=" + timing.retrievalMs()
+                    + "ms, embedding=" + retrieval.timing().embeddingMs()
+                    + "ms, vector=" + retrieval.timing().vectorSearchMs()
+                    + "ms, keyword=" + retrieval.timing().keywordSearchMs()
+                    + "ms, rerank=" + retrieval.timing().rerankMs()
+                    + "ms, adjacent=" + retrieval.timing().adjacentMs()
+                    + "ms, graph=" + retrieval.timing().graphExpansionMs()
                     + "ms, context=" + timing.contextMs()
                     + "ms, llm=" + timing.llmMs()
                     + "ms, total=" + timing.totalMs()
-                    + "ms, promptTokens=" + timing.promptTokens()
-                    + ", outputTokens=" + timing.outputTokens() + ".");
+                    + "ms, contextChars=" + timing.contextChars()
+                    + ", promptTokens=" + timing.promptTokens()
+                    + ", outputTokens=" + timing.outputTokens()
+                    + ", citations=" + results.size()
+                    + ", queries=" + retrieval.queryCount()
+                    + ", profile=" + retrieval.effectiveProfile().name() + ".");
         }
         if (isOverviewQuestionType(questionType)) {
             long contextCount = results.stream().filter(this::isDocumentContext).count();
@@ -1982,11 +2022,12 @@ public class RagService {
             int queryCount,
             DocumentSpeedProfile requestedProfile,
             DocumentSpeedProfile effectiveProfile,
-            boolean profileEscalated
+            boolean profileEscalated,
+            RetrievalTiming timing
     ) {
     }
 
-    private record QuerySearchResults(String query, List<SearchResult> results) {
+    private record QuerySearchResults(String query, List<SearchResult> results, SearchService.SearchTiming timing) {
     }
 
     private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {
@@ -2003,9 +2044,68 @@ public class RagService {
             long contextMs,
             long llmMs,
             long totalMs,
+            int contextChars,
             int promptTokens,
             int outputTokens
     ) {
+    }
+
+    private record RetrievalTiming(
+            long embeddingMs,
+            long vectorSearchMs,
+            long keywordSearchMs,
+            long rerankMs,
+            long adjacentMs,
+            long graphExpansionMs,
+            int embeddingCacheHits,
+            int expandedQueryCount
+    ) {
+    }
+
+    private static class RetrievalTimingAccumulator {
+        private long embeddingMs;
+        private long vectorSearchMs;
+        private long keywordSearchMs;
+        private long rerankMs;
+        private long adjacentMs;
+        private long graphExpansionMs;
+        private int embeddingCacheHits;
+        private int expandedQueryCount;
+
+        void add(SearchService.SearchTiming timing) {
+            if (timing == null) {
+                return;
+            }
+            embeddingMs += timing.embeddingMs();
+            vectorSearchMs += timing.vectorSearchMs();
+            keywordSearchMs += timing.keywordSearchMs();
+            rerankMs += timing.rerankMs();
+            if (timing.embeddingCacheHit()) {
+                embeddingCacheHits++;
+            }
+            expandedQueryCount += timing.expandedQueryCount();
+        }
+
+        void addAdjacentMs(long value) {
+            adjacentMs += value;
+        }
+
+        void addGraphExpansionMs(long value) {
+            graphExpansionMs += value;
+        }
+
+        RetrievalTiming snapshot() {
+            return new RetrievalTiming(
+                    embeddingMs,
+                    vectorSearchMs,
+                    keywordSearchMs,
+                    rerankMs,
+                    adjacentMs,
+                    graphExpansionMs,
+                    embeddingCacheHits,
+                    expandedQueryCount
+            );
+        }
     }
 
     private record SpreadsheetStats(

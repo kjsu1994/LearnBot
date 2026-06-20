@@ -9,6 +9,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DocumentContextBuilderTest {
@@ -136,6 +138,24 @@ class DocumentContextBuilderTest {
         ));
 
         assertThat(chunks).isEmpty();
+    }
+
+    @Test
+    void recursiveWebUsesDeterministicSummaryByDefault() {
+        LearnBotProperties properties = properties(true);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentContextBuilder builder = new DocumentContextBuilder(properties, ollamaClient);
+
+        List<Chunk> chunks = builder.buildDocumentContext(document("guide.html", "text/html"), List.of(
+                chunk(0, "Install and operate the service.", Map.of("strategy", "html_blocks", "headingPath", "Install"))
+        ), true);
+
+        verify(ollamaClient, never()).chat(any(), any(), any());
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.metadata()).containsEntry("contextType", "document_summary");
+            assertThat(chunk.metadata()).containsEntry("generatedBy", "deterministic");
+            assertThat(chunk.metadata()).containsEntry("llmAttempted", false);
+        });
     }
 
     private LearnBotProperties properties(boolean llmEnabled) {

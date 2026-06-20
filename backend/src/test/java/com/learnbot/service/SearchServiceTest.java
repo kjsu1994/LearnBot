@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SearchServiceTest {
@@ -55,6 +58,28 @@ class SearchServiceTest {
         assertThat(expanded)
                 .contains("차별 예방 개선")
                 .anySatisfy(query -> assertThat(query).contains("임금").contains("복리후생"));
+    }
+
+    @Test
+    void cachesQueryEmbeddingUntilTtlExpires() {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setQueryEmbeddingCacheTtlSeconds(3600);
+        SearchService service = new SearchService(repository, ollamaClient, null, properties);
+
+        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1)));
+        when(repository.search(anyString(), anyList(), isNull(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(result("policy.pdf", "security policy", 0.8)));
+        when(repository.keywordSearch(anyString(), isNull(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of());
+
+        SearchService.SearchResponse first = service.searchDetailed("security policy", null, 2, List.of(UUID.randomUUID()), null, "BALANCED");
+        SearchService.SearchResponse second = service.searchDetailed("security policy", null, 2, List.of(UUID.randomUUID()), null, "BALANCED");
+
+        verify(ollamaClient, times(1)).embed(anyList());
+        assertThat(first.timing().embeddingCacheHit()).isFalse();
+        assertThat(second.timing().embeddingCacheHit()).isTrue();
     }
 
     private SearchResult result(String title, String content, double score) {

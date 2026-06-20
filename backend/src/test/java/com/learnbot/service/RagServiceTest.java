@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -273,6 +274,43 @@ class RagServiceTest {
         assertThat(response.answer()).contains("[2]");
         assertThat(response.confidence()).isEqualTo("보통");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("LLM"));
+    }
+
+    @Test
+    void fastProfileDoesNotEscalateToRewriteOrDocumentGraphWhenEvidenceIsWeak() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagPipelineService pipelineService = mock(RagPipelineService.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setDocumentAdjacentExpansionEnabled(false);
+        properties.getDocument().getGraph().setEnabled(true);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties, pipelineService);
+        String question = "What is the security policy?";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "security-policy.pdf",
+                "application/pdf",
+                "The policy requires MFA for administrators.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), any(), isNull(), eq("FAST")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(4, 5, 6, 0, 15, false, 1)
+                ));
+        when(pipelineService.assessDocuments(anyString(), any(), anyInt(), anyInt()))
+                .thenReturn(new RagPipelineService.EvidenceAssessment(false, 1, 0.2, 1, 0.0, List.of("weak")));
+        when(pipelineService.maxIterations()).thenReturn(2);
+        when(pipelineService.assessAnswer(anyString(), anyInt(), eq(true), any()))
+                .thenReturn(new RagPipelineService.AnswerAssessment(true, "ok"));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The policy requires MFA for administrators [1]."));
+
+        AskResponse response = service.ask(question, null, "qa", "FAST", List.of(UUID.randomUUID()), null);
+
+        verify(pipelineService, never()).buildQueryPlan(anyString(), any(), any());
+        verify(documentRepository, never()).graphExpandedChunks(any(), anyInt(), any(), isNull());
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("requested=FAST").contains("effective=FAST"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("embedding=4ms").contains("vector=5ms").contains("keyword=6ms"));
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {

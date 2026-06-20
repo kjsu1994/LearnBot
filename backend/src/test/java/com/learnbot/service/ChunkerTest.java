@@ -95,4 +95,61 @@ class ChunkerTest {
         assertThat(chunks.get(0).metadata()).containsEntry("strategy", "pptx_slide");
         assertThat(chunks.get(1).metadata()).containsEntry("slideStart", 2);
     }
+
+    @Test
+    void splitMarkdownKeepsHeadingPathMetadata() {
+        Chunker chunker = new Chunker(new LearnBotProperties());
+        ExtractedDocument document = new ExtractedDocument(
+                "guide.md",
+                "file://guide.md",
+                "text/markdown",
+                "# Install\nRun setup.\n\n## Configure\nSet options.",
+                Map.of("fileName", "guide.md")
+        );
+
+        List<Chunk> chunks = chunker.split(document);
+
+        assertThat(chunks).hasSize(2);
+        assertThat(chunks.get(0).metadata()).containsEntry("strategy", "markdown_heading");
+        assertThat(chunks.get(1).metadata()).containsEntry("headingPath", "Install > Configure");
+    }
+
+    @Test
+    void splitHtmlUsesPreviewBlocksWhenAvailable() {
+        Chunker chunker = new Chunker(new LearnBotProperties());
+        ExtractedDocument document = new ExtractedDocument(
+                "page.html",
+                "https://example.test/page.html",
+                "text/html",
+                "fallback content",
+                Map.of("webPreviewBlocks", List.of(
+                        Map.of("type", "heading", "level", 1, "text", "Intro"),
+                        Map.of("type", "paragraph", "text", "Welcome to the guide.")
+                ))
+        );
+
+        List<Chunk> chunks = chunker.split(document);
+
+        assertThat(chunks).hasSize(1);
+        assertThat(chunks.get(0).content()).contains("Intro", "Welcome");
+        assertThat(chunks.get(0).metadata()).containsEntry("strategy", "html_blocks");
+        assertThat(chunks.get(0).metadata()).containsEntry("headingPath", "Intro");
+    }
+
+    @Test
+    void splitDocxSeparatesTablesFromParagraphs() {
+        Chunker chunker = new Chunker(new LearnBotProperties());
+        ExtractedDocument document = new ExtractedDocument(
+                "guide.docx",
+                "file://guide.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "Intro paragraph.\n\nTable 1:\nRow 1: C1=name | C2=role\nRow 2: C1=Kim | C2=admin",
+                Map.of("fileName", "guide.docx")
+        );
+
+        List<Chunk> chunks = chunker.split(document);
+
+        assertThat(chunks).anySatisfy(chunk -> assertThat(chunk.metadata()).containsEntry("strategy", "docx_paragraph"));
+        assertThat(chunks).anySatisfy(chunk -> assertThat(chunk.metadata()).containsEntry("strategy", "docx_table"));
+    }
 }

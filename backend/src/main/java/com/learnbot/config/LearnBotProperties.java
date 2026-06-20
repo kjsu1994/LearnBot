@@ -510,10 +510,10 @@ public class LearnBotProperties {
             private int maxIterations = 2;
 
             @Min(1)
-            private int rerankTopN = 30;
+            private int rerankTopN = 20;
 
             @Min(1)
-            private int documentContextLimit = 12;
+            private int documentContextLimit = 8;
 
             @Min(1)
             private int codeContextLimit = 8;
@@ -533,7 +533,7 @@ public class LearnBotProperties {
             private int queryEmbeddingCacheMaxEntries = 1024;
 
             @Min(1)
-            private int queryEmbeddingCacheTtlSeconds = 600;
+            private int queryEmbeddingCacheTtlSeconds = 3600;
             private Reranker reranker = new Reranker();
 
             public boolean isRewriteEnabled() {
@@ -671,7 +671,7 @@ public class LearnBotProperties {
                 private String baseUrl = "http://localhost:8081";
 
                 @Min(1)
-                private int topN = 30;
+                private int topN = 20;
 
                 @Min(1)
                 private int timeoutSeconds = 8;
@@ -1375,7 +1375,7 @@ public class LearnBotProperties {
         }
 
         public static class Graph {
-            private boolean enabled = true;
+            private boolean enabled = false;
 
             @Min(1)
             private int maxHop = 1;

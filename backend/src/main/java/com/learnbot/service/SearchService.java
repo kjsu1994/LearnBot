@@ -45,6 +45,11 @@ public class SearchService {
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId, String speedProfile) {
+        return searchDetailed(query, filter, limit, spaceIds, selectedSpaceId, speedProfile).results();
+    }
+
+    public SearchResponse searchDetailed(String query, SearchFilter filter, int limit, List<java.util.UUID> spaceIds, java.util.UUID selectedSpaceId, String speedProfile) {
+        long started = System.nanoTime();
         int safeLimit = Math.max(1, Math.min(limit, 20));
         List<java.util.UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
                 ? List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
@@ -52,32 +57,58 @@ public class SearchService {
         int candidateLimit = Math.min(60, Math.max(safeLimit * 4, 20));
         Map<UUID, SearchResult> merged = new LinkedHashMap<>();
         List<String> expandedQueries = expandedQueries(query);
+        long embeddingMs = 0;
+        long vectorSearchMs = 0;
+        long keywordSearchMs = 0;
+        long rerankMs;
+        boolean embeddingCacheHit = false;
 
         try {
             String semanticQuery = String.join(" ", expandedQueries);
-            List<Double> embedding = embeddingFor(semanticQuery);
-            for (SearchResult result : repository.search(semanticQuery, embedding, filter, candidateLimit, safeSpaceIds, selectedSpaceId)) {
+            long embeddingStarted = System.nanoTime();
+            CachedEmbeddingResult embeddingResult = embeddingFor(semanticQuery);
+            embeddingMs = elapsedMs(embeddingStarted);
+            embeddingCacheHit = embeddingResult.cacheHit();
+            long vectorStarted = System.nanoTime();
+            for (SearchResult result : repository.search(semanticQuery, embeddingResult.values(), filter, candidateLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
+            vectorSearchMs = elapsedMs(vectorStarted);
         } catch (RuntimeException ex) {
             // Keyword search below remains available when embeddings are temporarily unavailable.
         }
 
+        long keywordStarted = System.nanoTime();
         for (String searchQuery : expandedQueries) {
             int keywordLimit = searchQuery.equalsIgnoreCase(safeQuery(query)) ? candidateLimit : Math.max(8, candidateLimit / 2);
             for (SearchResult result : repository.keywordSearch(searchQuery, filter, keywordLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, searchQuery.equalsIgnoreCase(safeQuery(query)) ? result : boost(result, 0.05));
             }
         }
+        keywordSearchMs = elapsedMs(keywordStarted);
 
         List<SearchResult> ranked = merged.values().stream()
                 .map(result -> boost(result, rerankBoost(query, result)))
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .toList();
+        long rerankStarted = System.nanoTime();
         List<SearchResult> reranked = rerankDocuments(query, ranked, speedProfile);
-        return reranked.stream()
+        rerankMs = elapsedMs(rerankStarted);
+        List<SearchResult> results = reranked.stream()
                 .limit(safeLimit)
                 .toList();
+        return new SearchResponse(
+                results,
+                new SearchTiming(
+                        embeddingMs,
+                        vectorSearchMs,
+                        keywordSearchMs,
+                        rerankMs,
+                        elapsedMs(started),
+                        embeddingCacheHit,
+                        expandedQueries.size()
+                )
+        );
     }
 
     private List<SearchResult> rerankDocuments(String query, List<SearchResult> ranked, String speedProfile) {
@@ -278,20 +309,20 @@ public class SearchService {
         }
     }
 
-    private List<Double> embeddingFor(String semanticQuery) {
+    private CachedEmbeddingResult embeddingFor(String semanticQuery) {
         if (!embeddingCacheEnabled()) {
-            return ollamaClient.embed(List.of(semanticQuery)).get(0);
+            return new CachedEmbeddingResult(ollamaClient.embed(List.of(semanticQuery)).get(0), false);
         }
         String key = embeddingCacheKey(semanticQuery);
         long now = System.currentTimeMillis();
         CachedEmbedding cached = embeddingCache.get(key);
         if (cached != null && cached.expiresAtMillis() > now) {
-            return cached.values();
+            return new CachedEmbeddingResult(cached.values(), true);
         }
         List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
         embeddingCache.put(key, new CachedEmbedding(embedding, now + embeddingCacheTtlMillis()));
         trimEmbeddingCache();
-        return embedding;
+        return new CachedEmbeddingResult(embedding, false);
     }
 
     private boolean embeddingCacheEnabled() {
@@ -370,5 +401,29 @@ public class SearchService {
     }
 
     private record CachedEmbedding(List<Double> values, long expiresAtMillis) {
+    }
+
+    private record CachedEmbeddingResult(List<Double> values, boolean cacheHit) {
+    }
+
+    public record SearchResponse(List<SearchResult> results, SearchTiming timing) {
+    }
+
+    public record SearchTiming(
+            long embeddingMs,
+            long vectorSearchMs,
+            long keywordSearchMs,
+            long rerankMs,
+            long totalMs,
+            boolean embeddingCacheHit,
+            int expandedQueryCount
+    ) {
+        static SearchTiming empty() {
+            return new SearchTiming(0, 0, 0, 0, 0, false, 0);
+        }
+    }
+
+    private long elapsedMs(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 }
