@@ -33,6 +33,12 @@ On Windows, use the helper script if you want GPU acceleration with CPU fallback
 .\scripts\up.ps1 -Build
 ```
 
+To build the deployment images with the GPU Compose overlay without starting services:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml build
+```
+
 The script uses `docker-compose.gpu.yml` when `nvidia-smi` is available and Docker can attach the GPU to the Ollama container. If GPU startup fails, it starts the normal CPU-compatible Compose stack instead. To force CPU mode:
 
 ```powershell
@@ -97,6 +103,47 @@ The UI also provides:
 - failed/cancelled indexing history cleanup
 - source file browsing with line highlights
 - symbol reference lookup for method, class, control, and event names
+
+### Code Graph RAG
+
+Code indexing builds a versioned graph in PostgreSQL alongside chunks and embeddings. Neo4j is not required. Java source is analyzed with JavaParser Symbol Solver, while C# source is analyzed with a Roslyn semantic analyzer included in the backend image.
+
+Resolved methods use qualified signatures containing their declaring type and parameter types. This separates overloads and same-named methods in different packages or namespaces. A relationship found only by text matching is stored conservatively as `REFERENCES`; it is not promoted to `CALLS` unless JavaParser, Roslyn, or the validated LLM fallback resolves it.
+
+The graph can contain these relationships:
+
+- structure: `DEFINES`, `CONTAINS`, `EXTENDS`, `IMPLEMENTS`, `OVERRIDES`
+- execution and dependencies: `CALLS`, `INJECTS`, `RETURNS`, `ACCEPTS`, `THROWS`
+- code semantics: `ANNOTATED_BY`, `READS_FIELD`, `WRITES_FIELD`
+- framework semantics: `USES_ENTITY`, `MAPS_TO_TABLE`, `EXPOSES_ENDPOINT`
+- UI semantics: `HANDLES_EVENT`, `BINDS_TO`
+- conservative fallback: `REFERENCES`
+
+Graph search uses a recursive PostgreSQL CTE. It prevents cycles, reduces scores for longer or lower-confidence paths, and returns the best path for each related chunk. Search strategy depends on the question:
+
+- call-flow questions traverse `CALLS` and related execution edges forward
+- impact questions traverse callers and dependencies in reverse
+- UI questions prioritize XAML event, binding, endpoint, and handler edges
+- overview questions prioritize containment, inheritance, implementation, and injection edges
+
+Graph-expanded evidence includes the path, edge sequence, depth, and path score. Code answers can therefore explain a connected flow such as `Controller -> Service -> Repository` instead of listing unrelated chunks.
+
+Configure graph behavior with environment variables:
+
+```bash
+LEARNBOT_CODE_GRAPH_ENABLED=true
+LEARNBOT_CODE_GRAPH_MAX_HOP=2
+LEARNBOT_CODE_GRAPH_MAX_EXPANDED_RESULTS=12
+LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED=true
+LEARNBOT_CODE_GRAPH_MAX_LLM_FILES=80
+LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH=/app/roslyn/LearnBot.RoslynAnalyzer.dll
+```
+
+`LEARNBOT_CODE_GRAPH_MAX_HOP` is constrained to 1-4 during traversal. The optional LLM stage only evaluates unresolved candidates, accepts known graph node keys and approved relationship types, and records its output with lower confidence. If JavaParser, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
+
+Existing active indexes remain readable after an upgrade. Reindex each repository to create qualified signature nodes, expanded relationships, and multi-hop paths using the new analyzers. A failed reindex does not replace the previous active index.
+
+The backend deployment image includes both Java 17 and the .NET 8 runtime required by Roslyn. Build deployment images with the GPU Compose overlay shown in the Run section; GPU access is assigned to Ollama, while source analysis remains CPU-based.
 
 ## Model Changes
 
