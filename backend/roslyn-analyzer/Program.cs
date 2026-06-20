@@ -1,21 +1,21 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-if (args.Length != 1 || !Directory.Exists(args[0]))
+if (args.Length < 1 || !Directory.Exists(args[0]))
 {
-    Console.Error.WriteLine("Usage: LearnBot.RoslynAnalyzer <repository-root>");
+    Console.Error.WriteLine("Usage: LearnBot.RoslynAnalyzer <repository-root> [SIMPLE|PROJECT|SOLUTION]");
     return 2;
 }
 
 var root = Path.GetFullPath(args[0]);
-var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-    .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-        && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
-    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-    .ToArray();
-var trees = files.Select(path => CSharpSyntaxTree.ParseText(File.ReadAllText(path), path: path)).ToArray();
+var requestedMode = args.Length > 1 ? args[1].ToUpperInvariant() : "SIMPLE";
+var inputs = ResolveInputs(root, requestedMode);
+var parseOptions = new CSharpParseOptions(preprocessorSymbols: inputs.DefineConstants);
+var trees = inputs.Files.Select(path => CSharpSyntaxTree.ParseText(File.ReadAllText(path), parseOptions, path: path)).ToArray();
 var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ?? "")
     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
     .Select(path => MetadataReference.CreateFromFile(path));
@@ -140,7 +140,9 @@ foreach (var tree in trees)
     }
 }
 
-Console.Write(JsonSerializer.Serialize(new GraphOutput(nodes.Values, edges.Values), new JsonSerializerOptions
+Console.Write(JsonSerializer.Serialize(new GraphOutput(
+    nodes.Values, edges.Values, inputs.Mode, inputs.ProjectCount, trees.Length, inputs.FailedProjects
+), new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 }));
@@ -203,6 +205,73 @@ string FieldKey(string owner, string name) => "field:csharp:" + owner + "#" + na
 string Relative(string repositoryRoot, string path) => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/');
 int Line(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 
-record GraphOutput(IEnumerable<GraphNode> Nodes, IEnumerable<GraphEdge> Edges);
+AnalysisInputs ResolveInputs(string repositoryRoot, string mode)
+{
+    var projectFiles = mode == "SOLUTION" ? ProjectsFromSolutions(repositoryRoot) :
+        mode == "PROJECT" ? Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories).ToArray() :
+        Array.Empty<string>();
+    if (projectFiles.Length == 0)
+    {
+        var simpleFiles = SafeCsFiles(repositoryRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        return new AnalysisInputs(simpleFiles, mode == "SIMPLE" ? "SIMPLE" : mode, 0, 0, Array.Empty<string>());
+    }
+
+    var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var defines = new HashSet<string>(StringComparer.Ordinal);
+    var failedProjects = 0;
+    foreach (var project in projectFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        try
+        {
+            var document = XDocument.Load(project, LoadOptions.None);
+            var projectDirectory = Path.GetDirectoryName(project)!;
+            foreach (var file in SafeCsFiles(projectDirectory)) files.Add(file);
+            foreach (var value in document.Descendants().Where(node => node.Name.LocalName == "DefineConstants"))
+                foreach (var symbol in value.Value.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    defines.Add(symbol);
+            foreach (var remove in document.Descendants().Where(node => node.Name.LocalName == "Compile")
+                         .Select(node => node.Attribute("Remove")?.Value).Where(value => !string.IsNullOrWhiteSpace(value)))
+                RemoveGlob(files, projectDirectory, remove!);
+        }
+        catch
+        {
+            failedProjects++;
+        }
+    }
+    return new AnalysisInputs(files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray(), mode,
+        projectFiles.Distinct(StringComparer.OrdinalIgnoreCase).Count(), failedProjects, defines.ToArray());
+}
+
+string[] ProjectsFromSolutions(string repositoryRoot)
+{
+    var projects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var pattern = new Regex("\"([^\"]+\\.csproj)\"", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    foreach (var solution in Directory.EnumerateFiles(repositoryRoot, "*.sln", SearchOption.AllDirectories))
+    {
+        var directory = Path.GetDirectoryName(solution)!;
+        foreach (Match match in pattern.Matches(File.ReadAllText(solution)))
+        {
+            var path = Path.GetFullPath(Path.Combine(directory, match.Groups[1].Value.Replace('\\', Path.DirectorySeparatorChar)));
+            if (path.StartsWith(repositoryRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(path)) projects.Add(path);
+        }
+    }
+    return projects.ToArray();
+}
+
+IEnumerable<string> SafeCsFiles(string directory) => Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
+    .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+        && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
+
+void RemoveGlob(HashSet<string> files, string directory, string glob)
+{
+    var normalized = glob.Replace('\\', '/');
+    var regex = "^" + Regex.Escape(Path.GetFullPath(Path.Combine(directory, normalized)).Replace('\\', '/'))
+        .Replace("\\*\\*", ".*").Replace("\\*", "[^/]*").Replace("\\?", ".") + "$";
+    files.RemoveWhere(path => Regex.IsMatch(Path.GetFullPath(path).Replace('\\', '/'), regex, RegexOptions.IgnoreCase));
+}
+
+record AnalysisInputs(string[] Files, string Mode, int ProjectCount, int FailedProjects, string[] DefineConstants);
+record GraphOutput(IEnumerable<GraphNode> Nodes, IEnumerable<GraphEdge> Edges, string Mode,
+    int ProjectCount, int AnalyzedFiles, int FailedFiles);
 record GraphNode(string Key, string Type, string Name, string QualifiedName, string? FilePath, int Line);
 record GraphEdge(string SourceKey, string TargetKey, string Type, double Confidence, string FilePath, int Line, string Source);

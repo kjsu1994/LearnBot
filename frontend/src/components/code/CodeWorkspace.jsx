@@ -174,6 +174,8 @@ function CodeSourceManagementPanel(props) {
     jobs = {},
     jobFailures = {},
     loadJobFailures = () => {},
+    jobDiagnostics = {},
+    loadJobDiagnostics = () => {},
     registerRepository = (event) => event.preventDefault(),
     uploadZipRepository = (event) => event.preventDefault(),
     replaceZipRepository = () => {},
@@ -313,6 +315,9 @@ function CodeSourceManagementPanel(props) {
                     failures={jobFailures[latestJob.id]}
                     loadFailures={loadJobFailures}
                     loading={loading(`job-failures-${latestJob.id}`)}
+                    diagnostics={jobDiagnostics[latestJob.id]}
+                    loadDiagnostics={loadJobDiagnostics}
+                    diagnosticsLoading={loading(`job-diagnostics-${latestJob.id}`)}
                   />
                 )}
               </article>
@@ -358,7 +363,7 @@ function CodeSourceManagementPanel(props) {
     </div>
   );
 }
-function JobStrip({ job, repoId, failures, loadFailures, loading }) {
+function JobStrip({ job, repoId, failures, loadFailures, loading, diagnostics, loadDiagnostics, diagnosticsLoading }) {
   const canShowFailures = job.failedFiles > 0 || job.status === 'FAILED' || job.errorMessage;
   return (
     <div className="job-strip">
@@ -377,7 +382,33 @@ function JobStrip({ job, repoId, failures, loadFailures, loading }) {
           {'\uC2E4\uD328 \uC0AC\uC720'}
         </button>
       )}
+      <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadDiagnostics(repoId, job.id); }}>
+        {diagnosticsLoading ? <Loader2 className="spin" size={14} /> : <Info size={14} />}
+        분석 진단
+      </button>
       {failures && <JobFailureList failures={failures} />}
+      {diagnostics && <JobDiagnosticList diagnostics={diagnostics} />}
+    </div>
+  );
+}
+
+function JobDiagnosticList({ diagnostics }) {
+  if (!diagnostics.length) {
+    return <p className="empty compact-empty">기록된 분석 진단이 없습니다.</p>;
+  }
+  return (
+    <div className="failure-list">
+      {diagnostics.map((diagnostic) => (
+        <div className="failure-item" key={diagnostic.id}>
+          <strong>{diagnostic.stage} · {diagnostic.status}</strong>
+          <small>{diagnostic.mode || diagnostic.analyzer} · {diagnostic.durationMillis}ms</small>
+          <span>
+            파일 {diagnostic.analyzedFiles}/{diagnostic.attemptedFiles} · 관계 {diagnostic.resolvedRelations}개
+            {diagnostic.unresolvedRelations > 0 ? ` · 미해결 ${diagnostic.unresolvedRelations}개` : ''}
+          </span>
+          {diagnostic.message && <span>{diagnostic.message}</span>}
+        </div>
+      ))}
     </div>
   );
 }

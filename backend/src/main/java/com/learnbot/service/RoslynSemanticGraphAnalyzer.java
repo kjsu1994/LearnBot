@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -23,8 +22,6 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 public class RoslynSemanticGraphAnalyzer {
-    private static final Duration TIMEOUT = Duration.ofSeconds(60);
-
     private final LearnBotProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -34,40 +31,93 @@ public class RoslynSemanticGraphAnalyzer {
     }
 
     public CodeGraph analyze(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        return analyzeWithDiagnostics(repositoryRoot, chunks).graph();
+    }
+
+    public CodeGraphAnalysisResult analyzeWithDiagnostics(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        long started = System.nanoTime();
         String analyzerPath = properties.getCode().getGraph().getRoslynAnalyzerPath();
+        int attemptedFiles = countFiles(repositoryRoot, ".cs");
+        String mode = determineMode(repositoryRoot);
+        if (attemptedFiles == 0) {
+            return new CodeGraphAnalysisResult(empty(), CodeAnalysisDiagnostic.skipped(
+                    "CSHARP_ROSLYN", "Roslyn", mode, "No C# source files found."
+            ));
+        }
         if (repositoryRoot == null || analyzerPath == null || analyzerPath.isBlank()
                 || !Files.isDirectory(repositoryRoot) || !Files.isRegularFile(Path.of(analyzerPath))) {
-            return empty();
+            return failed(mode, attemptedFiles, started, "Roslyn analyzer is unavailable.");
         }
         Process process = null;
         try {
-            process = new ProcessBuilder("dotnet", analyzerPath, repositoryRoot.toAbsolutePath().normalize().toString()).start();
+            process = new ProcessBuilder("dotnet", analyzerPath, repositoryRoot.toAbsolutePath().normalize().toString(), mode).start();
             Process running = process;
             CompletableFuture<String> stdout = CompletableFuture.supplyAsync(() -> read(running.getInputStream()));
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> read(running.getErrorStream()));
-            if (!process.waitFor(TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
+            if (!process.waitFor(Math.max(1, properties.getCode().getGraph().getRoslynTimeoutSeconds()), TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                return empty();
+                return failed(mode, attemptedFiles, started, "Roslyn analyzer timed out.");
             }
             String json = stdout.join();
             stderr.join();
             if (process.exitValue() != 0 || json.isBlank()) {
-                return empty();
+                return failed(mode, attemptedFiles, started, "Roslyn analyzer returned no usable output.");
             }
             AnalyzerOutput output = objectMapper.readValue(json, AnalyzerOutput.class);
-            return map(output, chunks);
+            CodeGraph graph = map(output, chunks);
+            int analyzedFiles = output.analyzedFiles() > 0 ? output.analyzedFiles() : attemptedFiles;
+            int failedFiles = Math.max(output.failedFiles(), attemptedFiles - analyzedFiles);
+            return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
+                    "CSHARP_ROSLYN", "Roslyn", failedFiles == 0 ? "SUCCESS" : "PARTIAL",
+                    output.mode() == null ? mode : output.mode(), attemptedFiles, analyzedFiles, failedFiles,
+                    graph.edges().size(), 0, graph.nodes().size(), graph.edges().size(), elapsedMillis(started),
+                    failedFiles == 0 ? "Roslyn semantic analysis completed." : "Some C# files or projects used fallback analysis.",
+                    Map.of("projects", output.projectCount())
+            ));
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             if (process != null) {
                 process.destroyForcibly();
             }
-            return empty();
+            return failed(mode, attemptedFiles, started, "Roslyn analyzer was interrupted.");
         } catch (RuntimeException | IOException ex) {
             if (process != null) {
                 process.destroyForcibly();
             }
-            return empty();
+            return failed(mode, attemptedFiles, started, "Roslyn analyzer failed: " + ex.getClass().getSimpleName());
         }
+    }
+
+    private CodeGraphAnalysisResult failed(String mode, int attemptedFiles, long started, String message) {
+        return new CodeGraphAnalysisResult(empty(), new CodeAnalysisDiagnostic(
+                "CSHARP_ROSLYN", "Roslyn", "FAILED", mode, attemptedFiles, 0, attemptedFiles,
+                0, 0, 0, 0, elapsedMillis(started), message, Map.of()
+        ));
+    }
+
+    private String determineMode(Path root) {
+        String requested = properties.getCode().getGraph().getRoslynMode();
+        if (requested != null && !requested.isBlank() && !"AUTO".equalsIgnoreCase(requested)) {
+            return requested.trim().toUpperCase(Locale.ROOT);
+        }
+        if (hasFile(root, ".sln")) return "SOLUTION";
+        if (hasFile(root, ".csproj")) return "PROJECT";
+        return "SIMPLE";
+    }
+
+    private boolean hasFile(Path root, String suffix) { return countFiles(root, suffix) > 0; }
+
+    private int countFiles(Path root, String suffix) {
+        if (root == null || !Files.isDirectory(root)) return 0;
+        try (var paths = Files.walk(root)) {
+            return (int) paths.filter(path -> Files.isRegularFile(path) && path.toString().endsWith(suffix)).count();
+        } catch (IOException ignored) {
+            return 0;
+        }
+    }
+
+    private long elapsedMillis(long started) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
     }
 
     private CodeGraph map(AnalyzerOutput output, List<CodeSearchResult> chunks) {
@@ -107,7 +157,8 @@ public class RoslynSemanticGraphAnalyzer {
         return new CodeGraph(List.of(), List.of());
     }
 
-    private record AnalyzerOutput(List<AnalyzerNode> nodes, List<AnalyzerEdge> edges) {}
+    private record AnalyzerOutput(List<AnalyzerNode> nodes, List<AnalyzerEdge> edges, String mode,
+                                  int projectCount, int analyzedFiles, int failedFiles) {}
     private record AnalyzerNode(String key, String type, String name, String qualifiedName, String filePath, int line) {}
     private record AnalyzerEdge(String sourceKey, String targetKey, String type, double confidence,
                                 String filePath, int line, String source) {}

@@ -796,12 +796,40 @@ public class LearnBotProperties {
             private boolean enabled = true;
             private boolean llmRelationEnabled = true;
             private String roslynAnalyzerPath = "/app/roslyn/LearnBot.RoslynAnalyzer.dll";
+            private String roslynMode = "AUTO";
+
+            @Min(1)
+            private int roslynTimeoutSeconds = 120;
+
+            private boolean dependencyResolutionEnabled = true;
+            private List<String> dependencyAllowedRepositories = new ArrayList<>(List.of("https://repo.maven.apache.org/maven2"));
+
+            @Min(1)
+            private int dependencyMaxArtifacts = 256;
+
+            @Min(1)
+            private long dependencyMaxBytes = 536870912L;
+
+            @Min(1)
+            private int dependencyTimeoutSeconds = 120;
 
             @Min(1)
             private int maxHop = 2;
 
             @Min(1)
             private int maxExpandedResults = 12;
+
+            @Min(1)
+            private int maxSeedNodes = 24;
+
+            @Min(1)
+            private int maxEdgesPerNode = 12;
+
+            @Min(1)
+            private int maxCandidatesPerHop = 200;
+
+            @Min(1)
+            private int maxTraversalRows = 1000;
 
             @Min(0)
             private int maxLlmFiles = 80;
@@ -830,6 +858,21 @@ public class LearnBotProperties {
                 this.roslynAnalyzerPath = roslynAnalyzerPath;
             }
 
+            public String getRoslynMode() { return roslynMode; }
+            public void setRoslynMode(String roslynMode) { this.roslynMode = roslynMode; }
+            public int getRoslynTimeoutSeconds() { return roslynTimeoutSeconds; }
+            public void setRoslynTimeoutSeconds(int roslynTimeoutSeconds) { this.roslynTimeoutSeconds = roslynTimeoutSeconds; }
+            public boolean isDependencyResolutionEnabled() { return dependencyResolutionEnabled; }
+            public void setDependencyResolutionEnabled(boolean dependencyResolutionEnabled) { this.dependencyResolutionEnabled = dependencyResolutionEnabled; }
+            public List<String> getDependencyAllowedRepositories() { return dependencyAllowedRepositories; }
+            public void setDependencyAllowedRepositories(List<String> dependencyAllowedRepositories) { this.dependencyAllowedRepositories = dependencyAllowedRepositories; }
+            public int getDependencyMaxArtifacts() { return dependencyMaxArtifacts; }
+            public void setDependencyMaxArtifacts(int dependencyMaxArtifacts) { this.dependencyMaxArtifacts = dependencyMaxArtifacts; }
+            public long getDependencyMaxBytes() { return dependencyMaxBytes; }
+            public void setDependencyMaxBytes(long dependencyMaxBytes) { this.dependencyMaxBytes = dependencyMaxBytes; }
+            public int getDependencyTimeoutSeconds() { return dependencyTimeoutSeconds; }
+            public void setDependencyTimeoutSeconds(int dependencyTimeoutSeconds) { this.dependencyTimeoutSeconds = dependencyTimeoutSeconds; }
+
             public int getMaxHop() {
                 return maxHop;
             }
@@ -845,6 +888,15 @@ public class LearnBotProperties {
             public void setMaxExpandedResults(int maxExpandedResults) {
                 this.maxExpandedResults = maxExpandedResults;
             }
+
+            public int getMaxSeedNodes() { return maxSeedNodes; }
+            public void setMaxSeedNodes(int maxSeedNodes) { this.maxSeedNodes = maxSeedNodes; }
+            public int getMaxEdgesPerNode() { return maxEdgesPerNode; }
+            public void setMaxEdgesPerNode(int maxEdgesPerNode) { this.maxEdgesPerNode = maxEdgesPerNode; }
+            public int getMaxCandidatesPerHop() { return maxCandidatesPerHop; }
+            public void setMaxCandidatesPerHop(int maxCandidatesPerHop) { this.maxCandidatesPerHop = maxCandidatesPerHop; }
+            public int getMaxTraversalRows() { return maxTraversalRows; }
+            public void setMaxTraversalRows(int maxTraversalRows) { this.maxTraversalRows = maxTraversalRows; }
 
             public int getMaxLlmFiles() {
                 return maxLlmFiles;

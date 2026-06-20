@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeChunkSummary;
+import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
@@ -14,6 +15,8 @@ import com.learnbot.service.ActiveCodeFileSnapshot;
 import com.learnbot.service.CodeGraph;
 import com.learnbot.service.CodeGraphEdge;
 import com.learnbot.service.CodeGraphNode;
+import com.learnbot.service.CodeGraphEnrichmentJob;
+import com.learnbot.service.CodeAnalysisDiagnostic;
 import com.learnbot.service.CodeFileRecord;
 import com.learnbot.service.CodeRepositoryRecord;
 import com.learnbot.service.EncryptedGitCredential;
@@ -22,10 +25,15 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,6 +42,7 @@ import java.util.UUID;
 
 @Repository
 public class CodeRepository {
+    private static final Logger log = LoggerFactory.getLogger(CodeRepository.class);
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final LearnBotProperties properties;
@@ -372,6 +381,207 @@ public class CodeRepository {
                 .addValue("filePath", filePath)
                 .addValue("stage", stage)
                 .addValue("message", trimMessage(message)));
+    }
+
+    public void addAnalysisDiagnostics(UUID repositoryId, UUID indexVersion, List<CodeAnalysisDiagnostic> diagnostics) {
+        if (diagnostics == null || diagnostics.isEmpty()) {
+            return;
+        }
+        for (CodeAnalysisDiagnostic diagnostic : diagnostics) {
+            jdbc.update("""
+                    INSERT INTO code_analysis_diagnostics (
+                        id, repository_id, index_version, stage, analyzer, status, mode,
+                        attempted_files, analyzed_files, failed_files, resolved_relations,
+                        unresolved_relations, node_count, edge_count, duration_millis, message, metadata
+                    ) VALUES (
+                        :id, :repositoryId, :indexVersion, :stage, :analyzer, :status, :mode,
+                        :attemptedFiles, :analyzedFiles, :failedFiles, :resolvedRelations,
+                        :unresolvedRelations, :nodeCount, :edgeCount, :durationMillis, :message,
+                        CAST(:metadata AS jsonb)
+                    )
+                    """, new MapSqlParameterSource()
+                    .addValue("id", UUID.randomUUID())
+                    .addValue("repositoryId", repositoryId)
+                    .addValue("indexVersion", indexVersion)
+                    .addValue("stage", diagnostic.stage())
+                    .addValue("analyzer", diagnostic.analyzer())
+                    .addValue("status", diagnostic.status())
+                    .addValue("mode", diagnostic.mode())
+                    .addValue("attemptedFiles", diagnostic.attemptedFiles())
+                    .addValue("analyzedFiles", diagnostic.analyzedFiles())
+                    .addValue("failedFiles", diagnostic.failedFiles())
+                    .addValue("resolvedRelations", diagnostic.resolvedRelations())
+                    .addValue("unresolvedRelations", diagnostic.unresolvedRelations())
+                    .addValue("nodeCount", diagnostic.nodeCount())
+                    .addValue("edgeCount", diagnostic.edgeCount())
+                    .addValue("durationMillis", diagnostic.durationMillis())
+                    .addValue("message", diagnostic.message())
+                    .addValue("metadata", toJson(diagnostic.metadata())));
+        }
+    }
+
+    public void enqueueGraphEnrichment(UUID repositoryId, UUID indexVersion) {
+        jdbc.update("""
+                INSERT INTO code_graph_enrichment_jobs (id, repository_id, index_version, status)
+                VALUES (:id, :repositoryId, :indexVersion, 'PENDING')
+                ON CONFLICT (repository_id, index_version) DO NOTHING
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion));
+    }
+
+    public void recoverGraphEnrichmentJobs() {
+        jdbc.update("""
+                UPDATE code_graph_enrichment_jobs
+                SET status = 'PENDING', next_attempt_at = now(), started_at = NULL,
+                    error_message = 'Recovered after service restart.'
+                WHERE status = 'RUNNING'
+                """, new MapSqlParameterSource());
+    }
+
+    @Transactional
+    public Optional<CodeGraphEnrichmentJob> claimGraphEnrichmentJob() {
+        List<CodeGraphEnrichmentJob> jobs = jdbc.query("""
+                WITH candidate AS (
+                    SELECT id
+                    FROM code_graph_enrichment_jobs
+                    WHERE status = 'PENDING' AND next_attempt_at <= now()
+                    ORDER BY created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE code_graph_enrichment_jobs job
+                SET status = 'RUNNING', attempts = attempts + 1, started_at = now(), error_message = NULL
+                FROM candidate
+                WHERE job.id = candidate.id
+                RETURNING job.id, job.repository_id, job.index_version, job.status, job.attempts
+                """, new MapSqlParameterSource(), (rs, rowNum) -> new CodeGraphEnrichmentJob(
+                        rs.getObject("id", UUID.class), rs.getObject("repository_id", UUID.class),
+                        rs.getObject("index_version", UUID.class), rs.getString("status"), rs.getInt("attempts")
+                ));
+        return jobs.stream().findFirst();
+    }
+
+    public void finishGraphEnrichmentJob(UUID id, String status, String message) {
+        jdbc.update("""
+                UPDATE code_graph_enrichment_jobs
+                SET status = :status, error_message = :message, finished_at = now()
+                WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", id).addValue("status", status)
+                .addValue("message", message == null ? null : trimMessage(message)));
+    }
+
+    public void retryGraphEnrichmentJob(UUID id, int attempts, String message) {
+        int delayMinutes = attempts <= 1 ? 1 : attempts == 2 ? 5 : 30;
+        jdbc.update("""
+                UPDATE code_graph_enrichment_jobs
+                SET status = 'PENDING', error_message = :message,
+                    next_attempt_at = now() + (:delayMinutes * interval '1 minute')
+                WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", id).addValue("delayMinutes", delayMinutes)
+                .addValue("message", trimMessage(message)));
+    }
+
+    public boolean isActiveIndex(UUID repositoryId, UUID indexVersion) {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM code_graph_nodes
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion AND active
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), Integer.class);
+        return count != null && count > 0;
+    }
+
+    public CodeGraph loadGraph(UUID repositoryId, UUID indexVersion) {
+        List<CodeGraphNode> nodes = jdbc.query("""
+                SELECT node_key, node_type, name, qualified_name, file_path, chunk_id, metadata
+                FROM code_graph_nodes
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), (rs, rowNum) -> new CodeGraphNode(
+                        rs.getString("node_key"), rs.getString("node_type"), rs.getString("name"),
+                        rs.getString("qualified_name"), rs.getString("file_path"),
+                        rs.getObject("chunk_id", UUID.class), fromJson(rs.getString("metadata"))
+                ));
+        List<CodeGraphEdge> edges = jdbc.query("""
+                SELECT source.node_key AS source_key, target.node_key AS target_key,
+                       edge.edge_type, edge.confidence, edge.evidence_chunk_id, edge.metadata
+                FROM code_graph_edges edge
+                JOIN code_graph_nodes source ON source.id = edge.source_node_id
+                JOIN code_graph_nodes target ON target.id = edge.target_node_id
+                WHERE edge.repository_id = :repositoryId AND edge.index_version = :indexVersion
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), (rs, rowNum) -> new CodeGraphEdge(
+                        rs.getString("source_key"), rs.getString("target_key"), rs.getString("edge_type"),
+                        rs.getDouble("confidence"), rs.getObject("evidence_chunk_id", UUID.class),
+                        fromJson(rs.getString("metadata"))
+                ));
+        return new CodeGraph(nodes, edges);
+    }
+
+    public int mergeGraphEdges(UUID repositoryId, UUID indexVersion, List<CodeGraphEdge> edges) {
+        if (edges == null || edges.isEmpty() || !isActiveIndex(repositoryId, indexVersion)) return 0;
+        Map<String, UUID> nodeIds = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT id, node_key FROM code_graph_nodes
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion
+                """, new MapSqlParameterSource().addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), (rs, rowNum) -> Map.entry(
+                        rs.getString("node_key"), rs.getObject("id", UUID.class)
+                )).forEach(entry -> nodeIds.put(entry.getKey(), entry.getValue()));
+        int inserted = 0;
+        for (CodeGraphEdge edge : edges) {
+            UUID sourceId = nodeIds.get(edge.sourceKey());
+            UUID targetId = nodeIds.get(edge.targetKey());
+            if (sourceId == null || targetId == null || sourceId.equals(targetId)) continue;
+            inserted += jdbc.update("""
+                    INSERT INTO code_graph_edges (
+                        id, repository_id, index_version, source_node_id, target_node_id,
+                        edge_type, confidence, evidence_chunk_id, metadata, active
+                    ) VALUES (
+                        :id, :repositoryId, :indexVersion, :sourceId, :targetId,
+                        :edgeType, :confidence, :evidenceChunkId, CAST(:metadata AS jsonb), TRUE
+                    ) ON CONFLICT (repository_id, index_version, source_node_id, target_node_id, edge_type) DO NOTHING
+                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                    .addValue("repositoryId", repositoryId).addValue("indexVersion", indexVersion)
+                    .addValue("sourceId", sourceId).addValue("targetId", targetId)
+                    .addValue("edgeType", edge.type()).addValue("confidence", edge.confidence())
+                    .addValue("evidenceChunkId", edge.evidenceChunkId()).addValue("metadata", toJson(edge.metadata())));
+        }
+        return inserted;
+    }
+
+    public List<CodeAnalysisDiagnosticSummary> listAnalysisDiagnostics(UUID repositoryId, UUID indexVersion) {
+        return jdbc.query("""
+                SELECT id, repository_id, index_version, stage, analyzer, status, mode,
+                       attempted_files, analyzed_files, failed_files, resolved_relations,
+                       unresolved_relations, node_count, edge_count, duration_millis,
+                       message, metadata, created_at
+                FROM code_analysis_diagnostics
+                WHERE repository_id = :repositoryId AND index_version = :indexVersion
+                ORDER BY created_at, stage
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion), (rs, rowNum) -> new CodeAnalysisDiagnosticSummary(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("repository_id", UUID.class),
+                        rs.getObject("index_version", UUID.class),
+                        rs.getString("stage"),
+                        rs.getString("analyzer"),
+                        rs.getString("status"),
+                        rs.getString("mode"),
+                        rs.getInt("attempted_files"),
+                        rs.getInt("analyzed_files"),
+                        rs.getInt("failed_files"),
+                        rs.getInt("resolved_relations"),
+                        rs.getInt("unresolved_relations"),
+                        rs.getInt("node_count"),
+                        rs.getInt("edge_count"),
+                        rs.getLong("duration_millis"),
+                        rs.getString("message"),
+                        fromJson(rs.getString("metadata")),
+                        rs.getObject("created_at", OffsetDateTime.class)
+                ));
     }
 
     public Optional<IndexingJobSummary> findRunningJob(UUID repositoryId) {
@@ -1053,99 +1263,216 @@ public class CodeRepository {
                         "ANNOTATED_BY", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT")
                 : edgeTypes;
         String safeDirection = Set.of("FORWARD", "REVERSE", "BOTH").contains(direction) ? direction : "BOTH";
-        MapSqlParameterSource params = new MapSqlParameterSource()
+        int safeMaxHop = Math.max(1, Math.min(maxHop, 4));
+        int maxSeedNodes = Math.max(1, properties.getCode().getGraph().getMaxSeedNodes());
+        int maxEdgesPerNode = Math.max(1, properties.getCode().getGraph().getMaxEdgesPerNode());
+        int maxCandidatesPerHop = Math.max(1, properties.getCode().getGraph().getMaxCandidatesPerHop());
+        int maxTraversalRows = Math.max(1, properties.getCode().getGraph().getMaxTraversalRows());
+        int safeLimit = Math.max(1, Math.min(limit, 80));
+
+        List<TraversalPath> seeds = jdbc.query("""
+                SELECT DISTINCT n.id, n.name
+                FROM code_graph_nodes n
+                WHERE n.active
+                  AND n.chunk_id IN (:seedChunkIds)
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR n.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY n.id
+                LIMIT :maxSeedNodes
+                """, new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
                 .addValue("seedChunkIds", seedChunkIds)
-                .addValue("edgeTypes", safeEdgeTypes)
-                .addValue("maxHop", Math.max(1, Math.min(maxHop, 4)))
-                .addValue("direction", safeDirection)
-                .addValue("limit", Math.max(1, Math.min(limit, 80)));
+                .addValue("maxSeedNodes", maxSeedNodes), (rs, rowNum) -> {
+                    UUID id = rs.getObject("id", UUID.class);
+                    return new TraversalPath(id, List.of(id), List.of(rs.getString("name")), List.of(), 0, 1.0);
+                });
+        if (seeds.isEmpty()) {
+            return List.of();
+        }
 
-        return jdbc.query("""
-                WITH RECURSIVE seed_nodes AS (
-                    SELECT DISTINCT n.id, n.name
-                    FROM code_graph_nodes n
-                    WHERE n.active
-                      AND n.chunk_id IN (:seedChunkIds)
-                      AND (CAST(:repositoryId AS uuid) IS NULL OR n.repository_id = CAST(:repositoryId AS uuid))
-                ),
-                graph_walk AS (
-                    SELECT sn.id AS node_id,
-                           ARRAY[sn.id]::uuid[] AS visited,
-                           ARRAY[sn.name]::text[] AS path_names,
-                           ARRAY[]::text[] AS path_edges,
-                           0 AS depth,
-                           1.0::double precision AS path_score
-                    FROM seed_nodes sn
-                    UNION ALL
-                    SELECT CASE WHEN e.source_node_id = walk.node_id THEN e.target_node_id ELSE e.source_node_id END,
-                           walk.visited || CASE WHEN e.source_node_id = walk.node_id THEN e.target_node_id ELSE e.source_node_id END,
-                           walk.path_names || next_node.name,
-                           walk.path_edges || e.edge_type,
-                           walk.depth + 1,
-                           walk.path_score * e.confidence * 0.82
-                    FROM graph_walk walk
-                    JOIN code_graph_edges e ON e.active
-                      AND e.edge_type IN (:edgeTypes)
-                      AND (
-                          (:direction IN ('FORWARD', 'BOTH') AND e.source_node_id = walk.node_id)
-                          OR (:direction IN ('REVERSE', 'BOTH') AND e.target_node_id = walk.node_id)
-                      )
-                    JOIN code_graph_nodes next_node
-                      ON next_node.id = CASE WHEN e.source_node_id = walk.node_id THEN e.target_node_id ELSE e.source_node_id END
-                     AND next_node.active
-                    WHERE walk.depth < :maxHop
-                      AND NOT (next_node.id = ANY(walk.visited))
-                ),
-                ranked_nodes AS (
-                    SELECT DISTINCT ON (c.id)
-                           c.id AS chunk_id,
-                           walk.path_names,
-                           walk.path_edges,
-                           walk.depth,
-                           walk.path_score
-                    FROM graph_walk walk
-                    JOIN code_graph_nodes n ON n.id = walk.node_id AND n.active
-                    JOIN code_chunks c ON c.id = n.chunk_id AND c.active
-                    WHERE walk.depth > 0
-                      AND c.id NOT IN (:seedChunkIds)
-                    ORDER BY c.id, walk.path_score DESC, walk.depth ASC
-                )
-                SELECT c.id AS chunk_id,
-                       c.repository_id,
-                       c.file_id,
-                       r.name AS repository_name,
-                       c.file_path,
-                       c.chunk_type,
-                       c.symbol_name,
-                       c.class_name,
-                       c.method_name,
-                       c.namespace_name,
-                       c.control_name,
-                       c.event_name,
-                       c.chunk_index,
-                       c.line_start,
-                       c.line_end,
-                       c.content,
-                       c.metadata || jsonb_build_object(
-                           'graphPath', array_to_string(rn.path_names, ' -> '),
-                           'graphPathNodes', to_jsonb(rn.path_names),
-                           'graphEdgeTypes', to_jsonb(rn.path_edges),
-                           'graphEdgeType', rn.path_edges[array_length(rn.path_edges, 1)],
-                           'graphDepth', rn.depth,
-                           'graphPathScore', rn.path_score,
-                           'graphExpanded', true
-                       ) AS metadata,
-                       (0.12 + LEAST(0.36, rn.path_score * 0.24)) AS score
-                FROM ranked_nodes rn
-                JOIN code_chunks c ON c.id = rn.chunk_id AND c.active
-                JOIN code_repositories r ON r.id = c.repository_id
-                WHERE r.deleted_at IS NULL
-                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
-                ORDER BY score DESC, c.file_path, c.line_start
-                LIMIT :limit
-                """, params, this::mapSearchResult);
+        Map<UUID, TraversalPath> bestPaths = new LinkedHashMap<>();
+        seeds.forEach(seed -> bestPaths.put(seed.nodeId(), seed));
+        List<TraversalPath> frontier = seeds;
+        int traversalRows = 0;
+        boolean truncated = false;
+        int reachedHop = 0;
+
+        for (int hop = 1; hop <= safeMaxHop && !frontier.isEmpty(); hop++) {
+            int remainingRows = maxTraversalRows - traversalRows;
+            if (remainingRows <= 0) {
+                truncated = true;
+                break;
+            }
+            Map<UUID, TraversalPath> frontierById = new LinkedHashMap<>();
+            frontier.forEach(path -> frontierById.put(path.nodeId(), path));
+            List<TraversalNeighbor> neighbors = graphNeighbors(
+                    new ArrayList<>(frontierById.keySet()), safeEdgeTypes, safeDirection,
+                    maxEdgesPerNode, remainingRows
+            );
+            traversalRows += neighbors.size();
+            if (neighbors.size() >= remainingRows) {
+                truncated = true;
+            }
+            Map<UUID, TraversalPath> nextByNode = new LinkedHashMap<>();
+            for (TraversalNeighbor neighbor : neighbors) {
+                TraversalPath parent = frontierById.get(neighbor.fromNodeId());
+                if (parent == null || parent.visited().contains(neighbor.toNodeId())) {
+                    continue;
+                }
+                List<UUID> visited = new ArrayList<>(parent.visited());
+                visited.add(neighbor.toNodeId());
+                List<String> names = new ArrayList<>(parent.pathNames());
+                names.add(neighbor.toNodeName());
+                List<String> edges = new ArrayList<>(parent.pathEdges());
+                edges.add(neighbor.edgeType());
+                TraversalPath candidate = new TraversalPath(
+                        neighbor.toNodeId(), List.copyOf(visited), List.copyOf(names), List.copyOf(edges),
+                        hop, parent.pathScore() * neighbor.confidence() * 0.82
+                );
+                TraversalPath current = nextByNode.get(candidate.nodeId());
+                if (current == null || candidate.pathScore() > current.pathScore()) {
+                    nextByNode.put(candidate.nodeId(), candidate);
+                }
+            }
+            frontier = nextByNode.values().stream()
+                    .sorted(Comparator.comparingDouble(TraversalPath::pathScore).reversed())
+                    .limit(maxCandidatesPerHop)
+                    .toList();
+            if (nextByNode.size() > frontier.size()) {
+                truncated = true;
+            }
+            for (TraversalPath path : frontier) {
+                TraversalPath current = bestPaths.get(path.nodeId());
+                if (current == null || path.pathScore() > current.pathScore()) {
+                    bestPaths.put(path.nodeId(), path);
+                }
+            }
+            reachedHop = hop;
+        }
+
+        Set<UUID> seedNodeIds = seeds.stream().map(TraversalPath::nodeId).collect(java.util.stream.Collectors.toSet());
+        List<TraversalPath> resultPaths = bestPaths.values().stream()
+                .filter(path -> !seedNodeIds.contains(path.nodeId()))
+                .sorted(Comparator.comparingDouble(TraversalPath::pathScore).reversed())
+                .toList();
+        if (truncated) {
+            log.warn("code_graph_traversal repositoryId={} status=TRUNCATED rows={} reachedHop={} maxHop={} maxRows={} maxEdgesPerNode={} maxCandidatesPerHop={}",
+                    repositoryId, traversalRows, reachedHop, safeMaxHop, maxTraversalRows, maxEdgesPerNode, maxCandidatesPerHop);
+        }
+        return graphChunksForPaths(repositoryId, seedChunkIds, resultPaths, safeLimit, traversalRows, reachedHop, truncated);
     }
+
+    private List<TraversalNeighbor> graphNeighbors(List<UUID> frontierIds, List<String> edgeTypes, String direction,
+                                                    int maxEdgesPerNode, int remainingRows) {
+        boolean forward = "FORWARD".equals(direction) || "BOTH".equals(direction);
+        boolean reverse = "REVERSE".equals(direction) || "BOTH".equals(direction);
+        return jdbc.query("""
+                WITH candidates AS (
+                    SELECT e.source_node_id AS from_node_id, e.target_node_id AS to_node_id,
+                           e.edge_type, e.confidence
+                    FROM code_graph_edges e
+                    WHERE :forward AND e.active AND e.source_node_id IN (:frontierIds)
+                      AND e.edge_type IN (:edgeTypes)
+                    UNION ALL
+                    SELECT e.target_node_id AS from_node_id, e.source_node_id AS to_node_id,
+                           e.edge_type, e.confidence
+                    FROM code_graph_edges e
+                    WHERE :reverse AND e.active AND e.target_node_id IN (:frontierIds)
+                      AND e.edge_type IN (:edgeTypes)
+                ), ranked AS (
+                    SELECT candidates.*,
+                           row_number() OVER (
+                               PARTITION BY from_node_id
+                               ORDER BY confidence DESC,
+                                   CASE WHEN edge_type = 'REFERENCES' THEN 1 ELSE 0 END,
+                                   edge_type, to_node_id
+                           ) AS edge_rank
+                    FROM candidates
+                )
+                SELECT ranked.from_node_id, ranked.to_node_id, target.name AS to_node_name,
+                       ranked.edge_type, ranked.confidence
+                FROM ranked
+                JOIN code_graph_nodes target ON target.id = ranked.to_node_id AND target.active
+                WHERE ranked.edge_rank <= :maxEdgesPerNode
+                ORDER BY ranked.edge_rank, ranked.confidence DESC, ranked.to_node_id
+                LIMIT :remainingRows
+                """, new MapSqlParameterSource()
+                .addValue("frontierIds", frontierIds)
+                .addValue("edgeTypes", edgeTypes)
+                .addValue("forward", forward)
+                .addValue("reverse", reverse)
+                .addValue("maxEdgesPerNode", maxEdgesPerNode)
+                .addValue("remainingRows", remainingRows), (rs, rowNum) -> new TraversalNeighbor(
+                        rs.getObject("from_node_id", UUID.class),
+                        rs.getObject("to_node_id", UUID.class),
+                        rs.getString("to_node_name"),
+                        rs.getString("edge_type"),
+                        rs.getDouble("confidence")
+                ));
+    }
+
+    private List<CodeSearchResult> graphChunksForPaths(UUID repositoryId, List<UUID> seedChunkIds,
+                                                        List<TraversalPath> paths, int limit, int traversalRows,
+                                                        int reachedHop, boolean truncated) {
+        if (paths.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, TraversalPath> pathByNode = new LinkedHashMap<>();
+        paths.forEach(path -> pathByNode.put(path.nodeId(), path));
+        List<TraversalChunk> rows = jdbc.query("""
+                SELECT n.id AS graph_node_id,
+                       c.id AS chunk_id, c.repository_id, c.file_id, r.name AS repository_name,
+                       c.file_path, c.chunk_type, c.symbol_name, c.class_name, c.method_name,
+                       c.namespace_name, c.control_name, c.event_name, c.chunk_index,
+                       c.line_start, c.line_end, c.content, c.metadata, 0.0 AS score
+                FROM code_graph_nodes n
+                JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE n.active AND n.id IN (:nodeIds)
+                  AND c.id NOT IN (:seedChunkIds)
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                """, new MapSqlParameterSource()
+                .addValue("nodeIds", new ArrayList<>(pathByNode.keySet()))
+                .addValue("seedChunkIds", seedChunkIds)
+                .addValue("repositoryId", repositoryId), (rs, rowNum) -> new TraversalChunk(
+                        rs.getObject("graph_node_id", UUID.class), mapSearchResult(rs, rowNum)
+                ));
+        Map<UUID, CodeSearchResult> bestByChunk = new LinkedHashMap<>();
+        for (TraversalChunk row : rows) {
+            TraversalPath path = pathByNode.get(row.nodeId());
+            if (path == null) continue;
+            CodeSearchResult base = row.result();
+            Map<String, Object> metadata = new LinkedHashMap<>(base.metadata() == null ? Map.of() : base.metadata());
+            metadata.put("graphPath", String.join(" -> ", path.pathNames()));
+            metadata.put("graphPathNodes", path.pathNames());
+            metadata.put("graphEdgeTypes", path.pathEdges());
+            metadata.put("graphEdgeType", path.pathEdges().get(path.pathEdges().size() - 1));
+            metadata.put("graphDepth", path.depth());
+            metadata.put("graphPathScore", path.pathScore());
+            metadata.put("graphExpanded", true);
+            metadata.put("graphTraversalRows", traversalRows);
+            metadata.put("graphTraversalReachedHop", reachedHop);
+            metadata.put("graphTraversalTruncated", truncated);
+            CodeSearchResult enriched = new CodeSearchResult(
+                    base.chunkId(), base.repositoryId(), base.fileId(), base.repositoryName(), base.filePath(),
+                    base.chunkType(), base.symbolName(), base.className(), base.methodName(), base.namespaceName(),
+                    base.controlName(), base.eventName(), base.chunkIndex(), base.lineStart(), base.lineEnd(),
+                    base.content(), 0.12 + Math.min(0.36, path.pathScore() * 0.24), Map.copyOf(metadata)
+            );
+            CodeSearchResult current = bestByChunk.get(enriched.chunkId());
+            if (current == null || enriched.score() > current.score()) bestByChunk.put(enriched.chunkId(), enriched);
+        }
+        return bestByChunk.values().stream()
+                .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed()
+                        .thenComparing(CodeSearchResult::filePath).thenComparingInt(CodeSearchResult::lineStart))
+                .limit(limit)
+                .toList();
+    }
+
+    private record TraversalPath(UUID nodeId, List<UUID> visited, List<String> pathNames,
+                                 List<String> pathEdges, int depth, double pathScore) {}
+    private record TraversalNeighbor(UUID fromNodeId, UUID toNodeId, String toNodeName,
+                                     String edgeType, double confidence) {}
+    private record TraversalChunk(UUID nodeId, CodeSearchResult result) {}
 
     private CodeRepositoryRecord mapRepositoryRecord(ResultSet rs, int rowNum) throws SQLException {
         return new CodeRepositoryRecord(

@@ -29,9 +29,16 @@ public class CodeGraphLlmEnricher {
     }
 
     public CodeGraph enrich(CodeGraph graph, List<CodeSearchResult> chunks) {
+        return enrichWithDiagnostics(graph, chunks).graph();
+    }
+
+    public CodeGraphAnalysisResult enrichWithDiagnostics(CodeGraph graph, List<CodeSearchResult> chunks) {
+        long started = System.nanoTime();
         if (!properties.getCode().getGraph().isLlmRelationEnabled() || graph == null
                 || properties.getCode().getGraph().getMaxLlmFiles() <= 0) {
-            return graph;
+            return new CodeGraphAnalysisResult(graph, CodeAnalysisDiagnostic.skipped(
+                    "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "LLM relationship enrichment is disabled."
+            ));
         }
         List<CodeGraphEdge> candidates = graph.edges().stream()
                 .filter(edge -> "REFERENCES".equals(edge.type()))
@@ -41,7 +48,9 @@ public class CodeGraphLlmEnricher {
                 .limit(MAX_CANDIDATES)
                 .toList();
         if (candidates.isEmpty()) {
-            return graph;
+            return new CodeGraphAnalysisResult(graph, CodeAnalysisDiagnostic.skipped(
+                    "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "No unresolved relationship candidates found."
+            ));
         }
         Set<String> allowedFiles = new LinkedHashSet<>();
         Map<UUID, CodeSearchResult> byId = new LinkedHashMap<>();
@@ -67,7 +76,9 @@ public class CodeGraphLlmEnricher {
             ));
         }
         if (input.isEmpty()) {
-            return graph;
+            return new CodeGraphAnalysisResult(graph, CodeAnalysisDiagnostic.skipped(
+                    "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "No eligible evidence files found."
+            ));
         }
         try {
             String response = ollamaClient.chat(
@@ -77,9 +88,22 @@ public class CodeGraphLlmEnricher {
                     OllamaClient.ChatRole.AUXILIARY
             );
             LlmOutput output = objectMapper.readValue(jsonObject(response), LlmOutput.class);
-            return mergeValidated(graph, candidates, output);
-        } catch (RuntimeException | java.io.IOException ignored) {
-            return graph;
+            CodeGraph enriched = mergeValidated(graph, candidates, output);
+            int added = Math.max(0, enriched.edges().size() - graph.edges().size());
+            return new CodeGraphAnalysisResult(enriched, new CodeAnalysisDiagnostic(
+                    "LLM_ENRICHMENT", "Ollama auxiliary", "SUCCESS", "ASYNC",
+                    input.size(), input.size(), 0, added, Math.max(0, input.size() - added),
+                    enriched.nodes().size(), added,
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                    "LLM relationship enrichment completed.", Map.of("candidateCount", input.size())
+            ));
+        } catch (RuntimeException | java.io.IOException ex) {
+            return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
+                    "LLM_ENRICHMENT", "Ollama auxiliary", "FAILED", "ASYNC",
+                    input.size(), 0, input.size(), 0, input.size(), graph.nodes().size(), 0,
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                    "LLM enrichment failed: " + ex.getClass().getSimpleName(), Map.of()
+            ));
         }
     }
 

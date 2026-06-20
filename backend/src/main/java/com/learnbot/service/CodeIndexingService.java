@@ -2,12 +2,15 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeRepositorySummary;
+import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.IndexingJobFailureSummary;
 import com.learnbot.dto.IndexingJobSummary;
 import com.learnbot.repository.CodeRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.util.FileSystemUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -33,6 +36,7 @@ import java.util.concurrent.Future;
 
 @Service
 public class CodeIndexingService {
+    private static final Logger log = LoggerFactory.getLogger(CodeIndexingService.class);
     private final CodeRepository repository;
     private final GitWorkspaceService gitWorkspaceService;
     private final ZipCodeArchiveService zipCodeArchiveService;
@@ -169,6 +173,16 @@ public class CodeIndexingService {
             throw new IllegalArgumentException("Repository and indexing job do not match.");
         }
         return repository.listJobFailures(repositoryId, jobId);
+    }
+
+    public List<CodeAnalysisDiagnosticSummary> listAnalysisDiagnostics(AppUser user, UUID repositoryId, UUID jobId) {
+        CodeRepositoryRecord record = requireRepositoryAccess(user, repositoryId);
+        IndexingJobSummary job = repository.findJob(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Indexing job was not found."));
+        if (!job.repositoryId().equals(record.id())) {
+            throw new IllegalArgumentException("Indexing job does not belong to this repository.");
+        }
+        return repository.listAnalysisDiagnostics(repositoryId, jobId);
     }
 
     public IndexingJobSummary startIndex(AppUser user, UUID repositoryId, GitAccessToken accessToken, Boolean storeToken) {
@@ -396,6 +410,13 @@ public class CodeIndexingService {
             } else {
                 repository.completeSuccessfulIndex(repositoryId, jobId, commitHash);
             }
+            if (properties.getCode().getGraph().isEnabled() && properties.getCode().getGraph().isLlmRelationEnabled()) {
+                try {
+                    repository.enqueueGraphEnrichment(repositoryId, jobId);
+                } catch (RuntimeException ex) {
+                    recordNonFatalFailure(repositoryId, jobId, "LLM_ENRICHMENT_QUEUE", ex);
+                }
+            }
         } catch (CodeIndexCancelledException ex) {
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             repository.finishJob(jobId, "CANCELLED", commitHash, "User cancelled indexing.");
@@ -463,17 +484,41 @@ public class CodeIndexingService {
         }
         try {
             ensureNotCancelled(jobId);
-            CodeGraph graph = codeGraphBuilder.build(
+            CodeGraphBuildResult result = codeGraphBuilder.buildWithDiagnostics(
                     Path.of(record.localPath()),
                     repository.listChunksForIndex(record.id(), jobId)
             );
+            CodeGraph graph = result.graph();
+            result.diagnostics().forEach(diagnostic -> log.info(
+                    "code_analysis repositoryId={} indexVersion={} stage={} status={} mode={} attempted={} analyzed={} failed={} resolved={} unresolved={} durationMs={}",
+                    record.id(), jobId, diagnostic.stage(), diagnostic.status(), diagnostic.mode(),
+                    diagnostic.attemptedFiles(), diagnostic.analyzedFiles(), diagnostic.failedFiles(),
+                    diagnostic.resolvedRelations(), diagnostic.unresolvedRelations(), diagnostic.durationMillis()
+            ));
             if (!graph.nodes().isEmpty()) {
                 repository.replaceGraph(record.id(), jobId, graph);
+            }
+            try {
+                repository.addAnalysisDiagnostics(record.id(), jobId, result.diagnostics());
+            } catch (RuntimeException ex) {
+                recordNonFatalFailure(record.id(), jobId, "CODE_GRAPH_DIAGNOSTICS", ex);
             }
         } catch (CodeIndexCancelledException ex) {
             throw ex;
         } catch (RuntimeException ex) {
-            repository.addJobFailure(record.id(), jobId, null, "CODE_GRAPH", rootMessage(ex));
+            recordNonFatalFailure(record.id(), jobId, "CODE_GRAPH", ex);
+        }
+    }
+
+    private void recordNonFatalFailure(UUID repositoryId, UUID jobId, String stage, RuntimeException failure) {
+        String message = rootMessage(failure);
+        try {
+            repository.addJobFailure(repositoryId, jobId, null, stage, message);
+        } catch (RuntimeException diagnosticFailure) {
+            log.warn(
+                    "non_fatal_failure_record_failed repositoryId={} indexVersion={} stage={} failure={} diagnosticFailure={}",
+                    repositoryId, jobId, stage, message, rootMessage(diagnosticFailure)
+            );
         }
     }
 

@@ -84,6 +84,36 @@ class CodeGraphBuilderTest {
     }
 
     @Test
+    void javaFieldAccessUsesActualDeclaringType(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Base.java"), """
+                package sample;
+                public class Base { protected int value; }
+                """);
+        Files.writeString(sourceRoot.resolve("Child.java"), """
+                package sample;
+                public class Child extends Base {
+                    public void update() { value = 1; }
+                }
+                """);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult base = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/Base.java",
+                "class", "Base", null, null, null, "public class Base { protected int value; }");
+        CodeSearchResult child = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/Child.java",
+                "method", "Child", "update", null, null, "public void update() { value = 1; }");
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer().analyze(root, java.util.List.of(base, child));
+
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("WRITES_FIELD");
+            assertThat(edge.sourceKey()).contains("sample.Child.update(");
+            assertThat(edge.targetKey()).isEqualTo("field:java:sample.Base#value");
+        });
+        assertThat(graph.edges()).noneMatch(edge -> edge.targetKey().equals("field:java:sample.Child#value"));
+    }
+
+    @Test
     void onlyUsesCallsWhenMethodAppearsAsCallExpression() {
         CodeGraphBuilder builder = new CodeGraphBuilder(new LearnBotProperties());
         UUID repositoryId = UUID.randomUUID();

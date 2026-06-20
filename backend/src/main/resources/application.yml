@@ -89,8 +89,19 @@ learnbot:
       enabled: ${LEARNBOT_CODE_GRAPH_ENABLED:true}
       llm-relation-enabled: ${LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED:true}
       roslyn-analyzer-path: ${LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH:/app/roslyn/LearnBot.RoslynAnalyzer.dll}
+      roslyn-mode: ${LEARNBOT_CODE_GRAPH_ROSLYN_MODE:AUTO}
+      roslyn-timeout-seconds: ${LEARNBOT_CODE_GRAPH_ROSLYN_TIMEOUT_SECONDS:120}
+      dependency-resolution-enabled: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_RESOLUTION_ENABLED:true}
+      dependency-allowed-repositories: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_ALLOWED_REPOSITORIES:https://repo.maven.apache.org/maven2}
+      dependency-max-artifacts: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_ARTIFACTS:256}
+      dependency-max-bytes: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_BYTES:536870912}
+      dependency-timeout-seconds: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_TIMEOUT_SECONDS:120}
       max-hop: ${LEARNBOT_CODE_GRAPH_MAX_HOP:2}
       max-expanded-results: ${LEARNBOT_CODE_GRAPH_MAX_EXPANDED_RESULTS:12}
+      max-seed-nodes: ${LEARNBOT_CODE_GRAPH_MAX_SEED_NODES:24}
+      max-edges-per-node: ${LEARNBOT_CODE_GRAPH_MAX_EDGES_PER_NODE:12}
+      max-candidates-per-hop: ${LEARNBOT_CODE_GRAPH_MAX_CANDIDATES_PER_HOP:200}
+      max-traversal-rows: ${LEARNBOT_CODE_GRAPH_MAX_TRAVERSAL_ROWS:1000}
       max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}

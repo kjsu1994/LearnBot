@@ -23,6 +23,7 @@ import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.learnbot.dto.CodeSearchResult;
 import org.springframework.stereotype.Component;
@@ -50,16 +51,41 @@ public class JavaSemanticGraphAnalyzer {
     );
 
     public CodeGraph analyze(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        return analyzeWithDiagnostics(repositoryRoot, chunks).graph();
+    }
+
+    public CodeGraphAnalysisResult analyzeWithDiagnostics(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        return analyzeWithDiagnostics(repositoryRoot, chunks, List.of());
+    }
+
+    public CodeGraphAnalysisResult analyzeWithDiagnostics(Path repositoryRoot, List<CodeSearchResult> chunks, List<Path> dependencyJars) {
+        long started = System.nanoTime();
         if (repositoryRoot == null || !Files.isDirectory(repositoryRoot)) {
-            return empty();
+            return new CodeGraphAnalysisResult(empty(), CodeAnalysisDiagnostic.skipped(
+                    "JAVA_SEMANTIC", "JavaParser Symbol Solver", "SOURCE", "Repository root is unavailable."
+            ));
         }
         List<Path> sourceRoots = javaSourceRoots(repositoryRoot);
         CombinedTypeSolver typeSolver = new CombinedTypeSolver(new ReflectionTypeSolver(false));
         sourceRoots.forEach(root -> typeSolver.add(new JavaParserTypeSolver(root)));
+        if (dependencyJars != null) {
+            dependencyJars.forEach(jar -> {
+                try {
+                    typeSolver.add(new JarTypeSolver(jar));
+                } catch (IOException | RuntimeException ignored) {
+                    // Invalid cached jars are ignored; classpath diagnostics remains PARTIAL.
+                }
+            });
+        }
         JavaParser parser = new JavaParser(new ParserConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver)));
         List<ParsedFile> files = parseFiles(repositoryRoot, sourceRoots, parser);
+        int attemptedFiles = countJavaFiles(sourceRoots);
         if (files.isEmpty()) {
-            return empty();
+            return new CodeGraphAnalysisResult(empty(), new CodeAnalysisDiagnostic(
+                    "JAVA_SEMANTIC", "JavaParser Symbol Solver", attemptedFiles == 0 ? "SKIPPED" : "FAILED", "SOURCE",
+                    attemptedFiles, 0, attemptedFiles, 0, 0, 0, 0, elapsedMillis(started),
+                    attemptedFiles == 0 ? "No Java source files found." : "No Java source file could be parsed.", Map.of()
+            ));
         }
 
         Map<String, CodeGraphNode> nodes = new LinkedHashMap<>();
@@ -95,7 +121,31 @@ public class JavaSemanticGraphAnalyzer {
                 addCallable(nodes, edges, file, callable, chunkLookup, entityTypes);
             }
         }
-        return new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
+        CodeGraph graph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
+        int failedFiles = Math.max(0, attemptedFiles - files.size());
+        return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
+                "JAVA_SEMANTIC", "JavaParser Symbol Solver", failedFiles == 0 ? "SUCCESS" : "PARTIAL", "SOURCE",
+                attemptedFiles, files.size(), failedFiles, graph.edges().size(), 0,
+                graph.nodes().size(), graph.edges().size(), elapsedMillis(started),
+                failedFiles == 0 ? "Java semantic analysis completed." : "Some Java files could not be parsed.",
+                Map.of("sourceRoots", sourceRoots.size(), "dependencyJars", dependencyJars == null ? 0 : dependencyJars.size())
+        ));
+    }
+
+    private int countJavaFiles(List<Path> roots) {
+        int count = 0;
+        for (Path root : roots) {
+            try (var paths = Files.walk(root)) {
+                count += (int) paths.filter(path -> Files.isRegularFile(path) && path.toString().endsWith(".java")).count();
+            } catch (IOException ignored) {
+                // Count remains best-effort and analysis continues.
+            }
+        }
+        return count;
+    }
+
+    private long elapsedMillis(long started) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
     }
 
     private void addTypeRelations(
@@ -201,8 +251,17 @@ public class JavaSemanticGraphAnalyzer {
                     continue;
                 }
                 String fieldName = value.getName();
-                String fieldKey = "field:java:" + owner + "#" + fieldName;
-                addNode(nodes, new CodeGraphNode(fieldKey, "field", fieldName, owner + "#" + fieldName, path, chunkId, Map.of("language", "java")));
+                String declaringType = value.asField().declaringType().getQualifiedName();
+                String fieldKey = "field:java:" + declaringType + "#" + fieldName;
+                addNode(nodes, new CodeGraphNode(
+                        fieldKey,
+                        "field",
+                        fieldName,
+                        declaringType + "#" + fieldName,
+                        declaringType.equals(owner) ? path : null,
+                        declaringType.equals(owner) ? chunkId : null,
+                        Map.of("language", "java")
+                ));
                 boolean write = writes.stream().anyMatch(target -> target == candidate || target.isAncestorOf(candidate));
                 addEdge(edges, methodKey, fieldKey, write ? "WRITES_FIELD" : "READS_FIELD", 0.96, chunkId, "java_symbol_solver");
             } catch (RuntimeException ignored) {

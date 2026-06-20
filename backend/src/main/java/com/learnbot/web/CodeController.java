@@ -1,6 +1,7 @@
 package com.learnbot.web;
 
 import com.learnbot.dto.CodeAskRequest;
+import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeFileDetail;
 import com.learnbot.dto.CodeFileSummary;
@@ -150,6 +151,11 @@ public class CodeController {
     @GetMapping("/repositories/{repositoryId}/jobs/{jobId}/failures")
     List<IndexingJobFailureSummary> listJobFailures(@PathVariable UUID repositoryId, @PathVariable UUID jobId) {
         return indexingService.listJobFailures(currentUserProvider.currentUser(), repositoryId, jobId);
+    }
+
+    @GetMapping("/repositories/{repositoryId}/jobs/{jobId}/diagnostics")
+    List<CodeAnalysisDiagnosticSummary> listAnalysisDiagnostics(@PathVariable UUID repositoryId, @PathVariable UUID jobId) {
+        return indexingService.listAnalysisDiagnostics(currentUserProvider.currentUser(), repositoryId, jobId);
     }
 
     @PostMapping("/repositories/{repositoryId}/jobs/{jobId}/cancel")

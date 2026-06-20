@@ -26,7 +26,7 @@ public class CodeGraphBuilder {
     private final LearnBotProperties properties;
     private final JavaSemanticGraphAnalyzer javaAnalyzer;
     private final RoslynSemanticGraphAnalyzer roslynAnalyzer;
-    private final CodeGraphLlmEnricher llmEnricher;
+    private final JavaClasspathResolver javaClasspathResolver;
 
     public CodeGraphBuilder(LearnBotProperties properties) {
         this(properties, null, null, null);
@@ -34,11 +34,11 @@ public class CodeGraphBuilder {
 
     @Autowired
     public CodeGraphBuilder(LearnBotProperties properties, JavaSemanticGraphAnalyzer javaAnalyzer,
-                            RoslynSemanticGraphAnalyzer roslynAnalyzer, CodeGraphLlmEnricher llmEnricher) {
+                            RoslynSemanticGraphAnalyzer roslynAnalyzer, JavaClasspathResolver javaClasspathResolver) {
         this.properties = properties;
         this.javaAnalyzer = javaAnalyzer;
         this.roslynAnalyzer = roslynAnalyzer;
-        this.llmEnricher = llmEnricher;
+        this.javaClasspathResolver = javaClasspathResolver;
     }
 
     public boolean enabled() {
@@ -50,8 +50,16 @@ public class CodeGraphBuilder {
     }
 
     public CodeGraph build(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        return buildWithDiagnostics(repositoryRoot, chunks).graph();
+    }
+
+    public CodeGraphBuildResult buildWithDiagnostics(Path repositoryRoot, List<CodeSearchResult> chunks) {
+        long started = System.nanoTime();
+        List<CodeAnalysisDiagnostic> diagnostics = new ArrayList<>();
         if (!enabled() || chunks == null || chunks.isEmpty()) {
-            return new CodeGraph(List.of(), List.of());
+            diagnostics.add(CodeAnalysisDiagnostic.skipped("BASE_GRAPH", "Chunk graph", "DETERMINISTIC",
+                    enabled() ? "No indexed chunks found." : "Code graph is disabled."));
+            return new CodeGraphBuildResult(new CodeGraph(List.of(), List.of()), List.copyOf(diagnostics));
         }
         Map<String, CodeGraphNode> nodes = new LinkedHashMap<>();
         Map<String, CodeGraphEdge> edges = new LinkedHashMap<>();
@@ -103,29 +111,47 @@ public class CodeGraphBuilder {
                 }
             }
         }
+        CodeGraph baseGraph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
+        diagnostics.add(new CodeAnalysisDiagnostic(
+                "BASE_GRAPH", "Chunk graph", "SUCCESS", "DETERMINISTIC", chunks.size(), chunks.size(), 0,
+                baseGraph.edges().size(), 0, baseGraph.nodes().size(), baseGraph.edges().size(),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                "Deterministic chunk graph completed.", Map.of()
+        ));
         if (javaAnalyzer != null && repositoryRoot != null) {
             try {
-                merge(nodes, edges, javaAnalyzer.analyze(repositoryRoot, chunks));
-            } catch (RuntimeException ignored) {
-                // The conservative chunk graph remains available when semantic analysis fails.
+                JavaClasspathResolution classpath = javaClasspathResolver == null
+                        ? new JavaClasspathResolution(List.of(), CodeAnalysisDiagnostic.skipped(
+                                "JAVA_CLASSPATH", "Static dependency resolver", "CACHE_AND_ALLOWLIST", "Resolver is unavailable."))
+                        : javaClasspathResolver.resolve(repositoryRoot);
+                diagnostics.add(classpath.diagnostic());
+                CodeGraphAnalysisResult result = javaAnalyzer.analyzeWithDiagnostics(repositoryRoot, chunks, classpath.jars());
+                merge(nodes, edges, result.graph());
+                diagnostics.add(result.diagnostic());
+            } catch (RuntimeException ex) {
+                diagnostics.add(failedDiagnostic("JAVA_SEMANTIC", "JavaParser Symbol Solver", ex));
             }
+        } else {
+            diagnostics.add(CodeAnalysisDiagnostic.skipped("JAVA_SEMANTIC", "JavaParser Symbol Solver", "SOURCE", "Analyzer is unavailable."));
         }
         if (roslynAnalyzer != null && repositoryRoot != null) {
             try {
-                merge(nodes, edges, roslynAnalyzer.analyze(repositoryRoot, chunks));
-            } catch (RuntimeException ignored) {
-                // C# projects keep the conservative chunk graph when Roslyn is unavailable.
+                CodeGraphAnalysisResult result = roslynAnalyzer.analyzeWithDiagnostics(repositoryRoot, chunks);
+                merge(nodes, edges, result.graph());
+                diagnostics.add(result.diagnostic());
+            } catch (RuntimeException ex) {
+                diagnostics.add(failedDiagnostic("CSHARP_ROSLYN", "Roslyn", ex));
             }
+        } else {
+            diagnostics.add(CodeAnalysisDiagnostic.skipped("CSHARP_ROSLYN", "Roslyn", "AUTO", "Analyzer is unavailable."));
         }
         CodeGraph graph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
-        if (llmEnricher != null) {
-            try {
-                return llmEnricher.enrich(graph, chunks);
-            } catch (RuntimeException ignored) {
-                // Deterministic graph creation must not depend on LLM availability.
-            }
-        }
-        return graph;
+        return new CodeGraphBuildResult(graph, List.copyOf(diagnostics));
+    }
+
+    private CodeAnalysisDiagnostic failedDiagnostic(String stage, String analyzer, RuntimeException ex) {
+        return new CodeAnalysisDiagnostic(stage, analyzer, "FAILED", null, 0, 0, 0, 0, 0, 0, 0, 0,
+                ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "analysis failed" : ex.getMessage()), Map.of());
     }
 
     private void merge(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, CodeGraph graph) {

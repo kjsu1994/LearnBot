@@ -119,7 +119,7 @@ The graph can contain these relationships:
 - UI semantics: `HANDLES_EVENT`, `BINDS_TO`
 - conservative fallback: `REFERENCES`
 
-Graph search uses a recursive PostgreSQL CTE. It prevents cycles, reduces scores for longer or lower-confidence paths, and returns the best path for each related chunk. Search strategy depends on the question:
+Graph search uses bounded hop-by-hop traversal instead of an unbounded recursive query. It prevents cycles, limits seed nodes, per-node edges, per-hop candidates, and total traversal rows, then returns the best path for each related chunk. Search strategy depends on the question:
 
 - call-flow questions traverse `CALLS` and related execution edges forward
 - impact questions traverse callers and dependencies in reverse
@@ -134,12 +134,33 @@ Configure graph behavior with environment variables:
 LEARNBOT_CODE_GRAPH_ENABLED=true
 LEARNBOT_CODE_GRAPH_MAX_HOP=2
 LEARNBOT_CODE_GRAPH_MAX_EXPANDED_RESULTS=12
+LEARNBOT_CODE_GRAPH_MAX_SEED_NODES=24
+LEARNBOT_CODE_GRAPH_MAX_EDGES_PER_NODE=12
+LEARNBOT_CODE_GRAPH_MAX_CANDIDATES_PER_HOP=200
+LEARNBOT_CODE_GRAPH_MAX_TRAVERSAL_ROWS=1000
 LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED=true
 LEARNBOT_CODE_GRAPH_MAX_LLM_FILES=80
 LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH=/app/roslyn/LearnBot.RoslynAnalyzer.dll
+LEARNBOT_CODE_GRAPH_ROSLYN_MODE=AUTO
+LEARNBOT_CODE_GRAPH_ROSLYN_TIMEOUT_SECONDS=120
+LEARNBOT_CODE_GRAPH_DEPENDENCY_RESOLUTION_ENABLED=true
+LEARNBOT_CODE_GRAPH_DEPENDENCY_ALLOWED_REPOSITORIES=https://repo.maven.apache.org/maven2
+LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_ARTIFACTS=256
+LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_BYTES=536870912
+LEARNBOT_CODE_GRAPH_DEPENDENCY_TIMEOUT_SECONDS=120
 ```
 
-`LEARNBOT_CODE_GRAPH_MAX_HOP` is constrained to 1-4 during traversal. The optional LLM stage only evaluates unresolved candidates, accepts known graph node keys and approved relationship types, and records its output with lower confidence. If JavaParser, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
+`LEARNBOT_CODE_GRAPH_MAX_HOP` is constrained to 1-4 during traversal. When a traversal budget is reached, the best bounded results are returned with `graphTraversalTruncated` metadata instead of failing the search.
+
+Roslyn `AUTO` mode selects `SOLUTION`, `PROJECT`, or `SIMPLE` from repository contents. Project and solution descriptors are parsed, but MSBuild targets, source generators, and repository code are never executed. Java dependency resolution also parses Maven/Gradle declarations without running the build. It uses the persistent `.dependency-cache` under the code workspace and only downloads release artifacts from configured HTTPS repository allow lists.
+
+The optional LLM stage runs as a durable post-index enrichment job after the deterministic graph is active. Pending work survives restarts, retries up to three times, and is skipped when a newer index replaces it. It only accepts known graph node keys and approved relationship types, and records output with lower confidence. If JavaParser, dependency resolution, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
+
+Each indexing job records `SUCCESS`, `PARTIAL`, `FAILED`, or `SKIPPED` diagnostics for the base graph, Java classpath, Java semantic analysis, Roslyn, and LLM enrichment. The Code workspace exposes these under **분석 진단**. They are also available from:
+
+```text
+GET /api/code/repositories/{repositoryId}/jobs/{jobId}/diagnostics
+```
 
 Existing active indexes remain readable after an upgrade. Reindex each repository to create qualified signature nodes, expanded relationships, and multi-hop paths using the new analyzers. A failed reindex does not replace the previous active index.
 

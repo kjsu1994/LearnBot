@@ -26,6 +26,7 @@ export default function App() {
   const [repositories, setRepositories] = useState([]);
   const [jobs, setJobs] = useState({});
   const [jobFailures, setJobFailures] = useState({});
+  const [jobDiagnostics, setJobDiagnostics] = useState({});
   const [codeFiles, setCodeFiles] = useState([]);
   const [fileQuery, setFileQuery] = useState('');
   const [selectedCodeFile, setSelectedCodeFile] = useState(null);
@@ -636,6 +637,13 @@ export default function App() {
     });
   }
 
+  async function loadJobDiagnostics(repositoryId, jobId) {
+    await run(`job-diagnostics-${jobId}`, async () => {
+      const data = await request(`/api/code/repositories/${repositoryId}/jobs/${jobId}/diagnostics`);
+      setJobDiagnostics((current) => ({ ...current, [jobId]: data || [] }));
+    });
+  }
+
   async function saveCodeAnswer() {
     if (!codeAnswer) return;
     await run('save-code-answer', async () => {
@@ -1061,6 +1069,8 @@ export default function App() {
             jobs={jobs}
             jobFailures={jobFailures}
             loadJobFailures={loadJobFailures}
+            jobDiagnostics={jobDiagnostics}
+            loadJobDiagnostics={loadJobDiagnostics}
             codeFiles={codeFiles}
             fileQuery={fileQuery}
             setFileQuery={setFileQuery}
