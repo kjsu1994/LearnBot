@@ -8,6 +8,7 @@ public record AskRequest(
         @NotBlank String question,
         SearchFilter filter,
         String mode,
+        String speedProfile,
         UUID spaceId
 ) {
 }

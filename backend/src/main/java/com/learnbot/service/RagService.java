@@ -75,10 +75,18 @@ public class RagService {
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode, List<UUID> spaceIds, UUID selectedSpaceId) {
+        return ask(question, filter, mode, null, spaceIds, selectedSpaceId);
+    }
+
+    public AskResponse ask(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         AnswerMode answerMode = AnswerMode.from(mode);
+        DocumentSpeedProfile requestedSpeedProfile = DocumentSpeedProfile.from(
+                speedProfile,
+                properties.getRag().getPipeline().getDefaultDocumentSpeedProfile()
+        );
         DocumentQuestionType questionType = classifyDocumentQuestion(question, answerMode);
-        int topK = retrievalLimit(question, answerMode, questionType);
-        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, questionType, topK, spaceIds, selectedSpaceId);
+        int topK = retrievalLimit(question, answerMode, questionType, requestedSpeedProfile);
+        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, questionType, requestedSpeedProfile, topK, spaceIds, selectedSpaceId);
         List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
             return new AskResponse(
@@ -104,7 +112,7 @@ public class RagService {
             );
         }
 
-        String context = buildContext(question, answerMode, questionType, citations);
+        String context = buildContext(question, answerMode, questionType, retrieval.effectiveProfile(), citations);
         String systemPrompt = systemPrompt(answerMode, questionType);
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
@@ -166,23 +174,26 @@ public class RagService {
             SearchFilter filter,
             AnswerMode answerMode,
             DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile,
             int topK,
             List<UUID> spaceIds,
             UUID selectedSpaceId
     ) {
         Map<UUID, SearchResult> merged = new LinkedHashMap<>();
         List<String> queriesUsed = new ArrayList<>();
-        int searchLimit = pipelineService.documentSearchLimit(topK);
+        DocumentSpeedProfile effectiveProfile = speedProfile == null ? DocumentSpeedProfile.BALANCED : speedProfile;
+        boolean profileEscalated = false;
+        int searchLimit = documentSearchLimit(topK, effectiveProfile);
 
         searchAndMergeDocuments(question, question, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
         if (isOverviewQuestionType(questionType)) {
-            for (String query : overviewQueries(question, questionType)) {
+            for (String query : overviewQueries(question, questionType, effectiveProfile)) {
                 searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
             }
         }
-        expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
+        expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
         expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
-        List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
+        List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, effectiveProfile, List.copyOf(merged.values()));
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
                 question,
                 citations,
@@ -200,11 +211,16 @@ public class RagService {
 
         if (!isCountQuestion(question)
                 && (!assessment.sufficient() || needsMoreOverviewEvidence(citations, questionType))
-                && pipelineService.maxIterations() > 1) {
+                && (pipelineService.maxIterations() > 1 || speedProfile == DocumentSpeedProfile.FAST)) {
+            if (speedProfile == DocumentSpeedProfile.FAST) {
+                effectiveProfile = DocumentSpeedProfile.BALANCED;
+                profileEscalated = true;
+                searchLimit = documentSearchLimit(topK, effectiveProfile);
+            }
             queryPlan = pipelineService.buildQueryPlan(
                     question,
                     RagPipelineService.Domain.DOCUMENT,
-                    searchService.expandedQueries(question)
+                    retryBaselineQueries(question, questionType, effectiveProfile)
             );
             List<String> retryQueries = queryPlan.queries().stream()
                     .map(query -> safe(query).trim())
@@ -212,8 +228,9 @@ public class RagService {
                     .filter(query -> !queriesUsed.contains(query))
                     .distinct()
                     .toList();
+            int retrySearchLimit = searchLimit;
             List<QuerySearchResults> retryResults = retryQueries.parallelStream()
-                    .map(query -> searchDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId))
+                    .map(query -> searchDocuments(question, query, filter, retrySearchLimit, spaceIds, selectedSpaceId))
                     .toList();
             for (QuerySearchResults result : retryResults) {
                 queriesUsed.add(result.query());
@@ -222,9 +239,14 @@ public class RagService {
                 }
             }
             iteration = 2;
-            expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
+            if (isOverviewQuestionType(questionType)) {
+                for (String query : overviewQueries(question, questionType, effectiveProfile)) {
+                    searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
+                }
+            }
+            expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
             expandGraphDocumentChunks(filter, spaceIds, selectedSpaceId, merged);
-            citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
+            citations = selectAnswerCitations(question, answerMode, questionType, effectiveProfile, List.copyOf(merged.values()));
             assessment = pipelineService.assessDocuments(
                     question,
                     citations,
@@ -242,7 +264,7 @@ public class RagService {
                 queryPlan.rewriteFailed(),
                 String.format(java.util.Locale.ROOT, "%.2f", assessment.coverage()),
                 abbreviate(question));
-        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size());
+        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated);
     }
 
     private void searchAndMergeDocuments(
@@ -300,6 +322,7 @@ public class RagService {
             String question,
             AnswerMode answerMode,
             DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile,
             SearchFilter filter,
             List<UUID> spaceIds,
             UUID selectedSpaceId,
@@ -313,17 +336,64 @@ public class RagService {
         }
         int baseRadius = Math.max(0, properties.getRag().getPipeline().getDocumentAdjacentChunkRadius());
         int radius = isOverviewQuestionType(questionType) || answerMode == AnswerMode.SUMMARY ? Math.max(baseRadius, 2) : baseRadius;
+        if (speedProfile == DocumentSpeedProfile.FAST) {
+            radius = Math.min(radius, Math.max(1, baseRadius));
+        } else if (speedProfile == DocumentSpeedProfile.DEEP && isOverviewQuestionType(questionType)) {
+            radius = Math.max(radius, 2);
+        }
         if (radius <= 0) {
             return;
         }
+        int seedLimit = switch (speedProfile) {
+            case FAST -> 6;
+            case DEEP -> 16;
+            default -> 12;
+        };
+        int addLimit = switch (speedProfile) {
+            case FAST -> 12;
+            case DEEP -> 32;
+            default -> 24;
+        };
         List<SearchResult> seeds = merged.values().stream()
                 .filter(result -> !isDocumentContext(result))
                 .sorted(Comparator.comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result)).reversed())
-                .limit(12)
+                .limit(seedLimit)
                 .toList();
+        try {
+            int batchAdded = 0;
+            List<DocumentRepository.AdjacentChunkSeed> batchSeeds = seeds.stream()
+                    .map(seed -> new DocumentRepository.AdjacentChunkSeed(seed.chunkId(), seed.documentId(), seed.chunkIndex(), seed.score()))
+                    .toList();
+            for (DocumentRepository.AdjacentChunkCandidate candidate : documentRepository.adjacentChunksBatch(
+                    batchSeeds,
+                    radius,
+                    filter,
+                    spaceIds,
+                    selectedSpaceId
+            )) {
+                if (merged.containsKey(candidate.result().chunkId())) {
+                    continue;
+                }
+                mergeDocument(merged, withMetadata(candidate.result(), Map.of(
+                        "adjacentExpanded", true,
+                        "adjacentDistance", candidate.distance(),
+                        "adjacentSeedChunkId", candidate.seedChunkId().toString(),
+                        "evidenceRole", "adjacent"
+                ), Math.max(0.0, candidate.seedScore() - (0.04 * Math.max(1, candidate.distance())))));
+                batchAdded++;
+                if (batchAdded >= addLimit) {
+                    break;
+                }
+            }
+            if (batchAdded > 0) {
+                return;
+            }
+        } catch (RuntimeException ex) {
+            log.warn("RAG adjacent batch expansion failed question={}; falling back to per-seed lookup", abbreviate(question), ex);
+        }
         int added = 0;
         for (SearchResult seed : seeds) {
-            if (added >= 24) {
+            if (added >= addLimit) {
                 break;
             }
             try {
@@ -346,7 +416,7 @@ public class RagService {
                             "evidenceRole", "adjacent"
                     ), Math.max(0.0, seed.score() - (0.04 * Math.max(1, distance)))));
                     added++;
-                    if (added >= 24) {
+                    if (added >= addLimit) {
                         break;
                     }
                 }
@@ -439,24 +509,49 @@ public class RagService {
         };
     }
 
-    private int retrievalLimit(String question, AnswerMode answerMode, DocumentQuestionType questionType) {
+    private int retrievalLimit(String question, AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
         int configured = properties.getRag().getTopK();
+        int profileFloor = switch (speedProfile) {
+            case FAST -> 5;
+            case DEEP -> 10;
+            default -> 8;
+        };
         if (isOverviewQuestionType(questionType)) {
             int overviewMin = properties.getRag().getOverview().getMinContextChunks()
                     + properties.getRag().getOverview().getMinOriginalChunks()
                     + 4;
-            return Math.max(configured, Math.max(overviewMin, 12));
+            int floor = switch (speedProfile) {
+                case FAST -> 8;
+                case DEEP -> 14;
+                default -> 10;
+            };
+            return Math.max(configured, Math.max(overviewMin, floor));
         }
         if (isCountQuestion(question) || answerMode == AnswerMode.TABLE) {
-            return Math.max(configured, 12);
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 8 : 12);
         }
         if (answerMode == AnswerMode.SUMMARY) {
-            return Math.max(configured, 10);
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 7 : 10);
         }
-        return Math.max(configured, 8);
+        return Math.max(configured, profileFloor);
     }
 
-    private List<SearchResult> selectAnswerCitations(String question, AnswerMode answerMode, DocumentQuestionType questionType, List<SearchResult> results) {
+    private int documentSearchLimit(int topK, DocumentSpeedProfile speedProfile) {
+        int configured = pipelineService.documentSearchLimit(topK);
+        return switch (speedProfile) {
+            case FAST -> Math.max(topK, Math.min(configured, 16));
+            case DEEP -> Math.max(configured, 24);
+            default -> configured;
+        };
+    }
+
+    private List<String> retryBaselineQueries(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        List<String> queries = new ArrayList<>(searchService.expandedQueries(question));
+        queries.addAll(overviewQueries(question, questionType, speedProfile));
+        return queries.stream().filter(value -> !safe(value).isBlank()).distinct().toList();
+    }
+
+    private List<SearchResult> selectAnswerCitations(String question, AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, List<SearchResult> results) {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
@@ -467,7 +562,7 @@ public class RagService {
         };
         List<SearchResult> ordered = orderDocumentEvidence(question, answerMode, results);
         if (isOverviewQuestionType(questionType)) {
-            return selectOverviewCitations(ordered, limit);
+            return selectOverviewCitations(ordered, limit, speedProfile);
         }
         if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
             List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
@@ -615,12 +710,20 @@ public class RagService {
         }
     }
 
-    private List<SearchResult> selectOverviewCitations(List<SearchResult> ordered, int limit) {
+    private List<SearchResult> selectOverviewCitations(List<SearchResult> ordered, int limit, DocumentSpeedProfile speedProfile) {
         List<SearchResult> selected = new ArrayList<>();
         Set<UUID> seenChunks = new HashSet<>();
         int maxDocuments = Math.max(1, properties.getRag().getOverview().getMaxDocuments());
         int minContext = Math.max(1, properties.getRag().getOverview().getMinContextChunks());
         int minOriginal = Math.max(1, properties.getRag().getOverview().getMinOriginalChunks());
+        if (speedProfile == DocumentSpeedProfile.FAST) {
+            minContext = Math.min(minContext, 1);
+            minOriginal = Math.min(minOriginal, 3);
+            maxDocuments = Math.min(maxDocuments, 6);
+        } else if (speedProfile == DocumentSpeedProfile.DEEP) {
+            minContext = Math.max(minContext, 2);
+            minOriginal = Math.max(minOriginal, 4);
+        }
 
         for (SearchResult result : ordered) {
             if (isDocumentContext(result) && seenChunks.add(result.chunkId())) {
@@ -697,15 +800,13 @@ public class RagService {
         return score;
     }
 
-    private String buildContext(String question, AnswerMode answerMode, DocumentQuestionType questionType, List<SearchResult> results) {
+    private String buildContext(String question, AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "No context retrieved.";
         }
 
-        int limit = Math.min(results.size(), contextLimit(answerMode, questionType));
-        int excerptChars = answerMode == AnswerMode.TABLE
-                ? TABLE_CONTEXT_EXCERPT_CHARS
-                : isOverviewQuestionType(questionType) ? 900 : GENERAL_CONTEXT_EXCERPT_CHARS;
+        int limit = Math.min(results.size(), contextLimit(answerMode, questionType, speedProfile));
+        int excerptChars = contextExcerptChars(answerMode, questionType, speedProfile);
         return IntStream.range(0, limit)
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
@@ -718,17 +819,38 @@ public class RagService {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private int contextLimit(AnswerMode answerMode, DocumentQuestionType questionType) {
+    private int contextLimit(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
         if (isOverviewQuestionType(questionType)) {
-            return pipelineService.documentContextLimit(Math.max(8,
+            int baseline = pipelineService.documentContextLimit(Math.max(8,
                     properties.getRag().getOverview().getMinContextChunks()
                             + properties.getRag().getOverview().getMinOriginalChunks()
                             + 4));
+            return switch (speedProfile) {
+                case FAST -> Math.min(baseline, 8);
+                case DEEP -> Math.max(baseline, 12);
+                default -> Math.min(baseline, 10);
+            };
         }
-        return switch (answerMode) {
+        int baseline = switch (answerMode) {
             case SUMMARY, TABLE -> pipelineService.documentContextLimit(8);
             case QUOTE -> 6;
             default -> pipelineService.documentContextLimit(GENERAL_CONTEXT_RESULT_LIMIT);
+        };
+        return switch (speedProfile) {
+            case FAST -> Math.min(baseline, answerMode == AnswerMode.QUOTE ? 4 : 6);
+            case DEEP -> Math.max(baseline, answerMode == AnswerMode.QUOTE ? 6 : 10);
+            default -> baseline;
+        };
+    }
+
+    private int contextExcerptChars(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        int baseline = answerMode == AnswerMode.TABLE
+                ? TABLE_CONTEXT_EXCERPT_CHARS
+                : isOverviewQuestionType(questionType) ? 900 : GENERAL_CONTEXT_EXCERPT_CHARS;
+        return switch (speedProfile) {
+            case FAST -> Math.min(baseline, answerMode == AnswerMode.TABLE ? 700 : 520);
+            case DEEP -> Math.max(baseline, isOverviewQuestionType(questionType) ? 1000 : 820);
+            default -> baseline;
         };
     }
 
@@ -1448,15 +1570,21 @@ public class RagService {
                 || originalCount < properties.getRag().getOverview().getMinOriginalChunks();
     }
 
-    private List<String> overviewQueries(String question, DocumentQuestionType questionType) {
+    private List<String> overviewQueries(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
         String base = safe(question).trim();
-        return switch (questionType) {
+        List<String> queries = switch (questionType) {
             case ARCHITECTURE -> List.of(base + " architecture structure components", "source structure document map overview", "문서 구조 구성 아키텍처 개요");
             case PROCESS_FLOW -> List.of(base + " process flow workflow steps", "source structure process sequence overview", "흐름 과정 절차 단계 구조");
             case STRUCTURE -> List.of(base + " structure outline sections", "document structure source structure map", "구조 목차 섹션 구성 문서맵");
             case OVERVIEW -> List.of(base + " overview summary main topics", "source summary document summary representative documents", "개요 요약 주요 내용 전체 구조");
             default -> List.of();
         };
+        int limit = switch (speedProfile) {
+            case FAST -> 1;
+            case DEEP -> 3;
+            default -> questionType == DocumentQuestionType.OVERVIEW ? 2 : 1;
+        };
+        return queries.stream().limit(limit).toList();
     }
 
     private boolean containsAny(String value, String... needles) {
@@ -1579,6 +1707,11 @@ public class RagService {
         }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried retrieval once because the first evidence set was weak.");
+        }
+        if (retrieval != null) {
+            notes.add("Document RAG speed profile requested=" + retrieval.requestedProfile().name()
+                    + ", effective=" + retrieval.effectiveProfile().name()
+                    + (retrieval.profileEscalated() ? " after evidence-based fallback." : "."));
         }
         if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
             notes.add("RAG pipeline used query rewrite as an auxiliary retrieval signal.");
@@ -1747,7 +1880,10 @@ public class RagService {
             RagPipelineService.QueryPlan queryPlan,
             int iteration,
             int candidateCount,
-            int queryCount
+            int queryCount,
+            DocumentSpeedProfile requestedProfile,
+            DocumentSpeedProfile effectiveProfile,
+            boolean profileEscalated
     ) {
     }
 
@@ -1823,5 +1959,24 @@ public class RagService {
         STRUCTURE,
         PROCESS_FLOW,
         ARCHITECTURE
+    }
+
+    private enum DocumentSpeedProfile {
+        FAST,
+        BALANCED,
+        DEEP;
+
+        static DocumentSpeedProfile from(String value, String fallback) {
+            String candidate = value == null || value.isBlank() ? fallback : value;
+            if (candidate == null || candidate.isBlank()) {
+                return BALANCED;
+            }
+            for (DocumentSpeedProfile profile : values()) {
+                if (profile.name().equalsIgnoreCase(candidate.trim())) {
+                    return profile;
+                }
+            }
+            return BALANCED;
+        }
     }
 }

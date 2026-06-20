@@ -36,6 +36,12 @@ export const answerModes = [
   { value: 'quote', label: '원문 인용' },
 ];
 
+export const documentSpeedProfiles = [
+  { value: 'balanced', label: 'BALANCED' },
+  { value: 'fast', label: 'FAST' },
+  { value: 'deep', label: 'DEEP' },
+];
+
 export const codeModes = [
   { value: 'overview', label: '통합 질문' },
   { value: 'locate', label: '위치 찾기' },

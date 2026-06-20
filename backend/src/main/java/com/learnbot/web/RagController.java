@@ -28,6 +28,6 @@ public class RagController {
     AskResponse ask(@Valid @RequestBody AskRequest request) {
         var user = currentUserProvider.currentUser();
         var selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
-        return ragService.ask(request.question(), request.filter(), request.mode(), authService.accessibleSpaceIds(user), selectedSpaceId);
+        return ragService.ask(request.question(), request.filter(), request.mode(), request.speedProfile(), authService.accessibleSpaceIds(user), selectedSpaceId);
     }
 }

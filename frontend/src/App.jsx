@@ -47,6 +47,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [question, setQuestion] = useState('');
   const [answerMode, setAnswerMode] = useState('qa');
+  const [documentSpeedProfile, setDocumentSpeedProfile] = useState('balanced');
   const [searchResults, setSearchResults] = useState([]);
   const [answer, setAnswer] = useState(null);
   const [answerSavedId, setAnswerSavedId] = useState('');
@@ -453,7 +454,7 @@ export default function App() {
     await run('ask', async () => {
       const data = await request('/api/rag/ask', {
         method: 'POST',
-        json: { question, mode: answerMode, spaceId: activeSpaceId },
+        json: { question, mode: answerMode, speedProfile: documentSpeedProfile, spaceId: activeSpaceId },
       });
       setAnswer(data);
       setAnswerSavedId('');
@@ -1172,6 +1173,8 @@ export default function App() {
             closeDocumentPreview={closeDocumentPreview}
             answerMode={answerMode}
             setAnswerMode={setAnswerMode}
+            documentSpeedProfile={documentSpeedProfile}
+            setDocumentSpeedProfile={setDocumentSpeedProfile}
             question={question}
             setQuestion={setQuestion}
             ask={ask}

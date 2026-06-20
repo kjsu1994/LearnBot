@@ -13,22 +13,27 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import com.learnbot.config.LearnBotProperties;
 
 @Service
 public class SearchService {
     private final DocumentRepository repository;
     private final OllamaClient ollamaClient;
     private final DocumentReranker documentReranker;
+    private final LearnBotProperties properties;
+    private final Map<String, CachedEmbedding> embeddingCache = new ConcurrentHashMap<>();
 
     public SearchService(DocumentRepository repository, OllamaClient ollamaClient) {
-        this(repository, ollamaClient, null);
+        this(repository, ollamaClient, null, null);
     }
 
     @Autowired
-    public SearchService(DocumentRepository repository, OllamaClient ollamaClient, DocumentReranker documentReranker) {
+    public SearchService(DocumentRepository repository, OllamaClient ollamaClient, DocumentReranker documentReranker, LearnBotProperties properties) {
         this.repository = repository;
         this.ollamaClient = ollamaClient;
         this.documentReranker = documentReranker;
+        this.properties = properties;
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit) {
@@ -46,7 +51,7 @@ public class SearchService {
 
         try {
             String semanticQuery = String.join(" ", expandedQueries);
-            List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+            List<Double> embedding = embeddingFor(semanticQuery);
             for (SearchResult result : repository.search(semanticQuery, embedding, filter, candidateLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
@@ -246,6 +251,56 @@ public class SearchService {
         }
     }
 
+    private List<Double> embeddingFor(String semanticQuery) {
+        if (!embeddingCacheEnabled()) {
+            return ollamaClient.embed(List.of(semanticQuery)).get(0);
+        }
+        String key = embeddingCacheKey(semanticQuery);
+        long now = System.currentTimeMillis();
+        CachedEmbedding cached = embeddingCache.get(key);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            return cached.values();
+        }
+        List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+        embeddingCache.put(key, new CachedEmbedding(embedding, now + embeddingCacheTtlMillis()));
+        trimEmbeddingCache();
+        return embedding;
+    }
+
+    private boolean embeddingCacheEnabled() {
+        return properties != null && properties.getRag().getPipeline().isQueryEmbeddingCacheEnabled();
+    }
+
+    private long embeddingCacheTtlMillis() {
+        int seconds = properties == null ? 600 : properties.getRag().getPipeline().getQueryEmbeddingCacheTtlSeconds();
+        return Math.max(1, seconds) * 1000L;
+    }
+
+    private String embeddingCacheKey(String query) {
+        String model = properties == null ? "" : properties.getOllama().getEmbeddingModel();
+        return model + "::" + normalize(query);
+    }
+
+    private void trimEmbeddingCache() {
+        int max = properties == null ? 1024 : Math.max(1, properties.getRag().getPipeline().getQueryEmbeddingCacheMaxEntries());
+        if (embeddingCache.size() <= max) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        embeddingCache.entrySet().removeIf(entry -> entry.getValue().expiresAtMillis() <= now);
+        if (embeddingCache.size() <= max) {
+            return;
+        }
+        int remove = embeddingCache.size() - max;
+        for (String key : new ArrayList<>(embeddingCache.keySet())) {
+            embeddingCache.remove(key);
+            remove--;
+            if (remove <= 0) {
+                break;
+            }
+        }
+    }
+
     private SearchResult boost(SearchResult result, double value) {
         return new SearchResult(
                 result.chunkId(),
@@ -285,5 +340,8 @@ public class SearchService {
 
     private String safeQuery(String query) {
         return query == null ? "" : query.trim();
+    }
+
+    private record CachedEmbedding(List<Double> values, long expiresAtMillis) {
     }
 }

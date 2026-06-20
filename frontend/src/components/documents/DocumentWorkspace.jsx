@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, Search, X } from 'lucide-react';
-import { answerModes, evidencePreviewLimit } from '../../config/constants.js';
+import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
@@ -128,6 +128,7 @@ function DocumentWorkspace(props) {
             </div>
           </div>
           <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
+          <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
           <QuestionGuide guide={activeAnswerModeGuide} />
           <textarea
             value={props.question}

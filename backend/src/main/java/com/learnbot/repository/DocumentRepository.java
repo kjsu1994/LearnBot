@@ -32,6 +32,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Repository
 public class DocumentRepository {
@@ -637,6 +641,92 @@ public class DocumentRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<AdjacentChunkCandidate> adjacentChunksBatch(
+            List<AdjacentChunkSeed> seeds,
+            int radius,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (seeds == null || seeds.isEmpty() || radius <= 0 || spaceIds == null || spaceIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, ChunkRange> ranges = new LinkedHashMap<>();
+        for (AdjacentChunkSeed seed : seeds) {
+            if (seed == null || seed.documentId() == null) {
+                continue;
+            }
+            ranges.merge(
+                    seed.documentId(),
+                    new ChunkRange(seed.chunkIndex() - radius, seed.chunkIndex() + radius),
+                    ChunkRange::merge
+            );
+        }
+        if (ranges.isEmpty()) {
+            return List.of();
+        }
+        int minChunkIndex = ranges.values().stream().mapToInt(ChunkRange::min).min().orElse(0);
+        int maxChunkIndex = ranges.values().stream().mapToInt(ChunkRange::max).max().orElse(0);
+        List<UUID> documentIds = new ArrayList<>(ranges.keySet());
+        Set<UUID> seedChunkIds = seeds.stream().map(AdjacentChunkSeed::chunkId).collect(Collectors.toSet());
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("documentIds", documentIds)
+                .addValue("minChunkIndex", minChunkIndex)
+                .addValue("maxChunkIndex", maxChunkIndex)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
+                .addValue("contentType", clean(filter == null ? null : filter.contentType()));
+
+        List<SearchResult> candidates = jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       d.id AS document_id,
+                       d.title,
+                       d.source_uri,
+                       s.type AS source_type,
+                       d.content_type,
+                       c.chunk_index,
+                       c.content,
+                       c.metadata::text AS metadata,
+                       0.0 AS score
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                JOIN data_sources s ON s.id = d.source_id
+                WHERE d.id IN (:documentIds)
+                  AND s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                  AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
+                  AND c.chunk_index BETWEEN :minChunkIndex AND :maxChunkIndex
+                  AND c.metadata ->> 'kind' IS DISTINCT FROM 'document_context'
+                ORDER BY d.id, c.chunk_index
+                """, params, this::mapSearchResult);
+
+        List<AdjacentChunkCandidate> output = new ArrayList<>();
+        Set<UUID> emitted = new HashSet<>();
+        for (SearchResult candidate : candidates) {
+            if (seedChunkIds.contains(candidate.chunkId())) {
+                continue;
+            }
+            AdjacentChunkSeed nearest = seeds.stream()
+                    .filter(seed -> seed != null && candidate.documentId().equals(seed.documentId()))
+                    .filter(seed -> Math.abs(candidate.chunkIndex() - seed.chunkIndex()) <= radius)
+                    .min(Comparator.comparingInt(seed -> Math.abs(candidate.chunkIndex() - seed.chunkIndex())))
+                    .orElse(null);
+            if (nearest == null || !emitted.add(candidate.chunkId())) {
+                continue;
+            }
+            output.add(new AdjacentChunkCandidate(
+                    candidate,
+                    nearest.chunkId(),
+                    Math.abs(candidate.chunkIndex() - nearest.chunkIndex()),
+                    nearest.score()
+            ));
+        }
+        return output;
+    }
+
     public void rebuildDocumentGraph(UUID sourceId) {
         jdbc.update("DELETE FROM document_graph_edges WHERE source_id = :sourceId",
                 new MapSqlParameterSource().addValue("sourceId", sourceId));
@@ -962,5 +1052,17 @@ public class DocumentRepository {
             Integer chunkIndex,
             Map<String, Object> metadata
     ) {
+    }
+
+    public record AdjacentChunkSeed(UUID chunkId, UUID documentId, int chunkIndex, double score) {
+    }
+
+    public record AdjacentChunkCandidate(SearchResult result, UUID seedChunkId, int distance, double seedScore) {
+    }
+
+    private record ChunkRange(int min, int max) {
+        ChunkRange merge(ChunkRange other) {
+            return new ChunkRange(Math.min(min, other.min()), Math.max(max, other.max()));
+        }
     }
 }

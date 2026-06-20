@@ -526,6 +526,14 @@ public class LearnBotProperties {
 
             private double minTopScore = 0.30;
             private double minCoverage = 0.15;
+            private String defaultDocumentSpeedProfile = "BALANCED";
+            private boolean queryEmbeddingCacheEnabled = true;
+
+            @Min(1)
+            private int queryEmbeddingCacheMaxEntries = 1024;
+
+            @Min(1)
+            private int queryEmbeddingCacheTtlSeconds = 600;
             private Reranker reranker = new Reranker();
 
             public boolean isRewriteEnabled() {
@@ -614,6 +622,38 @@ public class LearnBotProperties {
 
             public void setMinCoverage(double minCoverage) {
                 this.minCoverage = minCoverage;
+            }
+
+            public String getDefaultDocumentSpeedProfile() {
+                return defaultDocumentSpeedProfile;
+            }
+
+            public void setDefaultDocumentSpeedProfile(String defaultDocumentSpeedProfile) {
+                this.defaultDocumentSpeedProfile = defaultDocumentSpeedProfile;
+            }
+
+            public boolean isQueryEmbeddingCacheEnabled() {
+                return queryEmbeddingCacheEnabled;
+            }
+
+            public void setQueryEmbeddingCacheEnabled(boolean queryEmbeddingCacheEnabled) {
+                this.queryEmbeddingCacheEnabled = queryEmbeddingCacheEnabled;
+            }
+
+            public int getQueryEmbeddingCacheMaxEntries() {
+                return queryEmbeddingCacheMaxEntries;
+            }
+
+            public void setQueryEmbeddingCacheMaxEntries(int queryEmbeddingCacheMaxEntries) {
+                this.queryEmbeddingCacheMaxEntries = queryEmbeddingCacheMaxEntries;
+            }
+
+            public int getQueryEmbeddingCacheTtlSeconds() {
+                return queryEmbeddingCacheTtlSeconds;
+            }
+
+            public void setQueryEmbeddingCacheTtlSeconds(int queryEmbeddingCacheTtlSeconds) {
+                this.queryEmbeddingCacheTtlSeconds = queryEmbeddingCacheTtlSeconds;
             }
 
             public Reranker getReranker() {
