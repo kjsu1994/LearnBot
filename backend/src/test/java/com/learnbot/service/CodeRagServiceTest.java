@@ -225,8 +225,88 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence()).isNotEmpty();
         assertThat(response.evidence().get(0).filePath()).contains("AuthService");
-        assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceScoreParts", "evidenceRankReason");
+        assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceRankReason", "graphReliability");
+        assertThat(response.evidence().get(0).metadata()).doesNotContainKey("evidenceScoreParts");
         assertThat(String.valueOf(response.evidence().get(0).metadata().get("evidenceRankReason"))).contains("graph CALLS");
+    }
+
+    @Test
+    void evidenceRankingDebugExposesScorePartsAndGraphDiagnostics() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getCode().getGraph().setEvidenceRankingDebug(true);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult graph = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.42, "CALLS", 0.96, 1);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(graph));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "login call flow",
+                "flow",
+                4
+        );
+
+        assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScoreParts", "evidenceRankReason");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Graph evidence:"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Top graph edges: CALLS=1"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Evidence ranking debug:"));
+    }
+
+    @Test
+    void confidenceUsesGraphEvidenceScoreWhenRawSearchScoreIsLow() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult serviceResult = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.12, "CALLS", 0.98, 1);
+        CodeSearchResult repositoryResult = graphResult("backend/src/main/java/com/learnbot/repository/AuthRepository.java", "method", "findUser", 0.10, "USES_ENTITY", 0.92, 1);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(serviceResult, repositoryResult));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("AuthService calls repository evidence [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "login call flow",
+                "flow",
+                4
+        );
+
+        assertThat(response.confidence()).isIn("높음", "보통");
+    }
+
+    @Test
+    void callFlowSelectionPrioritizesEvidenceScoreBeforeFlowRank() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult weakController = graphResult("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.15, "CALLS", 0.20, 2);
+        CodeSearchResult strongService = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.45, "CALLS", 0.99, 1);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(weakController, strongService));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "login call flow",
+                "flow",
+                4
+        );
+
+        assertThat(response.evidence().get(0).filePath()).contains("AuthService");
     }
 
     private static OllamaClient.ChatResult chat(String content) {

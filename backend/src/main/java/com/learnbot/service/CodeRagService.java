@@ -32,6 +32,7 @@ public class CodeRagService {
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
     private final RagPipelineService pipelineService;
+    private final CodeEvidenceRanker evidenceRanker;
 
     @Autowired
     public CodeRagService(
@@ -40,7 +41,8 @@ public class CodeRagService {
             CommitInsightService commitInsightService,
             OllamaClient ollamaClient,
             LearnBotProperties properties,
-            RagPipelineService pipelineService
+            RagPipelineService pipelineService,
+            CodeEvidenceRanker evidenceRanker
     ) {
         this.searchService = searchService;
         this.referenceService = referenceService;
@@ -48,6 +50,18 @@ public class CodeRagService {
         this.ollamaClient = ollamaClient;
         this.properties = properties;
         this.pipelineService = pipelineService;
+        this.evidenceRanker = evidenceRanker;
+    }
+
+    public CodeRagService(
+            CodeSearchService searchService,
+            CodeReferenceService referenceService,
+            CommitInsightService commitInsightService,
+            OllamaClient ollamaClient,
+            LearnBotProperties properties,
+            RagPipelineService pipelineService
+    ) {
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, new CodeEvidenceRanker(properties));
     }
 
     CodeRagService(
@@ -57,7 +71,7 @@ public class CodeRagService {
             OllamaClient ollamaClient,
             LearnBotProperties properties
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties));
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties), new CodeEvidenceRanker(properties));
     }
 
     CodeRagService(
@@ -260,11 +274,7 @@ public class CodeRagService {
             Map<UUID, CodeSearchResult> merged,
             int limit
     ) {
-        List<CodeSearchResult> ranked = merged.values().stream()
-                .map(result -> rankEvidence(question, questionMode, result))
-                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceScore(question, questionMode, result)).reversed())
-                .toList();
-        return applyDiversityPenalty(question, questionMode, ranked).stream()
+        return evidenceRanker.rank(question, questionMode, List.copyOf(merged.values())).stream()
                 .limit(limit)
                 .toList();
     }
@@ -275,207 +285,6 @@ public class CodeRagService {
             case CALL_FLOW -> 3;
             default -> 2;
         };
-    }
-
-    private List<CodeSearchResult> applyDiversityPenalty(String question, CodeQuestionMode mode, List<CodeSearchResult> ranked) {
-        if (ranked == null || ranked.isEmpty()) {
-            return List.of();
-        }
-        Map<String, Integer> fileCounts = new LinkedHashMap<>();
-        Map<String, Integer> categoryCounts = new LinkedHashMap<>();
-        List<CodeSearchResult> adjusted = new ArrayList<>();
-        for (CodeSearchResult result : ranked) {
-            double penalty = Math.max(0, fileCounts.getOrDefault(result.filePath(), 0) * 0.08)
-                    + Math.max(0, categoryCounts.getOrDefault(category(result), 0) * 0.05);
-            adjusted.add(withEvidenceAdjustment(question, mode, result, -penalty, penalty == 0 ? null : "diversity penalty"));
-            fileCounts.merge(result.filePath(), 1, Integer::sum);
-            categoryCounts.merge(category(result), 1, Integer::sum);
-        }
-        return adjusted.stream()
-                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceScore(question, mode, result)).reversed()
-                        .thenComparing(CodeSearchResult::filePath)
-                        .thenComparingInt(CodeSearchResult::lineStart))
-                .toList();
-    }
-
-    private CodeSearchResult rankEvidence(String question, CodeQuestionMode mode, CodeSearchResult result) {
-        if (result == null || !properties.getCode().getGraph().isEvidenceRankingEnabled()) {
-            return result;
-        }
-        double base = clamp(result.score(), 0, 1);
-        double text = textMatchScore(question, result);
-        double graph = graphEvidenceScore(mode, result);
-        double intent = intentEvidenceScore(mode, result);
-        double structure = structureEvidenceScore(mode, result);
-        double legacy = Math.max(0, answerRelevance(question, mode, result) - result.score()) * 0.20;
-        double score = base + text + graph + intent + structure + legacy;
-        Map<String, Object> parts = new LinkedHashMap<>();
-        parts.put("baseSearch", round(base));
-        parts.put("textMatch", round(text));
-        parts.put("graph", round(graph));
-        parts.put("intent", round(intent));
-        parts.put("structure", round(structure));
-        parts.put("legacyRerank", round(legacy));
-        return withEvidenceMetadata(result, score, parts, evidenceReason(mode, result, graph, intent, structure));
-    }
-
-    private CodeSearchResult withEvidenceAdjustment(String question, CodeQuestionMode mode, CodeSearchResult result, double adjustment, String reason) {
-        if (result == null || !properties.getCode().getGraph().isEvidenceRankingEnabled()) {
-            return result;
-        }
-        double current = evidenceScore(question, mode, result);
-        Map<String, Object> sourceMetadata = result.metadata() == null ? Map.of() : result.metadata();
-        Map<String, Object> parts = new LinkedHashMap<>(metadataMap(sourceMetadata.get("evidenceScoreParts")));
-        if (adjustment != 0) {
-            parts.put("diversity", round(adjustment));
-        }
-        String currentReason = String.valueOf(sourceMetadata.getOrDefault("evidenceRankReason", ""));
-        String nextReason = reason == null || reason.isBlank()
-                ? currentReason
-                : currentReason.isBlank() ? reason : currentReason + "; " + reason;
-        return withEvidenceMetadata(result, current + adjustment, parts, nextReason);
-    }
-
-    private CodeSearchResult withEvidenceMetadata(CodeSearchResult result, double score, Map<String, Object> parts, String reason) {
-        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
-        metadata.put("evidenceScore", round(score));
-        metadata.put("evidenceScoreParts", Map.copyOf(parts));
-        metadata.put("evidenceRankReason", reason);
-        metadata.put("graphReliability", graphReliability(result));
-        return new CodeSearchResult(
-                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
-                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
-                result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
-                result.content(), result.score(), Map.copyOf(metadata)
-        );
-    }
-
-    private double evidenceScore(String question, CodeQuestionMode mode, CodeSearchResult result) {
-        if (result == null) {
-            return 0;
-        }
-        Object value = result.metadata() == null ? null : result.metadata().get("evidenceScore");
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-        try {
-            return value == null ? answerRelevance(question, mode, result) : Double.parseDouble(String.valueOf(value));
-        } catch (NumberFormatException ignored) {
-            return answerRelevance(question, mode, result);
-        }
-    }
-
-    private double textMatchScore(String question, CodeSearchResult result) {
-        List<String> terms = primaryQuestionTerms(question);
-        if (terms.isEmpty()) {
-            return 0;
-        }
-        String path = normalizeCodeText(result.filePath());
-        String symbol = normalizeCodeText(String.join(" ",
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), ""),
-                safe(result.controlName(), ""),
-                safe(result.eventName(), "")
-        ));
-        String content = normalizeCodeText(result.content());
-        double score = 0;
-        for (String term : terms) {
-            if (path.contains(term)) score += 0.10;
-            if (symbol.contains(term)) score += 0.12;
-            if (content.contains(term)) score += 0.03;
-        }
-        return Math.min(0.55, score);
-    }
-
-    private double graphEvidenceScore(CodeQuestionMode mode, CodeSearchResult result) {
-        if (!isGraphExpanded(result)) {
-            return 0;
-        }
-        double pathScore = clamp(numberMetadata(result, "graphPathScore", 0), 0, 1);
-        int depth = Math.max(1, (int) numberMetadata(result, "graphDepth", 1));
-        double depthFactor = switch (depth) {
-            case 1 -> 1.0;
-            case 2 -> 0.72;
-            case 3 -> 0.52;
-            default -> 0.36;
-        };
-        double edgeFactor = edgeWeight(String.valueOf(result.metadata().getOrDefault("graphEdgeType", "")), mode);
-        double sourceFactor = "llm_fallback".equals(String.valueOf(result.metadata().get("source"))) ? 0.70 : 1.0;
-        double truncationFactor = Boolean.TRUE.equals(result.metadata().get("graphTraversalTruncated")) ? 0.82 : 1.0;
-        return 0.45 * pathScore * depthFactor * edgeFactor * sourceFactor * truncationFactor;
-    }
-
-    private double edgeWeight(String edgeType, CodeQuestionMode mode) {
-        if (edgeType == null || edgeType.isBlank()) {
-            return 0.65;
-        }
-        if ("REFERENCES".equals(edgeType)) return 0.45;
-        if ("CALLS".equals(edgeType) || "HANDLES_EVENT".equals(edgeType) || "EXPOSES_ENDPOINT".equals(edgeType)) {
-            return mode == CodeQuestionMode.CALL_FLOW || mode == CodeQuestionMode.UI_EVENT ? 1.15 : 1.0;
-        }
-        if ("IMPLEMENTS".equals(edgeType) || "OVERRIDES".equals(edgeType) || "EXTENDS".equals(edgeType)) {
-            return mode == CodeQuestionMode.IMPACT || mode == CodeQuestionMode.OVERVIEW ? 1.05 : 0.85;
-        }
-        if ("READS_FIELD".equals(edgeType) || "WRITES_FIELD".equals(edgeType) || "USES_ENTITY".equals(edgeType)) {
-            return mode == CodeQuestionMode.IMPACT ? 1.10 : 0.82;
-        }
-        if ("CONTAINS".equals(edgeType) || "DEFINES".equals(edgeType)) {
-            return mode == CodeQuestionMode.OVERVIEW || mode == CodeQuestionMode.LOCATE ? 0.95 : 0.70;
-        }
-        return 0.80;
-    }
-
-    private double intentEvidenceScore(CodeQuestionMode mode, CodeSearchResult result) {
-        String type = result.chunkType() == null ? "" : result.chunkType();
-        String path = result.filePath() == null ? "" : result.filePath().toLowerCase(java.util.Locale.ROOT);
-        return switch (mode) {
-            case CALL_FLOW -> Math.max(0, 0.07 * (5 - flowRank(result)))
-                    + (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT") ? 0.18 : 0);
-            case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY") ? 0.22 : 0.04;
-            case UI_EVENT -> ("event_handler".equals(type) || "xaml_event".equals(type) || "xaml_view".equals(type)
-                    || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO")) ? 0.25 : 0.02;
-            case OVERVIEW -> isProjectContext(type) || path.contains("/config/") || path.contains("/web/") || path.contains("/service/") ? 0.18 : 0.04;
-            case EXPLAIN_METHOD -> "method".equals(type) || notBlank(result.methodName()) ? 0.22 : 0.02;
-            case LOCATE -> notBlank(result.methodName()) || notBlank(result.className()) || notBlank(result.symbolName()) ? 0.18 : 0.03;
-        };
-    }
-
-    private double structureEvidenceScore(CodeQuestionMode mode, CodeSearchResult result) {
-        double score = isStructured(result.chunkType()) ? 0.10 : 0;
-        if (notBlank(result.methodName())) score += 0.05;
-        if (notBlank(result.className())) score += 0.04;
-        if ((mode == CodeQuestionMode.OVERVIEW || mode == CodeQuestionMode.IMPACT) && isProjectContext(result.chunkType())) {
-            score += 0.10;
-        }
-        return Math.min(0.24, score);
-    }
-
-    private boolean isGraphEdge(CodeSearchResult result, String... types) {
-        if (!isGraphExpanded(result)) {
-            return false;
-        }
-        String edgeType = String.valueOf(result.metadata().get("graphEdgeType"));
-        return List.of(types).contains(edgeType);
-    }
-
-    private String evidenceReason(CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure) {
-        List<String> reasons = new ArrayList<>();
-        if (graph > 0) reasons.add("graph " + String.valueOf(result.metadata().getOrDefault("graphEdgeType", "RELATED")));
-        if (intent >= 0.18) reasons.add(mode.value() + " intent match");
-        if (structure >= 0.10) reasons.add("structured code evidence");
-        if (reasons.isEmpty()) reasons.add("hybrid search relevance");
-        return String.join(", ", reasons);
-    }
-
-    private String graphReliability(CodeSearchResult result) {
-        if (!isGraphExpanded(result)) {
-            return "none";
-        }
-        if (Boolean.TRUE.equals(result.metadata().get("graphTraversalTruncated"))) {
-            return "partial";
-        }
-        return numberMetadata(result, "graphDepth", 1) <= 1 ? "strong" : "medium";
     }
 
     private List<CodeSearchResult> collectEvidence(
@@ -505,23 +314,18 @@ public class CodeRagService {
                 // Invalid symbol candidates should not block a natural-language code answer.
             }
         }
-        return merged.values().stream()
-                .map(result -> rankEvidence(question, questionMode, result))
-                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceScore(question, questionMode, result)).reversed())
+        return evidenceRanker.rank(question, questionMode, List.copyOf(merged.values())).stream()
                 .limit(limit)
                 .toList();
     }
 
     private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
         int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
-        List<CodeSearchResult> ranked = results.stream()
-                .map(result -> rankEvidence(question, questionMode, result))
-                .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceScore(question, questionMode, result)).reversed())
-                .toList();
+        List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
         if (questionMode == CodeQuestionMode.CALL_FLOW) {
             return ranked.stream()
-                    .sorted(Comparator.comparingInt(this::flowRank)
-                            .thenComparing(Comparator.comparingDouble((CodeSearchResult result) -> evidenceScore(question, questionMode, result)).reversed()))
+                    .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceRanker.score(result)).reversed()
+                            .thenComparingInt(this::flowRank))
                     .limit(limit)
                     .toList();
         }
@@ -756,7 +560,7 @@ public class CodeRagService {
                             result.lineEnd(),
                             preview(result.content()),
                             result.score(),
-                            result.metadata()
+                            evidenceRanker.responseMetadata(result.metadata())
                     );
                 })
                 .toList();
@@ -774,15 +578,18 @@ public class CodeRagService {
         if (results == null || results.isEmpty()) {
             return "낮음";
         }
-        double topScore = results.get(0).score();
+        double topScore = results.stream().mapToDouble(evidenceRanker::score).max().orElse(results.get(0).score());
         long distinctFiles = results.stream().map(CodeSearchResult::filePath).distinct().count();
         boolean hasStructuredEvidence = results.stream().anyMatch(result ->
                 isStructured(result.chunkType()) || notBlank(result.methodName()) || notBlank(result.className()) || notBlank(result.symbolName())
         );
-        if (hasStructuredEvidence && results.size() >= 4 && topScore >= 0.55 && distinctFiles <= 6) {
+        CodeEvidenceRanker.GraphReliabilitySummary graph = evidenceRanker.summarizeGraph(results);
+        boolean strongGraphEvidence = graph.strong() >= 2 || (graph.strong() >= 1 && graph.medium() >= 2);
+        if ((hasStructuredEvidence && results.size() >= 4 && topScore >= 0.55 && distinctFiles <= 6)
+                || (strongGraphEvidence && topScore >= 0.90 && distinctFiles <= 8)) {
             return "높음";
         }
-        if (hasStructuredEvidence || results.size() >= 3 || topScore >= 0.35) {
+        if (hasStructuredEvidence || results.size() >= 3 || topScore >= 0.35 || (graph.strong() + graph.medium()) >= 2) {
             return "보통";
         }
         return "낮음";
@@ -825,11 +632,31 @@ public class CodeRagService {
         if (retrieval != null && !retrieval.assessment().sufficient()) {
             notes.add("Code evidence sufficiency check remained weak: " + String.join(", ", retrieval.assessment().reasons()));
         }
-        if (results.stream().anyMatch(this::isGraphExpanded)) {
+        if (answerResults.stream().anyMatch(this::isGraphExpanded)) {
             notes.add("Code GraphRAG expanded related evidence through indexed code relationships.");
+            CodeEvidenceRanker.GraphReliabilitySummary graph = evidenceRanker.summarizeGraph(answerResults);
+            notes.add("Graph evidence: " + graph.expanded() + " expanded chunks, "
+                    + graph.strong() + " strong, "
+                    + graph.medium() + " medium, "
+                    + graph.partial() + " partial.");
+            if (!graph.edgeSummary().isBlank()) {
+                notes.add("Top graph edges: " + graph.edgeSummary() + ".");
+            }
         }
         if (answerResults.stream().anyMatch(result -> result.metadata() != null && result.metadata().containsKey("evidenceScore"))) {
             notes.add("Code evidence was ranked with deterministic evidence scoring before answer context selection.");
+            if (evidenceRanker.debug()) {
+                String rankingDetails = answerResults.stream()
+                        .limit(5)
+                        .map(result -> {
+                            Map<String, Object> metadata = result.metadata() == null ? Map.of() : result.metadata();
+                            return result.filePath() + " score=" + evidenceRanker.score(result)
+                                    + " reliability=" + String.valueOf(metadata.getOrDefault("graphReliability", "none"))
+                                    + " reason=" + String.valueOf(metadata.getOrDefault("evidenceRankReason", ""));
+                        })
+                        .collect(Collectors.joining("; "));
+                notes.add("Evidence ranking debug: " + rankingDetails);
+            }
         }
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
@@ -896,55 +723,6 @@ public class CodeRagService {
 
     private boolean containsCitation(String answer) {
         return answer != null && answer.matches("(?s).*\\[\\d+].*");
-    }
-
-    private double answerRelevance(String question, CodeQuestionMode mode, CodeSearchResult result) {
-        double score = result.score();
-        List<String> terms = primaryQuestionTerms(question);
-        String path = normalizeCodeText(result.filePath());
-        String symbolText = normalizeCodeText(String.join(" ",
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), ""),
-                safe(result.controlName(), ""),
-                safe(result.eventName(), "")
-        ));
-        String content = normalizeCodeText(result.content());
-
-        for (String term : terms) {
-            if (path.contains(term)) {
-                score += 0.55;
-            }
-            if (symbolText.contains(term)) {
-                score += 0.45;
-            }
-            if (content.contains(term)) {
-                score += 0.12;
-            }
-        }
-        if (isStructured(result.chunkType())) {
-            score += 0.08;
-        }
-        if ((mode == CodeQuestionMode.OVERVIEW || mode == CodeQuestionMode.IMPACT) && isProjectContext(result.chunkType())) {
-            score += "project_structure".equals(result.chunkType()) || "repository_summary".equals(result.chunkType()) ? 0.65 : 0.30;
-        }
-        if (mode != CodeQuestionMode.OVERVIEW && mode != CodeQuestionMode.IMPACT && isProjectContext(result.chunkType())) {
-            score -= "file_summary".equals(result.chunkType()) ? 0.04 : 0.16;
-        }
-        if (mode == CodeQuestionMode.CALL_FLOW) {
-            score += Math.max(0, 0.08 * (5 - flowRank(result)));
-        }
-        if (isGraphExpanded(result)) {
-            score += switch (mode) {
-                case CALL_FLOW, IMPACT -> 0.18;
-                case OVERVIEW -> 0.10;
-                default -> 0.05;
-            };
-        }
-        if (isLoginQuestion(question) && path.contains("git") && !path.contains("auth") && !path.contains("login")) {
-            score -= 0.6;
-        }
-        return score;
     }
 
     private List<String> primaryQuestionTerms(String question) {
@@ -1260,42 +1038,11 @@ public class CodeRagService {
         Object evidenceScore = result.metadata().get("evidenceScore");
         Object reason = result.metadata().get("evidenceRankReason");
         return nullable(" rank=", evidenceScore == null ? null : String.valueOf(evidenceScore))
-                + (isGraphExpanded(result) ? nullable(" reason=", reason == null ? null : String.valueOf(reason)) : "");
+                + (evidenceRanker.debug() && isGraphExpanded(result) ? nullable(" reason=", reason == null ? null : String.valueOf(reason)) : "");
     }
 
     private boolean isGraphExpanded(CodeSearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("graphExpanded"));
-    }
-
-    private double numberMetadata(CodeSearchResult result, String key, double fallback) {
-        if (result == null || result.metadata() == null) {
-            return fallback;
-        }
-        Object value = result.metadata().get(key);
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-        try {
-            return value == null ? fallback : Double.parseDouble(String.valueOf(value));
-        } catch (NumberFormatException ignored) {
-            return fallback;
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> metadataMap(Object value) {
-        return value instanceof Map<?, ?> map
-                ? map.entrySet().stream()
-                .collect(Collectors.toMap(entry -> String.valueOf(entry.getKey()), Map.Entry::getValue, (left, right) -> left, LinkedHashMap::new))
-                : Map.of();
-    }
-
-    private double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private double round(double value) {
-        return Math.round(value * 10000.0) / 10000.0;
     }
 
     private String safe(String value, String fallback) {
@@ -1315,7 +1062,7 @@ public class CodeRagService {
     ) {
     }
 
-    private enum CodeQuestionMode {
+    enum CodeQuestionMode {
         OVERVIEW("overview", "Synthesize search, definitions, references, and nearby chunks. Answer natural-language architecture questions with sections: summary, related files/methods, flow, evidence, and limitations."),
         LOCATE("locate", "Find where the requested feature or behavior is implemented. Prioritize files, classes, methods, and line ranges."),
         EXPLAIN_METHOD("method", "Explain the selected or named method. Cover inputs, side effects, called logic, and return/result behavior."),
