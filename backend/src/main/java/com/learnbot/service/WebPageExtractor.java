@@ -6,6 +6,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.Connection;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -49,6 +50,7 @@ public class WebPageExtractor {
     private final ConcurrentMap<String, Long> lastFetchByHost = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, RobotsRules> robotsCache = new ConcurrentHashMap<>();
 
+    @Autowired
     public WebPageExtractor(LearnBotProperties properties, AdminSettingsService adminSettingsService, DocumentRepository repository, FileExtractor fileExtractor) {
         this.properties = properties;
         this.adminSettingsService = adminSettingsService;
