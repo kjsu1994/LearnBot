@@ -7,15 +7,27 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 if (args.Length < 1 || !Directory.Exists(args[0]))
 {
-    Console.Error.WriteLine("Usage: LearnBot.RoslynAnalyzer <repository-root> [SIMPLE|PROJECT|SOLUTION]");
+    Console.Error.WriteLine("Usage: LearnBot.RoslynAnalyzer <repository-root> [SIMPLE|SAFE_PROJECT|SAFE_SOLUTION]");
     return 2;
 }
 
 var root = Path.GetFullPath(args[0]);
-var requestedMode = args.Length > 1 ? args[1].ToUpperInvariant() : "SIMPLE";
+var requestedMode = NormalizeMode(args.Length > 1 ? args[1] : "SIMPLE");
 var inputs = ResolveInputs(root, requestedMode);
 var parseOptions = new CSharpParseOptions(preprocessorSymbols: inputs.DefineConstants);
-var trees = inputs.Files.Select(path => CSharpSyntaxTree.ParseText(File.ReadAllText(path), parseOptions, path: path)).ToArray();
+var trees = new List<SyntaxTree>();
+var failedFiles = 0;
+foreach (var path in inputs.Files)
+{
+    try
+    {
+        trees.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(path), parseOptions, path: path));
+    }
+    catch
+    {
+        failedFiles++;
+    }
+}
 var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ?? "")
     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
     .Select(path => MetadataReference.CreateFromFile(path));
@@ -141,7 +153,7 @@ foreach (var tree in trees)
 }
 
 Console.Write(JsonSerializer.Serialize(new GraphOutput(
-    nodes.Values, edges.Values, inputs.Mode, inputs.ProjectCount, trees.Length, inputs.FailedProjects
+    nodes.Values, edges.Values, inputs.Mode, inputs.ProjectCount, trees.Count, inputs.FailedProjects, failedFiles
 ), new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -207,8 +219,8 @@ int Line(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.
 
 AnalysisInputs ResolveInputs(string repositoryRoot, string mode)
 {
-    var projectFiles = mode == "SOLUTION" ? ProjectsFromSolutions(repositoryRoot) :
-        mode == "PROJECT" ? Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories).ToArray() :
+    var projectFiles = mode == "SAFE_SOLUTION" ? ProjectsFromSolutions(repositoryRoot) :
+        mode == "SAFE_PROJECT" ? Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories).ToArray() :
         Array.Empty<string>();
     if (projectFiles.Length == 0)
     {
@@ -242,6 +254,18 @@ AnalysisInputs ResolveInputs(string repositoryRoot, string mode)
         projectFiles.Distinct(StringComparer.OrdinalIgnoreCase).Count(), failedProjects, defines.ToArray());
 }
 
+string NormalizeMode(string mode)
+{
+    return (mode ?? "SIMPLE").Trim().ToUpperInvariant() switch
+    {
+        "SOLUTION" => "SAFE_SOLUTION",
+        "PROJECT" => "SAFE_PROJECT",
+        "SAFE_SOLUTION" => "SAFE_SOLUTION",
+        "SAFE_PROJECT" => "SAFE_PROJECT",
+        _ => "SIMPLE"
+    };
+}
+
 string[] ProjectsFromSolutions(string repositoryRoot)
 {
     var projects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -272,6 +296,6 @@ void RemoveGlob(HashSet<string> files, string directory, string glob)
 
 record AnalysisInputs(string[] Files, string Mode, int ProjectCount, int FailedProjects, string[] DefineConstants);
 record GraphOutput(IEnumerable<GraphNode> Nodes, IEnumerable<GraphEdge> Edges, string Mode,
-    int ProjectCount, int AnalyzedFiles, int FailedFiles);
+    int ProjectCount, int AnalyzedFiles, int FailedProjects, int FailedFiles);
 record GraphNode(string Key, string Type, string Name, string QualifiedName, string? FilePath, int Line);
 record GraphEdge(string SourceKey, string TargetKey, string Type, double Confidence, string FilePath, int Line, string Source);

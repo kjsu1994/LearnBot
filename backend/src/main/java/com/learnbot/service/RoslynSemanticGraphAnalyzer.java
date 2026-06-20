@@ -66,13 +66,23 @@ public class RoslynSemanticGraphAnalyzer {
             AnalyzerOutput output = objectMapper.readValue(json, AnalyzerOutput.class);
             CodeGraph graph = map(output, chunks);
             int analyzedFiles = output.analyzedFiles() > 0 ? output.analyzedFiles() : attemptedFiles;
-            int failedFiles = Math.max(output.failedFiles(), attemptedFiles - analyzedFiles);
+            int failedFiles = Math.max(0, output.failedFiles());
+            int failedProjects = Math.max(0, output.failedProjects());
+            int fallbackFiles = Math.max(0, attemptedFiles - analyzedFiles - failedFiles);
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("projects", output.projectCount());
+            metadata.put("failedProjects", failedProjects);
+            metadata.put("failedSourceFiles", failedFiles);
+            metadata.put("fallbackFiles", fallbackFiles);
+            metadata.put("safeMode", isSafeMode(output.mode() == null ? mode : output.mode()));
+            metadata.put("deprecatedModeAlias", usesDeprecatedModeAlias());
+            String message = diagnosticMessage(failedFiles, failedProjects, fallbackFiles);
             return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
-                    "CSHARP_ROSLYN", "Roslyn", failedFiles == 0 ? "SUCCESS" : "PARTIAL",
+                    "CSHARP_ROSLYN", "Roslyn",
+                    failedFiles == 0 && failedProjects == 0 && fallbackFiles == 0 ? "SUCCESS" : "PARTIAL",
                     output.mode() == null ? mode : output.mode(), attemptedFiles, analyzedFiles, failedFiles,
                     graph.edges().size(), 0, graph.nodes().size(), graph.edges().size(), elapsedMillis(started),
-                    failedFiles == 0 ? "Roslyn semantic analysis completed." : "Some C# files or projects used fallback analysis.",
-                    Map.of("projects", output.projectCount())
+                    message, Map.copyOf(metadata)
             ));
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -98,11 +108,49 @@ public class RoslynSemanticGraphAnalyzer {
     private String determineMode(Path root) {
         String requested = properties.getCode().getGraph().getRoslynMode();
         if (requested != null && !requested.isBlank() && !"AUTO".equalsIgnoreCase(requested)) {
-            return requested.trim().toUpperCase(Locale.ROOT);
+            return normalizeMode(requested);
         }
-        if (hasFile(root, ".sln")) return "SOLUTION";
-        if (hasFile(root, ".csproj")) return "PROJECT";
+        if (hasFile(root, ".sln")) return "SAFE_SOLUTION";
+        if (hasFile(root, ".csproj")) return "SAFE_PROJECT";
         return "SIMPLE";
+    }
+
+    private String normalizeMode(String mode) {
+        return switch (mode.trim().toUpperCase(Locale.ROOT)) {
+            case "SOLUTION", "SAFE_SOLUTION" -> "SAFE_SOLUTION";
+            case "PROJECT", "SAFE_PROJECT" -> "SAFE_PROJECT";
+            default -> "SIMPLE";
+        };
+    }
+
+    private boolean usesDeprecatedModeAlias() {
+        String requested = properties.getCode().getGraph().getRoslynMode();
+        if (requested == null) {
+            return false;
+        }
+        String normalized = requested.trim().toUpperCase(Locale.ROOT);
+        return "PROJECT".equals(normalized) || "SOLUTION".equals(normalized);
+    }
+
+    private boolean isSafeMode(String mode) {
+        return "SAFE_PROJECT".equals(mode) || "SAFE_SOLUTION".equals(mode);
+    }
+
+    private String diagnosticMessage(int failedFiles, int failedProjects, int fallbackFiles) {
+        if (failedFiles == 0 && failedProjects == 0 && fallbackFiles == 0) {
+            return "Roslyn safe semantic analysis completed.";
+        }
+        List<String> parts = new ArrayList<>();
+        if (failedFiles > 0) {
+            parts.add(failedFiles + " C# source files could not be parsed");
+        }
+        if (failedProjects > 0) {
+            parts.add(failedProjects + " C# project files could not be interpreted");
+        }
+        if (fallbackFiles > 0) {
+            parts.add(fallbackFiles + " C# files were outside safe project inputs");
+        }
+        return "Roslyn safe semantic analysis completed partially: " + String.join(", ", parts) + ".";
     }
 
     private boolean hasFile(Path root, String suffix) { return countFiles(root, suffix) > 0; }
@@ -110,10 +158,17 @@ public class RoslynSemanticGraphAnalyzer {
     private int countFiles(Path root, String suffix) {
         if (root == null || !Files.isDirectory(root)) return 0;
         try (var paths = Files.walk(root)) {
-            return (int) paths.filter(path -> Files.isRegularFile(path) && path.toString().endsWith(suffix)).count();
+            return (int) paths.filter(path -> Files.isRegularFile(path)
+                    && path.toString().endsWith(suffix)
+                    && (!".cs".equals(suffix) || isSafeSourcePath(path))).count();
         } catch (IOException ignored) {
             return 0;
         }
+    }
+
+    private boolean isSafeSourcePath(Path path) {
+        String normalized = path.toString().replace('\\', '/');
+        return !normalized.contains("/bin/") && !normalized.contains("/obj/");
     }
 
     private long elapsedMillis(long started) {
@@ -158,7 +213,7 @@ public class RoslynSemanticGraphAnalyzer {
     }
 
     private record AnalyzerOutput(List<AnalyzerNode> nodes, List<AnalyzerEdge> edges, String mode,
-                                  int projectCount, int analyzedFiles, int failedFiles) {}
+                                  int projectCount, int analyzedFiles, int failedProjects, int failedFiles) {}
     private record AnalyzerNode(String key, String type, String name, String qualifiedName, String filePath, int line) {}
     private record AnalyzerEdge(String sourceKey, String targetKey, String type, double confidence,
                                 String filePath, int line, String source) {}

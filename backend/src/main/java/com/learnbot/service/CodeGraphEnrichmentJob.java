@@ -7,6 +7,7 @@ public record CodeGraphEnrichmentJob(
         UUID repositoryId,
         UUID indexVersion,
         String status,
-        int attempts
+        int attempts,
+        String leaseOwner
 ) {
 }

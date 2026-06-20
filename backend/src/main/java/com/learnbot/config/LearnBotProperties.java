@@ -834,6 +834,9 @@ public class LearnBotProperties {
             @Min(0)
             private int maxLlmFiles = 80;
 
+            @Min(1)
+            private int enrichmentLeaseSeconds = 300;
+
             public boolean isEnabled() {
                 return enabled;
             }
@@ -905,6 +908,9 @@ public class LearnBotProperties {
             public void setMaxLlmFiles(int maxLlmFiles) {
                 this.maxLlmFiles = maxLlmFiles;
             }
+
+            public int getEnrichmentLeaseSeconds() { return enrichmentLeaseSeconds; }
+            public void setEnrichmentLeaseSeconds(int enrichmentLeaseSeconds) { this.enrichmentLeaseSeconds = enrichmentLeaseSeconds; }
         }
     }
 

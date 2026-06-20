@@ -406,6 +406,12 @@ function JobDiagnosticList({ diagnostics }) {
             파일 {diagnostic.analyzedFiles}/{diagnostic.attemptedFiles} · 관계 {diagnostic.resolvedRelations}개
             {diagnostic.unresolvedRelations > 0 ? ` · 미해결 ${diagnostic.unresolvedRelations}개` : ''}
           </span>
+          {diagnostic.metadata?.failedProjects > 0 && (
+            <span>C# project parse failures: {diagnostic.metadata.failedProjects}</span>
+          )}
+          {diagnostic.metadata?.fallbackFiles > 0 && (
+            <span>C# files outside safe project inputs: {diagnostic.metadata.fallbackFiles}</span>
+          )}
           {diagnostic.message && <span>{diagnostic.message}</span>}
         </div>
       ))}

@@ -80,13 +80,13 @@ class CodeSearchServiceTest {
         when(repository.keywordSearch(eq(repositoryId), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(seed));
         when(repository.relatedChunks(any(), anyList(), anyInt(), anyInt())).thenReturn(List.of());
-        when(repository.graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt()))
+        when(repository.graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt(), anyList()))
                 .thenReturn(List.of());
         when(ollamaClient.embed(anyList())).thenThrow(new RuntimeException("embedding unavailable"));
 
         searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
 
-        verify(repository).graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt());
+        verify(repository).graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt(), anyList());
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score) {

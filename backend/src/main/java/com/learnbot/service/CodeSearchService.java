@@ -170,7 +170,8 @@ public class CodeSearchService {
                     graphEdgeTypes(query, intent),
                     graphMaxHop(intent),
                     graphDirection(intent),
-                    Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults())
+                    Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults()),
+                    graphSeedNodeTypes(intent)
             )) {
                 merge(expanded, boost(related, graphBoost(query, related)));
             }
@@ -354,6 +355,16 @@ public class CodeSearchService {
             case FLOW -> "FORWARD";
             case IMPACT -> "REVERSE";
             default -> "BOTH";
+        };
+    }
+
+    private List<String> graphSeedNodeTypes(GraphSearchIntent intent) {
+        return switch (intent) {
+            case FLOW -> List.of("method", "endpoint", "event_handler", "class", "file");
+            case IMPACT -> List.of("method", "class", "field", "type", "file");
+            case UI_EVENT -> List.of("event_handler", "xaml_control", "method", "class", "file");
+            case OVERVIEW -> List.of("directory", "file", "class", "type", "method");
+            default -> List.of("method", "class", "type", "file");
         };
     }
 

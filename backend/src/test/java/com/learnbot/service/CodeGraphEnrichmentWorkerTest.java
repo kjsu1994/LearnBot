@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -21,7 +22,7 @@ class CodeGraphEnrichmentWorkerTest {
         CodeGraphLlmEnricher enricher = mock(CodeGraphLlmEnricher.class);
         UUID repositoryId = UUID.randomUUID();
         UUID indexVersion = UUID.randomUUID();
-        CodeGraphEnrichmentJob job = new CodeGraphEnrichmentJob(UUID.randomUUID(), repositoryId, indexVersion, "RUNNING", 1);
+        CodeGraphEnrichmentJob job = new CodeGraphEnrichmentJob(UUID.randomUUID(), repositoryId, indexVersion, "RUNNING", 1, "worker");
         CodeGraph original = new CodeGraph(List.of(), List.of());
         CodeGraphEdge llmEdge = new CodeGraphEdge("method:a", "method:b", "CALLS", 0.52, null,
                 Map.of("source", "llm_fallback"));
@@ -29,30 +30,35 @@ class CodeGraphEnrichmentWorkerTest {
                 "LLM_ENRICHMENT", "Ollama auxiliary", "SUCCESS", "ASYNC",
                 1, 1, 0, 1, 0, 0, 1, 10, "done", Map.of()
         );
-        when(repository.claimGraphEnrichmentJob()).thenReturn(Optional.of(job));
+        when(repository.claimGraphEnrichmentJob(anyString())).thenReturn(Optional.of(job));
         when(repository.isActiveIndex(repositoryId, indexVersion)).thenReturn(true);
+        when(repository.heartbeatGraphEnrichmentJob(eq(job.id()), anyString())).thenReturn(true);
         when(repository.loadGraph(repositoryId, indexVersion)).thenReturn(original);
         when(repository.listChunksForIndex(repositoryId, indexVersion)).thenReturn(List.of());
         when(enricher.enrichWithDiagnostics(eq(original), anyList()))
                 .thenReturn(new CodeGraphAnalysisResult(new CodeGraph(List.of(), List.of(llmEdge)), diagnostic));
         when(repository.mergeGraphEdges(repositoryId, indexVersion, List.of(llmEdge))).thenReturn(1);
+        when(repository.finishGraphEnrichmentJob(eq(job.id()), anyString(), eq("SUCCEEDED"), eq("Inserted 1 validated LLM relationships.")))
+                .thenReturn(true);
 
         new CodeGraphEnrichmentWorker(repository, enricher).processNext();
 
         verify(repository).mergeGraphEdges(repositoryId, indexVersion, List.of(llmEdge));
-        verify(repository).finishGraphEnrichmentJob(job.id(), "SUCCEEDED", "Inserted 1 validated LLM relationships.");
+        verify(repository).finishGraphEnrichmentJob(eq(job.id()), anyString(), eq("SUCCEEDED"), eq("Inserted 1 validated LLM relationships."));
     }
 
     @Test
     void skipsSupersededIndexWithoutCallingLlm() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeGraphLlmEnricher enricher = mock(CodeGraphLlmEnricher.class);
-        CodeGraphEnrichmentJob job = new CodeGraphEnrichmentJob(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "RUNNING", 1);
-        when(repository.claimGraphEnrichmentJob()).thenReturn(Optional.of(job));
+        CodeGraphEnrichmentJob job = new CodeGraphEnrichmentJob(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "RUNNING", 1, "worker");
+        when(repository.claimGraphEnrichmentJob(anyString())).thenReturn(Optional.of(job));
         when(repository.isActiveIndex(job.repositoryId(), job.indexVersion())).thenReturn(false);
+        when(repository.finishGraphEnrichmentJob(eq(job.id()), anyString(), eq("SKIPPED"), eq("Index is no longer active.")))
+                .thenReturn(true);
 
         new CodeGraphEnrichmentWorker(repository, enricher).processNext();
 
-        verify(repository).finishGraphEnrichmentJob(eq(job.id()), eq("SKIPPED"), eq("Index is no longer active."));
+        verify(repository).finishGraphEnrichmentJob(eq(job.id()), anyString(), eq("SKIPPED"), eq("Index is no longer active."));
     }
 }

@@ -103,6 +103,7 @@ learnbot:
       max-candidates-per-hop: ${LEARNBOT_CODE_GRAPH_MAX_CANDIDATES_PER_HOP:200}
       max-traversal-rows: ${LEARNBOT_CODE_GRAPH_MAX_TRAVERSAL_ROWS:1000}
       max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}
+      enrichment-lease-seconds: ${LEARNBOT_CODE_GRAPH_ENRICHMENT_LEASE_SECONDS:300}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}
   auth:

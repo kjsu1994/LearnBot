@@ -435,52 +435,89 @@ public class CodeRepository {
         jdbc.update("""
                 UPDATE code_graph_enrichment_jobs
                 SET status = 'PENDING', next_attempt_at = now(), started_at = NULL,
-                    error_message = 'Recovered after service restart.'
+                    lease_owner = NULL, lease_until = NULL, heartbeat_at = NULL,
+                    error_message = 'Recovered after expired enrichment lease.'
                 WHERE status = 'RUNNING'
+                  AND (lease_until IS NULL OR lease_until < now())
                 """, new MapSqlParameterSource());
     }
 
     @Transactional
-    public Optional<CodeGraphEnrichmentJob> claimGraphEnrichmentJob() {
+    public Optional<CodeGraphEnrichmentJob> claimGraphEnrichmentJob(String workerId) {
+        int leaseSeconds = Math.max(1, properties.getCode().getGraph().getEnrichmentLeaseSeconds());
         List<CodeGraphEnrichmentJob> jobs = jdbc.query("""
                 WITH candidate AS (
                     SELECT id
                     FROM code_graph_enrichment_jobs
-                    WHERE status = 'PENDING' AND next_attempt_at <= now()
+                    WHERE (status = 'PENDING' AND next_attempt_at <= now())
+                       OR (status = 'RUNNING' AND (lease_until IS NULL OR lease_until < now()))
                     ORDER BY created_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
                 UPDATE code_graph_enrichment_jobs job
-                SET status = 'RUNNING', attempts = attempts + 1, started_at = now(), error_message = NULL
+                SET status = 'RUNNING',
+                    attempts = attempts + 1,
+                    started_at = now(),
+                    lease_owner = :workerId,
+                    lease_until = now() + (:leaseSeconds * interval '1 second'),
+                    heartbeat_at = now(),
+                    error_message = NULL
                 FROM candidate
                 WHERE job.id = candidate.id
-                RETURNING job.id, job.repository_id, job.index_version, job.status, job.attempts
-                """, new MapSqlParameterSource(), (rs, rowNum) -> new CodeGraphEnrichmentJob(
+                RETURNING job.id, job.repository_id, job.index_version, job.status, job.attempts, job.lease_owner
+                """, new MapSqlParameterSource().addValue("workerId", workerId).addValue("leaseSeconds", leaseSeconds), (rs, rowNum) -> new CodeGraphEnrichmentJob(
                         rs.getObject("id", UUID.class), rs.getObject("repository_id", UUID.class),
-                        rs.getObject("index_version", UUID.class), rs.getString("status"), rs.getInt("attempts")
+                        rs.getObject("index_version", UUID.class), rs.getString("status"), rs.getInt("attempts"),
+                        rs.getString("lease_owner")
                 ));
         return jobs.stream().findFirst();
     }
 
-    public void finishGraphEnrichmentJob(UUID id, String status, String message) {
-        jdbc.update("""
+    public boolean finishGraphEnrichmentJob(UUID id, String workerId, String status, String message) {
+        int updated = jdbc.update("""
                 UPDATE code_graph_enrichment_jobs
-                SET status = :status, error_message = :message, finished_at = now()
+                SET status = :status,
+                    error_message = :message,
+                    finished_at = now(),
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL
                 WHERE id = :id
-                """, new MapSqlParameterSource().addValue("id", id).addValue("status", status)
-                .addValue("message", message == null ? null : trimMessage(message)));
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource().addValue("id", id).addValue("workerId", workerId)
+                .addValue("status", status).addValue("message", message == null ? null : trimMessage(message)));
+        return updated > 0;
     }
 
-    public void retryGraphEnrichmentJob(UUID id, int attempts, String message) {
+    public boolean retryGraphEnrichmentJob(UUID id, String workerId, int attempts, String message) {
         int delayMinutes = attempts <= 1 ? 1 : attempts == 2 ? 5 : 30;
-        jdbc.update("""
+        int updated = jdbc.update("""
                 UPDATE code_graph_enrichment_jobs
                 SET status = 'PENDING', error_message = :message,
-                    next_attempt_at = now() + (:delayMinutes * interval '1 minute')
+                    next_attempt_at = now() + (:delayMinutes * interval '1 minute'),
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL
                 WHERE id = :id
-                """, new MapSqlParameterSource().addValue("id", id).addValue("delayMinutes", delayMinutes)
-                .addValue("message", trimMessage(message)));
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource().addValue("id", id).addValue("workerId", workerId)
+                .addValue("delayMinutes", delayMinutes).addValue("message", trimMessage(message)));
+        return updated > 0;
+    }
+
+    public boolean heartbeatGraphEnrichmentJob(UUID id, String workerId) {
+        int leaseSeconds = Math.max(1, properties.getCode().getGraph().getEnrichmentLeaseSeconds());
+        int updated = jdbc.update("""
+                UPDATE code_graph_enrichment_jobs
+                SET lease_until = now() + (:leaseSeconds * interval '1 second'),
+                    heartbeat_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                  AND status = 'RUNNING'
+                """, new MapSqlParameterSource().addValue("id", id).addValue("workerId", workerId)
+                .addValue("leaseSeconds", leaseSeconds));
+        return updated > 0;
     }
 
     public boolean isActiveIndex(UUID repositoryId, UUID indexVersion) {
@@ -1243,7 +1280,7 @@ public class CodeRepository {
     }
 
     public List<CodeSearchResult> graphRelatedChunks(UUID repositoryId, List<UUID> seedChunkIds, List<String> edgeTypes, int limit) {
-        return graphRelatedChunks(repositoryId, seedChunkIds, edgeTypes, 1, "BOTH", limit);
+        return graphRelatedChunks(repositoryId, seedChunkIds, edgeTypes, 1, "BOTH", limit, List.of());
     }
 
     public List<CodeSearchResult> graphRelatedChunks(
@@ -1253,6 +1290,18 @@ public class CodeRepository {
             int maxHop,
             String direction,
             int limit
+    ) {
+        return graphRelatedChunks(repositoryId, seedChunkIds, edgeTypes, maxHop, direction, limit, List.of());
+    }
+
+    public List<CodeSearchResult> graphRelatedChunks(
+            UUID repositoryId,
+            List<UUID> seedChunkIds,
+            List<String> edgeTypes,
+            int maxHop,
+            String direction,
+            int limit,
+            List<String> seedNodeTypes
     ) {
         if (seedChunkIds == null || seedChunkIds.isEmpty()) {
             return List.of();
@@ -1269,19 +1318,25 @@ public class CodeRepository {
         int maxCandidatesPerHop = Math.max(1, properties.getCode().getGraph().getMaxCandidatesPerHop());
         int maxTraversalRows = Math.max(1, properties.getCode().getGraph().getMaxTraversalRows());
         int safeLimit = Math.max(1, Math.min(limit, 80));
+        MapSqlParameterSource seedParams = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("maxSeedNodes", maxSeedNodes);
+        String seedValues = seedValues(seedChunkIds, seedParams);
+        String seedTypeOrder = seedTypeOrder(seedNodeTypes, seedParams);
 
         List<TraversalPath> seeds = jdbc.query("""
-                SELECT DISTINCT n.id, n.name
+                WITH seed_input(chunk_id, seed_rank) AS (
+                    VALUES %s
+                )
+                SELECT DISTINCT n.id, n.name, seed_input.seed_rank,
+                       %s AS seed_type_rank
                 FROM code_graph_nodes n
+                JOIN seed_input ON seed_input.chunk_id = n.chunk_id
                 WHERE n.active
-                  AND n.chunk_id IN (:seedChunkIds)
                   AND (CAST(:repositoryId AS uuid) IS NULL OR n.repository_id = CAST(:repositoryId AS uuid))
-                ORDER BY n.id
+                ORDER BY seed_input.seed_rank, seed_type_rank, n.name, n.id
                 LIMIT :maxSeedNodes
-                """, new MapSqlParameterSource()
-                .addValue("repositoryId", repositoryId)
-                .addValue("seedChunkIds", seedChunkIds)
-                .addValue("maxSeedNodes", maxSeedNodes), (rs, rowNum) -> {
+                """.formatted(seedValues, seedTypeOrder), seedParams, (rs, rowNum) -> {
                     UUID id = rs.getObject("id", UUID.class);
                     return new TraversalPath(id, List.of(id), List.of(rs.getString("name")), List.of(), 0, 1.0);
                 });
@@ -1408,6 +1463,37 @@ public class CodeRepository {
                         rs.getString("edge_type"),
                         rs.getDouble("confidence")
                 ));
+    }
+
+    private String seedValues(List<UUID> seedChunkIds, MapSqlParameterSource params) {
+        List<UUID> distinct = seedChunkIds.stream().distinct().toList();
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < distinct.size(); i++) {
+            String param = "seedChunk" + i;
+            params.addValue(param, distinct.get(i));
+            values.add("(CAST(:" + param + " AS uuid), " + i + ")");
+        }
+        return String.join(", ", values);
+    }
+
+    private String seedTypeOrder(List<String> seedNodeTypes, MapSqlParameterSource params) {
+        if (seedNodeTypes == null || seedNodeTypes.isEmpty()) {
+            return "99";
+        }
+        StringBuilder builder = new StringBuilder("CASE n.node_type ");
+        List<String> distinct = seedNodeTypes.stream()
+                .filter(type -> type != null && !type.isBlank())
+                .distinct()
+                .toList();
+        if (distinct.isEmpty()) {
+            return "99";
+        }
+        for (int i = 0; i < distinct.size(); i++) {
+            String param = "seedNodeType" + i;
+            params.addValue(param, distinct.get(i));
+            builder.append("WHEN :").append(param).append(" THEN ").append(i).append(' ');
+        }
+        return builder.append("ELSE 99 END").toString();
     }
 
     private List<CodeSearchResult> graphChunksForPaths(UUID repositoryId, List<UUID> seedChunkIds,

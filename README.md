@@ -142,6 +142,7 @@ LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED=true
 LEARNBOT_CODE_GRAPH_MAX_LLM_FILES=80
 LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH=/app/roslyn/LearnBot.RoslynAnalyzer.dll
 LEARNBOT_CODE_GRAPH_ROSLYN_MODE=AUTO
+LEARNBOT_CODE_GRAPH_ROSLYN_MODE=AUTO
 LEARNBOT_CODE_GRAPH_ROSLYN_TIMEOUT_SECONDS=120
 LEARNBOT_CODE_GRAPH_DEPENDENCY_RESOLUTION_ENABLED=true
 LEARNBOT_CODE_GRAPH_DEPENDENCY_ALLOWED_REPOSITORIES=https://repo.maven.apache.org/maven2
@@ -152,7 +153,7 @@ LEARNBOT_CODE_GRAPH_DEPENDENCY_TIMEOUT_SECONDS=120
 
 `LEARNBOT_CODE_GRAPH_MAX_HOP` is constrained to 1-4 during traversal. When a traversal budget is reached, the best bounded results are returned with `graphTraversalTruncated` metadata instead of failing the search.
 
-Roslyn `AUTO` mode selects `SOLUTION`, `PROJECT`, or `SIMPLE` from repository contents. Project and solution descriptors are parsed, but MSBuild targets, source generators, and repository code are never executed. Java dependency resolution also parses Maven/Gradle declarations without running the build. It uses the persistent `.dependency-cache` under the code workspace and only downloads release artifacts from configured HTTPS repository allow lists.
+Roslyn `AUTO` mode selects `SAFE_SOLUTION`, `SAFE_PROJECT`, or `SIMPLE` from repository contents. `SAFE_*` modes parse project and solution descriptors statically; MSBuild targets, source generators, and repository code are never executed. Legacy `PROJECT` and `SOLUTION` config values are accepted as aliases for `SAFE_PROJECT` and `SAFE_SOLUTION`. A future `MSBUILD_WORKSPACE` mode must run only in an explicitly enabled isolated worker with network, time, and memory limits. Java dependency resolution also parses Maven/Gradle declarations without running the build. It uses the persistent `.dependency-cache` under the code workspace and only downloads release artifacts from configured HTTPS repository allow lists.
 
 The optional LLM stage runs as a durable post-index enrichment job after the deterministic graph is active. Pending work survives restarts, retries up to three times, and is skipped when a newer index replaces it. It only accepts known graph node keys and approved relationship types, and records output with lower confidence. If JavaParser, dependency resolution, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
 
