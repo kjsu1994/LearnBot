@@ -45,7 +45,7 @@ public class DocumentContextBuilder {
                 "llmSucceeded", false
         ));
 
-        HybridText summary = documentSummary(document, facts);
+        HybridText summary = documentSummary(document, chunks, facts);
         addChunk(output, "document_summary", "document", summary.content(), Map.of(
                 "summaryLevel", "document",
                 "generatedBy", summary.generatedBy(),
@@ -173,7 +173,7 @@ public class DocumentContextBuilder {
         ).strip();
     }
 
-    private HybridText documentSummary(ExtractedDocument document, DocumentFacts facts) {
+    private HybridText documentSummary(ExtractedDocument document, List<Chunk> chunks, DocumentFacts facts) {
         String deterministic = """
                 Document summary
                 Title: %s
@@ -197,12 +197,60 @@ public class DocumentContextBuilder {
         if (!llmEnabled()) {
             return new HybridText(deterministic, "deterministic", false);
         }
+        if (properties.getRag().getDocumentContext().isMapReduceEnabled()) {
+            HybridText mapReduce = mapReduceDocumentSummary(document, chunks, deterministic);
+            if (mapReduce.llmSucceeded()) {
+                return mapReduce;
+            }
+        }
         String samples = facts.sampleTexts().stream().collect(Collectors.joining("\n\n---\n\n"));
         return llmSummary(
                 "Summarize this document for retrieval. Mention concrete sections, pages, sheets, tables, and topics when present.",
                 deterministic + "\n\nRepresentative excerpts:\n" + samples,
                 deterministic
         );
+    }
+
+    private HybridText mapReduceDocumentSummary(ExtractedDocument document, List<Chunk> chunks, String fallback) {
+        if (chunks == null || chunks.isEmpty()) {
+            return new HybridText(fallback, "deterministic", false);
+        }
+        try {
+            int windowSize = Math.max(1, properties.getRag().getDocumentContext().getMapWindowChunks());
+            int maxWindows = Math.max(1, properties.getRag().getDocumentContext().getMaxMapWindowsPerDocument());
+            List<String> mapSummaries = new ArrayList<>();
+            for (int start = 0; start < chunks.size() && mapSummaries.size() < maxWindows; start += windowSize) {
+                int end = Math.min(chunks.size(), start + windowSize);
+                String window = chunks.subList(start, end).stream()
+                        .map(chunk -> "Chunk " + chunk.index() + ":\n" + clean(chunk.content()))
+                        .collect(Collectors.joining("\n\n---\n\n"));
+                HybridText mapped = llmSummary(
+                        "Create a retrieval map summary for this chunk window from document " + clean(document.title()) + ".",
+                        window,
+                        "",
+                        maxMapInputChars()
+                );
+                if (mapped.llmSucceeded() && !mapped.content().isBlank()) {
+                    mapSummaries.add(mapped.content());
+                }
+            }
+            if (mapSummaries.isEmpty()) {
+                return new HybridText(fallback, "deterministic", false);
+            }
+            HybridText reduced = llmSummary(
+                    "Reduce these chunk-window summaries into one document retrieval summary. Preserve concrete topics, sections, pages, sheets, tables, and limitations.",
+                    "Document: " + clean(document.title()) + "\nSource URI: " + clean(document.sourceUri())
+                            + "\n\nWindow summaries:\n" + trim(String.join("\n\n---\n\n", mapSummaries), maxReduceInputChars()),
+                    fallback,
+                    maxReduceInputChars()
+            );
+            if (reduced.llmSucceeded()) {
+                return new HybridText(reduced.content(), "llm_auxiliary_map_reduce", true);
+            }
+            return new HybridText(fallback, "deterministic", false);
+        } catch (RuntimeException ex) {
+            return new HybridText(fallback, "deterministic", false);
+        }
     }
 
     private String sourceStructureContent(SourceFacts facts) {
@@ -243,11 +291,16 @@ public class DocumentContextBuilder {
         return llmSummary(
                 "Summarize this multi-document source for retrieval. Mention the document map and likely question routing.",
                 deterministic + "\n\n" + sourceStructureContent(facts),
-                deterministic
+                deterministic,
+                maxReduceInputChars()
         );
     }
 
     private HybridText llmSummary(String instruction, String context, String fallback) {
+        return llmSummary(instruction, context, fallback, maxSummaryInputChars());
+    }
+
+    private HybridText llmSummary(String instruction, String context, String fallback, int maxInputChars) {
         try {
             String response = ollamaClient.chat(
                     """
@@ -255,7 +308,7 @@ public class DocumentContextBuilder {
                             Use only the provided facts and excerpts. Do not invent facts, counts, pages, tables, or source names.
                             Return plain text with concrete titles, sections, pages, sheets, tables, and topics.
                             """,
-                    instruction + "\n\nFacts:\n" + trim(maskSecrets(context), maxSummaryInputChars()),
+                    instruction + "\n\nFacts:\n" + trim(maskSecrets(context), Math.max(1000, maxInputChars)),
                     OllamaClient.ChatRole.AUXILIARY
             );
             String clean = response == null ? "" : response.strip();
@@ -289,6 +342,14 @@ public class DocumentContextBuilder {
 
     private int maxSummaryInputChars() {
         return Math.max(1000, properties.getRag().getDocumentContext().getMaxSummaryInputChars());
+    }
+
+    private int maxMapInputChars() {
+        return Math.max(1000, properties.getRag().getDocumentContext().getMaxMapInputChars());
+    }
+
+    private int maxReduceInputChars() {
+        return Math.max(1000, properties.getRag().getDocumentContext().getMaxReduceInputChars());
     }
 
     private List<String> keywords(ExtractedDocument document, List<Chunk> chunks) {

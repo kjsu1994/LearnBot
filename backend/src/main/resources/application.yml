@@ -48,8 +48,11 @@ learnbot:
       self-check-enabled: ${RAG_PIPELINE_SELF_CHECK_ENABLED:true}
       max-iterations: ${RAG_PIPELINE_MAX_ITERATIONS:2}
       rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:30}
-      document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:8}
+      document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:12}
       code-context-limit: ${RAG_PIPELINE_CODE_CONTEXT_LIMIT:12}
+      document-evidence-ranking-enabled: ${RAG_PIPELINE_DOCUMENT_EVIDENCE_RANKING_ENABLED:true}
+      document-adjacent-expansion-enabled: ${RAG_PIPELINE_DOCUMENT_ADJACENT_EXPANSION_ENABLED:true}
+      document-adjacent-chunk-radius: ${RAG_PIPELINE_DOCUMENT_ADJACENT_CHUNK_RADIUS:1}
       min-top-score: ${RAG_PIPELINE_MIN_TOP_SCORE:0.30}
       min-coverage: ${RAG_PIPELINE_MIN_COVERAGE:0.15}
     document-context:
@@ -57,6 +60,11 @@ learnbot:
       llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_SUMMARY_ENABLED:true}
       max-source-documents: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SOURCE_DOCUMENTS:80}
       max-summary-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_SUMMARY_INPUT_CHARS:9000}
+      map-reduce-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_MAP_REDUCE_ENABLED:true}
+      max-map-windows-per-document: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_MAP_WINDOWS_PER_DOCUMENT:8}
+      map-window-chunks: ${LEARNBOT_DOCUMENT_CONTEXT_MAP_WINDOW_CHUNKS:6}
+      max-map-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_MAP_INPUT_CHARS:7000}
+      max-reduce-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_REDUCE_INPUT_CHARS:12000}
     overview:
       enabled: ${LEARNBOT_RAG_OVERVIEW_ENABLED:true}
       min-context-chunks: ${LEARNBOT_RAG_OVERVIEW_MIN_CONTEXT_CHUNKS:2}

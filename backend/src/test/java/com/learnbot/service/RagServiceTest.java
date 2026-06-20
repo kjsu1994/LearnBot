@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -155,6 +156,85 @@ class RagServiceTest {
         assertThat(response.answer()).contains("[1]");
         assertThat(response.confidence()).isIn("높음", "보통");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
+    }
+
+    @Test
+    void genericDocumentFallbackUsesStructuredSections() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "What is the benefits policy?";
+        String content = "The benefits policy includes health checks, education support, and vacation support.";
+
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull()))
+                .thenReturn(List.of(searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                        "benefits-policy.pdf",
+                        "application/pdf",
+                        content)));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("x"));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.answer()).contains("## ");
+        assertThat(response.answer()).contains("health checks");
+        assertThat(response.answer()).contains("[1]");
+    }
+
+    @Test
+    void documentEvidenceRankingAddsMetadataAndPromotesDirectMatch() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "Tell me the security policy";
+        SearchResult weak = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "general-guide.pdf",
+                "application/pdf",
+                "This is a general guide.");
+        SearchResult direct = searchResult(UUID.randomUUID(), UUID.randomUUID(), 1,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA and access reviews.");
+
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull()))
+                .thenReturn(List.of(weak, direct));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("The security policy requires MFA and access reviews [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.evidence().get(0).title()).isEqualTo("security-policy.pdf");
+        assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceRole", "evidenceRankReason");
+    }
+
+    @Test
+    void adjacentDocumentChunksCanBeAddedAsSupportingEvidence() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "Tell me the security policy";
+        UUID documentId = UUID.randomUUID();
+        SearchResult seed = searchResult(documentId, UUID.randomUUID(), 3,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires access reviews.");
+        SearchResult adjacent = searchResult(documentId, UUID.randomUUID(), 4,
+                "security-policy.pdf",
+                "application/pdf",
+                "MFA applies to every administrator account.");
+
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), any(), isNull()))
+                .thenReturn(List.of(seed));
+        when(documentRepository.adjacentChunks(eq(documentId), eq(3), eq(1), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(adjacent));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("The security policy requires access reviews and MFA [1][2]."));
+
+        AskResponse response = service.ask(question, null, "qa", List.of(UUID.randomUUID()), null);
+
+        assertThat(response.evidence()).hasSize(2);
+        assertThat(response.evidence().get(1).metadata()).containsEntry("adjacentExpanded", true);
+        assertThat(response.evidence().get(1).metadata()).containsEntry("evidenceRole", "adjacent");
     }
 
     @Test

@@ -30,9 +30,9 @@ import java.util.stream.IntStream;
 public class RagService {
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final Pattern SPREADSHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
-    private static final int GENERAL_CONTEXT_RESULT_LIMIT = 4;
-    private static final int GENERAL_CONTEXT_EXCERPT_CHARS = 360;
-    private static final int TABLE_CONTEXT_EXCERPT_CHARS = 520;
+    private static final int GENERAL_CONTEXT_RESULT_LIMIT = 8;
+    private static final int GENERAL_CONTEXT_EXCERPT_CHARS = 760;
+    private static final int TABLE_CONTEXT_EXCERPT_CHARS = 900;
     private static final int FALLBACK_RESULT_LIMIT = 4;
     private static final int FALLBACK_EXCERPT_CHARS = 260;
     private static final int FALLBACK_POINT_CHARS = 220;
@@ -180,6 +180,7 @@ public class RagService {
                 searchAndMergeDocuments(question, query, filter, searchLimit, spaceIds, selectedSpaceId, merged, queriesUsed);
             }
         }
+        expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
         List<SearchResult> citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessDocuments(
                 question,
@@ -220,6 +221,7 @@ public class RagService {
                 }
             }
             iteration = 2;
+            expandAdjacentDocumentChunks(question, answerMode, questionType, filter, spaceIds, selectedSpaceId, merged);
             citations = selectAnswerCitations(question, answerMode, questionType, List.copyOf(merged.values()));
             assessment = pipelineService.assessDocuments(
                     question,
@@ -292,6 +294,67 @@ public class RagService {
         }
     }
 
+    private void expandAdjacentDocumentChunks(
+            String question,
+            AnswerMode answerMode,
+            DocumentQuestionType questionType,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            Map<UUID, SearchResult> merged
+    ) {
+        if (!properties.getRag().getPipeline().isDocumentAdjacentExpansionEnabled()
+                || merged.isEmpty()
+                || spaceIds == null
+                || spaceIds.isEmpty()) {
+            return;
+        }
+        int baseRadius = Math.max(0, properties.getRag().getPipeline().getDocumentAdjacentChunkRadius());
+        int radius = isOverviewQuestionType(questionType) || answerMode == AnswerMode.SUMMARY ? Math.max(baseRadius, 2) : baseRadius;
+        if (radius <= 0) {
+            return;
+        }
+        List<SearchResult> seeds = merged.values().stream()
+                .filter(result -> !isDocumentContext(result))
+                .sorted(Comparator.comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result)).reversed())
+                .limit(12)
+                .toList();
+        int added = 0;
+        for (SearchResult seed : seeds) {
+            if (added >= 24) {
+                break;
+            }
+            try {
+                for (SearchResult adjacent : documentRepository.adjacentChunks(
+                        seed.documentId(),
+                        seed.chunkIndex(),
+                        radius,
+                        filter,
+                        spaceIds,
+                        selectedSpaceId
+                )) {
+                    if (merged.containsKey(adjacent.chunkId())) {
+                        continue;
+                    }
+                    int distance = Math.abs(adjacent.chunkIndex() - seed.chunkIndex());
+                    mergeDocument(merged, withMetadata(adjacent, Map.of(
+                            "adjacentExpanded", true,
+                            "adjacentDistance", distance,
+                            "adjacentSeedChunkId", seed.chunkId().toString(),
+                            "evidenceRole", "adjacent"
+                    ), Math.max(0.0, seed.score() - (0.04 * Math.max(1, distance)))));
+                    added++;
+                    if (added >= 24) {
+                        break;
+                    }
+                }
+            } catch (RuntimeException ex) {
+                log.warn("RAG adjacent chunk expansion failed document={} chunk={} question={}",
+                        seed.documentId(), seed.chunkIndex(), abbreviate(question), ex);
+            }
+        }
+    }
+
     private SearchResult boostDocument(SearchResult result, double value) {
         return new SearchResult(
                 result.chunkId(),
@@ -304,6 +367,27 @@ public class RagService {
                 result.content(),
                 result.metadata(),
                 result.score() + value
+        );
+    }
+
+    private SearchResult withMetadata(SearchResult result, Map<String, Object> additions) {
+        return withMetadata(result, additions, result.score());
+    }
+
+    private SearchResult withMetadata(SearchResult result, Map<String, Object> additions, double score) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.putAll(additions);
+        return new SearchResult(
+                result.chunkId(),
+                result.documentId(),
+                result.title(),
+                result.sourceUri(),
+                result.sourceType(),
+                result.contentType(),
+                result.chunkIndex(),
+                result.content(),
+                metadata,
+                score
         );
     }
 
@@ -337,15 +421,11 @@ public class RagService {
             return List.of();
         }
         int limit = switch (answerMode) {
-            case SUMMARY, TABLE -> Math.min(results.size(), 10);
+            case SUMMARY, TABLE -> Math.min(results.size(), pipelineService.documentContextLimit(12));
             case QUOTE -> Math.min(results.size(), 6);
-            default -> Math.min(results.size(), Math.max(6, properties.getRag().getTopK()));
+            default -> Math.min(results.size(), pipelineService.documentContextLimit(Math.max(8, properties.getRag().getTopK())));
         };
-        List<SearchResult> ordered = results.stream()
-                .sorted(Comparator
-                        .comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result))
-                .reversed())
-                .toList();
+        List<SearchResult> ordered = orderDocumentEvidence(question, answerMode, results);
         if (isOverviewQuestionType(questionType)) {
             return selectOverviewCitations(ordered, limit);
         }
@@ -370,6 +450,129 @@ public class RagService {
             }
         }
         return selected;
+    }
+
+    private List<SearchResult> orderDocumentEvidence(String question, AnswerMode answerMode, List<SearchResult> results) {
+        if (!properties.getRag().getPipeline().isDocumentEvidenceRankingEnabled()) {
+            return results.stream()
+                    .sorted(Comparator.comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result)).reversed())
+                    .toList();
+        }
+        try {
+            Map<UUID, Integer> documentCounts = new LinkedHashMap<>();
+            List<SearchResult> ranked = new ArrayList<>();
+            for (SearchResult result : results.stream()
+                    .sorted(Comparator.comparingDouble((SearchResult item) -> answerRelevance(question, answerMode, item)).reversed())
+                    .toList()) {
+                int seenForDocument = documentCounts.getOrDefault(result.documentId(), 0);
+                EvidenceScore score = documentEvidenceScore(question, answerMode, result, seenForDocument);
+                documentCounts.merge(result.documentId(), 1, Integer::sum);
+                ranked.add(withMetadata(result, Map.of(
+                        "evidenceScore", score.value(),
+                        "evidenceRole", score.role(),
+                        "evidenceRankReason", score.reason()
+                )));
+            }
+            return ranked.stream()
+                    .sorted(Comparator
+                            .comparingDouble((SearchResult result) -> metadataDouble(result, "evidenceScore", answerRelevance(question, answerMode, result)))
+                            .reversed())
+                    .toList();
+        } catch (RuntimeException ex) {
+            log.warn("RAG document evidence ranking failed question={}", abbreviate(question), ex);
+            return results.stream()
+                    .sorted(Comparator.comparingDouble((SearchResult result) -> answerRelevance(question, answerMode, result)).reversed())
+                    .toList();
+        }
+    }
+
+    private EvidenceScore documentEvidenceScore(String question, AnswerMode answerMode, SearchResult result, int seenForDocument) {
+        String title = normalizeForSearch(result.title());
+        String source = normalizeForSearch(result.sourceUri());
+        String content = normalizeForSearch(result.content());
+        double score = answerRelevance(question, answerMode, result);
+        double termBoost = 0.0;
+        for (String term : queryTerms(question)) {
+            if (title.contains(term)) {
+                termBoost += 0.08;
+            }
+            if (source.contains(term)) {
+                termBoost += 0.04;
+            }
+            if (content.contains(term)) {
+                termBoost += 0.05;
+            }
+        }
+        score += Math.min(0.40, termBoost);
+        String role = evidenceRole(answerMode, result);
+        if ("direct".equals(role)) {
+            score += 0.08;
+        } else if ("table".equals(role) || "summary".equals(role) || "quote".equals(role)) {
+            score += 0.10;
+        } else if ("adjacent".equals(role)) {
+            int distance = metadataInt(result, "adjacentDistance", 1);
+            score += Math.max(0.01, 0.08 - (0.03 * distance));
+        }
+        score -= Math.min(0.24, seenForDocument * 0.06);
+        return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument));
+    }
+
+    private String evidenceRole(AnswerMode answerMode, SearchResult result) {
+        if (metadataBoolean(result, "adjacentExpanded")) {
+            return "adjacent";
+        }
+        String contextType = contextType(result);
+        if (answerMode == AnswerMode.SUMMARY && contextType.endsWith("_summary")) {
+            return "summary";
+        }
+        if (answerMode == AnswerMode.TABLE && isSpreadsheet(result)) {
+            return "table";
+        }
+        if (answerMode == AnswerMode.QUOTE) {
+            return "quote";
+        }
+        return isDocumentContext(result) ? "context" : "direct";
+    }
+
+    private String evidenceReason(String role, double termBoost, int seenForDocument) {
+        List<String> reasons = new ArrayList<>();
+        reasons.add("role=" + role);
+        if (termBoost > 0) {
+            reasons.add("query-term-match");
+        }
+        if (seenForDocument > 0) {
+            reasons.add("document-diversity-penalty");
+        }
+        return String.join(", ", reasons);
+    }
+
+    private boolean metadataBoolean(SearchResult result, String key) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
+        return value instanceof Boolean booleanValue ? booleanValue : Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private int metadataInt(SearchResult result, String key, int fallback) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? fallback : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    private double metadataDouble(SearchResult result, String key, double fallback) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        try {
+            return value == null ? fallback : Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
     }
 
     private List<SearchResult> selectOverviewCitations(List<SearchResult> ordered, int limit) {
@@ -462,7 +665,7 @@ public class RagService {
         int limit = Math.min(results.size(), contextLimit(answerMode, questionType));
         int excerptChars = answerMode == AnswerMode.TABLE
                 ? TABLE_CONTEXT_EXCERPT_CHARS
-                : isOverviewQuestionType(questionType) ? 620 : GENERAL_CONTEXT_EXCERPT_CHARS;
+                : isOverviewQuestionType(questionType) ? 900 : GENERAL_CONTEXT_EXCERPT_CHARS;
         return IntStream.range(0, limit)
                 .mapToObj(index -> {
                     SearchResult result = results.get(index);
@@ -507,6 +710,11 @@ public class RagService {
                 If the evidence is insufficient, say exactly which part is insufficient.
                 Do not invent sources, counts, filenames, pages, or legal clauses.
                 Do not answer with only a source list.
+                Prefer a structured answer over short bullet extraction.
+                For QA, use "결론", "근거", and "한계" when useful.
+                For summaries, group by topic and cite representative evidence.
+                For tables, extract only fields present in evidence.
+                For quotes, quote briefly and explain why the quote matters.
                 """ + "\n" + overviewInstruction + "\n" + answerMode.instruction();
     }
 
@@ -526,11 +734,84 @@ public class RagService {
         }
 
         return switch (answerMode) {
-            case SUMMARY -> summaryFallbackAnswer(question, results);
+            case SUMMARY -> structuredSummaryFallbackAnswer(question, results);
             case TABLE -> tableFallbackAnswer(question, results);
             case QUOTE -> quoteFallbackAnswer(question, results);
-            default -> extractiveFallbackAnswer(question, results);
+            default -> structuredExtractiveFallbackAnswer(question, results);
         };
+    }
+
+    private String structuredExtractiveFallbackAnswer(String question, List<SearchResult> results) {
+        if (isRecruitmentCautionQuestion(question)) {
+            String answer = recruitmentCautionFallback(results);
+            if (!answer.isBlank()) {
+                return answer;
+            }
+        }
+
+        if (isDiscriminationImprovementQuestion(question)) {
+            String answer = discriminationImprovementFallback(results);
+            if (!answer.isBlank()) {
+                return answer;
+            }
+        }
+
+        List<EvidencePoint> points = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT);
+        String conclusion = points.isEmpty()
+                ? "검색된 문서 근거만으로는 명확한 결론을 확정하기 어렵습니다."
+                : points.get(0).text() + " [" + points.get(0).citationIndex() + "]";
+        String evidence = points.stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return """
+                ## 결론
+                %s
+
+                ## 근거
+                %s
+
+                ## 관련 문서
+                %s
+
+                ## 한계
+                LLM 답변 생성이 실패했거나 품질 기준을 통과하지 못해, 검색된 문서 근거를 구조화해 반환했습니다.
+                """.formatted(
+                conclusion,
+                evidence.isBlank() ? "- 직접 인용 가능한 근거가 부족합니다." : evidence,
+                citedDocuments(results)
+        ).strip();
+    }
+
+    private String structuredSummaryFallbackAnswer(String question, List<SearchResult> results) {
+        String body = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT + 2).stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return """
+                ## 요약
+                검색된 문서 근거를 기준으로 핵심 내용을 요약했습니다.
+
+                ## 주요 근거
+                %s
+
+                ## 문서별 포인트
+                %s
+
+                ## 한계
+                LLM 요약 생성이 실패했거나 품질 기준을 통과하지 못해, 추출 근거 중심의 요약으로 대체했습니다.
+                """.formatted(
+                body.isBlank() ? "- 요약 가능한 근거가 부족합니다." : body,
+                citedDocuments(results)
+        ).strip();
+    }
+
+    private String citedDocuments(List<SearchResult> results) {
+        return IntStream.range(0, results.size())
+                .limit(FALLBACK_RESULT_LIMIT + 2)
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "- [" + (index + 1) + "] " + result.title() + " (chunk " + result.chunkIndex() + ")";
+                })
+                .collect(Collectors.joining("\n"));
     }
 
     private String extractiveFallbackAnswer(String question, List<SearchResult> results) {
@@ -1371,10 +1652,30 @@ public class RagService {
                             result.sourceType(),
                             result.chunkIndex(),
                             preview(result.content()),
-                            result.score()
+                            result.score(),
+                            evidenceMetadata(result)
                     );
                 })
                 .toList();
+    }
+
+    private Map<String, Object> evidenceMetadata(SearchResult result) {
+        if (result == null || result.metadata() == null || result.metadata().isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        copyMetadata(result.metadata(), metadata, "evidenceScore");
+        copyMetadata(result.metadata(), metadata, "evidenceRole");
+        copyMetadata(result.metadata(), metadata, "evidenceRankReason");
+        copyMetadata(result.metadata(), metadata, "adjacentExpanded");
+        copyMetadata(result.metadata(), metadata, "adjacentDistance");
+        return metadata;
+    }
+
+    private void copyMetadata(Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source.containsKey(key)) {
+            target.put(key, source.get(key));
+        }
     }
 
     private String preview(String content) {
@@ -1414,6 +1715,9 @@ public class RagService {
     }
 
     private record EvidencePoint(String text, int citationIndex) {
+    }
+
+    private record EvidenceScore(double value, String role, String reason) {
     }
 
     private record SpreadsheetStats(

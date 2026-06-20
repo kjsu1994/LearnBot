@@ -549,6 +549,54 @@ public class DocumentRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<SearchResult> adjacentChunks(
+            UUID documentId,
+            int centerChunkIndex,
+            int radius,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (documentId == null || radius <= 0 || spaceIds == null || spaceIds.isEmpty()) {
+            return List.of();
+        }
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("documentId", documentId)
+                .addValue("minChunkIndex", centerChunkIndex - radius)
+                .addValue("maxChunkIndex", centerChunkIndex + radius)
+                .addValue("centerChunkIndex", centerChunkIndex)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
+                .addValue("contentType", clean(filter == null ? null : filter.contentType()));
+
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       d.id AS document_id,
+                       d.title,
+                       d.source_uri,
+                       s.type AS source_type,
+                       d.content_type,
+                       c.chunk_index,
+                       c.content,
+                       c.metadata::text AS metadata,
+                       0.0 AS score
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                JOIN data_sources s ON s.id = d.source_id
+                WHERE d.id = :documentId
+                  AND s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                  AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
+                  AND c.chunk_index BETWEEN :minChunkIndex AND :maxChunkIndex
+                  AND c.chunk_index <> :centerChunkIndex
+                  AND c.metadata ->> 'kind' IS DISTINCT FROM 'document_context'
+                ORDER BY ABS(c.chunk_index - :centerChunkIndex), c.chunk_index
+                """, params, this::mapSearchResult);
+    }
+
     private SearchResult mapSearchResult(ResultSet rs, int rowNum) throws SQLException {
         return new SearchResult(
                 rs.getObject("chunk_id", UUID.class),

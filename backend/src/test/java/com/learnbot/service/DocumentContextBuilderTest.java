@@ -101,6 +101,31 @@ class DocumentContextBuilderTest {
     }
 
     @Test
+    void usesMapReduceSummaryWhenEnabled() {
+        LearnBotProperties properties = properties(true);
+        properties.getRag().getDocumentContext().setMapWindowChunks(1);
+        properties.getRag().getDocumentContext().setMaxMapWindowsPerDocument(2);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        when(ollamaClient.chat(any(), any(), any()))
+                .thenReturn("Window summary one with setup details.")
+                .thenReturn("Window summary two with usage details.")
+                .thenReturn("Reduced document summary with setup and usage details.");
+        DocumentContextBuilder builder = new DocumentContextBuilder(properties, ollamaClient);
+
+        List<Chunk> chunks = builder.buildDocumentContext(document("guide.md", "text/markdown"), List.of(
+                chunk(0, "# Setup\nInstall the service", Map.of("strategy", "markdown_heading", "headingPath", "Setup")),
+                chunk(1, "# Usage\nRun the service", Map.of("strategy", "markdown_heading", "headingPath", "Usage"))
+        ));
+
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.metadata()).containsEntry("contextType", "document_summary");
+            assertThat(chunk.metadata()).containsEntry("generatedBy", "llm_auxiliary_map_reduce");
+            assertThat(chunk.metadata()).containsEntry("llmSucceeded", true);
+            assertThat(chunk.content()).contains("Reduced document summary");
+        });
+    }
+
+    @Test
     void returnsNoChunksWhenDisabled() {
         LearnBotProperties properties = properties(false);
         properties.getRag().getDocumentContext().setEnabled(false);

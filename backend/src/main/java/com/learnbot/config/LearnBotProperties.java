@@ -389,10 +389,16 @@ public class LearnBotProperties {
             private int rerankTopN = 30;
 
             @Min(1)
-            private int documentContextLimit = 8;
+            private int documentContextLimit = 12;
 
             @Min(1)
             private int codeContextLimit = 8;
+
+            private boolean documentEvidenceRankingEnabled = true;
+            private boolean documentAdjacentExpansionEnabled = true;
+
+            @Min(0)
+            private int documentAdjacentChunkRadius = 1;
 
             private double minTopScore = 0.30;
             private double minCoverage = 0.15;
@@ -445,6 +451,30 @@ public class LearnBotProperties {
                 this.codeContextLimit = codeContextLimit;
             }
 
+            public boolean isDocumentEvidenceRankingEnabled() {
+                return documentEvidenceRankingEnabled;
+            }
+
+            public void setDocumentEvidenceRankingEnabled(boolean documentEvidenceRankingEnabled) {
+                this.documentEvidenceRankingEnabled = documentEvidenceRankingEnabled;
+            }
+
+            public boolean isDocumentAdjacentExpansionEnabled() {
+                return documentAdjacentExpansionEnabled;
+            }
+
+            public void setDocumentAdjacentExpansionEnabled(boolean documentAdjacentExpansionEnabled) {
+                this.documentAdjacentExpansionEnabled = documentAdjacentExpansionEnabled;
+            }
+
+            public int getDocumentAdjacentChunkRadius() {
+                return documentAdjacentChunkRadius;
+            }
+
+            public void setDocumentAdjacentChunkRadius(int documentAdjacentChunkRadius) {
+                this.documentAdjacentChunkRadius = documentAdjacentChunkRadius;
+            }
+
             public double getMinTopScore() {
                 return minTopScore;
             }
@@ -471,6 +501,20 @@ public class LearnBotProperties {
 
             @Min(1000)
             private int maxSummaryInputChars = 9000;
+
+            private boolean mapReduceEnabled = true;
+
+            @Min(1)
+            private int maxMapWindowsPerDocument = 8;
+
+            @Min(1)
+            private int mapWindowChunks = 6;
+
+            @Min(1000)
+            private int maxMapInputChars = 7000;
+
+            @Min(1000)
+            private int maxReduceInputChars = 12000;
 
             public boolean isEnabled() {
                 return enabled;
@@ -502,6 +546,46 @@ public class LearnBotProperties {
 
             public void setMaxSummaryInputChars(int maxSummaryInputChars) {
                 this.maxSummaryInputChars = maxSummaryInputChars;
+            }
+
+            public boolean isMapReduceEnabled() {
+                return mapReduceEnabled;
+            }
+
+            public void setMapReduceEnabled(boolean mapReduceEnabled) {
+                this.mapReduceEnabled = mapReduceEnabled;
+            }
+
+            public int getMaxMapWindowsPerDocument() {
+                return maxMapWindowsPerDocument;
+            }
+
+            public void setMaxMapWindowsPerDocument(int maxMapWindowsPerDocument) {
+                this.maxMapWindowsPerDocument = maxMapWindowsPerDocument;
+            }
+
+            public int getMapWindowChunks() {
+                return mapWindowChunks;
+            }
+
+            public void setMapWindowChunks(int mapWindowChunks) {
+                this.mapWindowChunks = mapWindowChunks;
+            }
+
+            public int getMaxMapInputChars() {
+                return maxMapInputChars;
+            }
+
+            public void setMaxMapInputChars(int maxMapInputChars) {
+                this.maxMapInputChars = maxMapInputChars;
+            }
+
+            public int getMaxReduceInputChars() {
+                return maxReduceInputChars;
+            }
+
+            public void setMaxReduceInputChars(int maxReduceInputChars) {
+                this.maxReduceInputChars = maxReduceInputChars;
             }
         }
 

@@ -170,7 +170,7 @@ public class RagPipelineService {
     }
 
     public int documentContextLimit(int fallback) {
-        return Math.max(1, Math.min(12, pipeline().getDocumentContextLimit() <= 0 ? fallback : pipeline().getDocumentContextLimit()));
+        return Math.max(1, Math.min(16, pipeline().getDocumentContextLimit() <= 0 ? fallback : pipeline().getDocumentContextLimit()));
     }
 
     public int codeContextLimit(int fallback) {
