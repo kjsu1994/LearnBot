@@ -61,6 +61,14 @@
   overflow-x: hidden;
 }
 
+.landing-shell .home-brand strong {
+  color: #ffffff;
+}
+
+.landing-shell .home-brand small {
+  color: rgba(226, 232, 240, 0.82);
+}
+
 .shader-background {
   display: block;
 }
