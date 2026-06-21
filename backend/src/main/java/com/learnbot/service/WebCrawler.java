@@ -54,10 +54,11 @@ public class WebCrawler {
         List<ExtractedDocument> documents = new ArrayList<>();
         int fetchedCount = 0;
         int skippedCount = 0;
+        int attachmentCount = 0;
 
         enqueue(queue, queuedOrVisited, startUri, 0);
         if (safeOptions.useSitemap()) {
-            for (URI sitemapUri : extractor.sitemapUrls(startUri)) {
+            for (URI sitemapUri : extractor.sitemapUrls(sourceId, startUri, properties.getCrawler().getMaxSitemapUrls())) {
                 URI normalized;
                 try {
                     normalized = normalizeUri(sitemapUri);
@@ -96,6 +97,14 @@ public class WebCrawler {
             ExclusionDecision currentExclusion = exclusionDecision(current.uri(), safeOptions);
             if (currentExclusion.excluded()) {
                 if (currentExclusion.attachment() && safeOptions.includeAttachments()) {
+                    if (attachmentCount >= Math.max(0, properties.getCrawler().getMaxAttachmentsPerCrawl())) {
+                        skippedCount++;
+                        extractor.auditSkipped(sourceId, current.uri(), "ATTACHMENT_LIMIT_REACHED", current.depth(),
+                                current.referrer() == null ? null : current.referrer().toString(), null,
+                                "Skipped attachment because the per-crawl attachment limit was reached.",
+                                Map.of("maxAttachmentsPerCrawl", Math.max(0, properties.getCrawler().getMaxAttachmentsPerCrawl())));
+                        continue;
+                    }
                     ExtractedDocument attachment = extractor.fetchAttachment(
                             sourceId,
                             current.uri(),
@@ -103,6 +112,7 @@ public class WebCrawler {
                             safeOptions
                     );
                     if (attachment != null) {
+                        attachmentCount++;
                         documents.add(withCrawlMetadata(attachment, startUri, current.depth(), current.referrer()));
                     } else {
                         skippedCount++;
@@ -144,6 +154,13 @@ public class WebCrawler {
             }
 
             SkipDecision skipDecision = skipDecision(page.document(), contentSignatures, current.depth());
+            if (skipDecision != null && shouldRetryWithPlaywright(skipDecision, safeOptions)) {
+                WebPageExtractor.FetchedPage renderedPage = retryWithPlaywright(sourceId, current, safeOptions, skipDecision);
+                if (renderedPage != null) {
+                    page = renderedPage;
+                    skipDecision = skipDecision(page.document(), contentSignatures, current.depth());
+                }
+            }
             if (skipDecision != null) {
                 skippedCount++;
                 extractor.auditSkipped(sourceId, page.uri(), skipDecision.reasonCode(), current.depth(),
@@ -155,6 +172,40 @@ public class WebCrawler {
         }
 
         return new CrawlResult(documents, fetchedCount, skippedCount);
+    }
+
+    private boolean shouldRetryWithPlaywright(SkipDecision skipDecision, CrawlOptions options) {
+        if (skipDecision == null || options == null || options.renderMode() != WebRenderMode.STATIC) {
+            return false;
+        }
+        if (!properties.getCrawler().isPlaywrightEnabled()) {
+            return false;
+        }
+        return "LOW_CONTENT".equals(skipDecision.reasonCode())
+                || "NAVIGATION_ONLY_PAGE".equals(skipDecision.reasonCode())
+                || "LOW_TEXT_DENSITY".equals(skipDecision.reasonCode());
+    }
+
+    private WebPageExtractor.FetchedPage retryWithPlaywright(UUID sourceId, CrawlUrl current, CrawlOptions options, SkipDecision skipDecision) {
+        CrawlOptions fallbackOptions = new CrawlOptions(
+                options.scope(),
+                options.robotsFailurePolicy(),
+                options.includeAttachments(),
+                options.useSitemap(),
+                WebRenderMode.PLAYWRIGHT_FALLBACK
+        );
+        extractor.auditSkipped(sourceId, current.uri(), "STATIC_LOW_CONTENT_PLAYWRIGHT_RETRY", current.depth(),
+                current.referrer() == null ? null : current.referrer().toString(), null,
+                "Static crawl result was weak; retrying with Playwright fallback.",
+                skipDecision.metadata());
+        try {
+            return extractor.fetchPage(sourceId, current.uri().toString(), fallbackOptions);
+        } catch (RuntimeException ex) {
+            extractor.auditSkipped(sourceId, current.uri(), "PLAYWRIGHT_RETRY_FAILED_STATIC_FALLBACK", current.depth(),
+                    current.referrer() == null ? null : current.referrer().toString(), null,
+                    "Playwright retry failed; keeping the static crawl result. " + ex.getMessage(), Map.of("error", ex.getMessage()));
+            return null;
+        }
     }
 
     private int enqueueIfCrawlable(
@@ -373,7 +424,7 @@ public class WebCrawler {
         try {
             return new URI(scheme, authority, path, query, null).normalize();
         } catch (URISyntaxException ex) {
-            throw new IllegalArgumentException("크롤링 URL 형식이 올바르지 않습니다: " + uri, ex);
+            throw new IllegalArgumentException("잘못된 URL 형식입니다: " + uri, ex);
         }
     }
 
@@ -404,7 +455,7 @@ public class WebCrawler {
     private String requireHost(URI uri) {
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("URL에 도메인 또는 호스트가 필요합니다. 예: https://example.com/docs");
+            throw new IllegalArgumentException("URL에는 도메인 또는 호스트가 필요합니다. 예: https://example.com/docs");
         }
         return host.toLowerCase(Locale.ROOT);
     }

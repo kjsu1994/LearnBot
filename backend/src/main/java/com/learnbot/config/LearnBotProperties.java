@@ -114,6 +114,9 @@ public class LearnBotProperties {
         @Min(1)
         private int maxPagesPerRequest = 30;
 
+        @Min(1)
+        private int maxSitemapUrls = 500;
+
         @Min(0)
         private int maxDepth = 2;
 
@@ -134,6 +137,9 @@ public class LearnBotProperties {
 
         @Min(1)
         private long maxAttachmentBytes = 25_000_000L;
+
+        @Min(0)
+        private int maxAttachmentsPerCrawl = 50;
 
         private boolean playwrightEnabled = false;
 
@@ -180,6 +186,14 @@ public class LearnBotProperties {
 
         public void setMaxPagesPerRequest(int maxPagesPerRequest) {
             this.maxPagesPerRequest = maxPagesPerRequest;
+        }
+
+        public int getMaxSitemapUrls() {
+            return maxSitemapUrls;
+        }
+
+        public void setMaxSitemapUrls(int maxSitemapUrls) {
+            this.maxSitemapUrls = maxSitemapUrls;
         }
 
         public int getMaxDepth() {
@@ -252,6 +266,14 @@ public class LearnBotProperties {
 
         public void setMaxAttachmentBytes(long maxAttachmentBytes) {
             this.maxAttachmentBytes = maxAttachmentBytes;
+        }
+
+        public int getMaxAttachmentsPerCrawl() {
+            return maxAttachmentsPerCrawl;
+        }
+
+        public void setMaxAttachmentsPerCrawl(int maxAttachmentsPerCrawl) {
+            this.maxAttachmentsPerCrawl = maxAttachmentsPerCrawl;
         }
 
         public boolean isPlaywrightEnabled() {

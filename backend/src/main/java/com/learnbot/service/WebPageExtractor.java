@@ -810,21 +810,34 @@ public class WebPageExtractor {
     }
 
     public List<URI> sitemapUrls(URI startUri) {
+        return sitemapUrls(null, startUri, properties.getCrawler().getMaxSitemapUrls());
+    }
+
+    public List<URI> sitemapUrls(UUID sourceId, URI startUri, int maxUrls) {
         List<String> sitemapLocations = new ArrayList<>();
         RobotsRules rules = robotsCache.computeIfAbsent(robotsKey(startUri), ignored -> fetchRobotsRules(startUri));
         sitemapLocations.addAll(rules.sitemaps());
         sitemapLocations.add(startUri.getScheme() + "://" + startUri.getAuthority() + "/sitemap.xml");
-        return sitemapLocations.stream()
+        List<URI> urls = sitemapLocations.stream()
                 .distinct()
-                .flatMap(location -> fetchSitemap(location, 0).stream())
+                .flatMap(location -> fetchSitemap(sourceId, startUri, location, 0).stream())
                 .distinct()
+                .limit(Math.max(1, maxUrls))
                 .toList();
+        if (sourceId != null) {
+            audit(new CrawlAuditEvent(sourceId, startUri.toString(), safeHost(startUri), true, null, null, true,
+                    "SITEMAP_URL_DISCOVERED", 0, null, startUri.toString(), "application/xml",
+                    Map.of("discoveredUrlCount", urls.size(), "maxSitemapUrls", Math.max(1, maxUrls)),
+                    "Discovered " + urls.size() + " URLs from sitemap."));
+        }
+        return urls;
     }
 
-    private List<URI> fetchSitemap(String sitemapUrl, int depth) {
+    private List<URI> fetchSitemap(UUID sourceId, URI startUri, String sitemapUrl, int depth) {
         if (depth > 2) {
             return List.of();
         }
+        URI sitemapUri = toUriOrNull(sitemapUrl);
         try {
             Connection.Response response = Jsoup.connect(sitemapUrl)
                     .timeout(properties.getCrawler().getTimeoutSeconds() * 1000)
@@ -833,12 +846,14 @@ public class WebPageExtractor {
                     .ignoreHttpErrors(true)
                     .execute();
             if (response.statusCode() >= 400) {
+                auditSitemap(sourceId, startUri, sitemapUri, "SITEMAP_FETCH_FAILED", false,
+                        response.statusCode(), "Sitemap returned HTTP " + response.statusCode(), Map.of("depth", depth));
                 return List.of();
             }
             Document xml = Jsoup.parse(response.body(), sitemapUrl, org.jsoup.parser.Parser.xmlParser());
             List<URI> urls = new ArrayList<>();
             for (Element sitemap : xml.select("sitemap > loc")) {
-                urls.addAll(fetchSitemap(sitemap.text(), depth + 1));
+                urls.addAll(fetchSitemap(sourceId, startUri, sitemap.text(), depth + 1));
             }
             for (Element loc : xml.select("url > loc")) {
                 URI uri = toUriOrNull(loc.text());
@@ -846,10 +861,23 @@ public class WebPageExtractor {
                     urls.add(uri);
                 }
             }
+            auditSitemap(sourceId, startUri, sitemapUri, "SITEMAP_FETCHED", true,
+                    response.statusCode(), "Fetched sitemap with " + urls.size() + " URLs.", Map.of("depth", depth, "urlCount", urls.size()));
             return urls;
         } catch (Exception ex) {
+            auditSitemap(sourceId, startUri, sitemapUri, "SITEMAP_FETCH_FAILED", false,
+                    null, "Sitemap fetch failed: " + ex.getMessage(), Map.of("depth", depth));
             return List.of();
         }
+    }
+
+    private void auditSitemap(UUID sourceId, URI startUri, URI sitemapUri, String reasonCode, boolean success, Integer statusCode, String message, Map<String, Object> metadata) {
+        if (sourceId == null || sitemapUri == null) {
+            return;
+        }
+        audit(new CrawlAuditEvent(sourceId, sitemapUri.toString(), safeHost(sitemapUri), true, null, statusCode, success,
+                reasonCode, 0, startUri == null ? null : startUri.toString(), sitemapUri.toString(), "application/xml",
+                metadata == null ? Map.of() : metadata, message));
     }
 
     private record RootSelection(Element root, String selector, String strategy) {

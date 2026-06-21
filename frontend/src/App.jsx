@@ -41,7 +41,7 @@ export default function App() {
   const [webRobotsFailurePolicy, setWebRobotsFailurePolicy] = useState('FAIL_CLOSED');
   const [webIncludeAttachments, setWebIncludeAttachments] = useState(false);
   const [webUseSitemap, setWebUseSitemap] = useState(false);
-  const [webRenderMode, setWebRenderMode] = useState('STATIC');
+  const [webRenderMode, setWebRenderMode] = useState('PLAYWRIGHT_FALLBACK');
   const [files, setFiles] = useState([]);
   const [fileBatchResult, setFileBatchResult] = useState(null);
   const [query, setQuery] = useState('');

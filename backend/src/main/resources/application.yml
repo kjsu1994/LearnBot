@@ -21,6 +21,7 @@ learnbot:
     timeout-seconds: ${LEARNBOT_CRAWLER_TIMEOUT_SECONDS:15}
     rate-limit-millis: ${LEARNBOT_CRAWLER_RATE_LIMIT_MILLIS:500}
     max-pages-per-request: ${LEARNBOT_CRAWLER_MAX_PAGES_PER_REQUEST:30}
+    max-sitemap-urls: ${LEARNBOT_CRAWLER_MAX_SITEMAP_URLS:500}
     max-depth: ${LEARNBOT_CRAWLER_MAX_DEPTH:2}
     min-content-chars: ${LEARNBOT_CRAWLER_MIN_CONTENT_CHARS:200}
     respect-robots-txt: ${LEARNBOT_CRAWLER_RESPECT_ROBOTS_TXT:true}
@@ -30,6 +31,7 @@ learnbot:
     use-sitemap: ${LEARNBOT_CRAWLER_USE_SITEMAP:false}
     render-mode: ${LEARNBOT_CRAWLER_RENDER_MODE:STATIC}
     max-attachment-bytes: ${LEARNBOT_CRAWLER_MAX_ATTACHMENT_BYTES:25000000}
+    max-attachments-per-crawl: ${LEARNBOT_CRAWLER_MAX_ATTACHMENTS_PER_CRAWL:50}
     playwright-enabled: ${LEARNBOT_CRAWLER_PLAYWRIGHT_ENABLED:false}
     playwright-timeout-seconds: ${LEARNBOT_CRAWLER_PLAYWRIGHT_TIMEOUT_SECONDS:20}
     playwright-wait-until: ${LEARNBOT_CRAWLER_PLAYWRIGHT_WAIT_UNTIL:networkidle}

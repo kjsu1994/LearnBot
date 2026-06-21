@@ -22,9 +22,9 @@ function DocumentWorkspace(props) {
             <Database size={18} />
             <div>
               <h2>문서 소스 추가</h2>
-              <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
+              <p>웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
             </div>
-            <button className="icon-button" type="button" title="웹 수집 옵션 도움말" onClick={() => setWebIngestHelpOpen(true)}>
+        <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
               <HelpCircle size={16} />
             </button>
           </div>
@@ -39,7 +39,7 @@ function DocumentWorkspace(props) {
             </div>
             <label className="checkbox-row" htmlFor="web-recursive">
               <input id="web-recursive" type="checkbox" checked={props.webRecursive} onChange={(event) => props.setWebRecursive(event.target.checked)} />
-              <span>시작 URL의 하위 경로를 재귀 수집</span>
+              <span>시작 URL의 하위 경로를 함께 수집</span>
             </label>
             <WebCrawlAdvancedOptions
               prefix="web"
@@ -135,7 +135,7 @@ function DocumentWorkspace(props) {
             <MessageSquare size={18} />
             <div>
               <h2>문서에게 질문하기</h2>
-              <p>현재 선택된 공간의 인덱싱 완료 문서 전체에서 근거를 찾아 답변합니다.</p>
+              <p>현재 선택한 공간에 인덱싱된 문서 전체에서 근거를 찾아 답변합니다.</p>
             </div>
           </div>
           <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
@@ -164,7 +164,7 @@ function DocumentWorkspace(props) {
                   <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.loading('save-answer')} onClick={props.saveAnswer}>
                     {props.loading('save-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
                   </button>
-                  <button className="icon-button answer-expand-button" type="button" title="큰창으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                  <button className="icon-button answer-expand-button" type="button" title="확대해서 보기" onClick={() => setAnswerModalOpen(true)}>
                     <Maximize2 size={15} />
                   </button>
                 </div>
@@ -195,7 +195,7 @@ function DocumentWorkspace(props) {
             </div>
           </div>
           <div className="inline-control">
-            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요." />
+            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="검색어를 입력하세요" />
             <button disabled={!props.query || props.loading('search')}>
               {props.loading('search') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
               검색
@@ -237,7 +237,7 @@ function DocumentSourcePanel(props) {
     setWebIncludeAttachments = () => {},
     webUseSitemap = false,
     setWebUseSitemap = () => {},
-    webRenderMode = 'STATIC',
+    webRenderMode = 'PLAYWRIGHT_FALLBACK',
     setWebRenderMode = () => {},
     files = [],
     setFiles = () => {},
@@ -261,9 +261,9 @@ function DocumentSourcePanel(props) {
         <Database size={18} />
         <div>
           <h2>문서 소스 추가</h2>
-          <p>허용된 웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
+          <p>웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
         </div>
-        <button className="icon-button" type="button" title="웹 수집 옵션 도움말" onClick={() => setWebIngestHelpOpen(true)}>
+            <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
           <HelpCircle size={16} />
         </button>
       </div>
@@ -288,7 +288,7 @@ function DocumentSourcePanel(props) {
             checked={webRecursive}
             onChange={(event) => setWebRecursive(event.target.checked)}
           />
-          <span>시작 URL의 하위 경로를 재귀 수집</span>
+          <span>시작 URL의 하위 경로를 함께 수집</span>
         </label>
         <WebCrawlAdvancedOptions
           prefix="admin-web"
@@ -486,7 +486,7 @@ function WebIngestHelpModal({ onClose }) {
             <HelpCircle size={18} />
             <div>
               <h2 id="web-ingest-help-title">웹 문서 수집 옵션</h2>
-              <p>수집 범위와 실패 처리 방식에 따라 인덱싱되는 문서 수와 품질이 달라집니다.</p>
+              <p>수집 범위, 실패 처리, 렌더링 방식에 따라 인덱싱되는 문서 수와 품질이 달라집니다.</p>
             </div>
           </div>
           <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
@@ -496,39 +496,38 @@ function WebIngestHelpModal({ onClose }) {
         <div className="code-modal-body document-preview-body">
           <div className="document-reader">
             <h3>재귀 수집</h3>
-            <p>꺼져 있으면 입력한 URL 한 페이지만 수집합니다. 켜면 페이지 안의 링크를 따라가며 여러 문서를 같은 소스로 묶어 인덱싱합니다. 문서 사이트, 도움말 센터, 정책 페이지처럼 관련 문서가 여러 페이지로 나뉜 경우 켜는 것이 좋습니다.</p>
+            <p>꺼져 있으면 입력한 URL 한 페이지만 수집합니다. 켜면 페이지 안의 링크를 따라가며 관련 문서를 같은 소스로 묶어 인덱싱합니다.</p>
 
             <h3>수집 범위</h3>
             <p><strong>시작 경로 하위</strong>는 가장 안전한 기본값입니다. 예를 들어 /docs에서 시작하면 /docs/install은 수집하지만 /blog는 제외합니다.</p>
-            <p><strong>같은 호스트 전체</strong>는 같은 도메인의 다른 경로까지 수집합니다. 문서가 /guide, /reference처럼 여러 경로에 나뉘어 있을 때 유용하지만 불필요한 페이지도 늘 수 있습니다.</p>
+            <p><strong>같은 호스트 전체</strong>는 같은 도메인의 다른 경로까지 수집합니다. 문서가 /guide, /reference처럼 여러 경로에 나뉜 경우 유용합니다.</p>
             <p><strong>같은 사이트</strong>는 하위 도메인까지 넓게 봅니다. docs.example.com과 help.example.com을 함께 수집해야 할 때 사용합니다.</p>
-            <p><strong>허용 도메인 전체</strong>는 관리자 설정의 허용 도메인 안에서 교차 링크를 따라갑니다. 가장 넓은 범위라 운영자가 신뢰하는 도메인만 허용 목록에 넣었을 때 사용하세요.</p>
+            <p><strong>허용 도메인 전체</strong>는 관리자 설정의 허용 도메인 안에서 교차 링크를 따라갑니다. 운영자가 신뢰하는 도메인에만 사용하세요.</p>
 
             <h3>robots.txt 조회 실패</h3>
-            <p>관리자 설정의 robots.txt 정책 준수가 켜져 있을 때 적용됩니다. <strong>실패 시 차단</strong>은 가장 보수적인 기본값입니다. robots.txt를 읽지 못하면 수집하지 않습니다.</p>
-            <p><strong>조회 실패만 허용</strong>은 robots.txt 서버가 일시적으로 실패하거나 느린 경우 문서 수집을 계속합니다. 단, robots.txt가 정상적으로 읽히고 명시적으로 차단한 URL은 계속 수집하지 않습니다.</p>
-            <p><strong>robots.txt 무시</strong>는 관리자 소스 등록 화면에서만 선택할 수 있습니다. 해당 수집 요청에서 robots 검사를 건너뛰므로 내부 문서나 명확히 허가된 사이트에서만 사용하는 것이 안전합니다.</p>
+            <p><strong>실패 시 차단</strong>은 보수적인 기본값입니다. robots.txt를 읽지 못하면 수집하지 않습니다.</p>
+            <p><strong>조회 실패만 허용</strong>은 robots.txt 서버가 일시적으로 실패한 경우 수집을 계속합니다. 명시적으로 차단된 URL은 계속 제외합니다.</p>
+            <p><strong>robots.txt 무시</strong>는 관리자 화면에서만 선택할 수 있습니다. 내부 문서처럼 권한과 출처가 명확한 사이트에만 사용하세요.</p>
 
-            <h3>sitemap.xml 활용</h3>
-            <p>사이트가 sitemap.xml을 제공하면 링크를 클릭해서 찾기 어려운 문서도 seed로 추가합니다. 문서 사이트의 누락을 줄이는 데 효과적입니다. sitemap을 못 읽어도 전체 작업은 실패하지 않고 일반 링크 수집으로 폴백합니다.</p>
+            <h3>sitemap.xml 사용</h3>
+            <p>사이트가 sitemap.xml을 제공하면 링크 클릭만으로 찾기 어려운 문서를 seed로 추가합니다. sitemap을 읽지 못해도 전체 작업은 실패하지 않고 일반 링크 수집으로 폴백합니다.</p>
 
-            <h3>첨부파일 수집</h3>
-            <p>웹 페이지에 연결된 PDF, DOCX, PPTX, XLSX, CSV, TXT, Markdown 파일을 함께 인덱싱합니다. 기본값은 꺼짐입니다. 켜면 답변 근거가 풍부해지지만 수집 시간이 길어지고 저장 용량이 늘 수 있습니다. 파일 크기와 형식 제한은 서버 설정을 따릅니다.</p>
+            <h3>첨부 파일 수집</h3>
+            <p>페이지에 연결된 PDF, DOCX, PPTX, XLSX, CSV, TXT, Markdown 파일을 함께 인덱싱합니다. 서버 설정의 개수 제한에 도달하면 남은 첨부는 건너뛰고 audit에 사유를 남깁니다.</p>
 
             <h3>렌더링 방식</h3>
-            <p><strong>정적 HTML</strong>은 빠르고 안정적인 기본값입니다. 서버가 내려준 HTML만 파싱합니다.</p>
-            <p><strong>필요 시 Playwright 폴백</strong>은 정적 HTML에 본문이 거의 없거나 SPA 페이지로 보일 때 브라우저 렌더링을 시도하는 모드입니다.</p>
-            <p><strong>Playwright 우선</strong>은 처음부터 브라우저 렌더링을 우선합니다. JavaScript로 본문을 만드는 사이트에 유리하지만 느리고 자원 사용량이 큽니다. 현재 런타임에 Playwright가 준비되지 않은 경우 정적 HTML 수집으로 안전하게 폴백하고 audit에 기록됩니다.</p>
+            <p><strong>정적 HTML</strong>은 빠르고 안정적인 기본 수집 방식입니다. 서버가 내려준 HTML을 파싱합니다.</p>
+            <p><strong>필요 시 Playwright 폴백</strong>은 정적 HTML 본문이 너무 적거나 SPA처럼 보일 때 브라우저 렌더링을 한 번 더 시도합니다.</p>
+            <p><strong>Playwright 우선</strong>은 처음부터 브라우저 렌더링을 사용합니다. JavaScript 기반 사이트에 유리하지만 느리고 리소스 사용량이 큽니다.</p>
 
             <h3>추천 시작값</h3>
-            <p>처음에는 재귀 수집을 켜고, 수집 범위는 <strong>시작 경로 하위</strong>, robots.txt 조회 실패는 <strong>실패 시 차단</strong>, 렌더링 방식은 <strong>정적 HTML</strong>로 시작하세요. 결과가 부족하면 sitemap.xml 활용을 켜고, 문서가 여러 경로에 흩어져 있으면 수집 범위를 같은 호스트 전체로 넓히는 순서가 안전합니다.</p>
+            <p>처음에는 재귀 수집, 시작 경로 하위, 실패 시 차단, 필요 시 Playwright 폴백으로 시작하세요. 결과가 부족하면 sitemap.xml과 첨부 파일 수집을 켜고 audit에서 실패 사유를 확인하는 순서가 안전합니다.</p>
           </div>
         </div>
       </section>
     </div>
   );
 }
-
 function WebCrawlAdvancedOptions({
   prefix,
   recursive,
@@ -541,7 +540,7 @@ function WebCrawlAdvancedOptions({
   setIncludeAttachments = () => {},
   useSitemap = false,
   setUseSitemap = () => {},
-  renderMode = 'STATIC',
+  renderMode = 'PLAYWRIGHT_FALLBACK',
   setRenderMode = () => {},
 }) {
   useEffect(() => {
@@ -593,7 +592,7 @@ function WebCrawlAdvancedOptions({
             disabled={!recursive}
             onChange={(event) => setUseSitemap(event.target.checked)}
           />
-          <span>sitemap.xml 활용</span>
+          <span>sitemap.xml 사용</span>
         </label>
         <label className="checkbox-row" htmlFor={`${prefix}-attachments`}>
           <input
@@ -603,7 +602,7 @@ function WebCrawlAdvancedOptions({
             disabled={!recursive}
             onChange={(event) => setIncludeAttachments(event.target.checked)}
           />
-          <span>첨부파일 수집</span>
+          <span>첨부 파일 수집</span>
         </label>
       </div>
       <div className="stack">
@@ -639,6 +638,9 @@ function FileBatchResult({ result }) {
 }
 
 function DocumentDetailPanel({ detail, loading }) {
+  const [auditFilter, setAuditFilter] = useState('issues');
+  const [showAllAudits, setShowAllAudits] = useState(false);
+
   if (loading) {
     return (
       <section className="panel detail-panel">
@@ -655,6 +657,11 @@ function DocumentDetailPanel({ detail, loading }) {
   if (!detail) {
     return null;
   }
+  const audits = detail.crawlAudits || [];
+  const auditSummary = summarizeCrawlAudits(audits);
+  const filteredAudits = filterCrawlAudits(audits, auditFilter);
+  const visibleAudits = showAllAudits ? filteredAudits : filteredAudits.slice(0, 8);
+
   return (
     <section className="panel detail-panel">
       <div className="panel-title">
@@ -682,24 +689,133 @@ function DocumentDetailPanel({ detail, loading }) {
           <dd>{detail.storedObject?.originalFilename || '-'}</dd>
         </div>
       </dl>
-      {detail.crawlAudits?.length > 0 && (
+      {audits.length > 0 && (
         <div className="results audit-list">
-          {detail.crawlAudits.slice(0, 8).map((audit) => (
-            <article className="result" key={audit.id}>
+          <div className="audit-summary-grid">
+            <AuditSummaryItem label="Success" value={auditSummary.success} />
+            <AuditSummaryItem label="Issues" value={auditSummary.issues} tone={auditSummary.issues ? 'warning' : ''} />
+            <AuditSummaryItem label="Sitemap" value={auditSummary.sitemap} />
+            <AuditSummaryItem label="Attachments" value={auditSummary.attachments} />
+            <AuditSummaryItem label="Playwright" value={auditSummary.playwright} />
+          </div>
+          <div className="audit-filter-row">
+            {[
+              ['issues', '문제 우선'],
+              ['all', '전체'],
+              ['sitemap', 'Sitemap'],
+              ['attachments', 'Attachments'],
+              ['playwright', 'Playwright'],
+            ].map(([value, label]) => (
+              <button
+                className={auditFilter === value ? 'ghost-button compact-action active' : 'ghost-button compact-action'}
+                key={value}
+                type="button"
+                onClick={() => {
+                  setAuditFilter(value);
+                  setShowAllAudits(false);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {visibleAudits.map((audit) => (
+            <article className={audit.success ? 'result audit-result' : 'result audit-result audit-result-warning'} key={audit.id}>
               <div className="result-heading">
-                <strong>{audit.reasonCode || (audit.success ? 'FETCHED' : 'SKIPPED')}</strong>
+                <strong>{crawlReasonLabel(audit.reasonCode || (audit.success ? 'FETCHED' : 'SKIPPED'))}</strong>
                 <span>{audit.statusCode || '-'}</span>
               </div>
               <small title={audit.url}>
                 {audit.host || '-'}{audit.depth != null ? ` · depth ${audit.depth}` : ''}{audit.referrerUrl ? ` · from ${audit.referrerUrl}` : ''}
               </small>
               <p>{audit.message || audit.url}</p>
+              <small>{crawlAuditMetadataLine(audit)}</small>
             </article>
           ))}
+          {filteredAudits.length > visibleAudits.length && (
+            <button className="ghost-button compact-action" type="button" onClick={() => setShowAllAudits(true)}>
+              audit 이벤트 {filteredAudits.length}개 모두 보기
+            </button>
+          )}
+          {!filteredAudits.length && <p className="empty compact-empty">이 필터에 해당하는 crawl audit 이벤트가 없습니다.</p>}
         </div>
       )}
     </section>
   );
+}
+
+function AuditSummaryItem({ label, value, tone = '' }) {
+  return (
+    <div className={tone ? `audit-summary-item ${tone}` : 'audit-summary-item'}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function summarizeCrawlAudits(audits = []) {
+  return audits.reduce((summary, audit) => {
+    const reason = audit.reasonCode || '';
+    summary.success += audit.success ? 1 : 0;
+    summary.issues += audit.success ? 0 : 1;
+    summary.sitemap += reason.startsWith('SITEMAP_') ? 1 : 0;
+    summary.attachments += isAttachmentAudit(reason, audit) ? 1 : 0;
+    summary.playwright += reason.includes('PLAYWRIGHT') || reason.includes('STATIC_LOW_CONTENT') ? 1 : 0;
+    return summary;
+  }, { success: 0, issues: 0, sitemap: 0, attachments: 0, playwright: 0 });
+}
+
+function filterCrawlAudits(audits = [], filter = 'issues') {
+  if (filter === 'all') return audits;
+  if (filter === 'sitemap') return audits.filter((audit) => (audit.reasonCode || '').startsWith('SITEMAP_'));
+  if (filter === 'attachments') return audits.filter((audit) => isAttachmentAudit(audit.reasonCode || '', audit));
+  if (filter === 'playwright') {
+    return audits.filter((audit) => {
+      const reason = audit.reasonCode || '';
+      return reason.includes('PLAYWRIGHT') || reason.includes('STATIC_LOW_CONTENT');
+    });
+  }
+  return audits.filter((audit) => !audit.success);
+}
+
+function isAttachmentAudit(reasonCode = '', audit = {}) {
+  return reasonCode.includes('ATTACHMENT')
+    || /\.(pdf|docx?|pptx?|xlsx?|csv|txt|md|markdown)(\?|#|$)/i.test(audit.url || '');
+}
+
+function crawlReasonLabel(reasonCode = '') {
+  const labels = {
+    ATTACHMENT_LIMIT_REACHED: 'Attachment limit reached',
+    STATIC_LOW_CONTENT_PLAYWRIGHT_RETRY: 'Static page was thin, retried with Playwright',
+    PLAYWRIGHT_RETRY_FAILED_STATIC_FALLBACK: 'Playwright retry failed, kept static fallback',
+    SITEMAP_FETCH_FAILED: 'Sitemap fetch failed',
+    SITEMAP_FETCHED: 'Sitemap fetched',
+    SITEMAP_URL_DISCOVERED: 'Sitemap URLs discovered',
+    ROBOTS_DISALLOWED: 'Blocked by robots.txt',
+    ROBOTS_UNAVAILABLE: 'robots.txt unavailable',
+    OUT_OF_SCOPE: 'Outside crawl scope',
+    LOW_CONTENT: 'Low content page',
+    LOW_TEXT_DENSITY: 'Low text density',
+    NAVIGATION_ONLY_PAGE: 'Navigation-only page',
+    DUPLICATE_CONTENT: 'Duplicate content',
+    FETCH_ERROR: 'Fetch error',
+    FETCHED: 'Fetched',
+    SKIPPED: 'Skipped',
+  };
+  return labels[reasonCode] || reasonCode || 'Audit event';
+}
+
+function crawlAuditMetadataLine(audit = {}) {
+  const metadata = audit.metadata || {};
+  const parts = [];
+  if (metadata.fileSizeBytes != null) parts.push(`size ${formatFileSize(Number(metadata.fileSizeBytes))}`);
+  if (metadata.discoveredUrlCount != null) parts.push(`${metadata.discoveredUrlCount} URLs`);
+  if (metadata.urlCount != null) parts.push(`${metadata.urlCount} URLs`);
+  if (metadata.maxSitemapUrls != null) parts.push(`sitemap cap ${metadata.maxSitemapUrls}`);
+  if (metadata.maxAttachmentsPerCrawl != null) parts.push(`attachment cap ${metadata.maxAttachmentsPerCrawl}`);
+  if (metadata.contentLength != null) parts.push(`content ${metadata.contentLength}`);
+  if (metadata.density != null) parts.push(`density ${Number(metadata.density).toFixed(2)}`);
+  return parts.length ? parts.join(' · ') : audit.reasonCode || '';
 }
 
 function ResultList({ results, title }) {
@@ -758,7 +874,7 @@ function EvidenceList({ evidence = [], onOpenEvidence }) {
       {groupedEvidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '핵심 근거만 보기' : `전체 근거 문서 ${groupedEvidence.length}개 보기`}
+          {expanded ? '상위 근거만 보기' : `전체 근거 문서 ${groupedEvidence.length}개 보기`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
