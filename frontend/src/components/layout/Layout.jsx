@@ -13,6 +13,13 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
   const shellRef = useRef(null);
   const visualRef = useRef(null);
   const proofRef = useRef(null);
+  const supportedSources = ['PDF', 'DOCX', 'PPTX', 'Markdown', 'Excel', 'CSV', 'Web crawl', 'Git repository', 'Saved answers'];
+  const flowSteps = [
+    { label: '수집', detail: '문서와 코드를 안전하게 가져옵니다.' },
+    { label: '인덱싱', detail: '구조, 메타데이터, 근거 청크를 정리합니다.' },
+    { label: '검색', detail: '질문 의도에 맞는 원문 근거를 찾습니다.' },
+    { label: '답변', detail: '출처와 함께 검증 가능한 답변을 제공합니다.' },
+  ];
   const featureCards = [
     {
       path: routePaths.code,
@@ -20,7 +27,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       title: 'Code RAG',
       eyebrow: 'CODE',
       description: '저장소를 인덱싱하고 최신 커밋, 호출 흐름, UI 이벤트를 코드 근거와 함께 확인합니다.',
-      metric: 'Git · Commit · Trace',
+      metric: 'Git / Commit / Trace',
     },
     {
       path: routePaths.docs,
@@ -28,15 +35,37 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       title: 'Document RAG',
       eyebrow: 'DOCS',
       description: 'PDF, 엑셀, 웹 문서를 사내 지식으로 축적하고 원문 근거 기반 답변을 생성합니다.',
-      metric: 'PDF · Excel · Web',
+      metric: 'PDF / Excel / Web',
     },
     {
       path: routePaths.admin,
       icon: <IconShieldCheck size={22} />,
       title: 'Admin Console',
       eyebrow: 'ADMIN',
-      description: '사용자, 공간, 크롤링 정책, 모델 설정, RAG 데이터 이관을 한 곳에서 관리합니다.',
-      metric: 'Users · Spaces · Audit',
+      description: '사용자, 공간, 크롤링 정책, 모델 설정, RAG 데이터를 한 곳에서 관리합니다.',
+      metric: 'Users / Spaces / Audit',
+    },
+  ];
+  const bentoCards = [
+    {
+      title: '근거 중심 답변',
+      copy: '답변마다 문서, 파일, 청크, 라인 정보를 연결해 검토 시간을 줄입니다.',
+      icon: <IconSearch size={22} />,
+    },
+    {
+      title: '사내 지식 통합',
+      copy: '문서 RAG와 코드 RAG를 한 워크스페이스에서 운영합니다.',
+      icon: <IconDatabase size={22} />,
+    },
+    {
+      title: '관리자 운영성',
+      copy: '인덱싱 상태, 진단, 감사 로그, 사용자 권한을 운영 화면에서 확인합니다.',
+      icon: <IconShieldCheck size={22} />,
+    },
+    {
+      title: '재사용 가능한 답변',
+      copy: '좋은 답변은 저장하고 팀의 표준 지식으로 다시 활용합니다.',
+      icon: <IconBook size={22} />,
     },
   ];
 
@@ -91,7 +120,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
   }, []);
 
   return (
-    <AnimatedPage ref={shellRef} className="home-shell commercial-shell min-h-screen bg-slate-950 text-slate-50">
+    <AnimatedPage ref={shellRef} className="home-shell commercial-shell landing-shell min-h-screen bg-slate-950 text-slate-50">
       <header className="home-nav border-white/10 bg-slate-950/80 backdrop-blur-xl">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
@@ -102,7 +131,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
             <small>Private Knowledge RAG</small>
           </span>
         </button>
-        <nav aria-label="런봇 주요 영역">
+        <nav aria-label="LearnBot 주요 영역">
           <button type="button" onClick={() => navigateTo(routePaths.code)}>코드</button>
           <button type="button" onClick={() => navigateTo(routePaths.docs)}>문서</button>
           <button type="button" onClick={() => navigateTo(routePaths.admin)}>관리자</button>
@@ -131,8 +160,8 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
           </Badge>
           <h1>사내 지식 운영을 위한<br />프라이빗 AI 워크스페이스</h1>
           <p>
-            코드, 문서, 저장 답변, 관리자 운영을 하나의 제품형 경험으로 연결하고
-            모든 답변을 근거 중심으로 검증합니다.
+            코드, 문서, 저장 답변, 관리자 운영을 하나의 제품 경험으로 연결하고
+            모든 답변을 원문 근거 중심으로 검증합니다.
           </p>
           <div className="home-hero-actions">
             <Button type="button" onClick={() => navigateTo(routePaths.docs)}>
@@ -144,8 +173,13 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
               코드 분석 열기
             </Button>
           </div>
+          <div className="landing-trust-row">
+            <span>Private workspace</span>
+            <span>Source-grounded answers</span>
+            <span>Admin diagnostics</span>
+          </div>
         </div>
-        <Card className="launch-hero-panel" ref={visualRef}>
+        <Card className="launch-hero-panel landing-product-mockup" ref={visualRef}>
           <CardHeader>
             <div className="launch-logo-lockup">
               <img src="/LearnBot_Logo.png" alt="LearnBot" />
@@ -156,6 +190,16 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mockup-browser-bar">
+              <span />
+              <span />
+              <span />
+              <strong>learnbot.local/rag</strong>
+            </div>
+            <div className="mockup-query">
+              <IconSparkles size={18} />
+              <span>“이 장애 코드의 원인과 조치 절차를 근거와 함께 알려줘”</span>
+            </div>
             <MetricBarChart
               data={[
                 { name: 'Code', value: 38 },
@@ -168,15 +212,23 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
               <span><IconFileText size={15} /> Document RAG</span>
               <span><IconShieldCheck size={15} /> Admin Guardrails</span>
             </div>
+            <div className="mockup-answer">
+              <strong>근거 기반 답변</strong>
+              <p>요약 답변과 함께 문서명, 섹션, 원문 청크, 코드 파일 라인을 함께 제공합니다.</p>
+            </div>
           </CardContent>
         </Card>
       </AnimatedSection>
 
-      <AnimatedSection className="home-marquee" aria-label="런봇 핵심 가치" delay={0.08}>
-        <span>Runbot supports your work</span>
+      <AnimatedSection className="home-marquee landing-marquee" aria-label="지원 데이터 소스" delay={0.08}>
+        <div className="landing-marquee-track">
+          {[...supportedSources, ...supportedSources].map((source, index) => (
+            <span key={`${source}-${index}`}>{source}</span>
+          ))}
+        </div>
       </AnimatedSection>
 
-      <AnimatedSection className="home-feature-grid" aria-label="런봇 기능 진입" delay={0.12}>
+      <AnimatedSection className="home-feature-grid" aria-label="LearnBot 기능 진입" delay={0.12}>
         {featureCards.map((card) => (
           <button className="home-feature-card" type="button" key={card.path} onClick={() => navigateTo(card.path)}>
             <span className="home-feature-eyebrow">{card.eyebrow}</span>
@@ -188,16 +240,67 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
         ))}
       </AnimatedSection>
 
+      <AnimatedSection className="landing-flow-section" delay={0.14}>
+        <div className="landing-section-copy">
+          <span className="home-kicker">RAG OPERATING FLOW</span>
+          <h2>수집부터 답변까지 한 화면에서 추적합니다</h2>
+          <p>Magic UI의 beam형 흐름을 LearnBot에 맞게 단순화해, 사용자가 서비스 구조를 바로 이해할 수 있도록 구성합니다.</p>
+        </div>
+        <div className="landing-flow-grid">
+          {flowSteps.map((step, index) => (
+            <div className="landing-flow-card" key={step.label}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{step.label}</strong>
+              <p>{step.detail}</p>
+            </div>
+          ))}
+        </div>
+      </AnimatedSection>
+
+      <AnimatedSection className="landing-bento-section" delay={0.15}>
+        <div className="landing-section-copy">
+          <span className="home-kicker">PRODUCT CAPABILITIES</span>
+          <h2>검색 품질, 운영성, 보안을 함께 설계한 RAG 제품</h2>
+        </div>
+        <div className="landing-bento-grid">
+          {bentoCards.map((card, index) => (
+            <div className={index === 0 ? 'landing-bento-card landing-bento-card-large' : 'landing-bento-card'} key={card.title}>
+              <span className="landing-bento-icon">{card.icon}</span>
+              <strong>{card.title}</strong>
+              <p>{card.copy}</p>
+            </div>
+          ))}
+        </div>
+      </AnimatedSection>
+
       <AnimatedSection ref={proofRef} className="home-proof" delay={0.16}>
         <div>
           <span className="home-kicker">OPERATING MODEL</span>
-          <h2>로컬환경 지원</h2>
+          <h2>로컬 환경 중심의 안전한 지식 운영</h2>
         </div>
         <div className="home-proof-list">
           <span>공간별 데이터 분리</span>
           <span>근거 기반 답변</span>
           <span>권한과 감사 로그</span>
-          <span>Export / Import 이관</span>
+          <span>Export / Import 지원</span>
+        </div>
+      </AnimatedSection>
+
+      <AnimatedSection className="landing-cta-section" delay={0.18}>
+        <div>
+          <span className="home-kicker">READY TO OPERATE</span>
+          <h2>지금 사내 문서와 코드를 LearnBot 지식으로 전환하세요</h2>
+          <p>문서 저장소, 코드 저장소, 관리자 진단까지 같은 제품 흐름 안에서 운영할 수 있습니다.</p>
+        </div>
+        <div className="landing-cta-actions">
+          <Button type="button" onClick={() => navigateTo(routePaths.docs)}>
+            <IconFileText size={17} />
+            문서 소스 등록
+          </Button>
+          <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+            <IconCode size={17} />
+            코드 저장소 등록
+          </Button>
         </div>
       </AnimatedSection>
     </AnimatedPage>
@@ -250,7 +353,6 @@ function LoginScreen({ onLogin, busy, error }) {
     </AnimatedPage>
   );
 }
-
 function WorkspaceShell({
   user,
   spaces,
