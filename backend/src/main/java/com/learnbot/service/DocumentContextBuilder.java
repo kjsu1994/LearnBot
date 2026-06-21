@@ -18,7 +18,9 @@ import java.util.stream.Collectors;
 public class DocumentContextBuilder {
     private static final int STRUCTURE_VERSION = 1;
     private static final int MAX_CONTEXT_CHARS = 9000;
-    private static final int MAX_CONTEXT_CHUNKS_PER_DOCUMENT = 2;
+    private static final int MAX_CONTEXT_CHUNKS_PER_DOCUMENT = 8;
+    private static final int MAX_SECTION_SUMMARIES_PER_DOCUMENT = 4;
+    private static final int MAX_TABLE_SUMMARIES_PER_DOCUMENT = 3;
 
     private final LearnBotProperties properties;
     private final OllamaClient ollamaClient;
@@ -44,6 +46,7 @@ public class DocumentContextBuilder {
         List<Chunk> output = new ArrayList<>();
         addChunk(output, "document_structure", "document", structureContent(document, facts), Map.of(
                 "summaryLevel", "document",
+                "sourceUrl", clean(document.sourceUri()),
                 "generatedBy", "deterministic",
                 "llmAttempted", false,
                 "llmSucceeded", false
@@ -52,10 +55,13 @@ public class DocumentContextBuilder {
         HybridText summary = documentSummary(document, chunks, facts, recursiveWeb);
         addChunk(output, "document_summary", "document", summary.content(), Map.of(
                 "summaryLevel", "document",
+                "sourceUrl", clean(document.sourceUri()),
                 "generatedBy", summary.generatedBy(),
                 "llmAttempted", llmEnabled(recursiveWeb),
                 "llmSucceeded", summary.llmSucceeded()
         ));
+        addSectionSummaryChunks(output, document, chunks);
+        addTableSummaryChunks(output, document, chunks);
         return output.stream().limit(MAX_CONTEXT_CHUNKS_PER_DOCUMENT).toList();
     }
 
@@ -346,6 +352,134 @@ public class DocumentContextBuilder {
         chunks.add(new Chunk(chunks.size(), clean, values));
     }
 
+    private void addSectionSummaryChunks(List<Chunk> output, ExtractedDocument document, List<Chunk> chunks) {
+        Map<String, List<Chunk>> grouped = new LinkedHashMap<>();
+        for (Chunk chunk : chunks) {
+            Map<String, Object> metadata = chunk.metadata() == null ? Map.of() : chunk.metadata();
+            String headingPath = string(metadata, "headingPath");
+            if (headingPath.isBlank()) {
+                continue;
+            }
+            grouped.computeIfAbsent(headingPath, ignored -> new ArrayList<>()).add(chunk);
+        }
+        grouped.entrySet().stream()
+                .limit(MAX_SECTION_SUMMARIES_PER_DOCUMENT)
+                .forEach(entry -> {
+                    String headingPath = entry.getKey();
+                    String sectionTitle = sectionTitle(headingPath);
+                    List<Chunk> sectionChunks = entry.getValue();
+                    String sample = sectionChunks.stream()
+                            .limit(3)
+                            .map(chunk -> trim(clean(chunk.content()), 700))
+                            .collect(Collectors.joining("\n\n---\n\n"));
+                    String content = """
+                            Section summary
+                            Document: %s
+                            Source URI: %s
+                            Section: %s
+                            Heading path: %s
+                            Original chunks in section: %d
+                            Representative content:
+                            %s
+                            Search keywords: section summary heading topic where located source map
+                            """.formatted(
+                            clean(document.title()),
+                            clean(document.sourceUri()),
+                            sectionTitle,
+                            headingPath,
+                            sectionChunks.size(),
+                            sample
+                    ).strip();
+                    addChunk(output, "section_summary", "section", content, Map.of(
+                            "summaryLevel", "section",
+                            "sourceUrl", clean(document.sourceUri()),
+                            "sectionTitle", sectionTitle,
+                            "headingPath", headingPath,
+                            "generatedBy", "deterministic",
+                            "llmAttempted", false,
+                            "llmSucceeded", false
+                    ));
+                });
+    }
+
+    private void addTableSummaryChunks(List<Chunk> output, ExtractedDocument document, List<Chunk> chunks) {
+        Map<String, List<Chunk>> grouped = new LinkedHashMap<>();
+        for (Chunk chunk : chunks) {
+            Map<String, Object> metadata = chunk.metadata() == null ? Map.of() : chunk.metadata();
+            String tableId = tableId(metadata);
+            if (tableId.isBlank()) {
+                continue;
+            }
+            grouped.computeIfAbsent(tableId, ignored -> new ArrayList<>()).add(chunk);
+        }
+        grouped.entrySet().stream()
+                .limit(MAX_TABLE_SUMMARIES_PER_DOCUMENT)
+                .forEach(entry -> {
+                    String tableId = entry.getKey();
+                    List<Chunk> tableChunks = entry.getValue();
+                    Map<String, Object> firstMetadata = tableChunks.get(0).metadata() == null ? Map.of() : tableChunks.get(0).metadata();
+                    String rowRange = tableChunks.stream()
+                            .map(chunk -> range(chunk.metadata() == null ? Map.of() : chunk.metadata(), "rowStart", "rowEnd"))
+                            .filter(value -> !value.isBlank())
+                            .distinct()
+                            .collect(Collectors.joining(", "));
+                    String header = tableChunks.stream()
+                            .map(chunk -> string(chunk.metadata() == null ? Map.of() : chunk.metadata(), "header"))
+                            .filter(value -> !value.isBlank())
+                            .findFirst()
+                            .orElse("-");
+                    String content = """
+                            Table summary
+                            Document: %s
+                            Source URI: %s
+                            Table: %s
+                            Sheet: %s
+                            Rows: %s
+                            Header: %s
+                            Original table chunks: %d
+                            Search keywords: table summary sheet rows columns count extracted data
+                            """.formatted(
+                            clean(document.title()),
+                            clean(document.sourceUri()),
+                            tableId,
+                            firstNonBlank(string(firstMetadata, "sheetName"), string(firstMetadata, "tableIndex")),
+                            rowRange.isBlank() ? "-" : rowRange,
+                            trim(header, 800),
+                            tableChunks.size()
+                    ).strip();
+                    addChunk(output, "table_summary", "table", content, Map.of(
+                            "summaryLevel", "table",
+                            "sourceUrl", clean(document.sourceUri()),
+                            "tableId", tableId,
+                            "sheetName", string(firstMetadata, "sheetName"),
+                            "generatedBy", "deterministic",
+                            "llmAttempted", false,
+                            "llmSucceeded", false
+                    ));
+                });
+    }
+
+    private String sectionTitle(String headingPath) {
+        String[] parts = clean(headingPath).split("\\s*>\\s*");
+        return parts.length == 0 ? clean(headingPath) : parts[parts.length - 1].trim();
+    }
+
+    private String tableId(Map<String, Object> metadata) {
+        String configured = string(metadata, "tableId");
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        String sheetName = string(metadata, "sheetName");
+        if (!sheetName.isBlank()) {
+            return "sheet:" + sheetName;
+        }
+        String tableIndex = string(metadata, "tableIndex");
+        if (!tableIndex.isBlank()) {
+            return "table:" + tableIndex;
+        }
+        return "";
+    }
+
     private boolean llmEnabled() {
         return properties.getRag().getDocumentContext().isLlmSummaryEnabled();
     }
@@ -417,6 +551,18 @@ public class DocumentContextBuilder {
         for (List<String> value : values) {
             if (value != null && !value.isEmpty()) {
                 return String.join(", ", value.stream().limit(6).toList());
+            }
+        }
+        return "-";
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "-";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
             }
         }
         return "-";

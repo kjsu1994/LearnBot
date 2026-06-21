@@ -1375,7 +1375,7 @@ public class LearnBotProperties {
         }
 
         public static class Graph {
-            private boolean enabled = false;
+            private boolean enabled = true;
 
             @Min(1)
             private int maxHop = 1;

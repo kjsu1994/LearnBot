@@ -239,6 +239,69 @@ class RagServiceTest {
     }
 
     @Test
+    void overviewQuestionExpandsContextChunkToOriginalSectionEvidence() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "Give me an overview of this document";
+        UUID documentId = UUID.randomUUID();
+        UUID contextChunkId = UUID.randomUUID();
+        SearchResult context = new SearchResult(
+                contextChunkId,
+                documentId,
+                "guide.md",
+                "file://guide.md",
+                "FILE",
+                "text/markdown",
+                2,
+                "Section summary\nSection: Setup\nHeading path: Intro > Setup",
+                java.util.Map.of(
+                        "kind", "document_context",
+                        "contextType", "section_summary",
+                        "headingPath", "Intro > Setup",
+                        "sectionTitle", "Setup"
+                ),
+                0.92
+        );
+        SearchResult original = new SearchResult(
+                UUID.randomUUID(),
+                documentId,
+                "guide.md",
+                "file://guide.md",
+                "FILE",
+                "text/markdown",
+                0,
+                "## Setup\nInstall the service and configure the database.",
+                java.util.Map.of(
+                        "headingPath", "Intro > Setup",
+                        "sectionTitle", "Setup"
+                ),
+                0.0
+        );
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), any(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(context),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 3, false, 1)
+                ));
+        when(documentRepository.contextRelatedChunks(any(), anyInt(), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(new DocumentRepository.ContextRelatedChunkCandidate(original, contextChunkId, "same_section", 0.92)));
+        when(documentRepository.graphExpandedChunks(any(), anyInt(), anyInt(), any(), isNull()))
+                .thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The document covers setup, including installation and database configuration [1][2]."));
+
+        AskResponse response = service.ask(question, null, "summary", List.of(UUID.randomUUID()), null);
+
+        assertThat(response.evidence()).hasSize(2);
+        assertThat(response.evidence()).anySatisfy(evidence ->
+                assertThat(evidence.metadata()).containsEntry("contextRelatedExpanded", true)
+                        .containsEntry("contextRelatedReason", "same_section"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("context-related chunks"));
+    }
+
+    @Test
     void recruitmentCautionQuestionFallsBackToStructuredGuidance() {
         SearchService searchService = mock(SearchService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);

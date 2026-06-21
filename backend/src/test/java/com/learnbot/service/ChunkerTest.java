@@ -54,6 +54,8 @@ class ChunkerTest {
         assertThat(chunks.get(0).content()).contains("Page 1:");
         assertThat(chunks.get(0).metadata()).containsEntry("strategy", "pdf_page");
         assertThat(chunks.get(0).metadata()).containsEntry("pageStart", 1);
+        assertThat(chunks.get(0).metadata()).containsEntry("pageNumber", 1);
+        assertThat(chunks.get(0).metadata()).containsEntry("sourceUrl", "file://manual.pdf");
     }
 
     @Test
@@ -76,6 +78,7 @@ class ChunkerTest {
         assertThat(chunks).hasSizeGreaterThan(1);
         assertThat(chunks.get(1).content()).startsWith("Row 1: C1=name");
         assertThat(chunks.get(1).metadata()).containsEntry("strategy", "table_rows");
+        assertThat(chunks.get(1).metadata()).containsEntry("tableId", "table:rows");
     }
 
     @Test
@@ -112,6 +115,7 @@ class ChunkerTest {
         assertThat(chunks).hasSize(2);
         assertThat(chunks.get(0).metadata()).containsEntry("strategy", "markdown_heading");
         assertThat(chunks.get(1).metadata()).containsEntry("headingPath", "Install > Configure");
+        assertThat(chunks.get(1).metadata()).containsEntry("sectionTitle", "Configure");
     }
 
     @Test
@@ -134,6 +138,7 @@ class ChunkerTest {
         assertThat(chunks.get(0).content()).contains("Intro", "Welcome");
         assertThat(chunks.get(0).metadata()).containsEntry("strategy", "html_blocks");
         assertThat(chunks.get(0).metadata()).containsEntry("headingPath", "Intro");
+        assertThat(chunks.get(0).metadata()).containsEntry("sectionTitle", "Intro");
     }
 
     @Test
@@ -150,6 +155,9 @@ class ChunkerTest {
         List<Chunk> chunks = chunker.split(document);
 
         assertThat(chunks).anySatisfy(chunk -> assertThat(chunk.metadata()).containsEntry("strategy", "docx_paragraph"));
-        assertThat(chunks).anySatisfy(chunk -> assertThat(chunk.metadata()).containsEntry("strategy", "docx_table"));
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.metadata()).containsEntry("strategy", "docx_table");
+            assertThat(chunk.metadata()).containsEntry("tableId", "table:1");
+        });
     }
 }

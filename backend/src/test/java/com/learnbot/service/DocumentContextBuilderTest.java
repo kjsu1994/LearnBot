@@ -24,7 +24,7 @@ class DocumentContextBuilderTest {
                 chunk(1, "## Setup\nInstall steps", Map.of("strategy", "markdown_heading", "blockType", "section", "headingPath", "Intro > Setup"))
         ));
 
-        assertThat(chunks).hasSize(2);
+        assertThat(chunks).hasSizeGreaterThanOrEqualTo(3);
         assertThat(chunks).anySatisfy(chunk -> {
             assertThat(chunk.content()).contains("Document structure context", "Headings", "Intro > Setup");
             assertThat(chunk.metadata()).containsEntry("kind", "document_context");
@@ -34,6 +34,11 @@ class DocumentContextBuilderTest {
         assertThat(chunks).anySatisfy(chunk -> {
             assertThat(chunk.content()).contains("Document summary", "guide.md");
             assertThat(chunk.metadata()).containsEntry("contextType", "document_summary");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.content()).contains("Section summary", "Intro");
+            assertThat(chunk.metadata()).containsEntry("contextType", "section_summary");
+            assertThat(chunk.metadata()).containsEntry("sectionTitle", "Intro");
         });
     }
 
@@ -56,6 +61,11 @@ class DocumentContextBuilderTest {
         assertThat(chunks).anySatisfy(chunk -> {
             assertThat(chunk.metadata()).containsEntry("contextType", "document_structure");
             assertThat(chunk.content()).contains("Sheets and row ranges: Members rows 1-2");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.metadata()).containsEntry("contextType", "table_summary");
+            assertThat(chunk.metadata()).containsEntry("tableId", "sheet:Members");
+            assertThat(chunk.content()).contains("Table summary", "Rows: 1-2");
         });
     }
 

@@ -92,12 +92,14 @@ public class DocumentRepository {
             MapSqlParameterSource[] batch = new MapSqlParameterSource[end - start];
             for (int i = start; i < end; i++) {
                 Chunk chunk = chunks.get(i);
+                Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata() == null ? Map.of() : chunk.metadata());
+                metadata.putIfAbsent("parentDocumentId", documentId.toString());
                 batch[i - start] = new MapSqlParameterSource()
                         .addValue("id", UUID.randomUUID())
                         .addValue("documentId", documentId)
                         .addValue("chunkIndex", chunk.index())
                         .addValue("content", chunk.content())
-                        .addValue("metadata", toJson(chunk.metadata()))
+                        .addValue("metadata", toJson(metadata))
                         .addValue("embedding", vectorLiteral(embeddings.get(i)));
             }
             jdbc.batchUpdate("""
@@ -211,7 +213,12 @@ public class DocumentRepository {
     public int copyReusableDocumentChunks(UUID oldDocumentId, UUID newDocumentId) {
         return jdbc.update("""
                 INSERT INTO document_chunks (id, document_id, chunk_index, content, metadata, embedding)
-                SELECT gen_random_uuid(), :newDocumentId, chunk_index, content, metadata, embedding
+                SELECT gen_random_uuid(),
+                       :newDocumentId,
+                       chunk_index,
+                       content,
+                       metadata || jsonb_build_object('parentDocumentId', CAST(:newDocumentId AS text)),
+                       embedding
                 FROM document_chunks
                 WHERE document_id = :oldDocumentId
                   AND metadata ->> 'kind' IS DISTINCT FROM 'document_context'
@@ -727,6 +734,77 @@ public class DocumentRepository {
         return output;
     }
 
+    public List<ContextRelatedChunkCandidate> contextRelatedChunks(
+            List<ContextChunkSeed> seeds,
+            int limit,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (seeds == null || seeds.isEmpty() || limit <= 0 || spaceIds == null || spaceIds.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> documentIds = seeds.stream()
+                .filter(seed -> seed != null && seed.documentId() != null)
+                .map(ContextChunkSeed::documentId)
+                .distinct()
+                .toList();
+        if (documentIds.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> seedChunkIds = seeds.stream()
+                .filter(seed -> seed != null && seed.chunkId() != null)
+                .map(ContextChunkSeed::chunkId)
+                .collect(Collectors.toSet());
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("documentIds", documentIds)
+                .addValue("spaceIds", spaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
+                .addValue("contentType", clean(filter == null ? null : filter.contentType()));
+
+        List<SearchResult> candidates = jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       d.id AS document_id,
+                       d.title,
+                       d.source_uri,
+                       s.type AS source_type,
+                       d.content_type,
+                       c.chunk_index,
+                       c.content,
+                       c.metadata::text AS metadata,
+                       0.0 AS score
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                JOIN data_sources s ON s.id = d.source_id
+                WHERE d.id IN (:documentIds)
+                  AND s.deleted_at IS NULL
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                  AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
+                  AND c.metadata ->> 'kind' IS DISTINCT FROM 'document_context'
+                ORDER BY d.id, c.chunk_index
+                """, params, this::mapSearchResult);
+
+        List<ContextRelatedChunkCandidate> output = new ArrayList<>();
+        Set<UUID> emitted = new HashSet<>();
+        for (SearchResult candidate : candidates) {
+            if (seedChunkIds.contains(candidate.chunkId())) {
+                continue;
+            }
+            ContextMatch match = bestContextMatch(candidate, seeds);
+            if (match == null || !emitted.add(candidate.chunkId())) {
+                continue;
+            }
+            output.add(new ContextRelatedChunkCandidate(candidate, match.seed().chunkId(), match.reason(), match.seed().score()));
+            if (output.size() >= limit) {
+                break;
+            }
+        }
+        return output;
+    }
+
     public void rebuildDocumentGraph(UUID sourceId) {
         jdbc.update("DELETE FROM document_graph_edges WHERE source_id = :sourceId",
                 new MapSqlParameterSource().addValue("sourceId", sourceId));
@@ -780,6 +858,7 @@ public class DocumentRepository {
             }
             previousDocumentId = row.documentId();
             previousChunkKey = chunkKey;
+            addStructureNodes(sourceId, nodes, edges, chunkKey, row);
             addTopicNodes(sourceId, nodes, edges, chunkKey, row);
         }
 
@@ -822,6 +901,10 @@ public class DocumentRepository {
     }
 
     public List<SearchResult> graphExpandedChunks(List<UUID> seedChunkIds, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
+        return graphExpandedChunks(seedChunkIds, limit, 1, spaceIds, selectedSpaceId);
+    }
+
+    public List<SearchResult> graphExpandedChunks(List<UUID> seedChunkIds, int limit, int maxHop, List<UUID> spaceIds, UUID selectedSpaceId) {
         if (seedChunkIds == null || seedChunkIds.isEmpty() || spaceIds == null || spaceIds.isEmpty()) {
             return List.of();
         }
@@ -831,8 +914,10 @@ public class DocumentRepository {
                     FROM document_graph_nodes
                     WHERE chunk_id IN (:seedChunkIds)
                 ),
-                expanded AS (
-                    SELECT n.chunk_id, MAX(e.weight) AS graph_score
+                direct_expanded AS (
+                    SELECT n.chunk_id,
+                           MAX(e.weight) AS graph_score,
+                           MAX(e.edge_type) AS edge_type
                     FROM seed_nodes seed
                     JOIN document_graph_edges e ON e.source_id = seed.source_id
                      AND (e.source_node_id = seed.id OR e.target_node_id = seed.id)
@@ -840,6 +925,32 @@ public class DocumentRepository {
                      AND n.id = CASE WHEN e.source_node_id = seed.id THEN e.target_node_id ELSE e.source_node_id END
                     WHERE n.chunk_id IS NOT NULL
                     GROUP BY n.chunk_id
+                ),
+                structure_expanded AS (
+                    SELECT target.chunk_id,
+                           MAX((first_edge.weight + second_edge.weight) / 2.0) AS graph_score,
+                           MAX(COALESCE(second_edge.metadata ->> 'relation', second_edge.edge_type)) AS edge_type
+                    FROM seed_nodes seed
+                    JOIN document_graph_edges first_edge ON first_edge.source_id = seed.source_id
+                     AND (first_edge.source_node_id = seed.id OR first_edge.target_node_id = seed.id)
+                    JOIN document_graph_nodes bridge ON bridge.source_id = first_edge.source_id
+                     AND bridge.id = CASE WHEN first_edge.source_node_id = seed.id THEN first_edge.target_node_id ELSE first_edge.source_node_id END
+                     AND bridge.chunk_id IS NULL
+                    JOIN document_graph_edges second_edge ON second_edge.source_id = bridge.source_id
+                     AND (second_edge.source_node_id = bridge.id OR second_edge.target_node_id = bridge.id)
+                    JOIN document_graph_nodes target ON target.source_id = second_edge.source_id
+                     AND target.id = CASE WHEN second_edge.source_node_id = bridge.id THEN second_edge.target_node_id ELSE second_edge.source_node_id END
+                    WHERE target.chunk_id IS NOT NULL
+                    GROUP BY target.chunk_id
+                ),
+                expanded AS (
+                    SELECT chunk_id, MAX(graph_score) AS graph_score, MAX(edge_type) AS edge_type
+                    FROM (
+                        SELECT * FROM direct_expanded
+                        UNION ALL
+                        SELECT * FROM structure_expanded
+                    ) combined
+                    GROUP BY chunk_id
                 )
                 SELECT c.id AS chunk_id,
                        d.id AS document_id,
@@ -850,7 +961,8 @@ public class DocumentRepository {
                        c.chunk_index,
                        c.content,
                        c.metadata::text AS metadata,
-                       e.graph_score AS score
+                       e.graph_score AS score,
+                       e.edge_type AS graph_edge_type
                 FROM expanded e
                 JOIN document_chunks c ON c.id = e.chunk_id
                 JOIN documents d ON d.id = c.document_id
@@ -865,7 +977,33 @@ public class DocumentRepository {
                 .addValue("seedChunkIds", seedChunkIds)
                 .addValue("spaceIds", spaceIds)
                 .addValue("selectedSpaceId", selectedSpaceId)
-                .addValue("limit", Math.max(1, limit)), this::mapSearchResult);
+                .addValue("limit", Math.max(1, limit)), this::mapGraphSearchResult);
+    }
+
+    private ContextMatch bestContextMatch(SearchResult candidate, List<ContextChunkSeed> seeds) {
+        Map<String, Object> metadata = candidate.metadata() == null ? Map.of() : candidate.metadata();
+        String headingPath = string(metadata, "headingPath");
+        String sectionTitle = string(metadata, "sectionTitle");
+        String tableId = string(metadata, "tableId");
+        Integer pageNumber = integer(metadata.get("pageNumber"));
+        for (ContextChunkSeed seed : seeds) {
+            if (seed == null || !candidate.documentId().equals(seed.documentId())) {
+                continue;
+            }
+            if (!seed.tableId().isBlank() && seed.tableId().equals(tableId)) {
+                return new ContextMatch(seed, "same_table");
+            }
+            if (seed.pageNumber() != null && seed.pageNumber().equals(pageNumber)) {
+                return new ContextMatch(seed, "same_page");
+            }
+            if (!seed.headingPath().isBlank() && seed.headingPath().equals(headingPath)) {
+                return new ContextMatch(seed, "same_section");
+            }
+            if (!seed.sectionTitle().isBlank() && seed.sectionTitle().equals(sectionTitle)) {
+                return new ContextMatch(seed, "same_section_title");
+            }
+        }
+        return null;
     }
 
     private void addNode(List<DocumentGraphNode> nodes, String key, String type, String label, UUID documentId, UUID chunkId, Map<String, Object> metadata) {
@@ -921,6 +1059,33 @@ public class DocumentRepository {
         }
     }
 
+    private void addStructureNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String chunkKey, GraphChunkRow row) {
+        if (row.metadata() == null) {
+            return;
+        }
+        String headingPath = string(row.metadata(), "headingPath");
+        if (!headingPath.isBlank()) {
+            String sectionKey = "section:" + row.documentId() + ":" + headingPath.toLowerCase(java.util.Locale.ROOT);
+            addNode(nodes, sectionKey, "SECTION", headingPath, row.documentId(), null, Map.of(
+                    "headingPath", headingPath,
+                    "sectionTitle", string(row.metadata(), "sectionTitle")
+            ));
+            addEdge(edges, sectionKey, chunkKey, "CONTAINS", 0.92, Map.of("relation", "same_section"));
+        }
+        String tableId = string(row.metadata(), "tableId");
+        if (!tableId.isBlank()) {
+            String tableKey = "table:" + row.documentId() + ":" + tableId.toLowerCase(java.util.Locale.ROOT);
+            addNode(nodes, tableKey, "TABLE", tableId, row.documentId(), null, Map.of("tableId", tableId));
+            addEdge(edges, tableKey, chunkKey, "CONTAINS", 0.90, Map.of("relation", "same_table"));
+        }
+        Integer pageNumber = integer(row.metadata().get("pageNumber"));
+        if (pageNumber != null) {
+            String pageKey = "page:" + row.documentId() + ":" + pageNumber;
+            addNode(nodes, pageKey, "PAGE", "Page " + pageNumber, row.documentId(), null, Map.of("pageNumber", pageNumber));
+            addEdge(edges, pageKey, chunkKey, "CONTAINS", 0.88, Map.of("relation", "same_page"));
+        }
+    }
+
     private void addTopic(List<String> topics, String value) {
         if (value == null) {
             return;
@@ -943,6 +1108,24 @@ public class DocumentRepository {
                 rs.getInt("chunk_index"),
                 rs.getString("content"),
                 fromJson(rs.getString("metadata")),
+                rs.getDouble("score")
+        );
+    }
+
+    private SearchResult mapGraphSearchResult(ResultSet rs, int rowNum) throws SQLException {
+        Map<String, Object> metadata = new LinkedHashMap<>(fromJson(rs.getString("metadata")));
+        metadata.put("graphDepth", 1);
+        metadata.put("graphEdgeType", rs.getString("graph_edge_type"));
+        return new SearchResult(
+                rs.getObject("chunk_id", UUID.class),
+                rs.getObject("document_id", UUID.class),
+                rs.getString("title"),
+                rs.getString("source_uri"),
+                rs.getString("source_type"),
+                rs.getString("content_type"),
+                rs.getInt("chunk_index"),
+                rs.getString("content"),
+                metadata,
                 rs.getDouble("score")
         );
     }
@@ -1040,6 +1223,23 @@ public class DocumentRepository {
         return clean == null ? null : clean.toUpperCase();
     }
 
+    private String string(Map<String, Object> metadata, String key) {
+        Object value = metadata == null ? null : metadata.get(key);
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private Integer integer(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            String text = value == null ? "" : String.valueOf(value).trim();
+            return text.isBlank() ? null : Integer.parseInt(text);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
     public record ReusableDocument(UUID documentId, int chunkCount) {
     }
 
@@ -1058,6 +1258,28 @@ public class DocumentRepository {
     }
 
     public record AdjacentChunkCandidate(SearchResult result, UUID seedChunkId, int distance, double seedScore) {
+    }
+
+    public record ContextChunkSeed(
+            UUID chunkId,
+            UUID documentId,
+            String headingPath,
+            String sectionTitle,
+            Integer pageNumber,
+            String tableId,
+            double score
+    ) {
+        public ContextChunkSeed {
+            headingPath = headingPath == null ? "" : headingPath;
+            sectionTitle = sectionTitle == null ? "" : sectionTitle;
+            tableId = tableId == null ? "" : tableId;
+        }
+    }
+
+    public record ContextRelatedChunkCandidate(SearchResult result, UUID seedChunkId, String reason, double seedScore) {
+    }
+
+    private record ContextMatch(ContextChunkSeed seed, String reason) {
     }
 
     private record ChunkRange(int min, int max) {

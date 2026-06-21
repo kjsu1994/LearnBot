@@ -235,6 +235,7 @@ public class RagService {
         }
         long adjacentStarted = System.nanoTime();
         expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
+        expandContextRelatedDocumentChunks(question, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
         timing.addAdjacentMs(elapsedMs(adjacentStarted));
         if (effectiveProfile != DocumentSpeedProfile.FAST) {
             long graphStarted = System.nanoTime();
@@ -292,6 +293,7 @@ public class RagService {
             }
             adjacentStarted = System.nanoTime();
             expandAdjacentDocumentChunks(question, answerMode, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
+            expandContextRelatedDocumentChunks(question, questionType, effectiveProfile, filter, spaceIds, selectedSpaceId, merged);
             timing.addAdjacentMs(elapsedMs(adjacentStarted));
             if (effectiveProfile != DocumentSpeedProfile.FAST) {
                 long graphStarted = System.nanoTime();
@@ -511,6 +513,79 @@ public class RagService {
         }
     }
 
+    private void expandContextRelatedDocumentChunks(
+            String question,
+            DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            Map<UUID, SearchResult> merged
+    ) {
+        if (!isOverviewQuestionType(questionType)
+                || merged.isEmpty()
+                || spaceIds == null
+                || spaceIds.isEmpty()) {
+            return;
+        }
+        int seedLimit = speedProfile == DocumentSpeedProfile.DEEP ? 8 : 5;
+        int addLimit = speedProfile == DocumentSpeedProfile.DEEP ? 16 : 10;
+        List<DocumentRepository.ContextChunkSeed> seeds = merged.values().stream()
+                .filter(this::isDocumentContext)
+                .filter(result -> hasContextRoutingMetadata(result.metadata()))
+                .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
+                .limit(seedLimit)
+                .map(result -> new DocumentRepository.ContextChunkSeed(
+                        result.chunkId(),
+                        result.documentId(),
+                        metadataString(result, "headingPath"),
+                        metadataString(result, "sectionTitle"),
+                        metadataInt(result, "pageNumber", -1) < 0 ? null : metadataInt(result, "pageNumber", -1),
+                        metadataString(result, "tableId"),
+                        result.score()
+                ))
+                .toList();
+        if (seeds.isEmpty()) {
+            return;
+        }
+        try {
+            int added = 0;
+            for (DocumentRepository.ContextRelatedChunkCandidate candidate : documentRepository.contextRelatedChunks(
+                    seeds,
+                    addLimit,
+                    filter,
+                    spaceIds,
+                    selectedSpaceId
+            )) {
+                if (merged.containsKey(candidate.result().chunkId())) {
+                    continue;
+                }
+                mergeDocument(merged, withMetadata(candidate.result(), Map.of(
+                        "contextRelatedExpanded", true,
+                        "contextRelatedReason", candidate.reason(),
+                        "contextSeedChunkId", candidate.seedChunkId().toString(),
+                        "evidenceRole", "context_related"
+                ), Math.max(0.0, candidate.seedScore() - 0.05)));
+                added++;
+                if (added >= addLimit) {
+                    break;
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("RAG context-related expansion failed question={}", abbreviate(question), ex);
+        }
+    }
+
+    private boolean hasContextRoutingMetadata(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return false;
+        }
+        return metadata.containsKey("headingPath")
+                || metadata.containsKey("sectionTitle")
+                || metadata.containsKey("pageNumber")
+                || metadata.containsKey("tableId");
+    }
+
     private void expandGraphDocumentChunks(
             SearchFilter filter,
             List<UUID> spaceIds,
@@ -534,7 +609,8 @@ public class RagService {
         }
         try {
             int limit = Math.max(1, properties.getDocument().getGraph().getMaxExpandedResults());
-            for (SearchResult expanded : documentRepository.graphExpandedChunks(seedChunkIds, limit, spaceIds, selectedSpaceId)) {
+            int maxHop = Math.max(1, properties.getDocument().getGraph().getMaxHop());
+            for (SearchResult expanded : documentRepository.graphExpandedChunks(seedChunkIds, limit, maxHop, spaceIds, selectedSpaceId)) {
                 if (merged.containsKey(expanded.chunkId())) {
                     continue;
                 }
@@ -731,12 +807,18 @@ public class RagService {
         } else if ("adjacent".equals(role)) {
             int distance = metadataInt(result, "adjacentDistance", 1);
             score += Math.max(0.01, 0.08 - (0.03 * distance));
+        } else if ("context_related".equals(role) || "document_graph".equals(role)) {
+            score += 0.07;
         }
         score -= Math.min(0.24, seenForDocument * 0.06);
         return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument));
     }
 
     private String evidenceRole(AnswerMode answerMode, SearchResult result) {
+        String existingRole = metadataString(result, "evidenceRole");
+        if ("context_related".equals(existingRole) || "document_graph".equals(existingRole)) {
+            return existingRole;
+        }
         if (metadataBoolean(result, "adjacentExpanded")) {
             return "adjacent";
         }
@@ -768,6 +850,11 @@ public class RagService {
     private boolean metadataBoolean(SearchResult result, String key) {
         Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
         return value instanceof Boolean booleanValue ? booleanValue : Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private String metadataString(SearchResult result, String key) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private int metadataInt(SearchResult result, String key, int fallback) {
@@ -897,10 +984,30 @@ public class RagService {
                     return "[" + (index + 1) + "] " + result.title()
                             + " · " + result.sourceUri()
                             + " · " + safe(result.contentType())
-                            + " · chunk " + result.chunkIndex() + "\n"
+                            + " · chunk " + result.chunkIndex()
+                            + contextMetadataLabel(result) + "\n"
                             + relevantExcerpt(question, result.content(), excerptChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+    }
+
+    private String contextMetadataLabel(SearchResult result) {
+        if (result == null || result.metadata() == null || result.metadata().isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>();
+        addMetadataLabel(parts, "section", metadataString(result, "sectionTitle"));
+        addMetadataLabel(parts, "heading", metadataString(result, "headingPath"));
+        addMetadataLabel(parts, "page", metadataString(result, "pageNumber"));
+        addMetadataLabel(parts, "table", metadataString(result, "tableId"));
+        addMetadataLabel(parts, "context", contextType(result));
+        return parts.isEmpty() ? "" : " · " + String.join(" · ", parts);
+    }
+
+    private void addMetadataLabel(List<String> parts, String label, String value) {
+        if (value != null && !value.isBlank()) {
+            parts.add(label + "=" + value);
+        }
     }
 
     private int contextLimit(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
@@ -1815,9 +1922,17 @@ public class RagService {
             long contextCount = results.stream().filter(this::isDocumentContext).count();
             long originalCount = results.size() - contextCount;
             long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+            long contextRelatedCount = results.stream().filter(result -> metadataBoolean(result, "contextRelatedExpanded")).count();
             notes.add("Question type was classified as " + questionType.name()
                     + "; overview retrieval used " + contextCount + " context chunks, "
-                    + originalCount + " original chunks, and " + distinctDocuments + " distinct documents.");
+                    + originalCount + " original chunks, " + contextRelatedCount
+                    + " context-related chunks, and " + distinctDocuments + " distinct documents.");
+        }
+        if (properties.getDocument().getGraph().isEnabled()) {
+            long graphCount = results.stream().filter(result -> metadataBoolean(result, "documentGraphExpanded")).count();
+            notes.add("Document graph retrieval enabled with maxHop="
+                    + Math.max(1, properties.getDocument().getGraph().getMaxHop())
+                    + "; graph-expanded citations=" + graphCount + ".");
         }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried retrieval once because the first evidence set was weak.");
@@ -1979,11 +2094,22 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "evidenceRankReason");
         copyMetadata(result.metadata(), metadata, "adjacentExpanded");
         copyMetadata(result.metadata(), metadata, "adjacentDistance");
+        copyMetadata(result.metadata(), metadata, "contextRelatedExpanded");
+        copyMetadata(result.metadata(), metadata, "contextRelatedReason");
         copyMetadata(result.metadata(), metadata, "rerankerUsed");
         copyMetadata(result.metadata(), metadata, "rerankerScore");
         copyMetadata(result.metadata(), metadata, "rerankerStatus");
         copyMetadata(result.metadata(), metadata, "rerankerDurationMs");
         copyMetadata(result.metadata(), metadata, "documentGraphExpanded");
+        copyMetadata(result.metadata(), metadata, "graphDepth");
+        copyMetadata(result.metadata(), metadata, "graphEdgeType");
+        copyMetadata(result.metadata(), metadata, "contextType");
+        copyMetadata(result.metadata(), metadata, "sectionTitle");
+        copyMetadata(result.metadata(), metadata, "headingPath");
+        copyMetadata(result.metadata(), metadata, "pageNumber");
+        copyMetadata(result.metadata(), metadata, "tableId");
+        copyMetadata(result.metadata(), metadata, "sourceUrl");
+        copyMetadata(result.metadata(), metadata, "parentDocumentId");
         return metadata;
     }
 

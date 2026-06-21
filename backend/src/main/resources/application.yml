@@ -149,7 +149,7 @@ learnbot:
       max-pages: ${LEARNBOT_DOCUMENT_OCR_MAX_PAGES:80}
       timeout-seconds: ${LEARNBOT_DOCUMENT_OCR_TIMEOUT_SECONDS:180}
     graph:
-      enabled: ${LEARNBOT_DOCUMENT_GRAPH_ENABLED:false}
+      enabled: ${LEARNBOT_DOCUMENT_GRAPH_ENABLED:true}
       max-hop: ${LEARNBOT_DOCUMENT_GRAPH_MAX_HOP:1}
       max-expanded-results: ${LEARNBOT_DOCUMENT_GRAPH_MAX_EXPANDED_RESULTS:12}
       debug: ${LEARNBOT_DOCUMENT_GRAPH_DEBUG:false}

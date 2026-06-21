@@ -36,30 +36,28 @@ public class Chunker {
         String sourceUri = lower(document.sourceUri());
         String title = lower(document.title());
         String content = document.content();
+        List<Chunk> chunks;
         if (contentType.contains("pdf") || sourceUri.endsWith(".pdf") || title.endsWith(".pdf")) {
-            return splitPdf(content);
-        }
-        if (contentType.contains("html") || "text/html".equals(contentType)) {
-            return splitHtml(document);
-        }
-        if (contentType.contains("spreadsheet")
+            chunks = splitPdf(content);
+        } else if (contentType.contains("html") || "text/html".equals(contentType)) {
+            chunks = splitHtml(document);
+        } else if (contentType.contains("spreadsheet")
                 || contentType.contains("excel")
                 || contentType.contains("csv")
                 || sourceUri.endsWith(".csv")
                 || sourceUri.endsWith(".xlsx")
                 || sourceUri.endsWith(".xls")) {
-            return splitRows(content);
+            chunks = splitRows(content);
+        } else if (contentType.contains("wordprocessingml") || sourceUri.endsWith(".docx")) {
+            chunks = splitDocx(content);
+        } else if (contentType.contains("presentationml") || sourceUri.endsWith(".pptx")) {
+            chunks = splitSlides(content);
+        } else if (contentType.contains("markdown") || sourceUri.endsWith(".md") || sourceUri.endsWith(".markdown")) {
+            chunks = splitMarkdown(content);
+        } else {
+            chunks = split(content);
         }
-        if (contentType.contains("wordprocessingml") || sourceUri.endsWith(".docx")) {
-            return splitDocx(content);
-        }
-        if (contentType.contains("presentationml") || sourceUri.endsWith(".pptx")) {
-            return splitSlides(content);
-        }
-        if (contentType.contains("markdown") || sourceUri.endsWith(".md") || sourceUri.endsWith(".markdown")) {
-            return splitMarkdown(content);
-        }
-        return split(content);
+        return enrichDocumentMetadata(document, chunks);
     }
 
     public List<Chunk> split(String content) {
@@ -366,6 +364,82 @@ public class Chunker {
             return;
         }
         chunks.add(new Chunk(chunks.size(), clean, new LinkedHashMap<>(metadata)));
+    }
+
+    private List<Chunk> enrichDocumentMetadata(ExtractedDocument document, List<Chunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of();
+        }
+        List<Chunk> enriched = new ArrayList<>();
+        for (Chunk chunk : chunks) {
+            Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata() == null ? Map.of() : chunk.metadata());
+            putIfNotBlank(metadata, "sourceUrl", document.sourceUri());
+            String headingPath = string(metadata.get("headingPath"));
+            if (!headingPath.isBlank()) {
+                putIfNotBlank(metadata, "sectionTitle", lastHeading(headingPath));
+            }
+            Integer page = sameNumber(metadata.get("pageStart"), metadata.get("pageEnd"));
+            if (page != null) {
+                metadata.putIfAbsent("pageNumber", page);
+            }
+            String sheetName = string(metadata.get("sheetName"));
+            if (!sheetName.isBlank()) {
+                putIfNotBlank(metadata, "tableId", "sheet:" + sheetName);
+            } else if (metadata.containsKey("tableIndex")) {
+                putIfNotBlank(metadata, "tableId", "table:" + metadata.get("tableIndex"));
+            } else if ("table".equals(string(metadata.get("blockType")))) {
+                putIfNotBlank(metadata, "tableId", "table:rows");
+            }
+            Integer row = sameNumber(metadata.get("rowStart"), metadata.get("rowEnd"));
+            if (row != null) {
+                metadata.putIfAbsent("rowNumber", row);
+            }
+            enriched.add(new Chunk(enriched.size(), chunk.content(), metadata));
+        }
+        return enriched;
+    }
+
+    private void putIfNotBlank(Map<String, Object> metadata, String key, Object value) {
+        String text = string(value);
+        if (!text.isBlank()) {
+            metadata.putIfAbsent(key, text);
+        }
+    }
+
+    private String lastHeading(String headingPath) {
+        String[] parts = headingPath.split("\\s*>\\s*");
+        return parts.length == 0 ? headingPath : parts[parts.length - 1].trim();
+    }
+
+    private Integer sameNumber(Object start, Object end) {
+        Integer first = integer(start);
+        Integer second = integer(end);
+        if (first == null && second == null) {
+            return null;
+        }
+        if (first == null) {
+            return second;
+        }
+        if (second == null || first.equals(second)) {
+            return first;
+        }
+        return null;
+    }
+
+    private Integer integer(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            String text = string(value);
+            return text.isBlank() ? null : Integer.parseInt(text);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private String string(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private Map<String, Object> baseMetadata(String strategy, String blockType) {
