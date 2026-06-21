@@ -58,9 +58,21 @@ function SavedAnswersWorkspace({
   ];
 
   return (
-    <section className="workspace-grid saved-grid">
+    <section className="workspace-grid saved-grid workspace-product saved-workspace-product">
+      <div className="workspace-product-hero saved-product-hero">
+        <div>
+          <Badge variant="secondary">Knowledge Library</Badge>
+          <h1>저장된 답변 라이브러리</h1>
+          <p>문서와 코드 RAG에서 검증한 답변을 다시 찾고 팀 지식으로 재사용합니다.</p>
+        </div>
+        <div className="workspace-product-metrics" aria-label="저장 답변 상태 요약">
+          <span><strong>{savedAnswers.length}</strong> saved</span>
+          <span><strong>{savedAnswerType || 'ALL'}</strong> filter</span>
+          <span><strong>{selectedSavedAnswer ? 'OPEN' : 'IDLE'}</strong> detail</span>
+        </div>
+      </div>
       <div className="left-column">
-        <section className="panel">
+        <section className="panel library-list-panel">
           <div className="panel-title">
             <Bookmark size={18} />
             <div>
@@ -94,7 +106,7 @@ function SavedAnswersWorkspace({
 
       <div className="right-column">
         {!selectedSavedAnswer && (
-          <section className="panel muted-panel">
+          <section className="panel muted-panel library-empty-panel">
             <div className="panel-title">
               <Bookmark size={18} />
               <div>
@@ -106,7 +118,7 @@ function SavedAnswersWorkspace({
         )}
 
         {selectedSavedAnswer && (
-          <section className="panel saved-answer-detail">
+          <section className="panel saved-answer-detail library-detail-panel">
             <div className="panel-title">
               {selectedSavedAnswer.answerType === 'CODE' ? <Code2 size={18} /> : <Database size={18} />}
               <div>
@@ -149,7 +161,6 @@ function SavedAnswersWorkspace({
     </section>
   );
 }
-
 function SavedEvidence({ evidence = [] }) {
   if (!Array.isArray(evidence) || !evidence.length) {
     return <p className="empty compact-empty">저장된 근거가 없습니다.</p>;

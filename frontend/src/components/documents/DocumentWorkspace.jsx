@@ -16,7 +16,19 @@ function DocumentWorkspace(props) {
   const showSourceManagement = props.showSourceManagement !== false;
 
   return (
-    <section className="workspace-grid">
+    <section className="workspace-grid workspace-product document-workspace-product">
+      <div className="workspace-product-hero document-product-hero">
+        <div>
+          <Badge variant="secondary">Document RAG</Badge>
+          <h1>문서 근거 질의 워크스페이스</h1>
+          <p>웹, PDF, 오피스 문서에서 원문 근거를 찾고 답변 품질을 진단합니다.</p>
+        </div>
+        <div className="workspace-product-metrics" aria-label="문서 RAG 상태 요약">
+          <span><strong>{props.documents?.length || 0}</strong> sources</span>
+          <span><strong>{props.searchResults?.length || 0}</strong> search hits</span>
+          <span><strong>{props.answer?.evidence?.length || 0}</strong> evidence</span>
+        </div>
+      </div>
       {showSourceManagement && (
       <div className="left-column">
         <section className="panel">
@@ -26,7 +38,7 @@ function DocumentWorkspace(props) {
               <h2>문서 소스 추가</h2>
               <p>웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
             </div>
-        <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
+            <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
               <HelpCircle size={16} />
             </button>
           </div>
@@ -135,7 +147,7 @@ function DocumentWorkspace(props) {
       )}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
-        <form className="panel ask-panel" onSubmit={props.ask}>
+        <form className="panel ask-panel rag-command-panel" onSubmit={props.ask}>
           <div className="panel-title">
             <MessageSquare size={18} />
             <div>
@@ -169,7 +181,7 @@ function DocumentWorkspace(props) {
                   <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.loading('save-answer')} onClick={props.saveAnswer}>
                     {props.loading('save-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
                   </button>
-                  <button className="icon-button answer-expand-button" type="button" title="확대해서 보기" onClick={() => setAnswerModalOpen(true)}>
+                  <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
                     <Maximize2 size={15} />
                   </button>
                 </div>
@@ -191,7 +203,7 @@ function DocumentWorkspace(props) {
             />
           )}
         </form>
-        <form className="panel search-panel" onSubmit={props.search}>
+        <form className="panel search-panel rag-search-panel" onSubmit={props.search}>
           <div className="panel-title">
             <Search size={18} />
             <div>
@@ -223,7 +235,6 @@ function DocumentWorkspace(props) {
     </section>
   );
 }
-
 function DocumentSourcePanel(props) {
   const {
     webUrl = '',

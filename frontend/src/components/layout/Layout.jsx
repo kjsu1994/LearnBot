@@ -124,7 +124,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       <header className="home-nav border-white/10 bg-slate-950/80 backdrop-blur-xl">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Logo.png" alt="" />
+            <img src="/LearnBot_Mark.png" alt="" />
           </span>
           <span>
             <strong>LearnBot</strong>
@@ -182,7 +182,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
         <Card className="launch-hero-panel landing-product-mockup" ref={visualRef}>
           <CardHeader>
             <div className="launch-logo-lockup">
-              <img src="/LearnBot_Logo.png" alt="LearnBot" />
+              <img src="/LearnBot_Wordmark.png" alt="LearnBot" />
               <div>
                 <CardTitle>LearnBot Console</CardTitle>
                 <CardDescription>Knowledge operations overview</CardDescription>
@@ -322,7 +322,7 @@ function LoginScreen({ onLogin, busy, error }) {
       <AnimatedSection className="login-panel panel commercial-login-card">
         <div className="brand login-brand">
           <div className="brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Logo.png" alt="" />
+            <img src="/LearnBot_Mark.png" alt="" />
           </div>
           <div>
             <span>LearnBot</span>
@@ -511,8 +511,8 @@ function Sidebar({
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
       <div className="brand">
         <button className="brand-home-button" type="button" title="메인 대시보드로 이동" onClick={() => navigateTo(routePaths.home)}>
-          <span className="brand-mark brand-home-mark">
-            <img src="/LearnBot_Logo.png" alt="" />
+          <span className="brand-mark brand-home-mark bg-white">
+            <img src="/LearnBot_Mark.png" alt="" />
           </span>
           <span className="brand-copy">
             <span>LearnBot</span>

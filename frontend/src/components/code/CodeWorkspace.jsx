@@ -44,16 +44,28 @@ function CodeWorkspace(props) {
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
 
   return (
-    <section className="workspace-grid code-grid">
+    <section className="workspace-grid code-grid workspace-product code-workspace-product">
+      <div className="workspace-product-hero code-product-hero">
+        <div>
+          <Badge variant="secondary">Code RAG</Badge>
+          <h1>코드 어시스턴트 콘솔</h1>
+          <p>저장소의 실제 파일, 심볼, 참조 위치를 근거로 코드 질문에 답합니다.</p>
+        </div>
+        <div className="workspace-product-metrics" aria-label="코드 RAG 상태 요약">
+          <span><strong>{repositories.length}</strong> repositories</span>
+          <span><strong>{codeSearchResults.length}</strong> search hits</span>
+          <span><strong>{referenceResult ? (referenceResult.definitions?.length || 0) + (referenceResult.references?.length || 0) : 0}</strong> references</span>
+        </div>
+      </div>
       {showSourceManagement && <CodeSourceManagementPanel {...props} />}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
-        <form className="panel ask-panel" onSubmit={askCode}>
+        <form className="panel ask-panel rag-command-panel" onSubmit={askCode}>
           <div className="panel-title">
             <MessageSquare size={18} />
             <div>
               <h2>코드에게 질문하기</h2>
-              <p>파일, 클래스, 메서드, UI 이벤트 이름을 실제 코드 근거와 함께 답합니다.</p>
+              <p>파일, 클래스, 메서드, UI 이벤트 이름을 실제 코드 근거와 함께 분석합니다.</p>
             </div>
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
@@ -112,7 +124,7 @@ function CodeWorkspace(props) {
           )}
         </form>
 
-        <form className="panel search-panel" onSubmit={searchCode}>
+        <form className="panel search-panel rag-search-panel" onSubmit={searchCode}>
           <div className="panel-title">
             <Search size={18} />
             <div>
@@ -130,7 +142,7 @@ function CodeWorkspace(props) {
           <CodeSearchResults results={codeSearchResults} onOpenEvidence={openCodeFile} />
         </form>
 
-        <form className="panel reference-panel" onSubmit={findReferences}>
+        <form className="panel reference-panel rag-reference-panel" onSubmit={findReferences}>
           <div className="panel-title">
             <Search size={18} />
             <div>
