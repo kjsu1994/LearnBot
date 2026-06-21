@@ -49,12 +49,23 @@
 
 .commercial-shell.home-shell {
   background:
+    radial-gradient(circle at 72% 56%, rgba(79, 70, 229, 0.18), transparent 30%),
+    radial-gradient(circle at 22% 68%, rgba(14, 165, 233, 0.14), transparent 28%),
+    linear-gradient(180deg, #050816 0%, #0b1024 42%, #101827 100%),
     linear-gradient(115deg, rgba(37, 99, 235, 0.22), transparent 38%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.92), #020617 42%, #0f172a 100%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.84), #020617 42%, #111827 100%),
     linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
     linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
     #020617;
-  background-size: auto, auto, 42px 42px, 42px 42px;
+  background-size: auto, auto, auto, auto, auto, 42px 42px, 42px 42px;
+}
+
+.commercial-shell.home-shell::after {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.12), transparent 28%),
+    radial-gradient(circle at 78% 0%, rgba(37, 99, 235, 0.14), transparent 30%),
+    linear-gradient(to bottom, rgba(2, 6, 23, 0), rgba(15, 23, 42, 0.72) 42%, #111827 100%);
+  height: 58%;
 }
 
 .landing-shell {
@@ -74,9 +85,9 @@
 }
 
 .landing-shader-canvas {
-  height: min(860px, 100vh);
+  height: min(1320px, 154vh);
   inset: 0 0 auto;
-  opacity: 0.92;
+  opacity: 0.96;
   pointer-events: none;
   position: absolute;
   width: 100%;
@@ -85,10 +96,10 @@
 
 .landing-shell::before {
   background:
-    radial-gradient(circle at 68% 18%, rgba(37, 99, 235, 0.22), transparent 30%),
-    linear-gradient(180deg, rgba(2, 6, 23, 0.04), rgba(2, 6, 23, 0.68));
+    radial-gradient(circle at 68% 18%, rgba(37, 99, 235, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.02), rgba(2, 6, 23, 0.14) 46%, rgba(17, 24, 39, 0.24) 100%);
   content: "";
-  height: min(860px, 100vh);
+  height: min(1320px, 154vh);
   inset: 0 0 auto;
   pointer-events: none;
   position: absolute;
@@ -254,6 +265,17 @@
   width: 210px;
 }
 
+.launch-logo-lockup .launch-logo-icon {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  height: 76px;
+  object-fit: contain;
+  padding: 0;
+  width: 76px;
+}
+
 .launch-proof-grid {
   display: grid;
   gap: 8px;
@@ -291,14 +313,17 @@
 }
 
 .landing-marquee-track span {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 10px 26px rgba(15, 23, 42, 0.14);
   color: #e2e8f0;
   flex: 0 0 auto;
   font-size: 13px;
   font-weight: 800;
-  padding: 9px 14px;
+  padding: 10px 16px;
 }
 
 @keyframes landing-marquee {
@@ -317,6 +342,8 @@
   margin: 0 auto;
   max-width: 1180px;
   padding: 34px 28px;
+  position: relative;
+  z-index: 2;
 }
 
 .landing-section-copy {
@@ -325,7 +352,7 @@
 
 .landing-section-copy h2,
 .landing-cta-section h2 {
-  color: #f8fafc;
+  color: #ffffff;
   font-size: clamp(30px, 4vw, 52px);
   letter-spacing: 0;
   line-height: 1.08;
@@ -334,7 +361,7 @@
 
 .landing-section-copy p,
 .landing-cta-section p {
-  color: #cbd5e1;
+  color: #e2e8f0;
   font-size: 16px;
   line-height: 1.7;
   margin: 0;
@@ -359,9 +386,10 @@
 }
 
 .landing-flow-card {
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(17, 24, 39, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 8px;
+  box-shadow: 0 18px 46px rgba(2, 6, 23, 0.28);
   min-height: 178px;
   padding: 20px;
   position: relative;
@@ -383,7 +411,7 @@
 
 .landing-flow-card strong,
 .landing-bento-card strong {
-  color: #f8fafc;
+  color: #ffffff;
   display: block;
   font-size: 18px;
   margin-bottom: 9px;
@@ -391,7 +419,7 @@
 
 .landing-flow-card p,
 .landing-bento-card p {
-  color: #cbd5e1;
+  color: #e2e8f0;
   font-size: 14px;
   line-height: 1.6;
   margin: 0;
@@ -406,9 +434,10 @@
 
 .landing-bento-card {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
-  border: 1px solid rgba(255, 255, 255, 0.14);
+    linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 8px;
+  box-shadow: 0 18px 46px rgba(2, 6, 23, 0.28);
   min-height: 196px;
   overflow: hidden;
   padding: 22px;
@@ -444,9 +473,10 @@
 
 .landing-cta-section {
   align-items: center;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.26), rgba(15, 23, 42, 0.74));
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.96), rgba(15, 23, 42, 0.96));
+  border: 1px solid rgba(147, 197, 253, 0.28);
   border-radius: 8px;
+  box-shadow: 0 22px 64px rgba(2, 6, 23, 0.34);
   display: flex;
   gap: 24px;
   justify-content: space-between;
@@ -463,6 +493,31 @@
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.landing-shell .home-kicker {
+  color: #7dd3fc;
+}
+
+.landing-shell .home-proof {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(17, 24, 39, 0.88));
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  box-shadow: 0 20px 56px rgba(2, 6, 23, 0.26);
+  margin-top: 28px;
+  padding: 28px;
+  position: relative;
+  z-index: 2;
+}
+
+.landing-shell .home-proof h2 {
+  color: #ffffff;
+}
+
+.landing-shell .home-proof-list span {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(226, 232, 240, 0.18);
+  color: #f8fafc;
 }
 
 @media (prefers-reduced-motion: reduce) {

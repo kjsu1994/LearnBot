@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Search, Eye, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Search } from 'lucide-react';
 import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
-import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
+import { AnimatedContent, AnimatedPage, AnimatedSection } from '../common/Common.jsx';
 import { ShaderBackground } from '../effects/ShaderBackground.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
@@ -184,7 +184,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
         <Card className="launch-hero-panel landing-product-mockup" ref={visualRef}>
           <CardHeader>
             <div className="launch-logo-lockup">
-              <img src="/LearnBot_Wordmark.png" alt="LearnBot" />
+              <img className="launch-logo-icon" src="/LearnBot_Mark.png" alt="LearnBot" />
               <div>
                 <CardTitle>LearnBot Console</CardTitle>
                 <CardDescription>Knowledge operations overview</CardDescription>
@@ -385,9 +385,7 @@ function WorkspaceShell({
   openCodeFile,
   documents,
   selectedDocumentId,
-  loadDocumentDetail,
   openDocumentPreview,
-  deleteDocument,
   loading,
 }) {
   return (
@@ -415,9 +413,7 @@ function WorkspaceShell({
         openCodeFile={openCodeFile}
         documents={documents}
         selectedDocumentId={selectedDocumentId}
-        loadDocumentDetail={loadDocumentDetail}
         openDocumentPreview={openDocumentPreview}
-        deleteDocument={deleteDocument}
         loading={loading}
       />
 
@@ -480,6 +476,305 @@ function WorkspaceShell({
   );
 }
 
+function normalizeCodeFilePath(filePath) {
+  return String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '') || 'untitled';
+}
+
+function sortCodeFileTreeNodes(nodes) {
+  return nodes
+    .map((node) => (
+      node.type === 'folder'
+        ? { ...node, children: sortCodeFileTreeNodes(node.children) }
+        : node
+    ))
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+}
+
+function buildCodeFileTree(files) {
+  const root = [];
+  const folders = new Map();
+
+  files.forEach((fileItem) => {
+    const filePath = normalizeCodeFilePath(fileItem.filePath);
+    const segments = filePath.split('/').filter(Boolean);
+    const fileName = segments.pop() || filePath;
+    let children = root;
+    let currentPath = '';
+
+    segments.forEach((segment) => {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let folderNode = folders.get(currentPath);
+
+      if (!folderNode) {
+        folderNode = {
+          type: 'folder',
+          key: `folder:${currentPath}`,
+          name: segment,
+          path: currentPath,
+          children: [],
+        };
+        folders.set(currentPath, folderNode);
+        children.push(folderNode);
+      }
+
+      children = folderNode.children;
+    });
+
+    children.push({
+      type: 'file',
+      key: `file:${fileItem.id ?? filePath}`,
+      name: fileName,
+      path: filePath,
+      directory: segments.join('/'),
+      extension: fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : 'default',
+      fileItem,
+    });
+  });
+
+  return sortCodeFileTreeNodes(root);
+}
+
+function getCodeFileIcon(extension) {
+  const iconMap = {
+    tsx: { className: 'tsx', icon: '⚛' },
+    ts: { className: 'ts', icon: '◆' },
+    jsx: { className: 'jsx', icon: '⚛' },
+    js: { className: 'js', icon: '◆' },
+    css: { className: 'css', icon: '◈' },
+    json: { className: 'json', icon: '{}' },
+    md: { className: 'md', icon: '◊' },
+    svg: { className: 'svg', icon: '◐' },
+    png: { className: 'png', icon: '◑' },
+    yml: { className: 'yaml', icon: '◇' },
+    yaml: { className: 'yaml', icon: '◇' },
+    html: { className: 'html', icon: '◇' },
+    pdf: { className: 'pdf', icon: '◇' },
+    doc: { className: 'doc', icon: '◇' },
+    docx: { className: 'doc', icon: '◇' },
+    ppt: { className: 'ppt', icon: '◇' },
+    pptx: { className: 'ppt', icon: '◇' },
+    xls: { className: 'xls', icon: '◇' },
+    xlsx: { className: 'xls', icon: '◇' },
+    default: { className: 'default', icon: '◇' },
+  };
+  return iconMap[extension || 'default'] || iconMap.default;
+}
+
+function compactCodeDirectory(directory) {
+  if (!directory) return '';
+  const segments = directory.split('/').filter(Boolean);
+  if (segments.length <= 3) return directory;
+  return `${segments[0]}/.../${segments.slice(-2).join('/')}`;
+}
+
+function CodeFileTree({ files, selectedRepositoryId, openCodeFile }) {
+  const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
+  const tree = buildCodeFileTree(files);
+
+  function toggleFolder(path) {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
+  function renderNode(node, depth = 0) {
+    const visualDepth = Math.min(depth, 3);
+    const indent = `${visualDepth * 12 + 8}px`;
+    const lineLeft = `${Math.max(visualDepth - 1, 0) * 12 + 14}px`;
+
+    if (node.type === 'folder') {
+      const collapsed = collapsedFolders.has(node.path);
+      return (
+        <div className="sidebar-file-tree-item-wrap" key={node.key}>
+          <button
+            className="sidebar-file-tree-item sidebar-file-tree-folder"
+            style={{ '--tree-indent': indent, '--tree-line-left': lineLeft }}
+            type="button"
+            title={node.path}
+            onClick={() => toggleFolder(node.path)}
+          >
+            {depth > 0 && <span className="sidebar-file-tree-line" />}
+            <span className={collapsed ? 'sidebar-file-tree-caret' : 'sidebar-file-tree-caret open'}>
+              <svg width="6" height="8" viewBox="0 0 6 8" fill="none" aria-hidden="true">
+                <path d="M1 1L5 4L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <span className="sidebar-file-tree-folder-icon" aria-hidden="true">
+              <svg width="16" height="14" viewBox="0 0 16 14" fill="currentColor">
+                <path d="M1.5 1C0.671573 1 0 1.67157 0 2.5V11.5C0 12.3284 0.671573 13 1.5 13H14.5C15.3284 13 16 12.3284 16 11.5V4.5C16 3.67157 15.3284 3 14.5 3H8L6.5 1H1.5Z" />
+              </svg>
+            </span>
+            <span className="sidebar-file-tree-name">{node.name}</span>
+            <span className="sidebar-file-tree-hover-dot" />
+          </button>
+          {!collapsed && (
+            <div className="sidebar-file-tree-children">
+              {node.children.map((child) => renderNode(child, depth + 1))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const { fileItem } = node;
+    const fileIcon = getCodeFileIcon(node.extension);
+    const compactDirectory = compactCodeDirectory(node.directory);
+    return (
+      <button
+        className="sidebar-file-tree-item sidebar-file-tree-file"
+        key={node.key}
+        style={{ '--tree-indent': indent, '--tree-line-left': lineLeft }}
+        type="button"
+        title={node.path}
+        onClick={() => openCodeFile(fileItem.repositoryId, fileItem.id)}
+      >
+        {depth > 0 && <span className="sidebar-file-tree-line" />}
+        <span className={`sidebar-file-tree-file-mark ${fileIcon.className}`}>{fileIcon.icon}</span>
+        <span className={`sidebar-file-tree-file-icon ${fileIcon.className}`} aria-hidden="true">
+          <svg width="14" height="16" viewBox="0 0 14 16" fill="currentColor" opacity="0.8">
+            <path d="M1.5 0C0.671573 0 0 0.671573 0 1.5V14.5C0 15.3284 0.671573 16 1.5 16H12.5C13.3284 16 14 15.3284 14 14.5V4.5L9.5 0H1.5Z" />
+            <path d="M9 0V4.5H14" fill="currentColor" fillOpacity="0.5" />
+          </svg>
+        </span>
+        <span className="sidebar-file-tree-text">
+          <span className="sidebar-file-tree-name">{node.name}</span>
+          {compactDirectory && <span className="sidebar-file-tree-path">{compactDirectory}</span>}
+        </span>
+        <span className="sidebar-file-tree-hover-dot" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="sidebar-file-tree-card">
+      <div className="sidebar-file-tree-header">
+        <div className="sidebar-file-tree-window-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+        <span>explorer</span>
+      </div>
+      <div className="sidebar-file-tree">
+        {tree.map((node) => renderNode(node))}
+        {selectedRepositoryId && !files.length && (
+          <p className="empty sidebar-empty">파일이 없습니다.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getDocumentExtension(doc) {
+  const candidate = doc.title || doc.sourceUri || doc.contentType || '';
+  const fromName = String(candidate).split(/[?#]/)[0].split('.').pop()?.toLowerCase();
+  if (fromName && fromName !== candidate.toLowerCase() && fromName.length <= 8) return fromName;
+
+  const contentType = String(doc.contentType || '').toLowerCase();
+  if (contentType.includes('pdf')) return 'pdf';
+  if (contentType.includes('word')) return 'docx';
+  if (contentType.includes('presentation')) return 'pptx';
+  if (contentType.includes('spreadsheet') || contentType.includes('excel')) return 'xlsx';
+  if (contentType.includes('json')) return 'json';
+  if (contentType.includes('markdown')) return 'md';
+  if (contentType.includes('html')) return 'html';
+  return 'default';
+}
+
+function DocumentFileList({
+  documents,
+  selectedDocumentId,
+  openDocumentPreview,
+  loading,
+}) {
+  const [documentQuery, setDocumentQuery] = useState('');
+  const normalizedQuery = documentQuery.trim().toLowerCase();
+  const filteredDocuments = normalizedQuery
+    ? documents.filter((doc) => (
+      [
+        doc.title,
+        doc.sourceUri,
+        doc.contentType,
+        getSourceLabel(doc.sourceType),
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery))
+    ))
+    : documents;
+
+  return (
+    <>
+      <form
+        className="sidebar-file-search sidebar-document-search"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <input
+          value={documentQuery}
+          onChange={(event) => setDocumentQuery(event.target.value)}
+          placeholder="문서 검색..."
+          disabled={!documents.length}
+        />
+        <button type="submit" disabled={!documents.length}>
+          <Search size={14} />
+        </button>
+      </form>
+
+      <div className="sidebar-file-tree-card sidebar-document-tree-card">
+        <div className="sidebar-file-tree-header">
+          <div className="sidebar-file-tree-window-dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <span>documents</span>
+        </div>
+        <div className="sidebar-file-tree sidebar-document-tree">
+          {filteredDocuments.map((doc) => {
+            const fileIcon = getCodeFileIcon(getDocumentExtension(doc));
+            const selected = doc.id === selectedDocumentId;
+            return (
+              <article
+                className={selected ? 'sidebar-document-tree-row selected' : 'sidebar-document-tree-row'}
+                key={doc.id}
+                title={doc.title}
+                onClick={() => openDocumentPreview(doc.id)}
+              >
+                <span className={`sidebar-file-tree-file-mark ${fileIcon.className}`}>{fileIcon.icon}</span>
+                <span className={`sidebar-file-tree-file-icon ${fileIcon.className}`} aria-hidden="true">
+                  <svg width="14" height="16" viewBox="0 0 14 16" fill="currentColor" opacity="0.8">
+                    <path d="M1.5 0C0.671573 0 0 0.671573 0 1.5V14.5C0 15.3284 0.671573 16 1.5 16H12.5C13.3284 16 14 15.3284 14 14.5V4.5L9.5 0H1.5Z" />
+                    <path d="M9 0V4.5H14" fill="currentColor" fillOpacity="0.5" />
+                  </svg>
+                </span>
+                <span className="sidebar-file-tree-text">
+                  <span className="sidebar-file-tree-name">{doc.title}</span>
+                </span>
+                <span className="sidebar-file-tree-hover-dot" />
+              </article>
+            );
+          })}
+
+          {documents.length === 0 && (
+            <p className="empty sidebar-empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>
+          )}
+          {documents.length > 0 && filteredDocuments.length === 0 && (
+            <p className="empty sidebar-empty">검색 결과가 없습니다.</p>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function Sidebar({
   user,
   spaces,
@@ -503,9 +798,7 @@ function Sidebar({
   navigateTo,
   documents,
   selectedDocumentId,
-  loadDocumentDetail,
   openDocumentPreview,
-  deleteDocument,
   loading,
 }) {
   const userLabel = formatBrandText(user.displayName || user.loginId || user.email);
@@ -592,24 +885,11 @@ function Sidebar({
               </button>
             </form>
 
-            <div className="sidebar-file-list">
-              {codeFiles.map((fileItem) => (
-                  <button
-                      className="sidebar-file-row"
-                      key={fileItem.id}
-                      type="button"
-                      title={fileItem.filePath}
-                      onClick={() => openCodeFile(fileItem.repositoryId, fileItem.id)}
-                  >
-                    <span>{fileItem.filePath.split(/[\\/]/).pop()}</span>
-                    <small>{fileItem.language} · {fileItem.chunkCount} chunks</small>
-                  </button>
-              ))}
-
-              {selectedRepositoryId && !codeFiles.length && (
-                  <p className="empty sidebar-empty">파일이 없습니다.</p>
-              )}
-            </div>
+            <CodeFileTree
+              files={codeFiles}
+              selectedRepositoryId={selectedRepositoryId}
+              openCodeFile={openCodeFile}
+            />
           </div>
       )}
       {activeView === 'docs' && !collapsed && (
@@ -620,57 +900,12 @@ function Sidebar({
               {documents.length ? `${documents.length}개 문서` : '인덱싱된 문서가 없습니다.'}
             </small>
 
-            <div className="sidebar-document-list">
-              {documents.map((doc) => (
-                  <article
-                      className={doc.id === selectedDocumentId ? 'sidebar-document-row selected' : 'sidebar-document-row'}
-                      key={doc.id}
-                      onClick={() => loadDocumentDetail(doc.id)}
-                  >
-                    <div className="sidebar-document-main">
-                      <strong>{doc.title}</strong>
-                      <small>{doc.sourceUri || doc.contentType || '원본 정보 없음'}</small>
-                    </div>
-
-                    <div className="sidebar-document-meta">
-                      <StatusBadge status={doc.sourceStatus} />
-                      <small>{getSourceLabel(doc.sourceType)} · {formatDate(doc.createdAt)}</small>
-                    </div>
-
-                    <div className="sidebar-document-actions">
-                      <IconButton
-                          title="원문 보기"
-                          disabled={loading(`detail-${doc.id}`) || loading(`delete-${doc.id}`)}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openDocumentPreview(doc.id);
-                          }}
-                      >
-                        <Eye size={14} />
-                      </IconButton>
-
-
-                      <IconButton
-                          danger
-                          title="삭제"
-                          disabled={loading(`delete-${doc.id}`)}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            deleteDocument(doc.id, doc.title);
-                          }}
-                      >
-                        {loading(`delete-${doc.id}`)
-                            ? <Loader2 className="spin" size={14} />
-                            : <Trash2 size={14} />}
-                      </IconButton>
-                    </div>
-                  </article>
-              ))}
-
-              {documents.length === 0 && (
-                  <p className="empty sidebar-empty">웹 URL이나 파일을 추가하면 여기에 표시됩니다.</p>
-              )}
-            </div>
+            <DocumentFileList
+              documents={documents}
+              selectedDocumentId={selectedDocumentId}
+              openDocumentPreview={openDocumentPreview}
+              loading={loading}
+            />
           </div>
       )}
     </aside>

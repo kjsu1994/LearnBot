@@ -95,20 +95,51 @@
 }
 
 .sidebar-file-search {
+  align-items: center;
+  background: #0b1014;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
   display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  padding: 4px;
 }
 
 .sidebar-file-search input {
-  min-height: 34px;
-  padding: 7px 9px;
+  background: transparent;
+  border: 0;
+  color: #e5e7eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+  min-height: 30px;
+  padding: 7px 8px;
+}
+
+.sidebar-file-search input::placeholder {
+  color: rgba(148, 163, 184, 0.74);
+}
+
+.sidebar-file-search input:focus {
+  box-shadow: none;
+  outline: none;
 }
 
 .sidebar-file-search button {
-  min-height: 34px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  color: #94a3b8;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 28px;
   padding: 0;
+}
+
+.sidebar-file-search button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #60a5fa;
 }
 
 .sidebar-file-list {
@@ -153,6 +184,344 @@
 .sidebar-file-row small {
   color: #b9c8c3;
   font-size: 11px;
+}
+
+.sidebar-file-tree-card {
+  background: #09090b;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 32px rgba(0, 0, 0, 0.18);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  padding: 12px;
+}
+
+.sidebar-file-tree-header {
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 2px 10px;
+}
+
+.sidebar-file-tree-window-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.sidebar-file-tree-window-dots span {
+  border-radius: 999px;
+  display: block;
+  height: 10px;
+  width: 10px;
+}
+
+.sidebar-file-tree-window-dots span:nth-child(1) {
+  background: oklch(0.65 0.2 25);
+}
+
+.sidebar-file-tree-window-dots span:nth-child(2) {
+  background: oklch(0.75 0.18 85);
+}
+
+.sidebar-file-tree-window-dots span:nth-child(3) {
+  background: oklch(0.65 0.18 150);
+}
+
+.sidebar-file-tree {
+  display: grid;
+  gap: 2px;
+  max-height: 340px;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.sidebar-file-tree-item-wrap,
+.sidebar-file-tree-children {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar-file-tree-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #a1a1aa;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 18px 4px var(--tree-indent, 8px);
+  position: relative;
+  text-align: left;
+  transition: background-color 180ms ease, color 180ms ease;
+  width: 100%;
+}
+
+.sidebar-file-tree-file {
+  align-items: flex-start;
+  min-height: 39px;
+  padding-bottom: 5px;
+  padding-top: 5px;
+}
+
+.sidebar-file-tree-item:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: transparent;
+  box-shadow: none;
+  color: #f8fafc;
+}
+
+.sidebar-file-tree-line {
+  background: rgba(148, 163, 184, 0.28);
+  bottom: 0;
+  left: var(--tree-line-left, 16px);
+  position: absolute;
+  top: 0;
+  transition: background-color 180ms ease;
+  width: 1px;
+}
+
+.sidebar-file-tree-item:hover .sidebar-file-tree-line {
+  background: rgba(59, 130, 246, 0.48);
+}
+
+.sidebar-file-tree-caret {
+  align-items: center;
+  color: #94a3b8;
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 16px;
+  justify-content: center;
+  transition: color 180ms ease, transform 200ms ease;
+  width: 16px;
+}
+
+.sidebar-file-tree-caret.open {
+  transform: rotate(90deg);
+}
+
+.sidebar-file-tree-folder:hover .sidebar-file-tree-caret {
+  color: #60a5fa;
+}
+
+.sidebar-file-tree-folder-icon,
+.sidebar-file-tree-file-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 20px;
+  height: 20px;
+  justify-content: center;
+  transition: color 180ms ease, opacity 180ms ease, transform 180ms ease;
+  width: 20px;
+}
+
+.sidebar-file-tree-folder-icon {
+  color: rgba(250, 204, 21, 0.82);
+}
+
+.sidebar-file-tree-folder:hover .sidebar-file-tree-folder-icon,
+.sidebar-file-tree-file:hover .sidebar-file-tree-file-icon,
+.sidebar-file-tree-file:hover .sidebar-file-tree-file-mark {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.sidebar-file-tree-file-mark {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 16px;
+  font-size: 11px;
+  height: 16px;
+  justify-content: center;
+  line-height: 1;
+  opacity: 0.74;
+  transition: opacity 180ms ease, transform 180ms ease;
+  width: 16px;
+}
+
+.sidebar-file-tree-file-icon {
+  opacity: 0.7;
+}
+
+.sidebar-file-tree-name {
+  color: inherit;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-file-tree-folder .sidebar-file-tree-name {
+  flex: 1 1 auto;
+  color: rgba(248, 250, 252, 0.9);
+}
+
+.sidebar-file-tree-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-file-tree-path {
+  color: rgba(148, 163, 184, 0.82);
+  display: block;
+  font-size: 10px;
+  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-file-tree-hover-dot {
+  background: #60a5fa;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 6px;
+  opacity: 0;
+  position: absolute;
+  right: 8px;
+  transform: scale(0);
+  transition: opacity 180ms ease, transform 180ms ease;
+  width: 6px;
+}
+
+.sidebar-file-tree-item:hover .sidebar-file-tree-hover-dot {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sidebar-file-tree-file-mark.tsx,
+.sidebar-file-tree-file-icon.tsx {
+  color: oklch(0.65 0.18 220);
+}
+
+.sidebar-file-tree-file-mark.ts,
+.sidebar-file-tree-file-icon.ts {
+  color: oklch(0.6 0.15 230);
+}
+
+.sidebar-file-tree-file-mark.jsx,
+.sidebar-file-tree-file-icon.jsx {
+  color: oklch(0.7 0.2 200);
+}
+
+.sidebar-file-tree-file-mark.js,
+.sidebar-file-tree-file-icon.js {
+  color: oklch(0.8 0.18 90);
+}
+
+.sidebar-file-tree-file-mark.css,
+.sidebar-file-tree-file-icon.css {
+  color: oklch(0.65 0.2 280);
+}
+
+.sidebar-file-tree-file-mark.json,
+.sidebar-file-tree-file-icon.json,
+.sidebar-file-tree-file-mark.yaml,
+.sidebar-file-tree-file-icon.yaml {
+  color: oklch(0.75 0.15 85);
+}
+
+.sidebar-file-tree-file-mark.md,
+.sidebar-file-tree-file-icon.md,
+.sidebar-file-tree-file-mark.default,
+.sidebar-file-tree-file-icon.default {
+  color: #94a3b8;
+}
+
+.sidebar-file-tree-file-mark.svg,
+.sidebar-file-tree-file-icon.svg,
+.sidebar-file-tree-file-mark.png,
+.sidebar-file-tree-file-icon.png {
+  color: oklch(0.7 0.15 160);
+}
+
+.sidebar-file-tree-file-mark.html,
+.sidebar-file-tree-file-icon.html {
+  color: oklch(0.7 0.18 35);
+}
+
+.sidebar-file-tree-file-mark.pdf,
+.sidebar-file-tree-file-icon.pdf {
+  color: oklch(0.62 0.22 25);
+}
+
+.sidebar-file-tree-file-mark.doc,
+.sidebar-file-tree-file-icon.doc {
+  color: oklch(0.62 0.18 245);
+}
+
+.sidebar-file-tree-file-mark.ppt,
+.sidebar-file-tree-file-icon.ppt {
+  color: oklch(0.68 0.2 45);
+}
+
+.sidebar-file-tree-file-mark.xls,
+.sidebar-file-tree-file-icon.xls {
+  color: oklch(0.62 0.18 145);
+}
+
+.sidebar-document-search {
+  margin-bottom: 0;
+}
+
+.sidebar-document-tree-card {
+  min-width: 0;
+}
+
+.sidebar-document-tree {
+  max-height: 360px;
+}
+
+.sidebar-document-tree-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #a1a1aa;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-height: 34px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 5px 18px 5px 8px;
+  position: relative;
+  transition: background-color 180ms ease, color 180ms ease;
+  width: 100%;
+}
+
+.sidebar-document-tree-row:hover,
+.sidebar-document-tree-row.selected {
+  background: rgba(148, 163, 184, 0.12);
+  color: #f8fafc;
+}
+
+.sidebar-document-tree-row.selected {
+  box-shadow: inset 2px 0 0 #60a5fa;
+}
+
+.sidebar-document-tree-row .sidebar-file-tree-text {
+  min-width: 0;
 }
 
 .sidebar-empty {
