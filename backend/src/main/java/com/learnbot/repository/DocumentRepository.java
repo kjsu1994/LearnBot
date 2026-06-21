@@ -7,6 +7,7 @@ import com.learnbot.domain.SourceStatus;
 import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.DocumentIndexingJobSummary;
+import com.learnbot.dto.DocumentProcessingDiagnosticSummary;
 import com.learnbot.dto.CrawlAuditSummary;
 import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.SearchFilter;
@@ -16,7 +17,9 @@ import com.learnbot.service.Chunk;
 import com.learnbot.service.CrawlAuditEvent;
 import com.learnbot.service.DocumentEntityMentionExtractor;
 import com.learnbot.service.DocumentGraphEdge;
+import com.learnbot.service.DocumentGraphJob;
 import com.learnbot.service.DocumentGraphNode;
+import com.learnbot.service.DocumentProcessingDiagnostic;
 import com.learnbot.service.DocumentPageMetadata;
 import com.learnbot.service.DocumentEnrichmentJob;
 import com.learnbot.service.StoredObject;
@@ -319,6 +322,15 @@ public class DocumentRepository {
                 .addValue("enrichmentMessage", enrichmentMessage));
     }
 
+    public void markSourceSearchable(UUID sourceId) {
+        jdbc.update("""
+                UPDATE data_sources
+                SET status = 'SEARCHABLE', error_message = NULL, updated_at = now()
+                WHERE id = :sourceId
+                  AND status <> 'FAILED'
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId));
+    }
+
     public void enqueueDocumentEnrichment(UUID sourceId, UUID jobId) {
         jdbc.update("""
                 INSERT INTO document_enrichment_jobs (id, source_id, job_id, status)
@@ -330,12 +342,215 @@ public class DocumentRepository {
                 .addValue("jobId", jobId));
     }
 
+    public void enqueueDocumentGraph(UUID sourceId, UUID jobId) {
+        jdbc.update("""
+                INSERT INTO document_graph_jobs (id, source_id, job_id, status)
+                VALUES (:id, :sourceId, :jobId, 'PENDING')
+                ON CONFLICT (source_id, job_id) DO UPDATE
+                SET status = 'PENDING',
+                    attempts = 0,
+                    error_message = NULL,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL,
+                    next_attempt_at = now(),
+                    started_at = NULL,
+                    finished_at = NULL,
+                    updated_at = now()
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("sourceId", sourceId)
+                .addValue("jobId", jobId));
+    }
+
+    public void recoverDocumentGraphJobs() {
+        jdbc.update("""
+                UPDATE document_graph_jobs
+                SET status = 'PENDING', next_attempt_at = now(), started_at = NULL,
+                    lease_owner = NULL, lease_until = NULL, heartbeat_at = NULL,
+                    error_message = 'Recovered after expired graph lease.',
+                    updated_at = now()
+                WHERE status = 'RUNNING'
+                  AND (lease_until IS NULL OR lease_until < now())
+                """, new MapSqlParameterSource());
+    }
+
+    public Optional<DocumentGraphJob> claimDocumentGraphJob(String workerId) {
+        List<DocumentGraphJob> jobs = jdbc.query("""
+                WITH candidate AS (
+                    SELECT id
+                    FROM document_graph_jobs
+                    WHERE (status = 'PENDING' AND next_attempt_at <= now())
+                       OR (status = 'RUNNING' AND (lease_until IS NULL OR lease_until < now()))
+                    ORDER BY created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE document_graph_jobs job
+                SET status = 'RUNNING',
+                    attempts = attempts + 1,
+                    started_at = now(),
+                    lease_owner = :workerId,
+                    lease_until = now() + interval '300 seconds',
+                    heartbeat_at = now(),
+                    error_message = NULL,
+                    updated_at = now()
+                FROM candidate
+                WHERE job.id = candidate.id
+                RETURNING job.id, job.source_id, job.job_id, job.status, job.attempts, job.lease_owner
+                """, new MapSqlParameterSource().addValue("workerId", workerId), (rs, rowNum) -> new DocumentGraphJob(
+                rs.getObject("id", UUID.class),
+                rs.getObject("source_id", UUID.class),
+                rs.getObject("job_id", UUID.class),
+                rs.getString("status"),
+                rs.getInt("attempts"),
+                rs.getString("lease_owner")
+        ));
+        return jobs.stream().findFirst();
+    }
+
+    public boolean heartbeatDocumentGraphJob(UUID graphJobId, String workerId) {
+        int updated = jdbc.update("""
+                UPDATE document_graph_jobs
+                SET lease_until = now() + interval '300 seconds',
+                    heartbeat_at = now(),
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                  AND status = 'RUNNING'
+                """, new MapSqlParameterSource()
+                .addValue("id", graphJobId)
+                .addValue("workerId", workerId));
+        return updated > 0;
+    }
+
+    public boolean finishDocumentGraphJob(UUID graphJobId, String workerId, String status, String message) {
+        int updated = jdbc.update("""
+                UPDATE document_graph_jobs
+                SET status = :status,
+                    error_message = :message,
+                    finished_at = now(),
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL,
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource()
+                .addValue("id", graphJobId)
+                .addValue("workerId", workerId)
+                .addValue("status", status)
+                .addValue("message", message));
+        return updated > 0;
+    }
+
+    public boolean retryDocumentGraphJob(UUID graphJobId, String workerId, int attempts, String message) {
+        int delayMinutes = attempts <= 1 ? 1 : 5;
+        int updated = jdbc.update("""
+                UPDATE document_graph_jobs
+                SET status = 'PENDING',
+                    error_message = :message,
+                    next_attempt_at = now() + (:delayMinutes * interval '1 minute'),
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL,
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource()
+                .addValue("id", graphJobId)
+                .addValue("workerId", workerId)
+                .addValue("delayMinutes", delayMinutes)
+                .addValue("message", message));
+        return updated > 0;
+    }
+
+    public boolean retryLatestDocumentEnrichmentJob(UUID jobId) {
+        int updated = jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET status = 'PENDING',
+                    attempts = 0,
+                    next_attempt_at = now(),
+                    error_message = NULL,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    updated_at = now()
+                WHERE job_id = :jobId
+                  AND status IN ('FAILED', 'SKIPPED', 'RETRYING')
+                """, new MapSqlParameterSource().addValue("jobId", jobId));
+        return updated > 0;
+    }
+
+    public boolean retryLatestDocumentGraphJob(UUID jobId) {
+        int updated = jdbc.update("""
+                UPDATE document_graph_jobs
+                SET status = 'PENDING',
+                    attempts = 0,
+                    next_attempt_at = now(),
+                    error_message = NULL,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL,
+                    updated_at = now()
+                WHERE job_id = :jobId
+                  AND status IN ('FAILED', 'SKIPPED', 'RETRYING')
+                """, new MapSqlParameterSource().addValue("jobId", jobId));
+        return updated > 0;
+    }
+
+    public void refreshSourceReadiness(UUID sourceId) {
+        String next = sourceReadiness(sourceId);
+        jdbc.update("""
+                UPDATE data_sources
+                SET status = :status,
+                    updated_at = now()
+                WHERE id = :sourceId
+                  AND status NOT IN ('INDEXING', 'FAILED')
+                """, new MapSqlParameterSource()
+                .addValue("sourceId", sourceId)
+                .addValue("status", next));
+    }
+
+    private String sourceReadiness(UUID sourceId) {
+        UUID latestJobId = latestDocumentJobId(sourceId).orElse(null);
+        if (latestJobId == null) {
+            return SourceStatus.READY.name();
+        }
+        List<String> statuses = new ArrayList<>();
+        statuses.addAll(jdbc.queryForList("""
+                SELECT status FROM document_enrichment_jobs WHERE source_id = :sourceId AND job_id = :jobId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId).addValue("jobId", latestJobId), String.class));
+        statuses.addAll(jdbc.queryForList("""
+                SELECT status FROM document_graph_jobs WHERE source_id = :sourceId AND job_id = :jobId
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId).addValue("jobId", latestJobId), String.class));
+        if (statuses.stream().anyMatch(status -> "FAILED".equals(status) || "RETRYING".equals(status))) {
+            return SourceStatus.PARTIAL.name();
+        }
+        if (statuses.stream().anyMatch(status -> "PENDING".equals(status) || "RUNNING".equals(status))) {
+            return SourceStatus.SEARCHABLE.name();
+        }
+        return SourceStatus.READY.name();
+    }
+
+    private Optional<UUID> latestDocumentJobId(UUID sourceId) {
+        List<UUID> ids = jdbc.queryForList("""
+                SELECT id
+                FROM document_indexing_jobs
+                WHERE source_id = :sourceId
+                ORDER BY created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), UUID.class);
+        return ids.stream().findFirst();
+    }
+
     public void recoverDocumentEnrichmentJobs() {
         jdbc.update("""
                 UPDATE document_enrichment_jobs
                 SET status = 'PENDING',
                     lease_owner = NULL,
                     lease_until = NULL,
+                    heartbeat_at = NULL,
+                    started_at = NULL,
                     next_attempt_at = now(),
                     error_message = 'Recovered after expired enrichment lease.'
                 WHERE status = 'RUNNING'
@@ -358,6 +573,8 @@ public class DocumentRepository {
                 SET status = 'RUNNING',
                     lease_owner = :workerId,
                     lease_until = now() + interval '5 minutes',
+                    heartbeat_at = now(),
+                    started_at = now(),
                     updated_at = now()
                 FROM next_job
                 WHERE job.id = next_job.id
@@ -377,6 +594,7 @@ public class DocumentRepository {
         int updated = jdbc.update("""
                 UPDATE document_enrichment_jobs
                 SET lease_until = now() + interval '5 minutes',
+                    heartbeat_at = now(),
                     updated_at = now()
                 WHERE id = :id
                   AND lease_owner = :workerId
@@ -394,6 +612,8 @@ public class DocumentRepository {
                     error_message = :message,
                     lease_owner = NULL,
                     lease_until = NULL,
+                    heartbeat_at = NULL,
+                    finished_at = now(),
                     updated_at = now()
                 WHERE id = :id
                   AND lease_owner = :workerId
@@ -413,6 +633,7 @@ public class DocumentRepository {
                     error_message = :message,
                     lease_owner = NULL,
                     lease_until = NULL,
+                    heartbeat_at = NULL,
                     next_attempt_at = now() + (:attempts + 1) * interval '30 seconds',
                     updated_at = now()
                 WHERE id = :id
@@ -423,6 +644,72 @@ public class DocumentRepository {
                 .addValue("attempts", attempts)
                 .addValue("message", message));
         return updated > 0;
+    }
+
+    public void addDocumentProcessingDiagnostic(UUID sourceId, UUID jobId, DocumentProcessingDiagnostic diagnostic) {
+        if (diagnostic == null) {
+            return;
+        }
+        jdbc.update("""
+                INSERT INTO document_processing_diagnostics (
+                    id, source_id, job_id, stage, analyzer, status, mode,
+                    attempted_items, processed_items, failed_items, node_count, edge_count,
+                    duration_millis, message, metadata
+                ) VALUES (
+                    :id, :sourceId, :jobId, :stage, :analyzer, :status, :mode,
+                    :attemptedItems, :processedItems, :failedItems, :nodeCount, :edgeCount,
+                    :durationMillis, :message, CAST(:metadata AS jsonb)
+                )
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("sourceId", sourceId)
+                .addValue("jobId", jobId)
+                .addValue("stage", diagnostic.stage())
+                .addValue("analyzer", diagnostic.analyzer())
+                .addValue("status", diagnostic.status())
+                .addValue("mode", diagnostic.mode())
+                .addValue("attemptedItems", diagnostic.attemptedItems())
+                .addValue("processedItems", diagnostic.processedItems())
+                .addValue("failedItems", diagnostic.failedItems())
+                .addValue("nodeCount", diagnostic.nodeCount())
+                .addValue("edgeCount", diagnostic.edgeCount())
+                .addValue("durationMillis", diagnostic.durationMillis())
+                .addValue("message", diagnostic.message())
+                .addValue("metadata", toJson(diagnostic.metadata())));
+    }
+
+    public List<DocumentProcessingDiagnosticSummary> listDocumentProcessingDiagnostics(UUID jobId, List<UUID> spaceIds) {
+        return jdbc.query("""
+                SELECT diagnostic.id, diagnostic.source_id, diagnostic.job_id, diagnostic.stage,
+                       diagnostic.analyzer, diagnostic.status, diagnostic.mode,
+                       diagnostic.attempted_items, diagnostic.processed_items, diagnostic.failed_items,
+                       diagnostic.node_count, diagnostic.edge_count, diagnostic.duration_millis,
+                       diagnostic.message, diagnostic.metadata::text AS metadata, diagnostic.created_at
+                FROM document_processing_diagnostics diagnostic
+                JOIN document_indexing_jobs job ON job.id = diagnostic.job_id
+                WHERE diagnostic.job_id = :jobId
+                  AND job.space_id IN (:spaceIds)
+                ORDER BY diagnostic.created_at, diagnostic.stage
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("spaceIds", spaceIds), (rs, rowNum) -> new DocumentProcessingDiagnosticSummary(
+                rs.getObject("id", UUID.class),
+                rs.getObject("source_id", UUID.class),
+                rs.getObject("job_id", UUID.class),
+                rs.getString("stage"),
+                rs.getString("analyzer"),
+                rs.getString("status"),
+                rs.getString("mode"),
+                rs.getInt("attempted_items"),
+                rs.getInt("processed_items"),
+                rs.getInt("failed_items"),
+                rs.getInt("node_count"),
+                rs.getInt("edge_count"),
+                rs.getLong("duration_millis"),
+                rs.getString("message"),
+                fromJson(rs.getString("metadata")),
+                rs.getObject("created_at", OffsetDateTime.class)
+        ));
     }
 
     public List<DocumentIndexingJobSummary> listDocumentJobs(List<UUID> spaceIds, UUID selectedSpaceId) {
@@ -994,6 +1281,11 @@ public class DocumentRepository {
     }
 
     public void rebuildDocumentGraph(UUID sourceId) {
+        rebuildDocumentGraphWithDiagnostic(sourceId);
+    }
+
+    public DocumentProcessingDiagnostic rebuildDocumentGraphWithDiagnostic(UUID sourceId) {
+        long started = System.nanoTime();
         jdbc.update("DELETE FROM document_graph_edges WHERE source_id = :sourceId",
                 new MapSqlParameterSource().addValue("sourceId", sourceId));
         jdbc.update("DELETE FROM document_graph_nodes WHERE source_id = :sourceId",
@@ -1019,7 +1311,11 @@ public class DocumentRepository {
                 fromJson(rs.getString("metadata"))
         ));
         if (rows.isEmpty()) {
-            return;
+            return new DocumentProcessingDiagnostic(
+                    "DOCUMENT_GRAPH_REBUILD", "Document graph builder", "SKIPPED", "ASYNC",
+                    0, 0, 0, 0, 0, elapsedMs(started),
+                    "No document chunks were available for graph rebuild.", Map.of()
+            );
         }
 
         Map<String, UUID> nodeIds = new LinkedHashMap<>();
@@ -1056,14 +1352,11 @@ public class DocumentRepository {
             addEntityMentionNodes(sourceId, nodes, edges, chunkKey, row);
         }
 
+        List<MapSqlParameterSource> nodeBatch = new ArrayList<>();
         for (DocumentGraphNode node : nodes) {
             UUID id = UUID.randomUUID();
             nodeIds.put(node.key(), id);
-            jdbc.update("""
-                    INSERT INTO document_graph_nodes (id, source_id, document_id, chunk_id, node_key, node_type, label, metadata)
-                    VALUES (:id, :sourceId, :documentId, :chunkId, :nodeKey, :nodeType, :label, CAST(:metadata AS jsonb))
-                    ON CONFLICT (source_id, node_key) DO NOTHING
-                    """, new MapSqlParameterSource()
+            nodeBatch.add(new MapSqlParameterSource()
                     .addValue("id", id)
                     .addValue("sourceId", sourceId)
                     .addValue("documentId", node.documentId())
@@ -1073,17 +1366,21 @@ public class DocumentRepository {
                     .addValue("label", node.label())
                     .addValue("metadata", toJson(node.metadata())));
         }
+        if (!nodeBatch.isEmpty()) {
+            jdbc.batchUpdate("""
+                    INSERT INTO document_graph_nodes (id, source_id, document_id, chunk_id, node_key, node_type, label, metadata)
+                    VALUES (:id, :sourceId, :documentId, :chunkId, :nodeKey, :nodeType, :label, CAST(:metadata AS jsonb))
+                    ON CONFLICT (source_id, node_key) DO NOTHING
+                    """, nodeBatch.toArray(MapSqlParameterSource[]::new));
+        }
+        List<MapSqlParameterSource> edgeBatch = new ArrayList<>();
         for (DocumentGraphEdge edge : edges) {
             UUID sourceNodeId = nodeIds.get(edge.sourceKey());
             UUID targetNodeId = nodeIds.get(edge.targetKey());
             if (sourceNodeId == null || targetNodeId == null) {
                 continue;
             }
-            jdbc.update("""
-                    INSERT INTO document_graph_edges (id, source_id, source_node_id, target_node_id, edge_type, weight, metadata)
-                    VALUES (:id, :sourceId, :sourceNodeId, :targetNodeId, :edgeType, :weight, CAST(:metadata AS jsonb))
-                    ON CONFLICT (source_id, source_node_id, target_node_id, edge_type) DO NOTHING
-                    """, new MapSqlParameterSource()
+            edgeBatch.add(new MapSqlParameterSource()
                     .addValue("id", UUID.randomUUID())
                     .addValue("sourceId", sourceId)
                     .addValue("sourceNodeId", sourceNodeId)
@@ -1092,6 +1389,18 @@ public class DocumentRepository {
                     .addValue("weight", edge.weight())
                     .addValue("metadata", toJson(edge.metadata())));
         }
+        if (!edgeBatch.isEmpty()) {
+            jdbc.batchUpdate("""
+                    INSERT INTO document_graph_edges (id, source_id, source_node_id, target_node_id, edge_type, weight, metadata)
+                    VALUES (:id, :sourceId, :sourceNodeId, :targetNodeId, :edgeType, :weight, CAST(:metadata AS jsonb))
+                    ON CONFLICT (source_id, source_node_id, target_node_id, edge_type) DO NOTHING
+                    """, edgeBatch.toArray(MapSqlParameterSource[]::new));
+        }
+        return new DocumentProcessingDiagnostic(
+                "DOCUMENT_GRAPH_REBUILD", "Document graph builder", "SUCCESS", "ASYNC",
+                rows.size(), rows.size(), 0, nodes.size(), edgeBatch.size(), elapsedMs(started),
+                "Document graph rebuild completed.", Map.of("sourceId", sourceId.toString())
+        );
     }
 
     public List<SearchResult> graphExpandedChunks(List<UUID> seedChunkIds, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
@@ -1517,6 +1826,10 @@ public class DocumentRepository {
         } catch (RuntimeException ex) {
             return null;
         }
+    }
+
+    private long elapsedMs(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 
     public record ReusableDocument(UUID documentId, int chunkCount) {

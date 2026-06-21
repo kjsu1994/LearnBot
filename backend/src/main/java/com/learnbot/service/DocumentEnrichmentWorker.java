@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -47,6 +48,7 @@ public class DocumentEnrichmentWorker {
             }
             List<DocumentRepository.StoredDocumentForEnrichment> storedDocuments = repository.listDocumentsForSource(job.sourceId());
             if (storedDocuments.isEmpty()) {
+                recordDiagnostic(job, "SKIPPED", 0, 0, 0, elapsedMs(started), "보강할 문서가 없습니다.", Map.of());
                 finish(job, "SKIPPED", "보강할 문서가 없습니다.");
                 return;
             }
@@ -86,12 +88,25 @@ public class DocumentEnrichmentWorker {
                         : embeddingService.embed(contextChunks.stream().map(Chunk::content).toList());
                 repository.replaceDocumentContextChunks(item.documentId(), reindex(contextChunks), embeddings);
             }
+            recordDiagnostic(job, "SUCCESS", work.size(), work.size(), 0, elapsedMs(started),
+                    "LLM 품질 보강이 완료되었습니다.", Map.of("documentCount", work.size()));
             finish(job, "SUCCEEDED", "LLM 품질 보강이 완료되었습니다.");
             log.info("document_enrichment sourceId={} jobId={} status=SUCCESS durationMs={}",
                     job.sourceId(), job.jobId(), elapsedMs(started));
         } catch (RuntimeException ex) {
-            retryOrFail(job, rootMessage(ex));
+            String message = rootMessage(ex);
+            recordDiagnostic(job, "FAILED", 0, 0, 1, elapsedMs(started), message,
+                    Map.of("errorType", ex.getClass().getSimpleName()));
+            retryOrFail(job, message);
         }
+    }
+
+    private void recordDiagnostic(DocumentEnrichmentJob job, String status, int attempted, int processed,
+                                  int failed, long durationMs, String message, Map<String, Object> metadata) {
+        repository.addDocumentProcessingDiagnostic(job.sourceId(), job.jobId(), new DocumentProcessingDiagnostic(
+                "DOCUMENT_LLM_ENRICHMENT", "Document context builder", status, "ASYNC",
+                attempted, processed, failed, 0, 0, durationMs, message, metadata
+        ));
     }
 
     private Chunk toChunk(DocumentChunkDetail detail) {
@@ -113,12 +128,14 @@ public class DocumentEnrichmentWorker {
         }
         if (repository.retryDocumentEnrichmentJob(job.id(), workerId, job.attempts(), message)) {
             repository.updateDocumentJobEnrichment(job.jobId(), "RETRYING", message);
+            repository.refreshSourceReadiness(job.sourceId());
         }
     }
 
     private void finish(DocumentEnrichmentJob job, String status, String message) {
         if (repository.finishDocumentEnrichmentJob(job.id(), workerId, status, message)) {
             repository.updateDocumentJobEnrichment(job.jobId(), status, message);
+            repository.refreshSourceReadiness(job.sourceId());
         }
     }
 

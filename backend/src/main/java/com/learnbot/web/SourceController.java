@@ -3,6 +3,7 @@ package com.learnbot.web;
 import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.DocumentIndexingJobSummary;
+import com.learnbot.dto.DocumentProcessingDiagnosticSummary;
 import com.learnbot.dto.DocumentPreviewResponse;
 import com.learnbot.dto.FileBatchIngestResponse;
 import com.learnbot.dto.FileIngestItemResponse;
@@ -107,6 +108,21 @@ public class SourceController {
     @GetMapping("/document-indexing/jobs/{jobId}")
     DocumentIndexingJobSummary getDocumentJob(@PathVariable UUID jobId) {
         return ingestionService.getDocumentJob(currentUserProvider.currentUser(), jobId);
+    }
+
+    @GetMapping("/document-indexing/jobs/{jobId}/diagnostics")
+    List<DocumentProcessingDiagnosticSummary> listDocumentDiagnostics(@PathVariable UUID jobId) {
+        return ingestionService.listDocumentDiagnostics(currentUserProvider.currentUser(), jobId);
+    }
+
+    @PostMapping("/document-indexing/jobs/{jobId}/retry-enrichment")
+    DocumentIndexingJobSummary retryDocumentEnrichment(@PathVariable UUID jobId) {
+        return ingestionService.retryDocumentEnrichment(currentUserProvider.currentUser(), jobId);
+    }
+
+    @PostMapping("/document-indexing/jobs/{jobId}/retry-graph")
+    DocumentIndexingJobSummary retryDocumentGraph(@PathVariable UUID jobId) {
+        return ingestionService.retryDocumentGraph(currentUserProvider.currentUser(), jobId);
     }
 
     @GetMapping("/documents/{documentId}")

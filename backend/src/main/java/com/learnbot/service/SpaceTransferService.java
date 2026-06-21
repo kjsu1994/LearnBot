@@ -378,16 +378,16 @@ public class SpaceTransferService {
                     (SELECT COUNT(*)
                      FROM documents d
                      JOIN data_sources s ON s.id = d.source_id
-                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status = 'INDEXED') AS documents,
+                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status IN ('SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED')) AS documents,
                     (SELECT COUNT(*)
                      FROM document_chunks c
                      JOIN documents d ON d.id = c.document_id
                      JOIN data_sources s ON s.id = d.source_id
-                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status = 'INDEXED') AS document_chunks,
+                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status IN ('SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED')) AS document_chunks,
                     (SELECT COUNT(*)
                      FROM source_objects o
                      JOIN data_sources s ON s.id = o.source_id
-                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status = 'INDEXED') AS source_objects,
+                     WHERE s.space_id = :spaceId AND s.deleted_at IS NULL AND s.status IN ('SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED')) AS source_objects,
                     (SELECT COUNT(*)
                      FROM code_repositories r
                      WHERE r.space_id = :spaceId AND r.deleted_at IS NULL AND r.status = 'INDEXED') AS code_repositories,
@@ -415,7 +415,7 @@ public class SpaceTransferService {
                 FROM data_sources
                 WHERE space_id = :spaceId
                   AND deleted_at IS NULL
-                  AND status = 'INDEXED'
+                  AND status IN ('SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED')
                   AND EXISTS (SELECT 1 FROM documents d WHERE d.source_id = data_sources.id)
                 ORDER BY created_at ASC
                 """, new MapSqlParameterSource().addValue("spaceId", spaceId), (rs, rowNum) -> new SourceRow(
@@ -476,7 +476,7 @@ public class SpaceTransferService {
                 FROM code_repositories
                 WHERE space_id = :spaceId
                   AND deleted_at IS NULL
-                  AND status = 'INDEXED'
+                  AND status IN ('SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED')
                   AND EXISTS (SELECT 1 FROM code_files f WHERE f.repository_id = code_repositories.id AND f.active)
                 ORDER BY created_at ASC
                 """, new MapSqlParameterSource().addValue("spaceId", spaceId), (rs, rowNum) -> {
@@ -570,7 +570,7 @@ public class SpaceTransferService {
     private void insertSource(UUID sourceId, UUID spaceId, UUID actorId, SourceArchive source) {
         jdbc.update("""
                 INSERT INTO data_sources (id, type, name, location, status, space_id, created_by, created_at, updated_at)
-                VALUES (:id, :type, :name, :location, 'INDEXED', :spaceId, :createdBy, now(), now())
+                VALUES (:id, :type, :name, :location, 'READY', :spaceId, :createdBy, now(), now())
                 """, new MapSqlParameterSource()
                 .addValue("id", sourceId)
                 .addValue("type", source.type())

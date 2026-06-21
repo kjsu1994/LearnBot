@@ -22,6 +22,9 @@ const sourceLabels = {
 
 const statusLabels = {
   INDEXING: '인덱싱 중',
+  SEARCHABLE: '검색 가능',
+  READY: '준비 완료',
+  PARTIAL: '부분 완료',
   INDEXED: '인덱싱 완료',
   PENDING: '대기',
   FAILED: '실패',

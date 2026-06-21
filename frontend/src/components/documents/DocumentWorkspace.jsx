@@ -108,12 +108,15 @@ function DocumentWorkspace(props) {
         <DocumentSourceList
           documents={props.documents}
           jobs={props.documentJobs}
+          diagnostics={props.documentJobDiagnostics}
+          loadDiagnostics={props.loadDocumentJobDiagnostics}
+          retryStage={props.retryDocumentJobStage}
+          loading={props.loading}
           selectedDocumentId={props.selectedDocumentId}
           loadDocumentDetail={props.loadDocumentDetail}
           openDocumentPreview={props.openDocumentPreview}
           reindexDocument={props.reindexDocument}
           deleteDocument={props.deleteDocument}
-          loading={props.loading}
         />
 
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
@@ -243,6 +246,9 @@ function DocumentSourcePanel(props) {
     setFiles = () => {},
     documents = [],
     documentJobs = [],
+    documentJobDiagnostics = {},
+    loadDocumentJobDiagnostics = () => {},
+    retryDocumentJobStage = () => {},
     selectedDocumentId = '',
     loadDocumentDetail = () => {},
     openDocumentPreview = () => {},
@@ -362,6 +368,9 @@ function DocumentSourcePanel(props) {
       <DocumentSourceList
         documents={documents}
         jobs={documentJobs}
+        diagnostics={documentJobDiagnostics}
+        loadDiagnostics={loadDocumentJobDiagnostics}
+        retryStage={retryDocumentJobStage}
         selectedDocumentId={selectedDocumentId}
         loadDocumentDetail={loadDocumentDetail}
         openDocumentPreview={openDocumentPreview}
@@ -377,6 +386,9 @@ function DocumentSourcePanel(props) {
 function DocumentSourceList({
   documents = [],
   jobs = [],
+  diagnostics = {},
+  loadDiagnostics = () => {},
+  retryStage = () => {},
   selectedDocumentId = '',
   loadDocumentDetail = () => {},
   openDocumentPreview = () => {},
@@ -423,7 +435,16 @@ function DocumentSourceList({
                   {loading(`delete-${document.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                 </IconButton>
               </div>
-              {latestJob && <DocumentJobStrip job={latestJob} />}
+              {latestJob && (
+                <DocumentJobStrip
+                  job={latestJob}
+                  diagnostics={diagnostics[latestJob.id]}
+                  loadDiagnostics={loadDiagnostics}
+                  retryStage={retryStage}
+                  diagnosticsLoading={loading(`document-job-diagnostics-${latestJob.id}`)}
+                  retryLoading={(stage) => loading(`document-job-retry-${stage}-${latestJob.id}`)}
+                />
+              )}
             </article>
           );
         })}
@@ -433,7 +454,7 @@ function DocumentSourceList({
   );
 }
 
-function DocumentJobStrip({ job }) {
+function DocumentJobStrip({ job, diagnostics, loadDiagnostics, retryStage, diagnosticsLoading, retryLoading }) {
   return (
     <div className="job-strip">
       <span>{documentJobSummary(job)}</span>
@@ -442,8 +463,53 @@ function DocumentJobStrip({ job }) {
         <span style={{ width: `${documentJobPercent(job)}%` }} />
       </div>
       {job.errorMessage && <div className="failure-line">{job.errorMessage}</div>}
+      <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadDiagnostics(job.id); }}>
+        {diagnosticsLoading ? <Loader2 className="spin" size={14} /> : <Info size={14} />}
+        진단
+      </button>
+      {diagnostics && <DocumentDiagnosticList diagnostics={diagnostics} job={job} retryStage={retryStage} retryLoading={retryLoading} />}
     </div>
   );
+}
+
+function DocumentDiagnosticList({ diagnostics = [], job, retryStage, retryLoading }) {
+  if (!diagnostics.length) {
+    return <p className="empty compact-empty">기록된 문서 처리 진단이 없습니다.</p>;
+  }
+  return (
+    <div className="failure-list">
+      {diagnostics.map((diagnostic) => {
+        const retryable = diagnostic.status === 'FAILED'
+          && (diagnostic.stage === 'DOCUMENT_LLM_ENRICHMENT' || diagnostic.stage === 'DOCUMENT_GRAPH_REBUILD');
+        return (
+          <div className="failure-item" key={diagnostic.id}>
+            <strong>{documentStageLabel(diagnostic.stage)} · {diagnostic.status}</strong>
+            <small>{diagnostic.mode || diagnostic.analyzer} · {diagnostic.durationMillis}ms</small>
+            <span>
+              처리 {diagnostic.processedItems}/{diagnostic.attemptedItems}
+              {diagnostic.nodeCount > 0 || diagnostic.edgeCount > 0 ? ` · 노드 ${diagnostic.nodeCount} · 관계 ${diagnostic.edgeCount}` : ''}
+            </span>
+            {diagnostic.message && <span>{diagnostic.message}</span>}
+            {retryable && (
+              <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); retryStage(job.id, diagnostic.stage); }}>
+                {retryLoading?.(diagnostic.stage) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+                이 단계 재시도
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function documentStageLabel(stage) {
+  const labels = {
+    DOCUMENT_LLM_ENRICHMENT: 'LLM 품질 보강',
+    DOCUMENT_GRAPH_REBUILD: '문서 그래프 생성',
+    DOCUMENT_CONTEXT_INLINE: '기본 문맥 생성',
+  };
+  return labels[stage] || stage;
 }
 
 function latestDocumentJobsBySource(jobs = []) {

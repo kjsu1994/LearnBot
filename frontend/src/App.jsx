@@ -27,6 +27,7 @@ export default function App() {
   const [jobs, setJobs] = useState({});
   const [jobFailures, setJobFailures] = useState({});
   const [jobDiagnostics, setJobDiagnostics] = useState({});
+  const [documentJobDiagnostics, setDocumentJobDiagnostics] = useState({});
   const [codeFiles, setCodeFiles] = useState([]);
   const [fileQuery, setFileQuery] = useState('');
   const [selectedCodeFile, setSelectedCodeFile] = useState(null);
@@ -208,7 +209,7 @@ export default function App() {
   }, [documentPreviewBlobUrl]);
 
   const indexedCount = useMemo(
-    () => documents.filter((doc) => doc.sourceStatus === 'INDEXED').length,
+    () => documents.filter((doc) => ['SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED'].includes(doc.sourceStatus)).length,
     [documents],
   );
   const indexedRepoCount = useMemo(
@@ -653,6 +654,21 @@ export default function App() {
     await run(`job-diagnostics-${jobId}`, async () => {
       const data = await request(`/api/code/repositories/${repositoryId}/jobs/${jobId}/diagnostics`);
       setJobDiagnostics((current) => ({ ...current, [jobId]: data || [] }));
+    });
+  }
+
+  async function loadDocumentJobDiagnostics(jobId) {
+    await run(`document-job-diagnostics-${jobId}`, async () => {
+      const data = await request(`/api/document-indexing/jobs/${jobId}/diagnostics`);
+      setDocumentJobDiagnostics((current) => ({ ...current, [jobId]: data || [] }));
+    });
+  }
+
+  async function retryDocumentJobStage(jobId, stage) {
+    const endpoint = stage === 'DOCUMENT_GRAPH_REBUILD' ? 'retry-graph' : 'retry-enrichment';
+    await run(`document-job-retry-${stage}-${jobId}`, async () => {
+      await request(`/api/document-indexing/jobs/${jobId}/${endpoint}`, { method: 'POST' });
+      await Promise.all([refreshDocuments(), refreshDocumentJobs(), loadDocumentJobDiagnostics(jobId)]);
     });
   }
 
@@ -1187,6 +1203,9 @@ export default function App() {
             ingestFile={ingestFile}
             documents={documents}
             documentJobs={documentJobs}
+            documentJobDiagnostics={documentJobDiagnostics}
+            loadDocumentJobDiagnostics={loadDocumentJobDiagnostics}
+            retryDocumentJobStage={retryDocumentJobStage}
             selectedDocumentId={selectedDocumentId}
             loadDocumentDetail={loadDocumentDetail}
             deleteDocument={deleteDocument}
@@ -1314,6 +1333,9 @@ export default function App() {
               ingestFile,
               documents,
               documentJobs,
+              documentJobDiagnostics,
+              loadDocumentJobDiagnostics,
+              retryDocumentJobStage,
               selectedDocumentId,
               loadDocumentDetail,
               openDocumentPreview,

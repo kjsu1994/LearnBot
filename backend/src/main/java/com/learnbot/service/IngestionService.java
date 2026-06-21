@@ -6,6 +6,7 @@ import com.learnbot.domain.SourceType;
 import com.learnbot.dto.DocumentSummary;
 import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.DocumentIndexingJobSummary;
+import com.learnbot.dto.DocumentProcessingDiagnosticSummary;
 import com.learnbot.dto.IngestResponse;
 import com.learnbot.repository.DocumentRepository;
 import jakarta.annotation.PostConstruct;
@@ -148,6 +149,32 @@ public class IngestionService {
     public DocumentIndexingJobSummary getDocumentJob(AppUser user, UUID jobId) {
         return repository.findDocumentJob(jobId, authService.accessibleSpaceIds(user))
                 .orElseThrow(() -> new IllegalArgumentException("Document indexing job was not found."));
+    }
+
+    public List<DocumentProcessingDiagnosticSummary> listDocumentDiagnostics(AppUser user, UUID jobId) {
+        getDocumentJob(user, jobId);
+        return repository.listDocumentProcessingDiagnostics(jobId, authService.accessibleSpaceIds(user));
+    }
+
+    public DocumentIndexingJobSummary retryDocumentEnrichment(AppUser user, UUID jobId) {
+        DocumentIndexingJobSummary job = getDocumentJob(user, jobId);
+        if (!repository.retryLatestDocumentEnrichmentJob(jobId)) {
+            throw new IllegalArgumentException("No failed document enrichment job is available to retry.");
+        }
+        repository.updateDocumentJobEnrichment(jobId, "PENDING", "LLM 품질 보강을 다시 대기열에 넣었습니다.");
+        repository.markSourceSearchable(job.sourceId());
+        auditService.log(user, "DOCUMENT_ENRICHMENT_RETRY", "DOCUMENT_INDEXING_JOB", jobId, job.spaceId(), "Document enrichment retry was queued.");
+        return getDocumentJob(user, jobId);
+    }
+
+    public DocumentIndexingJobSummary retryDocumentGraph(AppUser user, UUID jobId) {
+        DocumentIndexingJobSummary job = getDocumentJob(user, jobId);
+        if (!repository.retryLatestDocumentGraphJob(jobId)) {
+            throw new IllegalArgumentException("No failed document graph job is available to retry.");
+        }
+        repository.markSourceSearchable(job.sourceId());
+        auditService.log(user, "DOCUMENT_GRAPH_RETRY", "DOCUMENT_INDEXING_JOB", jobId, job.spaceId(), "Document graph rebuild retry was queued.");
+        return getDocumentJob(user, jobId);
     }
 
     public DocumentDetail getDocument(AppUser user, UUID documentId) {
@@ -447,13 +474,7 @@ public class IngestionService {
         if (replaceExisting) {
             repository.deleteDocumentsForSourceExcept(sourceId, newDocumentIds);
         }
-        if (properties.getDocument().getGraph().isEnabled()) {
-            try {
-                repository.rebuildDocumentGraph(sourceId);
-            } catch (RuntimeException ignored) {
-                // Document graph is retrieval enrichment only; indexing remains valid without it.
-            }
-        }
+        repository.markSourceSearchable(sourceId);
         if (jobId != null && documentContextBuilder.enabled()
                 && properties.getRag().getDocumentContext().isLlmSummaryEnabled()) {
             try {
@@ -465,13 +486,29 @@ public class IngestionService {
         } else if (jobId != null) {
             repository.markDocumentJobSearchable(jobId, "SKIPPED", "LLM 품질 보강이 비활성화되어 기본 색인만 완료되었습니다.");
         }
-        repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
+        if (jobId != null && properties.getDocument().getGraph().isEnabled()) {
+            try {
+                repository.enqueueDocumentGraph(sourceId, jobId);
+            } catch (RuntimeException ex) {
+                repository.addDocumentProcessingDiagnostic(sourceId, jobId, new DocumentProcessingDiagnostic(
+                        "DOCUMENT_GRAPH_REBUILD", "Document graph builder", "FAILED", "ASYNC",
+                        0, 0, 1, 0, 0, 0,
+                        "Document graph rebuild job registration failed: " + failureMessage(ex), Map.of()
+                ));
+            }
+        } else if (jobId != null) {
+            repository.addDocumentProcessingDiagnostic(sourceId, jobId, new DocumentProcessingDiagnostic(
+                    "DOCUMENT_GRAPH_REBUILD", "Document graph builder", "SKIPPED", "ASYNC",
+                    0, 0, 0, 0, 0, 0, "Document graph retrieval is disabled.", Map.of()
+            ));
+        }
+        repository.refreshSourceReadiness(sourceId);
         return new IngestResponse(
                 sourceId,
                 firstDocumentId,
                 spaceId,
                 totalChunkCount,
-                SourceStatus.INDEXED.name(),
+                SourceStatus.SEARCHABLE.name(),
                 documentCount,
                 pageCount,
                 skippedCount
