@@ -14,6 +14,7 @@ function AdminWorkspace({
   adminSettings,
   documentSchemaProfiles = [],
   storageRetention,
+  adminTrash = [],
   spaces,
   selectedSpaceId,
   auditLogs,
@@ -37,6 +38,7 @@ function AdminWorkspace({
   updateDocumentSchemaProfile,
   refreshStorageRetention,
   runStorageRetention,
+  restoreTrashItem,
   testAdminLlmSettings,
   refreshAdmin,
   loading,
@@ -242,6 +244,7 @@ function AdminWorkspace({
   const allowedDomains = adminSettings?.allowedDomains || [];
   const allowedDomainPreview = allowedDomains.slice(0, 6);
   const retentionAreas = storageRetention?.areas || [];
+  const trashItems = adminTrash || [];
   const activeUsers = users.filter((item) => String(item.status || '').toUpperCase() !== 'DISABLED').length;
   const enabledProfiles = documentSchemaProfiles.filter((profile) => profile.enabled).length;
   const retentionCandidateCount = storageRetention?.totalCandidates ?? 0;
@@ -272,6 +275,16 @@ function AdminWorkspace({
       >
         <IconFiles size={16} />
         코드/문서 등록
+      </button>
+      <button
+        className={activeAdminTab === 'trash' ? 'mode-button active' : 'mode-button'}
+        type="button"
+        role="tab"
+        aria-selected={activeAdminTab === 'trash'}
+        onClick={() => setActiveAdminTab('trash')}
+      >
+        <Trash2 size={16} />
+        휴지통
       </button>
     </div>
   );
@@ -310,6 +323,56 @@ function AdminWorkspace({
       </article>
     </section>
   );
+
+  if (activeAdminTab === 'trash') {
+    return (
+      <div className="admin-tabler-shell">
+        {adminHeader}
+        {adminSummaryCards}
+        {adminTabs}
+        <section className="panel">
+          <div className="panel-title">
+            <Trash2 size={18} />
+            <div>
+              <h2>휴지통</h2>
+              <p>영구 삭제되기 전에 삭제된 항목을 복구할 수 있습니다.</p>
+            </div>
+          </div>
+          <div className="results audit-list">
+            {trashItems.map((item) => {
+              const loadingKey = `trash-restore-${item.type}-${item.id}`;
+              return (
+                <article className="result" key={`${item.type}-${item.id}`}>
+                  <div className="result-heading">
+                    <strong>{item.title || item.id}</strong>
+                    <span>{item.type}</span>
+                  </div>
+                  <small>{item.subtitle || '-'}</small>
+                  <small>
+                    삭제일 {item.deletedAt ? formatDate(item.deletedAt) : '-'} · 영구삭제 예정일 {item.expiresAt ? formatDate(item.expiresAt) : '-'}
+                  </small>
+                  <p>{item.message}</p>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      disabled={!item.restorable || loading(loadingKey)}
+                      onClick={() => restoreTrashItem?.(item.type, item.id)}
+                    >
+                      {loading(loadingKey) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                      복구
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {!trashItems.length && (
+              <p className="empty compact-empty">현재 범위에서 복구 가능한 삭제 항목이 없습니다.</p>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   if (activeAdminTab === 'sources') {
     return (

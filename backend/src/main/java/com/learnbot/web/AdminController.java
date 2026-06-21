@@ -19,6 +19,7 @@ import com.learnbot.dto.SpaceUpdateRequest;
 import com.learnbot.dto.StorageRetentionPreview;
 import com.learnbot.dto.StorageRetentionRunRequest;
 import com.learnbot.dto.StorageRetentionRunResponse;
+import com.learnbot.dto.TrashItemSummary;
 import com.learnbot.dto.UserPasswordResetRequest;
 import com.learnbot.dto.UserSummary;
 import com.learnbot.dto.UserUpdateRequest;
@@ -30,6 +31,7 @@ import com.learnbot.service.AuthService;
 import com.learnbot.service.DocumentSchemaProfileService;
 import com.learnbot.service.SpaceTransferService;
 import com.learnbot.service.StorageRetentionService;
+import com.learnbot.service.TrashService;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -64,6 +66,7 @@ public class AdminController {
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
     private final StorageRetentionService storageRetentionService;
+    private final TrashService trashService;
 
     public AdminController(
             AuthService authService,
@@ -72,7 +75,8 @@ public class AdminController {
             DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
             SpaceTransferService spaceTransferService,
-            StorageRetentionService storageRetentionService
+            StorageRetentionService storageRetentionService,
+            TrashService trashService
     ) {
         this.authService = authService;
         this.auditService = auditService;
@@ -81,6 +85,7 @@ public class AdminController {
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
         this.storageRetentionService = storageRetentionService;
+        this.trashService = trashService;
     }
 
     @GetMapping("/users")
@@ -199,6 +204,20 @@ public class AdminController {
         authService.requireAdmin(currentUserProvider.currentUser());
         boolean dryRun = request == null || request.dryRun() == null || request.dryRun();
         return storageRetentionService.run(dryRun);
+    }
+
+    @GetMapping("/trash")
+    List<TrashItemSummary> trash(@RequestParam(required = false) String type, @RequestParam(required = false) UUID spaceId) {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireAdmin(user);
+        return trashService.list(user, type, spaceId);
+    }
+
+    @PostMapping("/trash/{type}/{id}/restore")
+    void restoreTrash(@PathVariable String type, @PathVariable UUID id) {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireAdmin(user);
+        trashService.restore(user, type, id);
     }
 
     @GetMapping("/settings")

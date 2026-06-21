@@ -239,7 +239,6 @@ public class CodeIndexingService {
         }
         repository.deleteRepository(repositoryId);
         auditService.log(user, "CODE_REPOSITORY_DELETED", "CODE_REPOSITORY", repositoryId, record.spaceId(), "Code repository was soft deleted.");
-        deleteLocalRepository(record.localPath());
     }
 
     public int clearFailedJobHistory(AppUser user, UUID repositoryId) {

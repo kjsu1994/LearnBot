@@ -109,6 +109,7 @@ export default function App() {
   });
   const [documentSchemaProfiles, setDocumentSchemaProfiles] = useState([]);
   const [storageRetention, setStorageRetention] = useState(null);
+  const [adminTrash, setAdminTrash] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [spaceTransferResult, setSpaceTransferResult] = useState(null);
   const [inviteForm, setInviteForm] = useState({
@@ -195,7 +196,7 @@ export default function App() {
     if (activeView === 'admin' && user?.role === 'ADMIN') {
       refreshAdmin();
     }
-  }, [activeView, user?.role]);
+  }, [activeView, user?.role, selectedSpaceId]);
 
   useEffect(() => {
     if (activeView === 'saved' && user && activeSpaceId) {
@@ -860,17 +861,20 @@ export default function App() {
   }
 
   async function refreshAdmin() {
-    const [users, logs, settings, schemaProfiles, retentionPreview] = await Promise.all([
+    const trashQuery = selectedSpaceId ? `?spaceId=${encodeURIComponent(selectedSpaceId)}` : '';
+    const [users, logs, settings, schemaProfiles, retentionPreview, trash] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=50'),
       request('/api/admin/settings'),
       request('/api/admin/document-graph/schema-profiles').catch(() => []),
       request('/api/admin/storage/retention/preview').catch(() => null),
+      request(`/api/admin/trash${trashQuery}`).catch(() => []),
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
     setDocumentSchemaProfiles(schemaProfiles || []);
     setStorageRetention(retentionPreview);
+    setAdminTrash(trash || []);
     setAdminSettings(settings || {
       respectRobotsTxt: true,
       allowedDomains: [],
@@ -1061,6 +1065,16 @@ export default function App() {
         await refreshAdmin();
       }
       return result;
+    });
+  }
+
+  async function restoreTrashItem(type, id) {
+    if (!type || !id) return false;
+    if (!window.confirm('이 항목을 복구할까요? 복구하면 기존 목록에 다시 표시됩니다.')) return false;
+    return await run(`trash-restore-${type}-${id}`, async () => {
+      await request(`/api/admin/trash/${encodeURIComponent(type)}/${id}/restore`, { method: 'POST' });
+      await Promise.all([refreshSession(), refreshDocuments(), refreshRepositories(), refreshSavedAnswers(), refreshAdmin()]);
+      return true;
     });
   }
 
@@ -1297,6 +1311,7 @@ export default function App() {
             adminSettings={adminSettings}
             documentSchemaProfiles={documentSchemaProfiles}
             storageRetention={storageRetention}
+            adminTrash={adminTrash}
             spaces={spaces}
             selectedSpaceId={activeSpaceId}
             auditLogs={auditLogs}
@@ -1320,6 +1335,7 @@ export default function App() {
             updateDocumentSchemaProfile={updateDocumentSchemaProfile}
             refreshStorageRetention={refreshStorageRetention}
             runStorageRetention={runStorageRetention}
+            restoreTrashItem={restoreTrashItem}
             testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}

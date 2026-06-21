@@ -91,6 +91,8 @@ public class StorageRetentionService {
         addArea(areas, () -> dependencyCache(delete), "dependency-cache");
         addArea(areas, () -> codeIndexArtifacts(delete), "code-index-artifacts");
         addArea(areas, () -> failedDocumentSources(delete), "failed-document-sources");
+        addArea(areas, () -> softDeletedDocumentSources(delete), "soft-deleted-document-sources");
+        addArea(areas, () -> softDeletedCodeRepositories(delete), "soft-deleted-code-repositories");
         addArea(areas, () -> orphanCodeWorkspaces(delete), "orphan-code-workspaces");
         if (delete) {
             vacuumAnalyzeBestEffort();
@@ -359,6 +361,90 @@ public class StorageRetentionService {
                 days, candidates == null ? 0 : candidates, deleted, bytes);
     }
 
+    private StorageRetentionArea softDeletedDocumentSources(boolean delete) {
+        int days = properties.getRetention().getOrphanGraceDays();
+        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(days);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("cutoff", cutoff);
+        Long candidates = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM data_sources
+                WHERE deleted_at IS NOT NULL
+                  AND deleted_at < :cutoff
+                """, params, Long.class);
+        Long estimatedBytes = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(bytes), 0)
+                FROM (
+                    SELECT pg_column_size(s.*)::bigint AS bytes
+                    FROM data_sources s
+                    WHERE s.deleted_at IS NOT NULL
+                      AND s.deleted_at < :cutoff
+                    UNION ALL
+                    SELECT pg_column_size(d.*)::bigint AS bytes
+                    FROM documents d
+                    JOIN data_sources s ON s.id = d.source_id
+                    WHERE s.deleted_at IS NOT NULL
+                      AND s.deleted_at < :cutoff
+                    UNION ALL
+                    SELECT pg_column_size(c.*)::bigint AS bytes
+                    FROM document_chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    JOIN data_sources s ON s.id = d.source_id
+                    WHERE s.deleted_at IS NOT NULL
+                      AND s.deleted_at < :cutoff
+                ) source_bytes
+                """, params, Long.class);
+        long deleted = 0;
+        if (delete) {
+            deleted = jdbc.update("""
+                    DELETE FROM data_sources
+                    WHERE deleted_at IS NOT NULL
+                      AND deleted_at < :cutoff
+                    """, params);
+        }
+        return new StorageRetentionArea("soft-deleted-document-sources", "Soft-deleted document sources",
+                "Permanently deletes document sources after the restore window has expired.",
+                days, candidates == null ? 0 : candidates, deleted, estimatedBytes == null ? 0 : estimatedBytes);
+    }
+
+    private StorageRetentionArea softDeletedCodeRepositories(boolean delete) {
+        int days = properties.getRetention().getOrphanGraceDays();
+        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(days);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("cutoff", cutoff);
+        List<DeletedRepositoryPath> repositories = jdbc.query("""
+                SELECT id, local_path
+                FROM code_repositories
+                WHERE deleted_at IS NOT NULL
+                  AND deleted_at < :cutoff
+                """, params, (rs, rowNum) -> new DeletedRepositoryPath(
+                rs.getObject("id", java.util.UUID.class),
+                rs.getString("local_path")
+        ));
+        long bytes = 0;
+        for (DeletedRepositoryPath repository : repositories) {
+            Path path = safeWorkspacePath(repository.localPath());
+            if (path != null && Files.isDirectory(path)) {
+                bytes += directoryBytes(path);
+            }
+        }
+        long deleted = 0;
+        if (delete) {
+            for (DeletedRepositoryPath repository : repositories) {
+                Path path = safeWorkspacePath(repository.localPath());
+                if (path != null && Files.isDirectory(path)) {
+                    deleteDirectoryRecursively(path);
+                }
+            }
+            deleted = jdbc.update("""
+                    DELETE FROM code_repositories
+                    WHERE deleted_at IS NOT NULL
+                      AND deleted_at < :cutoff
+                    """, params);
+        }
+        return new StorageRetentionArea("soft-deleted-code-repositories", "Soft-deleted code repositories",
+                "Permanently deletes code repositories and local workspaces after the restore window has expired.",
+                days, repositories.size(), deleted, bytes);
+    }
+
     private StorageRetentionArea orphanCodeWorkspaces(boolean delete) {
         int days = properties.getRetention().getOrphanWorkspaceDays();
         Instant cutoff = Instant.now().minusSeconds(days * 86_400L);
@@ -518,6 +604,23 @@ public class StorageRetentionService {
         return false;
     }
 
+    private Path safeWorkspacePath(String localPath) {
+        if (localPath == null || localPath.isBlank() || localPath.contains("://")) {
+            return null;
+        }
+        Path workspace = Path.of(properties.getCode().getWorkspacePath()).toAbsolutePath().normalize();
+        Path target;
+        try {
+            target = Path.of(localPath).toAbsolutePath().normalize();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+        if (!target.startsWith(workspace) || target.equals(workspace)) {
+            return null;
+        }
+        return target;
+    }
+
     private long directoryBytes(Path directory) {
         try (Stream<Path> paths = Files.walk(directory)) {
             return paths
@@ -610,6 +713,9 @@ public class StorageRetentionService {
     }
 
     private record DirectoryStats(long count, long deleted, long bytes) {
+    }
+
+    private record DeletedRepositoryPath(java.util.UUID id, String localPath) {
     }
 
     @FunctionalInterface
