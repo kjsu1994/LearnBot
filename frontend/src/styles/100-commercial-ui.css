@@ -34,6 +34,15 @@
   width: 54px;
 }
 
+.workspace-shell-v3 .brand-home-mark {
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  flex: 0 0 42px;
+  height: 42px;
+  min-width: 42px;
+  width: 42px;
+}
+
 .commercial-shell .home-brand-mark img,
 .commercial-shell .brand-home-mark img,
 .commercial-shell .login-brand .brand-mark img {
