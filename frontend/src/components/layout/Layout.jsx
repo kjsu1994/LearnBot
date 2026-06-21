@@ -4,6 +4,7 @@ import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, I
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
+import { ShaderBackground } from '../effects/ShaderBackground.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card.jsx';
@@ -121,7 +122,8 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
 
   return (
     <AnimatedPage ref={shellRef} className="home-shell commercial-shell landing-shell min-h-screen bg-slate-950 text-slate-50">
-      <header className="home-nav border-white/10 bg-slate-950/80 backdrop-blur-xl">
+      <ShaderBackground className="landing-shader-canvas" />
+      <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
             <img src="/LearnBot_Mark.png" alt="" />
