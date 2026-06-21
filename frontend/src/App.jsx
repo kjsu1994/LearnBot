@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { fetchBlob, fetchJson } from './lib/api.js';
 import { clearStoredToken, readStoredToken, storeSessionToken } from './lib/session.js';
@@ -9,6 +9,7 @@ import { CodeWorkspace } from './components/code/CodeWorkspace.jsx';
 import { DocumentWorkspace } from './components/documents/DocumentWorkspace.jsx';
 import { HomePage, LoginScreen, WorkspaceShell } from './components/layout/Layout.jsx';
 import { SavedAnswersWorkspace } from './components/saved/SavedAnswersWorkspace.jsx';
+import { useDocumentRagController } from './features/documents/useDocumentRagController.js';
 import { getProgressMessage } from './lib/formatters.js';
 
 export default function App() {
@@ -21,43 +22,15 @@ export default function App() {
   const [activeView, setActiveView] = useState(() => routeToView(normalizeRoute(window.location.pathname)));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const [documents, setDocuments] = useState([]);
-  const [documentJobs, setDocumentJobs] = useState([]);
   const [repositories, setRepositories] = useState([]);
   const [jobs, setJobs] = useState({});
   const [jobFailures, setJobFailures] = useState({});
   const [jobDiagnostics, setJobDiagnostics] = useState({});
-  const [documentJobDiagnostics, setDocumentJobDiagnostics] = useState({});
   const [codeFiles, setCodeFiles] = useState([]);
   const [fileQuery, setFileQuery] = useState('');
   const [selectedCodeFile, setSelectedCodeFile] = useState(null);
   const [highlightRange, setHighlightRange] = useState(null);
   const [codeModalOpen, setCodeModalOpen] = useState(false);
-
-  const [webUrl, setWebUrl] = useState('');
-  const [webRecursive, setWebRecursive] = useState(true);
-  const [webMaxDepth, setWebMaxDepth] = useState(2);
-  const [webMaxPages, setWebMaxPages] = useState(30);
-  const [webCrawlScope, setWebCrawlScope] = useState('START_PATH');
-  const [webRobotsFailurePolicy, setWebRobotsFailurePolicy] = useState('FAIL_CLOSED');
-  const [webIncludeAttachments, setWebIncludeAttachments] = useState(false);
-  const [webUseSitemap, setWebUseSitemap] = useState(false);
-  const [webRenderMode, setWebRenderMode] = useState('PLAYWRIGHT_FALLBACK');
-  const [files, setFiles] = useState([]);
-  const [fileBatchResult, setFileBatchResult] = useState(null);
-  const [query, setQuery] = useState('');
-  const [question, setQuestion] = useState('');
-  const [answerMode, setAnswerMode] = useState('qa');
-  const [documentSpeedProfile, setDocumentSpeedProfile] = useState('balanced');
-  const [searchResults, setSearchResults] = useState([]);
-  const [answer, setAnswer] = useState(null);
-  const [answerSavedId, setAnswerSavedId] = useState('');
-  const [selectedDocumentId, setSelectedDocumentId] = useState('');
-  const [documentDetail, setDocumentDetail] = useState(null);
-  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
-  const [documentPreview, setDocumentPreview] = useState(null);
-  const [documentPreviewBlobUrl, setDocumentPreviewBlobUrl] = useState('');
-  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
 
   const [repoForm, setRepoForm] = useState({
     sourceMode: 'GIT',
@@ -127,6 +100,74 @@ export default function App() {
   const activeSpaceId = selectedSpaceId || spaces[0]?.id || '';
   const selectedSpace = spaces.find((space) => space.id === activeSpaceId);
   const selectedRepository = repositories.find((repo) => repo.id === selectedRepositoryId);
+  const {
+    documents,
+    documentJobs,
+    documentJobDiagnostics,
+    webUrl,
+    setWebUrl,
+    webRecursive,
+    setWebRecursive,
+    webMaxDepth,
+    setWebMaxDepth,
+    webMaxPages,
+    setWebMaxPages,
+    webCrawlScope,
+    setWebCrawlScope,
+    webRobotsFailurePolicy,
+    setWebRobotsFailurePolicy,
+    webIncludeAttachments,
+    setWebIncludeAttachments,
+    webUseSitemap,
+    setWebUseSitemap,
+    webRenderMode,
+    setWebRenderMode,
+    files,
+    setFiles: updateUploadFiles,
+    fileBatchResult,
+    query,
+    setQuery,
+    question,
+    setQuestion,
+    answerMode,
+    setAnswerMode,
+    documentSpeedProfile,
+    setDocumentSpeedProfile,
+    searchResults,
+    answer,
+    setAnswerSavedId,
+    answerSavedId,
+    selectedDocumentId,
+    documentDetail,
+    documentPreviewOpen,
+    documentPreview,
+    documentPreviewBlobUrl,
+    documentPreviewLoading,
+    resetState: resetDocumentState,
+    refreshDocuments,
+    refreshDocumentJobs,
+    ingestWeb,
+    ingestFile,
+    search,
+    ask,
+    saveAnswer,
+    loadDocumentJobDiagnostics,
+    retryDocumentJobStage,
+    deleteDocument,
+    reindexDocument,
+    loadDocumentDetail,
+    openDocumentPreview,
+    closeDocumentPreview,
+  } = useDocumentRagController({
+    activeSpaceId,
+    request,
+    requestBlob,
+    run,
+    savedSummary,
+    setError,
+    setSavedAnswers,
+    setSelectedSavedAnswer,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -183,16 +224,6 @@ export default function App() {
   }, [repositories]);
 
   useEffect(() => {
-    const runningJobs = documentJobs.filter((job) => job.status === 'RUNNING');
-    if (!runningJobs.length) return undefined;
-    const timer = window.setInterval(() => {
-      refreshDocumentJobs();
-      refreshDocuments();
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [documentJobs]);
-
-  useEffect(() => {
     if (activeView === 'admin' && user?.role === 'ADMIN') {
       refreshAdmin();
     }
@@ -203,12 +234,6 @@ export default function App() {
       refreshSavedAnswers();
     }
   }, [activeView, user?.id, activeSpaceId, savedAnswerType]);
-
-  useEffect(() => () => {
-    if (documentPreviewBlobUrl) {
-      URL.revokeObjectURL(documentPreviewBlobUrl);
-    }
-  }, [documentPreviewBlobUrl]);
 
   const indexedCount = useMemo(
     () => documents.filter((doc) => ['SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED'].includes(doc.sourceStatus)).length,
@@ -265,8 +290,7 @@ export default function App() {
     setUser(null);
     setSpaces([]);
     setSelectedSpaceId('');
-    setDocuments([]);
-    setDocumentJobs([]);
+    resetDocumentState();
     setRepositories([]);
     setJobs({});
     setJobFailures({});
@@ -274,23 +298,9 @@ export default function App() {
     setSelectedCodeFile(null);
     setHighlightRange(null);
     setCodeModalOpen(false);
-    setFiles([]);
-    setFileBatchResult(null);
     setSavedAnswers([]);
     setSelectedSavedAnswer(null);
-    setAnswerSavedId('');
     setCodeAnswerSavedId('');
-    setDocumentPreviewOpen(false);
-    setDocumentPreview(null);
-    setDocumentPreviewBlobUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return '';
-    });
-  }
-
-  function updateUploadFiles(nextFiles) {
-    setFiles(nextFiles);
-    setFileBatchResult(null);
   }
 
   async function request(path, options = {}) {
@@ -318,7 +328,7 @@ export default function App() {
       const result = await task();
       return result === undefined ? true : result;
     } catch (err) {
-      setError(err.message || '요청을 처리하지 못했습니다.');
+      setError(err.message || '?붿껌??泥섎━?섏? 紐삵뻽?듬땲??');
       return false;
     } finally {
       setBusy('');
@@ -352,7 +362,7 @@ export default function App() {
       applySession(data, data.token);
       navigateTo(routePaths.home);
     } catch (err) {
-      setError(err.message || '로그인에 실패했습니다.');
+      setError(err.message || '濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎.');
     } finally {
       setBusy('');
       setBootstrapping(false);
@@ -375,120 +385,12 @@ export default function App() {
     applySession(data, token);
   }
 
-  async function refreshDocuments() {
-    const data = await request(spacePath('/api/documents'));
-    setDocuments(data || []);
-  }
-
-  async function refreshDocumentJobs() {
-    const data = await request(spacePath('/api/document-indexing/jobs'));
-    setDocumentJobs(data || []);
-  }
-
   async function refreshRepositories() {
     const data = await request(spacePath('/api/code/repositories'));
     setRepositories(data || []);
     setSelectedRepositoryId((current) => {
       if (current && data?.some((repo) => repo.id === current)) return current;
       return data?.[0]?.id || '';
-    });
-  }
-
-  async function ingestWeb(event) {
-    event.preventDefault();
-    await run('web', async () => {
-      await request('/api/sources/web', {
-        method: 'POST',
-        json: {
-          url: webUrl.trim(),
-          spaceId: activeSpaceId,
-          recursive: webRecursive,
-          maxDepth: Number(webMaxDepth),
-          maxPages: Number(webMaxPages),
-          crawlScope: webCrawlScope,
-          robotsFailurePolicy: webRobotsFailurePolicy,
-          includeAttachments: webIncludeAttachments,
-          useSitemap: webUseSitemap,
-          renderMode: webRenderMode,
-        },
-      });
-      setWebUrl('');
-      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
-    });
-  }
-
-  async function ingestFile(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    if (!files.length) return;
-    await run('file', async () => {
-      const body = new FormData();
-      let firstDocumentId = null;
-      setFileBatchResult(null);
-      if (files.length === 1) {
-        body.append('file', files[0]);
-        body.append('spaceId', activeSpaceId);
-        const response = await request('/api/sources/files', { method: 'POST', body });
-        firstDocumentId = response?.documentId;
-      } else {
-        files.forEach((selectedFile) => body.append('files', selectedFile));
-        body.append('spaceId', activeSpaceId);
-        const result = await request('/api/sources/files/batch', { method: 'POST', body });
-        setFileBatchResult(result);
-        firstDocumentId = result?.items?.find((item) => item.success)?.response?.documentId || null;
-      }
-      setFiles([]);
-      form.reset();
-      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
-      if (firstDocumentId) {
-        await loadDocumentDetail(firstDocumentId);
-      }
-    });
-  }
-
-  async function search(event) {
-    event.preventDefault();
-    await run('search', async () => {
-      const data = await request('/api/search', {
-        method: 'POST',
-        json: { query, limit: 8, spaceId: activeSpaceId },
-      });
-      setSearchResults(data || []);
-    });
-  }
-
-  async function ask(event) {
-    event.preventDefault();
-    await run('ask', async () => {
-      const data = await request('/api/rag/ask', {
-        method: 'POST',
-        json: { question, mode: answerMode, speedProfile: documentSpeedProfile, spaceId: activeSpaceId },
-      });
-      setAnswer(data);
-      setAnswerSavedId('');
-    });
-  }
-
-  async function saveAnswer() {
-    if (!answer) return;
-    await run('save-answer', async () => {
-      const saved = await request('/api/saved-answers', {
-        method: 'POST',
-        json: {
-          spaceId: activeSpaceId,
-          answerType: 'DOCUMENT',
-          question,
-          mode: answer.mode,
-          answer: answer.answer,
-          citations: answer.citations || [],
-          evidence: answer.evidence || [],
-          confidence: answer.confidence,
-          diagnostics: answer.diagnostics || [],
-        },
-      });
-      setAnswerSavedId(saved.id);
-      setSavedAnswers((current) => [savedSummary(saved), ...current.filter((item) => item.id !== saved.id)]);
-      setSelectedSavedAnswer(saved);
     });
   }
 
@@ -532,7 +434,7 @@ export default function App() {
       const tokenRequired = targetRepository?.authType === 'TOKEN' && !targetRepository?.credentialStored;
       if (tokenRequired && !indexCredential.token) {
         setSelectedRepositoryId(repositoryId);
-        throw new Error('저장소 인덱싱에 사용할 Git 토큰을 입력하세요.');
+        throw new Error('??μ냼 ?몃뜳?깆뿉 ?ъ슜??Git ?좏겙???낅젰?섏꽭??');
       }
       await request(`/api/code/repositories/${repositoryId}/index`, {
         method: 'POST',
@@ -599,7 +501,7 @@ export default function App() {
   }
 
   async function deleteRepository(repositoryId, name) {
-    if (!window.confirm(`'${name}' 저장소를 삭제할까요?`)) return;
+    if (!window.confirm(`'${name}' ??μ냼瑜???젣?좉퉴??`)) return;
     await run(`repo-delete-${repositoryId}`, async () => {
       await request(`/api/code/repositories/${repositoryId}`, { method: 'DELETE' });
       setRepositories((current) => current.filter((repo) => repo.id !== repositoryId));
@@ -660,21 +562,6 @@ export default function App() {
     await run(`job-diagnostics-${jobId}`, async () => {
       const data = await request(`/api/code/repositories/${repositoryId}/jobs/${jobId}/diagnostics`);
       setJobDiagnostics((current) => ({ ...current, [jobId]: data || [] }));
-    });
-  }
-
-  async function loadDocumentJobDiagnostics(jobId) {
-    await run(`document-job-diagnostics-${jobId}`, async () => {
-      const data = await request(`/api/document-indexing/jobs/${jobId}/diagnostics`);
-      setDocumentJobDiagnostics((current) => ({ ...current, [jobId]: data || [] }));
-    });
-  }
-
-  async function retryDocumentJobStage(jobId, stage) {
-    const endpoint = stage === 'DOCUMENT_GRAPH_REBUILD' ? 'retry-graph' : 'retry-enrichment';
-    await run(`document-job-retry-${stage}-${jobId}`, async () => {
-      await request(`/api/document-indexing/jobs/${jobId}/${endpoint}`, { method: 'POST' });
-      await Promise.all([refreshDocuments(), refreshDocumentJobs(), loadDocumentJobDiagnostics(jobId)]);
     });
   }
 
@@ -782,83 +669,6 @@ export default function App() {
     });
   }
 
-  async function deleteDocument(documentId, title) {
-    if (!window.confirm(`'${title}' 문서를 삭제할까요?`)) return;
-    await run(`delete-${documentId}`, async () => {
-      await request(`/api/documents/${documentId}`, { method: 'DELETE' });
-      await refreshDocuments();
-      if (selectedDocumentId === documentId) {
-        setSelectedDocumentId('');
-        setDocumentDetail(null);
-      }
-      setSearchResults((current) => current.filter((result) => result.documentId !== documentId));
-      if (answer?.citations?.some((result) => result.documentId === documentId)) {
-        setAnswer(null);
-      }
-    });
-  }
-
-  async function reindexDocument(documentId) {
-    await run(`document-reindex-${documentId}`, async () => {
-      await request(`/api/documents/${documentId}/reindex`, { method: 'POST' });
-      await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
-    });
-  }
-
-  async function loadDocumentDetail(documentId) {
-    setSelectedDocumentId(documentId);
-    await run(`detail-${documentId}`, async () => {
-      const data = await request(`/api/documents/${documentId}`);
-      setDocumentDetail(data);
-    });
-  }
-
-  async function openDocumentPreview(documentId) {
-    setError('');
-    setDocumentPreviewOpen(true);
-    setDocumentPreview(null);
-    setDocumentPreviewBlobUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return '';
-    });
-    setDocumentPreviewLoading(true);
-    try {
-      const preview = await request(`/api/documents/${documentId}/preview`);
-      setDocumentPreview(preview);
-      if (preview?.previewType === 'pdf' && preview.originalAvailable) {
-        const blob = await requestBlob(`/api/documents/${documentId}/original`);
-        const nextUrl = URL.createObjectURL(blob);
-        setDocumentPreviewBlobUrl(nextUrl);
-      } else if (preview?.previewType === 'presentation_pdf' && preview.renderedAvailable) {
-        try {
-          const blob = await requestBlob(`/api/documents/${documentId}/preview/rendered`);
-          const nextUrl = URL.createObjectURL(blob);
-          setDocumentPreviewBlobUrl(nextUrl);
-        } catch (err) {
-          setDocumentPreview({ ...preview, renderedAvailable: false, previewFallbackReason: 'PRESENTATION_RENDER_FETCH_FAILED' });
-          setError(err.message || 'Presentation preview rendering failed. Showing extracted text instead.');
-        }
-      }
-    } catch (err) {
-      setDocumentPreview(null);
-      setDocumentPreviewBlobUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
-        return '';
-      });
-      setError(err.message || '문서 원문을 불러오지 못했습니다.');
-    } finally {
-      setDocumentPreviewLoading(false);
-    }
-  }
-
-  function closeDocumentPreview() {
-    setDocumentPreviewOpen(false);
-    setDocumentPreview(null);
-    setDocumentPreviewBlobUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return '';
-    });
-  }
 
   async function refreshAdmin() {
     const trashQuery = selectedSpaceId ? `?spaceId=${encodeURIComponent(selectedSpaceId)}` : '';
@@ -993,7 +803,7 @@ export default function App() {
   }
 
   async function deleteSpace(spaceId, name) {
-    if (!window.confirm(`${name || '공간'} 공간을 삭제할까요? 삭제된 공간의 문서와 코드 저장소는 더 이상 목록에 표시되지 않습니다.`)) return;
+    if (!window.confirm(`${name || '怨듦컙'} 怨듦컙????젣?좉퉴?? ??젣??怨듦컙??臾몄꽌? 肄붾뱶 ??μ냼?????댁긽 紐⑸줉???쒖떆?섏? ?딆뒿?덈떎.`)) return;
     await run(`space-delete-${spaceId}`, async () => {
       await request(`/api/admin/spaces/${spaceId}`, { method: 'DELETE' });
       await refreshSession();
@@ -1070,7 +880,7 @@ export default function App() {
 
   async function restoreTrashItem(type, id) {
     if (!type || !id) return false;
-    if (!window.confirm('이 항목을 복구할까요? 복구하면 기존 목록에 다시 표시됩니다.')) return false;
+    if (!window.confirm('????ぉ??蹂듦뎄?좉퉴?? 蹂듦뎄?섎㈃ 湲곗〈 紐⑸줉???ㅼ떆 ?쒖떆?⑸땲??')) return false;
     return await run(`trash-restore-${type}-${id}`, async () => {
       await request(`/api/admin/trash/${encodeURIComponent(type)}/${id}/restore`, { method: 'POST' });
       await Promise.all([refreshSession(), refreshDocuments(), refreshRepositories(), refreshSavedAnswers(), refreshAdmin()]);
@@ -1112,7 +922,7 @@ export default function App() {
   const loading = (name) => busy === name;
   const runningDocumentJobs = documentJobs.filter((job) => job.status === 'RUNNING');
   const documentProgressMessage = runningDocumentJobs.length
-    ? `문서 인덱싱 ${runningDocumentJobs.length}건이 백그라운드에서 진행 중입니다.`
+    ? `臾몄꽌 ?몃뜳??${runningDocumentJobs.length}嫄댁씠 諛깃렇?쇱슫?쒖뿉??吏꾪뻾 以묒엯?덈떎.`
     : '';
   const progressMessage = getProgressMessage(busy) || documentProgressMessage;
 
@@ -1124,7 +934,7 @@ export default function App() {
     return (
       <div className="boot-screen">
         <Loader2 className="spin" size={24} />
-        <span>런봇 세션을 확인하는 중입니다.</span>
+        <span>?곕큸 ?몄뀡???뺤씤?섎뒗 以묒엯?덈떎.</span>
       </div>
     );
   }

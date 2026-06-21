@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
@@ -13,7 +13,6 @@ import { DataTable } from '../ui/data-table.jsx';
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
-  const [webIngestHelpOpen, setWebIngestHelpOpen] = useState(false);
   const showSourceManagement = props.showSourceManagement !== false;
 
   return (
@@ -22,128 +21,18 @@ function DocumentWorkspace(props) {
         <div>
           <Badge variant="secondary">Document RAG</Badge>
           <h1>문서 어시스턴트</h1>
-          <p>웹, PDF, 오피스 문서에서 원문 근거를 찾고 답변 품질을 진단합니다.</p>
+          <p>PDF, 웹, 오피스 문서에서 원문 근거를 찾고 답변 품질을 진단합니다.</p>
         </div>
         <div className="workspace-product-metrics" aria-label="문서 RAG 상태 요약">
-          <span><strong>{props.documents?.length || 0}</strong> sources</span>
-          <span><strong>{props.searchResults?.length || 0}</strong> search hits</span>
-          <span><strong>{props.answer?.evidence?.length || 0}</strong> evidence</span>
+          <span><strong>{props.documents?.length || 0}</strong> 소스</span>
+          <span><strong>{props.searchResults?.length || 0}</strong> 검색 결과</span>
+          <span><strong>{props.answer?.evidence?.length || 0}</strong> 근거</span>
         </div>
       </div>
       {showSourceManagement && (
       <div className="left-column">
-        <section className="panel">
-          <div className="panel-title">
-            <Database size={18} />
-            <div>
-              <h2>문서 소스 추가</h2>
-              <p>웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
-            </div>
-            <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
-              <HelpCircle size={16} />
-            </button>
-          </div>
-          <form className="stack" onSubmit={props.ingestWeb}>
-            <label htmlFor="web-url">웹 URL</label>
-            <div className="inline-control">
-              <input id="web-url" value={props.webUrl} onChange={(event) => props.setWebUrl(event.target.value)} placeholder="https://example.com/docs 또는 example.com/docs" />
-              <button disabled={!props.webUrl || props.loading('web')}>
-                {props.loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
-                인덱싱
-              </button>
-            </div>
-            <label className="checkbox-row" htmlFor="web-recursive">
-              <input id="web-recursive" type="checkbox" checked={props.webRecursive} onChange={(event) => props.setWebRecursive(event.target.checked)} />
-              <span>시작 URL의 하위 경로를 함께 수집</span>
-            </label>
-            <WebCrawlAdvancedOptions
-              prefix="web"
-              recursive={props.webRecursive}
-              allowIgnoreRobots={false}
-              crawlScope={props.webCrawlScope}
-              setCrawlScope={props.setWebCrawlScope}
-              robotsFailurePolicy={props.webRobotsFailurePolicy}
-              setRobotsFailurePolicy={props.setWebRobotsFailurePolicy}
-              includeAttachments={props.webIncludeAttachments}
-              setIncludeAttachments={props.setWebIncludeAttachments}
-              useSitemap={props.webUseSitemap}
-              setUseSitemap={props.setWebUseSitemap}
-              renderMode={props.webRenderMode}
-              setRenderMode={props.setWebRenderMode}
-            />
-            <div className="form-grid two">
-              <div className="stack">
-                <label htmlFor="web-max-depth">깊이</label>
-                <input
-                  id="web-max-depth"
-                  type="number"
-                  min="0"
-                  max="2"
-                  value={props.webMaxDepth}
-                  disabled={!props.webRecursive}
-                  onChange={(event) => props.setWebMaxDepth(event.target.value)}
-                />
-              </div>
-              <div className="stack">
-                <label htmlFor="web-max-pages">최대 페이지</label>
-                <input
-                  id="web-max-pages"
-                  type="number"
-                  min="1"
-                  max="30"
-                  value={props.webMaxPages}
-                  disabled={!props.webRecursive}
-                  onChange={(event) => props.setWebMaxPages(event.target.value)}
-                />
-              </div>
-            </div>
-          </form>
-          <form className="stack" onSubmit={props.ingestFile}>
-            <label htmlFor="file-upload">파일 업로드</label>
-            <div className="file-row">
-              <label className="file-picker" htmlFor="file-upload">
-                <FileUp size={16} />
-                <span>{formatSelectedFiles(props.files)}</span>
-              </label>
-              <input id="file-upload" className="visually-hidden" type="file" accept=".pdf,.docx,.ppt,.pptx,.md,.markdown,.txt,.csv,.xls,.xlsx" multiple onChange={(event) => props.setFiles(Array.from(event.target.files || []))} />
-              <button disabled={!props.files?.length || props.loading('file')}>
-                {props.loading('file') ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
-                업로드
-              </button>
-            </div>
-            {props.files?.length > 1 && (
-              <div className="selected-file-list">
-                {props.files.map((item) => <span key={`${item.name}-${item.size}`}>{item.name}</span>)}
-              </div>
-            )}
-            {props.fileBatchResult && <FileBatchResult result={props.fileBatchResult} />}
-          </form>
-        </section>
-
-        <DocumentSourceList
-          documents={props.documents}
-          jobs={props.documentJobs}
-          diagnostics={props.documentJobDiagnostics}
-          loadDiagnostics={props.loadDocumentJobDiagnostics}
-          retryStage={props.retryDocumentJobStage}
-          loading={props.loading}
-          selectedDocumentId={props.selectedDocumentId}
-          loadDocumentDetail={props.loadDocumentDetail}
-          openDocumentPreview={props.openDocumentPreview}
-          reindexDocument={props.reindexDocument}
-          deleteDocument={props.deleteDocument}
-        />
-
+        <DocumentSourcePanel {...props} />
         <DocumentDetailPanel detail={props.documentDetail} loading={props.selectedDocumentId && props.loading(`detail-${props.selectedDocumentId}`)} />
-        {props.documentPreviewOpen && (
-          <DocumentPreviewModal
-            preview={props.documentPreview}
-            blobUrl={props.documentPreviewBlobUrl}
-            loading={props.documentPreviewLoading}
-            onClose={props.closeDocumentPreview}
-          />
-        )}
-        {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
       </div>
       )}
 
@@ -151,7 +40,7 @@ function DocumentWorkspace(props) {
         <form className="panel ask-panel rag-command-panel" onSubmit={props.ask}>
           <RagAskComposer
             title="문서에게 질문하기"
-            description="현재 선택한 공간의 문서 전체에서 원문 근거를 찾아 답변합니다."
+            description="현재 선택된 공간의 문서 전체에서 원문 근거를 찾아 답변합니다."
             icon={<MessageSquare size={18} />}
             controls={(
               <>
@@ -170,32 +59,10 @@ function DocumentWorkspace(props) {
             templates={[
               { label: '요약', prompt: '이 문서들의 핵심 내용을 출처와 함께 요약해줘.' },
               { label: '절차', prompt: '관련 절차를 단계별로 정리하고 각 단계의 근거를 알려줘.' },
-              { label: '표/수치', prompt: '질문과 관련된 표, 수치, 조건을 원문 근거와 함께 찾아줘.' },
+              { label: '위치', prompt: '질문과 관련된 값, 위치, 조건을 원문 근거와 함께 찾아줘.' },
               { label: '출처 중심', prompt: '답변보다 근거 문서와 인용 위치를 중심으로 정리해줘.' },
             ]}
           />
-          <div className="panel-title">
-            <MessageSquare size={18} />
-            <div>
-              <h2>문서에게 질문하기</h2>
-              <p>현재 선택한 공간에 인덱싱된 문서 전체에서 근거를 찾아 답변합니다.</p>
-            </div>
-          </div>
-          <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
-          <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
-          <QuestionGuide guide={activeAnswerModeGuide} />
-          <textarea
-            value={props.question}
-            onChange={(event) => props.setQuestion(event.target.value)}
-            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
-            placeholder={activeAnswerModeGuide.placeholder}
-          />
-          <div className="action-row">
-            <button disabled={!props.question || props.loading('ask')}>
-              {props.loading('ask') ? <Loader2 className="spin" size={16} /> : <MessageSquare size={16} />}
-              답변 생성
-            </button>
-          </div>
           {props.answer && (
             <div className="answer">
               <div className="answer-title">
@@ -212,7 +79,7 @@ function DocumentWorkspace(props) {
                   </button>
                 </div>
               </div>
-              <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 모드</small>
+              <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 紐⑤뱶</small>
               <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
               <div className="answer-body">
                 <MarkdownAnswer text={props.answer.answer} />
@@ -557,7 +424,7 @@ function DocumentDiagnosticList({ diagnostics = [], job, retryStage, retryLoadin
 
 function documentStageLabel(stage) {
   const labels = {
-    DOCUMENT_LLM_ENRICHMENT: 'LLM 품질 보강',
+    DOCUMENT_LLM_ENRICHMENT: 'LLM 보강',
     DOCUMENT_GRAPH_REBUILD: '문서 그래프 생성',
     DOCUMENT_CONTEXT_INLINE: '기본 문맥 생성',
   };
@@ -609,12 +476,12 @@ function EnrichmentStatusLine({ job }) {
 
 function enrichmentStatusText(status) {
   const labels = {
-    PENDING: '품질 보강 대기',
-    RUNNING: '품질 보강 중',
-    RETRYING: '품질 보강 재시도 예정',
-    SUCCEEDED: '품질 보강 완료',
-    FAILED: '품질 보강 실패',
-    SKIPPED: '품질 보강 생략',
+    PENDING: '보강 대기',
+    RUNNING: '보강 중',
+    RETRYING: '보강 재시도 예정',
+    SUCCEEDED: '보강 완료',
+    FAILED: '보강 실패',
+    SKIPPED: '보강 생략',
     NOT_STARTED: '',
   };
   return labels[status] ?? status ?? '';
@@ -629,7 +496,7 @@ function WebIngestHelpModal({ onClose }) {
             <HelpCircle size={18} />
             <div>
               <h2 id="web-ingest-help-title">웹 문서 수집 옵션</h2>
-              <p>수집 범위, 실패 처리, 렌더링 방식에 따라 인덱싱되는 문서 수와 품질이 달라집니다.</p>
+              <p>수집 범위, 실패 처리, 렌더링 방식을 조정해 문서 인덱싱 품질과 속도를 제어합니다.</p>
             </div>
           </div>
           <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
@@ -639,32 +506,15 @@ function WebIngestHelpModal({ onClose }) {
         <div className="code-modal-body document-preview-body">
           <div className="document-reader">
             <h3>재귀 수집</h3>
-            <p>꺼져 있으면 입력한 URL 한 페이지만 수집합니다. 켜면 페이지 안의 링크를 따라가며 관련 문서를 같은 소스로 묶어 인덱싱합니다.</p>
-
+            <p>끄면 입력한 URL 한 페이지만 수집하고, 켜면 하위 링크를 따라가며 관련 문서를 같은 소스로 인덱싱합니다.</p>
             <h3>수집 범위</h3>
-            <p><strong>시작 경로 하위</strong>는 가장 안전한 기본값입니다. 예를 들어 /docs에서 시작하면 /docs/install은 수집하지만 /blog는 제외합니다.</p>
-            <p><strong>같은 호스트 전체</strong>는 같은 도메인의 다른 경로까지 수집합니다. 문서가 /guide, /reference처럼 여러 경로에 나뉜 경우 유용합니다.</p>
-            <p><strong>같은 사이트</strong>는 하위 도메인까지 넓게 봅니다. docs.example.com과 help.example.com을 함께 수집해야 할 때 사용합니다.</p>
-            <p><strong>허용 도메인 전체</strong>는 관리자 설정의 허용 도메인 안에서 교차 링크를 따라갑니다. 운영자가 신뢰하는 도메인에만 사용하세요.</p>
-
-            <h3>robots.txt 조회 실패</h3>
-            <p><strong>실패 시 차단</strong>은 보수적인 기본값입니다. robots.txt를 읽지 못하면 수집하지 않습니다.</p>
-            <p><strong>조회 실패만 허용</strong>은 robots.txt 서버가 일시적으로 실패한 경우 수집을 계속합니다. 명시적으로 차단된 URL은 계속 제외합니다.</p>
-            <p><strong>robots.txt 무시</strong>는 관리자 화면에서만 선택할 수 있습니다. 내부 문서처럼 권한과 출처가 명확한 사이트에만 사용하세요.</p>
-
-            <h3>sitemap.xml 사용</h3>
-            <p>사이트가 sitemap.xml을 제공하면 링크 클릭만으로 찾기 어려운 문서를 seed로 추가합니다. sitemap을 읽지 못해도 전체 작업은 실패하지 않고 일반 링크 수집으로 폴백합니다.</p>
-
-            <h3>첨부 파일 수집</h3>
-            <p>페이지에 연결된 PDF, DOCX, PPTX, XLSX, CSV, TXT, Markdown 파일을 함께 인덱싱합니다. 서버 설정의 개수 제한에 도달하면 남은 첨부는 건너뛰고 audit에 사유를 남깁니다.</p>
-
-            <h3>렌더링 방식</h3>
-            <p><strong>정적 HTML</strong>은 빠르고 안정적인 기본 수집 방식입니다. 서버가 내려준 HTML을 파싱합니다.</p>
-            <p><strong>필요 시 Playwright 폴백</strong>은 정적 HTML 본문이 너무 적거나 SPA처럼 보일 때 브라우저 렌더링을 한 번 더 시도합니다.</p>
-            <p><strong>Playwright 우선</strong>은 처음부터 브라우저 렌더링을 사용합니다. JavaScript 기반 사이트에 유리하지만 느리고 리소스 사용량이 큽니다.</p>
-
-            <h3>추천 시작값</h3>
-            <p>처음에는 재귀 수집, 시작 경로 하위, 실패 시 차단, 필요 시 Playwright 폴백으로 시작하세요. 결과가 부족하면 sitemap.xml과 첨부 파일 수집을 켜고 audit에서 실패 사유를 확인하는 순서가 안전합니다.</p>
+            <p><strong>시작 경로 하위</strong>는 가장 안전한 기본값입니다. 같은 문서 경로 아래의 페이지만 따라갑니다.</p>
+            <p><strong>같은 호스트 전체</strong>는 같은 도메인의 다른 경로까지 수집합니다.</p>
+            <p><strong>허용 도메인 전체</strong>는 관리자가 허용한 도메인 사이에서 교차 링크를 따라갑니다.</p>
+            <h3>robots.txt와 sitemap</h3>
+            <p>robots.txt 조회가 실패하면 기본적으로 차단하고, sitemap은 발견 가능한 문서 URL을 보강하는 용도로 사용합니다.</p>
+            <h3>첨부 파일과 렌더링</h3>
+            <p>첨부 파일 옵션은 PDF, DOCX, PPTX, XLSX, CSV, TXT, Markdown 링크를 함께 인덱싱합니다. Playwright fallback은 정적 HTML 본문이 부족할 때 브라우저 렌더링으로 재시도합니다.</p>
           </div>
         </div>
       </section>
@@ -756,7 +606,7 @@ function WebCrawlAdvancedOptions({
           onChange={(event) => setRenderMode(event.target.value)}
         >
           <option value="STATIC">정적 HTML</option>
-          <option value="PLAYWRIGHT_FALLBACK">필요 시 Playwright 폴백</option>
+          <option value="PLAYWRIGHT_FALLBACK">필요 시 Playwright fallback</option>
           <option value="PLAYWRIGHT_ALWAYS">Playwright 우선</option>
         </select>
       </div>
@@ -790,7 +640,7 @@ function DocumentDetailPanel({ detail, loading }) {
         <div className="panel-title">
           <Info size={18} />
           <div>
-            <h2>문서 상세</h2>
+          <h2>문서 상세</h2>
             <p>불러오는 중입니다.</p>
           </div>
         </div>
