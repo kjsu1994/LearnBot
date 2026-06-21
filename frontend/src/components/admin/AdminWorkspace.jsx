@@ -590,17 +590,17 @@ function AdminWorkspace({
           <div className="panel-title">
             <Database size={18} />
             <div>
-              <h2>Storage retention</h2>
-              <p>14-day operation logs, long audit logs, and safe orphan cleanup.</p>
+              <h2>저장소 정리 정책</h2>
+              <p>운영 로그, 감사 로그, 임시 파일, 참조 없는 데이터를 안전하게 정리합니다.</p>
             </div>
           </div>
           <div className="detail-box compact-box">
-            <strong>Cleanup preview</strong>
+            <strong>정리 미리보기</strong>
             <small>
-              Candidates {storageRetention?.totalCandidates ?? 0} · estimated {formatFileSize(storageRetention?.totalEstimatedBytes)}
+              정리 후보 {storageRetention?.totalCandidates ?? 0}개 · 예상 용량 {formatFileSize(storageRetention?.totalEstimatedBytes)}
             </small>
             <small>
-              Generated {storageRetention?.generatedAt ? formatDate(storageRetention.generatedAt) : '-'} · default run mode {storageRetention?.dryRun ? 'dry-run' : 'delete'}
+              생성 시각 {storageRetention?.generatedAt ? formatDate(storageRetention.generatedAt) : '-'} · 기본 실행 모드 {storageRetention?.dryRun ? '모의 실행' : '삭제'}
             </small>
           </div>
           <div className="results audit-list">
@@ -611,31 +611,34 @@ function AdminWorkspace({
                   <span>{area.retentionDays ? `${area.retentionDays}d` : '-'}</span>
                 </div>
                 <small>
-                  candidates {area.candidates || 0} · deleted {area.deleted || 0} · {formatFileSize(area.estimatedBytes)}
+                  후보 {area.candidates || 0}개 · 삭제 {area.deleted || 0}개 · {formatFileSize(area.estimatedBytes)}
                 </small>
                 <p>{area.impact}</p>
               </article>
             ))}
             {!retentionAreas.length && (
-              <p className="empty compact-empty">No retention diagnostics loaded.</p>
+              <p className="empty compact-empty">불러온 정리 진단 정보가 없습니다.</p>
             )}
           </div>
           <div className="action-row">
             <button className="ghost-button" type="button" disabled={loading('storage-retention-preview')} onClick={refreshStorageRetention}>
               {loading('storage-retention-preview') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-              Refresh
+              새로고침
             </button>
             <button className="ghost-button" type="button" disabled={loading('storage-retention-dry-run')} onClick={() => runStorageRetention?.(true)}>
               {loading('storage-retention-dry-run') ? <Loader2 className="spin" size={16} /> : <Info size={16} />}
-              Dry run
+              모의 실행
             </button>
             <button type="button" disabled={loading('storage-retention-run')} onClick={() => runStorageRetention?.(false)}>
               {loading('storage-retention-run') ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
-              Delete eligible data
+              후보 데이터 삭제
             </button>
           </div>
         </section>
 
+      </div>
+
+      <div className="right-column">
         <form className="panel" onSubmit={inviteUser}>
           <div className="panel-title">
             <UserPlus size={18} />
@@ -711,9 +714,7 @@ function AdminWorkspace({
             </button>
           </div>
         </form>
-      </div>
 
-      <div className="right-column">
         <section className="panel">
           <div className="panel-title">
             <Users size={18} />
