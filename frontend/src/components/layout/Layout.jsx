@@ -155,7 +155,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Mark.png" alt="" />
+            <img src="/LearnBot_Logo_mini.png" alt="" />
           </span>
           <span>
             <strong>LearnBot</strong>
@@ -437,7 +437,7 @@ function LegacyHomePage({ user, bootstrapping, navigateTo, logout }) {
       <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Mark.png" alt="" />
+            <img src="/LearnBot_Logo_mini.png" alt="" />
           </span>
           <span>
             <strong>LearnBot</strong>
@@ -495,7 +495,7 @@ function LegacyHomePage({ user, bootstrapping, navigateTo, logout }) {
         <Card className="launch-hero-panel landing-product-mockup" ref={visualRef}>
           <CardHeader>
             <div className="launch-logo-lockup">
-              <img className="launch-logo-icon" src="/LearnBot_Mark.png" alt="LearnBot" />
+              <img className="launch-logo-icon" src="/LearnBot_Logo_mini.png" alt="LearnBot" />
               <div>
                 <CardTitle>LearnBot Console</CardTitle>
                 <CardDescription>Knowledge operations overview</CardDescription>
@@ -637,7 +637,7 @@ function LoginScreen({ onLogin, busy, error }) {
       <AnimatedSection className="commercial-login-layout">
         <aside className="commercial-login-showcase" aria-hidden="true">
           <div className="commercial-login-showcase-mark">
-            <img src="/LearnBot_Mark.png" alt="" />
+            <img src="/LearnBot_Logo_mini.png" alt="" />
           </div>
           <div>
             <span>Private Knowledge RAG</span>
@@ -654,7 +654,7 @@ function LoginScreen({ onLogin, busy, error }) {
         <section className="login-panel panel commercial-login-card">
           <div className="brand login-brand">
             <div className="brand-mark overflow-hidden bg-white">
-              <img src="/LearnBot_Mark.png" alt="" />
+              <img src="/LearnBot_Logo_mini.png" alt="" />
             </div>
             <div>
               <span>LearnBot</span>
@@ -1151,7 +1151,7 @@ function Sidebar({
       <div className="brand">
         <button className="brand-home-button" type="button" title="메인 대시보드로 이동" onClick={() => navigateTo(routePaths.home)}>
           <span className="brand-mark brand-home-mark bg-white">
-            <img src="/LearnBot_Mark.png" alt="" />
+            <img src="/LearnBot_Logo_mini.png" alt="" />
           </span>
           <span className="brand-copy">
             <span>LearnBot</span>
@@ -1278,17 +1278,17 @@ function ScreenGuide({ activeView }) {
   const [open, setOpen] = useState(false);
   const guides = {
     code: {
-      title: '코드 RAG 화면',
+      title: '코드 RAG',
       description: 'Git 저장소를 등록하고 인덱싱한 뒤, 실제 파일 경로와 라인 범위를 근거로 코드 질문에 답합니다.',
       points: ['저장소 상태가 인덱싱 완료인지 확인', '실패 사유 버튼으로 모델, Git 인증, 파일별 실패 원인 확인', '코드 검색과 정의/참조로 답변 근거 검증'],
     },
     docs: {
-      title: '문서 RAG 화면',
+      title: '문서 RAG',
       description: 'PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel, 웹 문서를 업로드하거나 수집해 사내 위키형 근거로 사용합니다.',
       points: ['업로드 후 문서 상태가 인덱싱 완료인지 확인', '문서 상세에서 청크가 생성됐는지 확인', '근거가 없으면 답변하지 않는 정책으로 검증'],
     },
     admin: {
-      title: '관리자 화면',
+      title: '관리자',
       description: '사내 다중 사용자 운영을 위해 계정, 공간, 감사 로그를 관리합니다.',
       points: ['공간별로 접근 가능한 자료 분리', '초대 사용자의 시스템/공간 권한 지정', '로그인, 인덱싱, 삭제 같은 핵심 작업 감사'],
     },
