@@ -1339,6 +1339,11 @@ export default function App() {
               selectedDocumentId,
               loadDocumentDetail,
               openDocumentPreview,
+              documentPreviewOpen,
+              documentPreview,
+              documentPreviewBlobUrl,
+              documentPreviewLoading,
+              closeDocumentPreview,
               reindexDocument,
               deleteDocument,
             }}

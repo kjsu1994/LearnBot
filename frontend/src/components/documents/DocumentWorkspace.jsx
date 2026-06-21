@@ -252,6 +252,11 @@ function DocumentSourcePanel(props) {
     selectedDocumentId = '',
     loadDocumentDetail = () => {},
     openDocumentPreview = () => {},
+    documentPreviewOpen = false,
+    documentPreview = null,
+    documentPreviewBlobUrl = '',
+    documentPreviewLoading = false,
+    closeDocumentPreview = () => {},
     reindexDocument = () => {},
     deleteDocument = () => {},
     fileBatchResult,
@@ -378,6 +383,14 @@ function DocumentSourcePanel(props) {
         deleteDocument={deleteDocument}
         loading={loading}
       />
+      {documentPreviewOpen && (
+        <DocumentPreviewModal
+          preview={documentPreview}
+          blobUrl={documentPreviewBlobUrl}
+          loading={documentPreviewLoading}
+          onClose={closeDocumentPreview}
+        />
+      )}
       {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
     </section>
   );
