@@ -33,6 +33,10 @@ public class CodeProjectContextBuilder {
     }
 
     public List<ParsedCodeChunk> build(CodeRepositoryRecord repository, List<IndexedFileContext> files) {
+        return build(repository, files, true);
+    }
+
+    public List<ParsedCodeChunk> build(CodeRepositoryRecord repository, List<IndexedFileContext> files, boolean allowLlm) {
         if (!enabled() || files == null || files.isEmpty()) {
             return List.of();
         }
@@ -43,7 +47,7 @@ public class CodeProjectContextBuilder {
                 "summaryLevel", "repository",
                 "generatedBy", "deterministic"
         ));
-        HybridText repositorySummary = repositorySummary(repository, facts);
+        HybridText repositorySummary = repositorySummary(repository, facts, allowLlm);
         addChunk(chunks, "repository_summary", "repository-summary", repositorySummary.content(), Map.of(
                 "kind", "project_context",
                 "summaryLevel", "repository",
@@ -54,7 +58,7 @@ public class CodeProjectContextBuilder {
 
         int llmDirectoryBudget = Math.max(0, properties.getCode().getContext().getMaxLlmDirectorySummaries());
         for (DirectoryFacts directory : facts.directories().stream().limit(24).toList()) {
-            boolean tryLlm = llmEnabled() && llmDirectoryBudget-- > 0;
+            boolean tryLlm = allowLlm && llmEnabled() && llmDirectoryBudget-- > 0;
             HybridText summary = directorySummary(repository, directory, tryLlm);
             addChunk(chunks, "directory_summary", directory.path(), summary.content(), Map.of(
                     "kind", "project_context",
@@ -128,7 +132,7 @@ public class CodeProjectContextBuilder {
         ).strip();
     }
 
-    private HybridText repositorySummary(CodeRepositoryRecord repository, ProjectFacts facts) {
+    private HybridText repositorySummary(CodeRepositoryRecord repository, ProjectFacts facts, boolean allowLlm) {
         String deterministic = """
                 Repository summary
                 %s is indexed as a source-code project with %d files.
@@ -145,7 +149,7 @@ public class CodeProjectContextBuilder {
                 joinOrDash(facts.entrypoints()),
                 facts.directories().stream().limit(8).map(DirectoryFacts::path).collect(Collectors.joining(", "))
         ).strip();
-        if (!llmEnabled()) {
+        if (!allowLlm || !llmEnabled()) {
             return new HybridText(deterministic, "deterministic", false);
         }
         return llmSummary("Summarize this repository architecture for code retrieval. Keep concrete file and directory names.",

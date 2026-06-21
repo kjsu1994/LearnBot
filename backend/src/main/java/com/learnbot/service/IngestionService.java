@@ -366,12 +366,12 @@ public class IngestionService {
             List<DocumentContextBuilder.DocumentContextInput> inputs = documents.stream()
                     .map(document -> new DocumentContextBuilder.DocumentContextInput(document.document(), document.chunks()))
                     .toList();
-            List<Chunk> sourceContext = documentContextBuilder.buildSourceContext(inputs, recursiveWeb);
+            List<Chunk> sourceContext = documentContextBuilder.buildSourceContext(inputs, recursiveWeb, false);
             List<PreparedDocument> enriched = new ArrayList<>();
             for (int i = 0; i < documents.size(); i++) {
                 PreparedDocument prepared = documents.get(i);
                 List<Chunk> chunks = new ArrayList<>(prepared.chunks());
-                chunks.addAll(documentContextBuilder.buildDocumentContext(prepared.document(), prepared.chunks(), recursiveWeb));
+                chunks.addAll(documentContextBuilder.buildDocumentContext(prepared.document(), prepared.chunks(), recursiveWeb, false));
                 if (i == 0) {
                     chunks.addAll(sourceContext);
                 }
@@ -453,6 +453,17 @@ public class IngestionService {
             } catch (RuntimeException ignored) {
                 // Document graph is retrieval enrichment only; indexing remains valid without it.
             }
+        }
+        if (jobId != null && documentContextBuilder.enabled()
+                && properties.getRag().getDocumentContext().isLlmSummaryEnabled()) {
+            try {
+                repository.markDocumentJobSearchable(jobId, "PENDING", "문서 검색은 가능하며 LLM 품질 보강을 대기 중입니다.");
+                repository.enqueueDocumentEnrichment(sourceId, jobId);
+            } catch (RuntimeException ignored) {
+                repository.updateDocumentJobEnrichment(jobId, "SKIPPED", "LLM 품질 보강 작업 등록에 실패했지만 기본 검색은 가능합니다.");
+            }
+        } else if (jobId != null) {
+            repository.markDocumentJobSearchable(jobId, "SKIPPED", "LLM 품질 보강이 비활성화되어 기본 색인만 완료되었습니다.");
         }
         repository.updateSourceStatus(sourceId, SourceStatus.INDEXED, null);
         return new IngestResponse(

@@ -405,6 +405,7 @@ function JobStrip({ job, repoId, failures, loadFailures, loading, diagnostics, l
         {job.failedFiles > 0 ? ` \u00B7 ${'\uC2E4\uD328'} ${job.failedFiles}` : ''}
       </span>
       {jobChangeText(job) && <small className="job-change-line">{jobChangeText(job)}</small>}
+      <EnrichmentStatusLine job={job} />
       <div className="progress-track" aria-label={'\uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
         <span style={{ width: `${jobPercent(job)}%` }} />
       </div>
@@ -467,6 +468,30 @@ function JobFailureList({ failures }) {
       ))}
     </div>
   );
+}
+
+function EnrichmentStatusLine({ job }) {
+  const label = enrichmentStatusText(job?.enrichmentStatus);
+  if (!label) return null;
+  const message = job?.enrichmentMessage;
+  return (
+    <small className={`enrichment-line enrichment-${String(job.enrichmentStatus || '').toLowerCase()}`}>
+      {label}{message ? ` · ${message}` : ''}
+    </small>
+  );
+}
+
+function enrichmentStatusText(status) {
+  const labels = {
+    PENDING: '품질 보강 대기',
+    RUNNING: '품질 보강 중',
+    RETRYING: '품질 보강 재시도 예정',
+    SUCCEEDED: '품질 보강 완료',
+    FAILED: '품질 보강 실패',
+    SKIPPED: '품질 보강 생략',
+    NOT_STARTED: '',
+  };
+  return labels[status] ?? status ?? '';
 }
 
 function RepositorySelect({ repositories, selectedRepositoryId, setSelectedRepositoryId }) {

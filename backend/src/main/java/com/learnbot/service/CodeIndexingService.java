@@ -326,6 +326,7 @@ public class CodeIndexingService {
                     .count();
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             List<CodeProjectContextBuilder.IndexedFileContext> projectContexts = new java.util.ArrayList<>();
+            List<PendingCodeFile> pendingFiles = new java.util.ArrayList<>();
             for (CodeFileCandidate candidate : candidates) {
                 ensureNotCancelled(jobId);
                 ActiveCodeFileSnapshot previousFile = previousFiles.get(candidate.relativePath());
@@ -363,18 +364,7 @@ public class CodeIndexingService {
                         continue;
                     }
 
-                    List<List<Double>> embeddings = embeddingService.embed(chunks.stream().map(ParsedCodeChunk::content).toList());
-                    ensureNotCancelled(jobId);
-
-                    UUID fileId = repository.createFile(
-                            repositoryId,
-                            jobId,
-                            candidate.relativePath(),
-                            candidate.language(),
-                            contentHash
-                    );
-                    repository.addChunks(repositoryId, fileId, jobId, candidate.relativePath(), chunks, embeddings);
-                    totalChunks += chunks.size();
+                    pendingFiles.add(new PendingCodeFile(candidate.relativePath(), candidate.language(), contentHash, chunks, previousFile == null));
                     if (previousFile == null) {
                         addedFiles++;
                     } else {
@@ -394,6 +384,22 @@ public class CodeIndexingService {
                     }
                 }
                 updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
+            }
+            if (!pendingFiles.isEmpty()) {
+                List<ParsedCodeChunk> chunksToEmbed = pendingFiles.stream()
+                        .flatMap(file -> file.chunks().stream())
+                        .toList();
+                List<List<Double>> embeddings = embeddingService.embed(chunksToEmbed.stream().map(ParsedCodeChunk::content).toList());
+                ensureNotCancelled(jobId);
+                int offset = 0;
+                for (PendingCodeFile file : pendingFiles) {
+                    int end = offset + file.chunks().size();
+                    UUID fileId = repository.createFile(repositoryId, jobId, file.filePath(), file.language(), file.contentHash());
+                    repository.addChunks(repositoryId, fileId, jobId, file.filePath(), file.chunks(), embeddings.subList(offset, end));
+                    totalChunks += file.chunks().size();
+                    offset = end;
+                    updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
+                }
             }
 
             totalChunks += addProjectContextChunks(record, jobId, projectContexts);
@@ -452,7 +458,7 @@ public class CodeIndexingService {
         }
         try {
             ensureNotCancelled(jobId);
-            List<ParsedCodeChunk> chunks = projectContextBuilder.build(record, projectContexts);
+            List<ParsedCodeChunk> chunks = projectContextBuilder.build(record, projectContexts, false);
             if (chunks.isEmpty()) {
                 return 0;
             }
@@ -669,5 +675,14 @@ public class CodeIndexingService {
     }
 
     private record PendingZipSnapshot(String sourceLabel, String sourceHash, String localPath, String previousLocalPath) {
+    }
+
+    private record PendingCodeFile(
+            String filePath,
+            String language,
+            String contentHash,
+            List<ParsedCodeChunk> chunks,
+            boolean added
+    ) {
     }
 }

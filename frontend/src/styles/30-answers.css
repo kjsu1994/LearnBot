@@ -241,6 +241,19 @@
   font-size: 11px;
 }
 
+.enrichment-line {
+  color: #5d6f67;
+  font-size: 11px;
+}
+
+.enrichment-failed {
+  color: #a0443f;
+}
+
+.enrichment-succeeded {
+  color: #13715f;
+}
+
 .progress-track {
   background: #e8efeb;
   border-radius: 999px;

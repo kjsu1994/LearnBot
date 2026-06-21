@@ -15,6 +15,9 @@ public record DocumentIndexingJobSummary(
         int reusedChunks,
         int embeddedChunks,
         String errorMessage,
+        OffsetDateTime searchableAt,
+        String enrichmentStatus,
+        String enrichmentMessage,
         OffsetDateTime startedAt,
         OffsetDateTime finishedAt,
         OffsetDateTime createdAt

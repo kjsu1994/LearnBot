@@ -42,9 +42,11 @@ public class CodeGraphEnrichmentWorker {
                         "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "Index is no longer active."
                 );
                 repository.addAnalysisDiagnostics(job.repositoryId(), job.indexVersion(), List.of(skipped));
+                repository.updateJobEnrichment(job.indexVersion(), "SKIPPED", skipped.message());
                 finish(job, "SKIPPED", skipped.message());
                 return;
             }
+            repository.updateJobEnrichment(job.indexVersion(), "RUNNING", "코드 LLM 관계 보강을 진행 중입니다.");
             if (!repository.heartbeatGraphEnrichmentJob(job.id(), workerId)) {
                 log.warn("code_graph_enrichment repositoryId={} indexVersion={} status=LEASE_LOST beforeLlm=true",
                         job.repositoryId(), job.indexVersion());
@@ -68,6 +70,7 @@ public class CodeGraphEnrichmentWorker {
                     .filter(edge -> "llm_fallback".equals(String.valueOf(edge.metadata().get("source"))))
                     .toList();
             int inserted = repository.mergeGraphEdges(job.repositoryId(), job.indexVersion(), llmEdges);
+            repository.updateJobEnrichment(job.indexVersion(), "SUCCEEDED", "코드 LLM 관계 보강이 완료되었습니다.");
             finish(job, "SUCCEEDED", "Inserted " + inserted + " validated LLM relationships.");
             log.info("code_graph_enrichment repositoryId={} indexVersion={} status=SUCCESS inserted={} durationMs={}",
                     job.repositoryId(), job.indexVersion(), inserted,
@@ -81,8 +84,14 @@ public class CodeGraphEnrichmentWorker {
         boolean updated;
         if (job.attempts() >= MAX_ATTEMPTS) {
             updated = repository.finishGraphEnrichmentJob(job.id(), workerId, "FAILED", message);
+            if (updated) {
+                repository.updateJobEnrichment(job.indexVersion(), "FAILED", message);
+            }
         } else {
             updated = repository.retryGraphEnrichmentJob(job.id(), workerId, job.attempts(), message);
+            if (updated) {
+                repository.updateJobEnrichment(job.indexVersion(), "RETRYING", message);
+            }
         }
         if (!updated) {
             log.warn("code_graph_enrichment repositoryId={} indexVersion={} status=LEASE_LOST attempt={}",

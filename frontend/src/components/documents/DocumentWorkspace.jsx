@@ -437,6 +437,7 @@ function DocumentJobStrip({ job }) {
   return (
     <div className="job-strip">
       <span>{documentJobSummary(job)}</span>
+      <EnrichmentStatusLine job={job} />
       <div className="progress-track" aria-label={'\uBB38\uC11C \uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
         <span style={{ width: `${documentJobPercent(job)}%` }} />
       </div>
@@ -475,6 +476,30 @@ function documentJobPercent(job) {
   const total = Number(job?.totalDocuments || 0);
   if (!total) return job?.status === 'RUNNING' ? 8 : 0;
   return Math.max(5, Math.min(100, Math.round((Number(job?.processedDocuments || 0) / total) * 100)));
+}
+
+function EnrichmentStatusLine({ job }) {
+  const label = enrichmentStatusText(job?.enrichmentStatus);
+  if (!label) return null;
+  const message = job?.enrichmentMessage;
+  return (
+    <small className={`enrichment-line enrichment-${String(job.enrichmentStatus || '').toLowerCase()}`}>
+      {label}{message ? ` · ${message}` : ''}
+    </small>
+  );
+}
+
+function enrichmentStatusText(status) {
+  const labels = {
+    PENDING: '품질 보강 대기',
+    RUNNING: '품질 보강 중',
+    RETRYING: '품질 보강 재시도 예정',
+    SUCCEEDED: '품질 보강 완료',
+    FAILED: '품질 보강 실패',
+    SKIPPED: '품질 보강 생략',
+    NOT_STARTED: '',
+  };
+  return labels[status] ?? status ?? '';
 }
 
 function WebIngestHelpModal({ onClose }) {

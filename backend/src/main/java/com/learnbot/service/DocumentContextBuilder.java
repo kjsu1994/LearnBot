@@ -39,6 +39,10 @@ public class DocumentContextBuilder {
     }
 
     public List<Chunk> buildDocumentContext(ExtractedDocument document, List<Chunk> chunks, boolean recursiveWeb) {
+        return buildDocumentContext(document, chunks, recursiveWeb, true);
+    }
+
+    public List<Chunk> buildDocumentContext(ExtractedDocument document, List<Chunk> chunks, boolean recursiveWeb, boolean allowLlm) {
         if (!enabled() || document == null || chunks == null || chunks.isEmpty()) {
             return List.of();
         }
@@ -52,7 +56,7 @@ public class DocumentContextBuilder {
                 "llmSucceeded", false
         ));
 
-        HybridText summary = documentSummary(document, chunks, facts, recursiveWeb);
+        HybridText summary = documentSummary(document, chunks, facts, recursiveWeb, allowLlm);
         addChunk(output, "document_summary", "document", summary.content(), Map.of(
                 "summaryLevel", "document",
                 "sourceUrl", clean(document.sourceUri()),
@@ -70,6 +74,10 @@ public class DocumentContextBuilder {
     }
 
     public List<Chunk> buildSourceContext(List<DocumentContextInput> documents, boolean recursiveWeb) {
+        return buildSourceContext(documents, recursiveWeb, true);
+    }
+
+    public List<Chunk> buildSourceContext(List<DocumentContextInput> documents, boolean recursiveWeb, boolean allowLlm) {
         if (!enabled() || documents == null || documents.size() <= 1) {
             return List.of();
         }
@@ -91,7 +99,7 @@ public class DocumentContextBuilder {
                 "llmSucceeded", false,
                 "documentCount", usable.size()
         ));
-        HybridText summary = sourceSummary(facts, recursiveWeb);
+        HybridText summary = sourceSummary(facts, recursiveWeb, allowLlm);
         addChunk(output, "source_summary", "source", summary.content(), Map.of(
                 "summaryLevel", "source",
                 "generatedBy", summary.generatedBy(),
@@ -189,7 +197,7 @@ public class DocumentContextBuilder {
         ).strip();
     }
 
-    private HybridText documentSummary(ExtractedDocument document, List<Chunk> chunks, DocumentFacts facts, boolean recursiveWeb) {
+    private HybridText documentSummary(ExtractedDocument document, List<Chunk> chunks, DocumentFacts facts, boolean recursiveWeb, boolean allowLlm) {
         String deterministic = """
                 Document summary
                 Title: %s
@@ -210,7 +218,7 @@ public class DocumentContextBuilder {
                 joinOrDash(facts.tables().stream().limit(12).toList()),
                 joinOrDash(facts.keywords())
         ).strip();
-        if (!llmEnabled(recursiveWeb)) {
+        if (!allowLlm || !llmEnabled(recursiveWeb)) {
             return new HybridText(deterministic, "deterministic", false);
         }
         if (mapReduceEnabled(recursiveWeb)) {
@@ -289,7 +297,7 @@ public class DocumentContextBuilder {
                 """.formatted(facts.documents().size(), joinMap(facts.contentTypes()), documents).strip();
     }
 
-    private HybridText sourceSummary(SourceFacts facts, boolean recursiveWeb) {
+    private HybridText sourceSummary(SourceFacts facts, boolean recursiveWeb, boolean allowLlm) {
         String deterministic = """
                 Source summary
                 This source contains %d indexed documents.
@@ -301,7 +309,7 @@ public class DocumentContextBuilder {
                 joinMap(facts.contentTypes()),
                 facts.documents().stream().limit(16).map(DocumentSourceLine::title).collect(Collectors.joining(", "))
         ).strip();
-        if (!llmEnabled(recursiveWeb)) {
+        if (!allowLlm || !llmEnabled(recursiveWeb)) {
             return new HybridText(deterministic, "deterministic", false);
         }
         return llmSummary(

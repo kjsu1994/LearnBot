@@ -1210,6 +1210,7 @@ button:hover:not(:disabled),
 
 .repo-list .repo-row .job-strip > span,
 .repo-list .repo-row .job-change-line,
+.repo-list .repo-row .enrichment-line,
 .repo-list .repo-row .document-main small,
 .repo-list .repo-row .document-meta small {
   display: block;

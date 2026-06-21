@@ -258,6 +258,7 @@ public class CodeRepository {
     public void completeSuccessfulIndex(UUID repositoryId, UUID indexVersion, String commitHash) {
         setActiveIndex(repositoryId, indexVersion);
         markRepositoryIndexed(repositoryId, commitHash);
+        markJobSearchable(indexVersion, "PENDING", "코드 검색은 가능하며 그래프/LLM 보강을 대기 중입니다.");
         finishJob(indexVersion, "SUCCEEDED", commitHash, null);
     }
 
@@ -266,6 +267,7 @@ public class CodeRepository {
         updateZipSnapshot(repositoryId, sourceLabel, sourceHash, localPath);
         setActiveIndex(repositoryId, indexVersion);
         markRepositoryIndexed(repositoryId, sourceHash);
+        markJobSearchable(indexVersion, "PENDING", "코드 검색은 가능하며 그래프/LLM 보강을 대기 중입니다.");
         finishJob(indexVersion, "SUCCEEDED", sourceHash, null);
     }
 
@@ -334,11 +336,37 @@ public class CodeRepository {
                 .addValue("errorMessage", errorMessage));
     }
 
+    public void markJobSearchable(UUID jobId, String enrichmentStatus, String enrichmentMessage) {
+        jdbc.update("""
+                UPDATE indexing_jobs
+                SET searchable_at = COALESCE(searchable_at, now()),
+                    enrichment_status = :enrichmentStatus,
+                    enrichment_message = :enrichmentMessage
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("enrichmentStatus", enrichmentStatus)
+                .addValue("enrichmentMessage", enrichmentMessage));
+    }
+
+    public void updateJobEnrichment(UUID jobId, String enrichmentStatus, String enrichmentMessage) {
+        jdbc.update("""
+                UPDATE indexing_jobs
+                SET enrichment_status = :enrichmentStatus,
+                    enrichment_message = :enrichmentMessage
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("enrichmentStatus", enrichmentStatus)
+                .addValue("enrichmentMessage", enrichmentMessage));
+    }
+
     public List<IndexingJobSummary> listJobs(UUID repositoryId) {
         return jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
                        failed_files, added_files, modified_files, unchanged_files, deleted_files,
-                       commit_hash, error_message, started_at, finished_at, created_at
+                       commit_hash, error_message, searchable_at, enrichment_status, enrichment_message,
+                       started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE repository_id = :repositoryId
                 ORDER BY created_at DESC
@@ -350,7 +378,8 @@ public class CodeRepository {
         List<IndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
                        failed_files, added_files, modified_files, unchanged_files, deleted_files,
-                       commit_hash, error_message, started_at, finished_at, created_at
+                       commit_hash, error_message, searchable_at, enrichment_status, enrichment_message,
+                       started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE id = :jobId
                 """, new MapSqlParameterSource().addValue("jobId", jobId), this::mapJobSummary);
@@ -625,7 +654,8 @@ public class CodeRepository {
         List<IndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, repository_id, job_type, status, total_files, processed_files, total_chunks,
                        failed_files, added_files, modified_files, unchanged_files, deleted_files,
-                       commit_hash, error_message, started_at, finished_at, created_at
+                       commit_hash, error_message, searchable_at, enrichment_status, enrichment_message,
+                       started_at, finished_at, created_at
                 FROM indexing_jobs
                 WHERE repository_id = :repositoryId
                   AND status IN ('RUNNING', 'CANCELLING')
@@ -1672,6 +1702,9 @@ public class CodeRepository {
                 rs.getInt("deleted_files"),
                 rs.getString("commit_hash"),
                 rs.getString("error_message"),
+                rs.getObject("searchable_at", OffsetDateTime.class),
+                rs.getString("enrichment_status"),
+                rs.getString("enrichment_message"),
                 rs.getObject("started_at", OffsetDateTime.class),
                 rs.getObject("finished_at", OffsetDateTime.class),
                 rs.getObject("created_at", OffsetDateTime.class)

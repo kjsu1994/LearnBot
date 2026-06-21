@@ -18,6 +18,7 @@ import com.learnbot.service.DocumentEntityMentionExtractor;
 import com.learnbot.service.DocumentGraphEdge;
 import com.learnbot.service.DocumentGraphNode;
 import com.learnbot.service.DocumentPageMetadata;
+import com.learnbot.service.DocumentEnrichmentJob;
 import com.learnbot.service.StoredObject;
 import com.learnbot.service.StoredSource;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -293,10 +294,143 @@ public class DocumentRepository {
                 .addValue("errorMessage", errorMessage));
     }
 
+    public void markDocumentJobSearchable(UUID jobId, String enrichmentStatus, String enrichmentMessage) {
+        jdbc.update("""
+                UPDATE document_indexing_jobs
+                SET searchable_at = COALESCE(searchable_at, now()),
+                    enrichment_status = :enrichmentStatus,
+                    enrichment_message = :enrichmentMessage
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("enrichmentStatus", enrichmentStatus)
+                .addValue("enrichmentMessage", enrichmentMessage));
+    }
+
+    public void updateDocumentJobEnrichment(UUID jobId, String enrichmentStatus, String enrichmentMessage) {
+        jdbc.update("""
+                UPDATE document_indexing_jobs
+                SET enrichment_status = :enrichmentStatus,
+                    enrichment_message = :enrichmentMessage
+                WHERE id = :jobId
+                """, new MapSqlParameterSource()
+                .addValue("jobId", jobId)
+                .addValue("enrichmentStatus", enrichmentStatus)
+                .addValue("enrichmentMessage", enrichmentMessage));
+    }
+
+    public void enqueueDocumentEnrichment(UUID sourceId, UUID jobId) {
+        jdbc.update("""
+                INSERT INTO document_enrichment_jobs (id, source_id, job_id, status)
+                VALUES (:id, :sourceId, :jobId, 'PENDING')
+                ON CONFLICT (source_id, job_id) DO NOTHING
+                """, new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("sourceId", sourceId)
+                .addValue("jobId", jobId));
+    }
+
+    public void recoverDocumentEnrichmentJobs() {
+        jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET status = 'PENDING',
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    next_attempt_at = now(),
+                    error_message = 'Recovered after expired enrichment lease.'
+                WHERE status = 'RUNNING'
+                  AND lease_until < now()
+                """, new MapSqlParameterSource());
+    }
+
+    public Optional<DocumentEnrichmentJob> claimDocumentEnrichmentJob(String workerId) {
+        List<DocumentEnrichmentJob> jobs = jdbc.query("""
+                WITH next_job AS (
+                    SELECT id
+                    FROM document_enrichment_jobs
+                    WHERE status = 'PENDING'
+                      AND next_attempt_at <= now()
+                    ORDER BY created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE document_enrichment_jobs job
+                SET status = 'RUNNING',
+                    lease_owner = :workerId,
+                    lease_until = now() + interval '5 minutes',
+                    updated_at = now()
+                FROM next_job
+                WHERE job.id = next_job.id
+                RETURNING job.id, job.source_id, job.job_id, job.status, job.attempts, job.lease_owner
+                """, new MapSqlParameterSource().addValue("workerId", workerId), (rs, rowNum) -> new DocumentEnrichmentJob(
+                rs.getObject("id", UUID.class),
+                rs.getObject("source_id", UUID.class),
+                rs.getObject("job_id", UUID.class),
+                rs.getString("status"),
+                rs.getInt("attempts"),
+                rs.getString("lease_owner")
+        ));
+        return jobs.stream().findFirst();
+    }
+
+    public boolean heartbeatDocumentEnrichmentJob(UUID enrichmentJobId, String workerId) {
+        int updated = jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET lease_until = now() + interval '5 minutes',
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                  AND status = 'RUNNING'
+                """, new MapSqlParameterSource()
+                .addValue("id", enrichmentJobId)
+                .addValue("workerId", workerId));
+        return updated > 0;
+    }
+
+    public boolean finishDocumentEnrichmentJob(UUID enrichmentJobId, String workerId, String status, String message) {
+        int updated = jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET status = :status,
+                    error_message = :message,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource()
+                .addValue("id", enrichmentJobId)
+                .addValue("workerId", workerId)
+                .addValue("status", status)
+                .addValue("message", message));
+        return updated > 0;
+    }
+
+    public boolean retryDocumentEnrichmentJob(UUID enrichmentJobId, String workerId, int attempts, String message) {
+        int updated = jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET status = 'PENDING',
+                    attempts = :attempts + 1,
+                    error_message = :message,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    next_attempt_at = now() + (:attempts + 1) * interval '30 seconds',
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource()
+                .addValue("id", enrichmentJobId)
+                .addValue("workerId", workerId)
+                .addValue("attempts", attempts)
+                .addValue("message", message));
+        return updated > 0;
+    }
+
     public List<DocumentIndexingJobSummary> listDocumentJobs(List<UUID> spaceIds, UUID selectedSpaceId) {
         return jdbc.query("""
                 SELECT id, source_id, space_id, job_type, status, total_documents, processed_documents,
-                       total_chunks, reused_chunks, embedded_chunks, error_message, started_at, finished_at, created_at
+                       total_chunks, reused_chunks, embedded_chunks, error_message,
+                       searchable_at, enrichment_status, enrichment_message,
+                       started_at, finished_at, created_at
                 FROM document_indexing_jobs
                 WHERE space_id IN (:spaceIds)
                   AND (CAST(:selectedSpaceId AS uuid) IS NULL OR space_id = CAST(:selectedSpaceId AS uuid))
@@ -310,7 +444,9 @@ public class DocumentRepository {
     public Optional<DocumentIndexingJobSummary> findDocumentJob(UUID jobId, List<UUID> spaceIds) {
         List<DocumentIndexingJobSummary> jobs = jdbc.query("""
                 SELECT id, source_id, space_id, job_type, status, total_documents, processed_documents,
-                       total_chunks, reused_chunks, embedded_chunks, error_message, started_at, finished_at, created_at
+                       total_chunks, reused_chunks, embedded_chunks, error_message,
+                       searchable_at, enrichment_status, enrichment_message,
+                       started_at, finished_at, created_at
                 FROM document_indexing_jobs
                 WHERE id = :jobId
                   AND space_id IN (:spaceIds)
@@ -479,6 +615,43 @@ public class DocumentRepository {
                 fromJson(rs.getString("metadata")),
                 rs.getObject("created_at", OffsetDateTime.class)
         ));
+    }
+
+    public List<StoredDocumentForEnrichment> listDocumentsForSource(UUID sourceId) {
+        return jdbc.query("""
+                SELECT id, title, source_uri, content_type, metadata::text AS metadata
+                FROM documents
+                WHERE source_id = :sourceId
+                ORDER BY created_at, title
+                """, new MapSqlParameterSource().addValue("sourceId", sourceId), (rs, rowNum) -> new StoredDocumentForEnrichment(
+                rs.getObject("id", UUID.class),
+                rs.getString("title"),
+                rs.getString("source_uri"),
+                rs.getString("content_type"),
+                fromJson(rs.getString("metadata"))
+        ));
+    }
+
+    public void replaceDocumentContextChunks(UUID documentId, List<Chunk> chunks, List<List<Double>> embeddings) {
+        jdbc.update("""
+                DELETE FROM document_chunks
+                WHERE document_id = :documentId
+                  AND metadata ->> 'kind' = 'document_context'
+                """, new MapSqlParameterSource().addValue("documentId", documentId));
+        if (chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        Integer baseIndex = jdbc.queryForObject("""
+                SELECT COALESCE(MAX(chunk_index), -1) + 1
+                FROM document_chunks
+                WHERE document_id = :documentId
+                """, new MapSqlParameterSource().addValue("documentId", documentId), Integer.class);
+        List<Chunk> reindexed = new ArrayList<>();
+        int startIndex = baseIndex == null ? 0 : baseIndex;
+        for (int i = 0; i < chunks.size(); i++) {
+            reindexed.add(new Chunk(startIndex + i, chunks.get(i).content(), chunks.get(i).metadata()));
+        }
+        addChunks(documentId, reindexed, embeddings);
     }
 
     public Map<String, Object> documentMetadata(UUID documentId) {
@@ -1288,6 +1461,9 @@ public class DocumentRepository {
                 rs.getInt("reused_chunks"),
                 rs.getInt("embedded_chunks"),
                 rs.getString("error_message"),
+                rs.getObject("searchable_at", OffsetDateTime.class),
+                rs.getString("enrichment_status"),
+                rs.getString("enrichment_message"),
                 rs.getObject("started_at", OffsetDateTime.class),
                 rs.getObject("finished_at", OffsetDateTime.class),
                 rs.getObject("created_at", OffsetDateTime.class)
@@ -1382,6 +1558,15 @@ public class DocumentRepository {
     }
 
     public record ContextRelatedChunkCandidate(SearchResult result, UUID seedChunkId, String reason, double seedScore) {
+    }
+
+    public record StoredDocumentForEnrichment(
+            UUID documentId,
+            String title,
+            String sourceUri,
+            String contentType,
+            Map<String, Object> metadata
+    ) {
     }
 
     private record ContextMatch(ContextChunkSeed seed, String reason) {
