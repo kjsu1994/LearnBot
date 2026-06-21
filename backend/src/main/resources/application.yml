@@ -185,3 +185,6 @@ learnbot:
     export-days: ${LEARNBOT_RETENTION_EXPORT_DAYS:14}
     orphan-grace-days: ${LEARNBOT_RETENTION_ORPHAN_GRACE_DAYS:7}
     dependency-cache-days: ${LEARNBOT_RETENTION_DEPENDENCY_CACHE_DAYS:14}
+    index-artifact-days: ${LEARNBOT_RETENTION_INDEX_ARTIFACT_DAYS:7}
+    failed-source-days: ${LEARNBOT_RETENTION_FAILED_SOURCE_DAYS:7}
+    orphan-workspace-days: ${LEARNBOT_RETENTION_ORPHAN_WORKSPACE_DAYS:7}

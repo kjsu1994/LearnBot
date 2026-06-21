@@ -1612,6 +1612,15 @@ public class LearnBotProperties {
         @Min(1)
         private int dependencyCacheDays = 14;
 
+        @Min(1)
+        private int indexArtifactDays = 7;
+
+        @Min(1)
+        private int failedSourceDays = 7;
+
+        @Min(1)
+        private int orphanWorkspaceDays = 7;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -1666,6 +1675,30 @@ public class LearnBotProperties {
 
         public void setDependencyCacheDays(int dependencyCacheDays) {
             this.dependencyCacheDays = dependencyCacheDays;
+        }
+
+        public int getIndexArtifactDays() {
+            return indexArtifactDays;
+        }
+
+        public void setIndexArtifactDays(int indexArtifactDays) {
+            this.indexArtifactDays = indexArtifactDays;
+        }
+
+        public int getFailedSourceDays() {
+            return failedSourceDays;
+        }
+
+        public void setFailedSourceDays(int failedSourceDays) {
+            this.failedSourceDays = failedSourceDays;
+        }
+
+        public int getOrphanWorkspaceDays() {
+            return orphanWorkspaceDays;
+        }
+
+        public void setOrphanWorkspaceDays(int orphanWorkspaceDays) {
+            this.orphanWorkspaceDays = orphanWorkspaceDays;
         }
     }
 }

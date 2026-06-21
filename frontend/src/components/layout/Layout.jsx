@@ -191,8 +191,8 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
               <span className="hero3-pill hero3-pill-muted">Source-grounded answers</span>
             </div>
             <div className="hero3-title-block">
-              <h1>LearnBot: 사내 문서와 코드를 근거 중심 지식으로 운영하는</h1>
-              <h1>로컬 AI 워크스페이스</h1>
+              <h1>문서/코드 근거의 지식</h1>
+              <h1>로컬 AI : LearnBot</h1>
               <p>
                 문서 RAG, 코드 RAG, 저장 답변, 관리자 진단을 하나의 제품 경험으로 연결합니다.
                 모든 답변은 원문 근거와 운영 상태를 함께 남겨 팀이 검증 가능한 지식으로 활용할 수 있습니다.

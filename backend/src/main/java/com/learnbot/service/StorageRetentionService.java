@@ -89,6 +89,9 @@ public class StorageRetentionService {
         addArea(areas, () -> deletedSourceObjects(delete), "deleted-source-objects");
         addArea(areas, () -> orphanObjects(delete, preview), "orphan-objects");
         addArea(areas, () -> dependencyCache(delete), "dependency-cache");
+        addArea(areas, () -> codeIndexArtifacts(delete), "code-index-artifacts");
+        addArea(areas, () -> failedDocumentSources(delete), "failed-document-sources");
+        addArea(areas, () -> orphanCodeWorkspaces(delete), "orphan-code-workspaces");
         if (delete) {
             vacuumAnalyzeBestEffort();
         }
@@ -246,6 +249,143 @@ public class StorageRetentionService {
                 days, stats.count(), stats.deleted(), stats.bytes());
     }
 
+    private StorageRetentionArea codeIndexArtifacts(boolean delete) {
+        int days = properties.getRetention().getIndexArtifactDays();
+        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(days);
+        MapSqlParameterSource params = params(cutoff);
+        String eligibleJobs = """
+                SELECT j.id
+                FROM indexing_jobs j
+                WHERE j.created_at < :cutoff
+                  AND j.status IN (:terminalStatuses)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM code_files f
+                      WHERE f.index_version = j.id
+                        AND f.active
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM code_chunks c
+                      WHERE c.index_version = j.id
+                        AND c.active
+                  )
+                """;
+        Long candidates = jdbc.queryForObject("SELECT COUNT(*) FROM (" + eligibleJobs + ") eligible",
+                params, Long.class);
+        Long estimatedBytes = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(bytes), 0)
+                FROM (
+                    SELECT pg_column_size(j.*)::bigint AS bytes
+                    FROM indexing_jobs j
+                    WHERE j.id IN (""" + eligibleJobs + """
+                    )
+                    UNION ALL
+                    SELECT pg_column_size(f.*)::bigint AS bytes
+                    FROM code_files f
+                    WHERE f.index_version IN (""" + eligibleJobs + """
+                    )
+                    UNION ALL
+                    SELECT pg_column_size(c.*)::bigint AS bytes
+                    FROM code_chunks c
+                    WHERE c.index_version IN (""" + eligibleJobs + """
+                    )
+                    UNION ALL
+                    SELECT pg_column_size(n.*)::bigint AS bytes
+                    FROM code_graph_nodes n
+                    WHERE n.index_version IN (""" + eligibleJobs + """
+                    )
+                    UNION ALL
+                    SELECT pg_column_size(e.*)::bigint AS bytes
+                    FROM code_graph_edges e
+                    WHERE e.index_version IN (""" + eligibleJobs + """
+                    )
+                ) artifact_bytes
+                """, params, Long.class);
+        long deleted = 0;
+        if (delete) {
+            deleted = jdbc.update("DELETE FROM indexing_jobs j WHERE j.id IN (" + eligibleJobs + ")", params);
+        }
+        return new StorageRetentionArea("code-index-artifacts", "Inactive code index artifacts",
+                "Deletes only old failed, cancelled, or superseded code chunks and graph rows that are not active search data.",
+                days, candidates == null ? 0 : candidates, deleted, estimatedBytes == null ? 0 : estimatedBytes);
+    }
+
+    private StorageRetentionArea failedDocumentSources(boolean delete) {
+        int days = properties.getRetention().getFailedSourceDays();
+        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(days);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("cutoff", cutoff);
+        String eligibleSources = """
+                SELECT s.id
+                FROM data_sources s
+                WHERE s.status = 'FAILED'
+                  AND s.deleted_at IS NULL
+                  AND s.updated_at < :cutoff
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM documents d
+                      WHERE d.source_id = s.id
+                  )
+                """;
+        List<StoredObject> objects = jdbc.query("""
+                SELECT o.bucket, o.object_key, o.original_filename, o.content_type, o.size_bytes
+                FROM source_objects o
+                WHERE o.source_id IN (""" + eligibleSources + """
+                )
+                """, params, (rs, rowNum) -> new StoredObject(
+                rs.getString("bucket"),
+                rs.getString("object_key"),
+                rs.getString("original_filename"),
+                rs.getString("content_type"),
+                rs.getLong("size_bytes")
+        ));
+        Long candidates = jdbc.queryForObject("SELECT COUNT(*) FROM (" + eligibleSources + ") eligible",
+                params, Long.class);
+        long deleted = 0;
+        if (delete) {
+            for (StoredObject object : objects) {
+                try {
+                    objectStorageService.delete(object);
+                } catch (RuntimeException ex) {
+                    log.warn("storage_retention_failed_source_object_delete_failed bucket={} key={} reason={}",
+                            object.bucket(), object.objectKey(), rootMessage(ex));
+                }
+            }
+            deleted = jdbc.update("DELETE FROM data_sources s WHERE s.id IN (" + eligibleSources + ")", params);
+        }
+        long bytes = objects.stream().mapToLong(StoredObject::sizeBytes).sum();
+        return new StorageRetentionArea("failed-document-sources", "Failed document indexing sources",
+                "Deletes only failed document sources that never produced searchable documents.",
+                days, candidates == null ? 0 : candidates, deleted, bytes);
+    }
+
+    private StorageRetentionArea orphanCodeWorkspaces(boolean delete) {
+        int days = properties.getRetention().getOrphanWorkspaceDays();
+        Instant cutoff = Instant.now().minusSeconds(days * 86_400L);
+        Path workspace = Path.of(properties.getCode().getWorkspacePath()).toAbsolutePath().normalize();
+        if (!Files.isDirectory(workspace)) {
+            return new StorageRetentionArea("orphan-code-workspaces", "Orphan code workspaces",
+                    "Code workspace directory does not exist.",
+                    days, 0, 0, 0);
+        }
+        Set<Path> referenced = new HashSet<>();
+        for (String localPath : jdbc.queryForList("""
+                SELECT local_path
+                FROM code_repositories
+                WHERE local_path IS NOT NULL
+                """, new MapSqlParameterSource(), String.class)) {
+            try {
+                referenced.add(Path.of(localPath).toAbsolutePath().normalize());
+            } catch (RuntimeException ignored) {
+                // Invalid historic paths are ignored so cleanup can continue safely.
+            }
+        }
+        DirectoryStats stats = oldUnreferencedDirectories(workspace, referenced, cutoff, delete);
+        return new StorageRetentionArea("orphan-code-workspaces", "Orphan code workspaces",
+                "Deletes old local repository directories that are no longer referenced by code repository records.",
+                days, stats.count(), stats.deleted(), stats.bytes());
+    }
+
     private long countRows(DbCleanupSpec spec, OffsetDateTime cutoff) {
         String sql = "SELECT count(*) FROM " + spec.table() + " WHERE " + spec.timestampColumn() + " < :cutoff"
                 + whereSuffix(spec);
@@ -336,6 +476,78 @@ public class StorageRetentionService {
         return new FileStats(count, deleted, bytes);
     }
 
+    private DirectoryStats oldUnreferencedDirectories(Path root, Set<Path> referenced, Instant cutoff, boolean delete) {
+        long count = 0;
+        long deleted = 0;
+        long bytes = 0;
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(root)) {
+            for (Path path : stream) {
+                if (!Files.isDirectory(path)) {
+                    continue;
+                }
+                if (".dependency-cache".equals(path.getFileName().toString())) {
+                    continue;
+                }
+                Path candidate = path.toAbsolutePath().normalize();
+                if (!candidate.startsWith(root) || isReferencedPath(candidate, referenced)) {
+                    continue;
+                }
+                Instant modified = Files.getLastModifiedTime(candidate).toInstant();
+                if (modified.isAfter(cutoff)) {
+                    continue;
+                }
+                count++;
+                bytes += directoryBytes(candidate);
+                if (delete) {
+                    deleteDirectoryRecursively(candidate);
+                    deleted++;
+                }
+            }
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Could not inspect cleanup directory " + root, ex);
+        }
+        return new DirectoryStats(count, deleted, bytes);
+    }
+
+    private boolean isReferencedPath(Path candidate, Set<Path> referenced) {
+        for (Path path : referenced) {
+            if (path.equals(candidate) || path.startsWith(candidate) || candidate.startsWith(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private long directoryBytes(Path directory) {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            return paths
+                    .filter(Files::isRegularFile)
+                    .mapToLong(path -> {
+                        try {
+                            return Files.size(path);
+                        } catch (IOException ignored) {
+                            return 0L;
+                        }
+                    })
+                    .sum();
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Could not inspect cleanup directory " + directory, ex);
+        }
+    }
+
+    private void deleteDirectoryRecursively(Path directory) {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            List<Path> all = paths
+                    .sorted(Comparator.reverseOrder())
+                    .toList();
+            for (Path path : all) {
+                Files.deleteIfExists(path);
+            }
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Could not delete cleanup directory " + directory, ex);
+        }
+    }
+
     private void deleteEmptyDirectories(Path root) {
         try (Stream<Path> paths = Files.walk(root)) {
             List<Path> directories = paths
@@ -364,6 +576,15 @@ public class StorageRetentionService {
                 "document_enrichment_jobs",
                 "document_graph_jobs",
                 "code_graph_enrichment_jobs",
+                "indexing_jobs",
+                "code_files",
+                "code_chunks",
+                "code_graph_nodes",
+                "code_graph_edges",
+                "data_sources",
+                "source_objects",
+                "documents",
+                "document_chunks",
                 "audit_logs"
         )) {
             try {
@@ -386,6 +607,9 @@ public class StorageRetentionService {
     }
 
     private record FileStats(long count, long deleted, long bytes) {
+    }
+
+    private record DirectoryStats(long count, long deleted, long bytes) {
     }
 
     @FunctionalInterface
