@@ -201,11 +201,45 @@ LEARNBOT_CRAWLER_MIN_CONTENT_CHARS=200
 
 Each crawled page is stored as a separate document under the same source so RAG citations keep the original page URL.
 
+## Document RAG Indexing
+
+Document ingestion is split into a fast searchable phase and slower quality enrichment phases.
+
+Source status values:
+
+- `INDEXING`: original extraction, chunking, and embedding are still running; the source is not searchable yet.
+- `SEARCHABLE`: original chunks and deterministic context are stored; users can search and ask questions.
+- `READY`: enabled post-processing completed or was skipped by configuration.
+- `PARTIAL`: original search is available, but at least one post-processing stage failed or is waiting for retry.
+- `FAILED`: extraction, embedding, or storage failed before the source became searchable.
+
+The `INDEXED` value is still accepted for legacy data and import compatibility, but new document sources use `SEARCHABLE`, `READY`, or `PARTIAL` after successful base indexing.
+
+Document graph rebuild runs as a durable background job instead of blocking ingestion. It stores graph nodes and edges in PostgreSQL using batched inserts. If graph rebuild fails, the source remains searchable and the UI marks it as `PARTIAL`.
+
+LLM document context enrichment also runs as a background job. It replaces only generated `document_context` chunks, so original chunks remain available if the enrichment fails.
+
+Document post-processing diagnostics are recorded for graph rebuild and LLM enrichment. The Documents UI exposes diagnostics next to the indexing job and shows retry buttons beside failed stages, so users can see why a retry is available before clicking it. Retry requeues only the failed post-processing stage; it does not re-run full document extraction or embedding.
+
+Relevant APIs:
+
+```text
+GET  /api/document-indexing/jobs
+GET  /api/document-indexing/jobs/{jobId}
+GET  /api/document-indexing/jobs/{jobId}/diagnostics
+POST /api/document-indexing/jobs/{jobId}/retry-enrichment
+POST /api/document-indexing/jobs/{jobId}/retry-graph
+```
+
 ## API
 
 - `POST /api/sources/web` with `{ "url": "https://example.com/docs", "recursive": true, "maxDepth": 2, "maxPages": 30 }`
 - `POST /api/sources/files` with multipart field `file`
 - `GET /api/documents`
+- `GET /api/document-indexing/jobs`
+- `GET /api/document-indexing/jobs/{jobId}/diagnostics`
+- `POST /api/document-indexing/jobs/{jobId}/retry-enrichment`
+- `POST /api/document-indexing/jobs/{jobId}/retry-graph`
 - `GET /api/documents/{documentId}`
 - `POST /api/documents/{documentId}/reindex`
 - `DELETE /api/documents/{documentId}`
