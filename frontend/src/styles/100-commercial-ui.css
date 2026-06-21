@@ -1752,6 +1752,10 @@
 }
 
 .hero3-robot-stage {
+  background:
+    radial-gradient(circle at 50% 32%, rgba(255, 255, 255, 0.12), transparent 34%),
+    radial-gradient(ellipse at 50% 82%, rgba(255, 255, 255, 0.12), transparent 42%);
+  border-radius: 26px;
   height: 536px;
   margin: 0 -26px -8px;
   overflow: hidden;
@@ -1760,8 +1764,10 @@
 }
 
 .hero3-spline-scene {
+  position: relative;
   height: 100%;
   width: 100%;
+  z-index: 2;
 }
 
 .hero3-robot-stage canvas {
@@ -1769,10 +1775,56 @@
 }
 
 .hero3-robot-fallback {
-  inset: 72px 34px 34px;
-  margin: 0;
+  inset: 0;
   position: absolute;
-  z-index: 2;
+  z-index: 1;
+}
+
+.hero3-robot-fallback::before {
+  animation: hero3-robot-glow 2.4s ease-in-out infinite;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08) 32%, transparent 62%);
+  border-radius: 999px;
+  content: "";
+  height: 168px;
+  left: 50%;
+  position: absolute;
+  top: 36%;
+  transform: translate(-50%, -50%);
+  width: 168px;
+}
+
+.hero3-robot-orbit {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  left: 50%;
+  position: absolute;
+  top: 43%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+}
+
+.hero3-robot-orbit-one {
+  height: 210px;
+  width: 310px;
+}
+
+.hero3-robot-orbit-two {
+  height: 290px;
+  opacity: 0.55;
+  transform: translate(-50%, -50%) rotate(24deg);
+  width: 410px;
+}
+
+.hero3-robot-platform {
+  background:
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.08) 44%, transparent 72%);
+  border-radius: 999px;
+  bottom: 58px;
+  height: 78px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: min(72%, 360px);
 }
 
 .hero3-window-dots {
@@ -1910,6 +1962,18 @@
 
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes hero3-robot-glow {
+  0%, 100% {
+    opacity: 0.58;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+
+  50% {
+    opacity: 0.88;
+    transform: translate(-50%, -50%) scale(1.04);
   }
 }
 

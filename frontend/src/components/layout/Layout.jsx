@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { MetricBarChart } from '../ui/metric-chart.jsx';
 
 const Spline = lazy(() => import('@splinetool/react-spline'));
+const ROBOT_SCENE_READY_KEY = 'learnbot:spline-robot-ready';
 
 function DeckGlyph() {
   return (
@@ -25,46 +26,65 @@ function DeckGlyph() {
 
 function RobotSceneFallback() {
   return (
-    <div className="hero3-mini-console hero3-robot-fallback">
-      <div className="hero3-window-dots"><span /><span /><span /></div>
-      <div className="mockup-query">
-        <IconSparkles size={18} />
-        <span>“이 장애 코드의 원인과 조치 절차를 근거와 함께 알려줘”</span>
-      </div>
-      <MetricBarChart
-        data={[
-          { name: 'Code', value: 38 },
-          { name: 'Docs', value: 64 },
-          { name: 'Saved', value: 22 },
-        ]}
-      />
+    <div className="hero3-robot-fallback" aria-hidden="true">
+      <span className="hero3-robot-orbit hero3-robot-orbit-one" />
+      <span className="hero3-robot-orbit hero3-robot-orbit-two" />
+      <span className="hero3-robot-platform" />
     </div>
   );
 }
 
 function SplineRobotScene() {
+  const [ready, setReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    const hasLoadedBefore = window.localStorage.getItem(ROBOT_SCENE_READY_KEY) === '1';
+    const delay = hasLoadedBefore ? 650 : 1600;
+    let idleId;
     const timer = window.setTimeout(() => {
-      if (!loaded) {
-        setFailed(true);
+      if ('requestIdleCallback' in window) {
+        idleId = window.requestIdleCallback(() => setReady(true), { timeout: 3000 });
+        return;
       }
-    }, 9000);
+      setReady(true);
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (idleId && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready || loaded || failed) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setFailed(true);
+    }, 12000);
 
     return () => window.clearTimeout(timer);
-  }, [loaded]);
+  }, [failed, loaded, ready]);
+
+  function handleLoad() {
+    window.localStorage.setItem(ROBOT_SCENE_READY_KEY, '1');
+    setLoaded(true);
+  }
 
   return (
     <div className="hero3-robot-stage" aria-label="LearnBot 3D assistant">
       {!loaded && <RobotSceneFallback />}
-      {!failed && (
+      {ready && !failed && (
         <Suspense fallback={null}>
           <Spline
             scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
             className="hero3-spline-scene"
-            onLoad={() => setLoaded(true)}
+            onLoad={handleLoad}
             onError={() => setFailed(true)}
           />
         </Suspense>
@@ -159,7 +179,8 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
               <span className="hero3-pill hero3-pill-muted">Source-grounded answers</span>
             </div>
             <div className="hero3-title-block">
-              <h1>LearnBot: 사내 문서와 코드를 근거 중심 지식으로 운영하는 AI 커맨드 덱</h1>
+              <h1>LearnBot: 사내 문서와 코드를 근거 중심 지식으로 운영하는</h1>
+              <h1>로컬 AI 워크스페이스</h1>
               <p>
                 문서 RAG, 코드 RAG, 저장 답변, 관리자 진단을 하나의 제품 경험으로 연결합니다.
                 모든 답변은 원문 근거와 운영 상태를 함께 남겨 팀이 검증 가능한 지식으로 활용할 수 있습니다.
