@@ -1,0 +1,467 @@
+/* Tabler-inspired admin console layer. Scoped to avoid changing Code/Document RAG screens. */
+.admin-tabler-shell {
+  --tblr-admin-bg: #f6f8fb;
+  --tblr-admin-card: #ffffff;
+  --tblr-admin-border: #dce3ea;
+  --tblr-admin-muted: #667085;
+  --tblr-admin-text: #182433;
+  --tblr-admin-primary: #206bc4;
+  --tblr-admin-primary-soft: #eaf2ff;
+  --tblr-admin-success-soft: #eaf7ec;
+  --tblr-admin-danger-soft: #fff0f0;
+  background: var(--tblr-admin-bg);
+  border: 1px solid #e4e9ef;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  color: var(--tblr-admin-text);
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.admin-tabler-header {
+  align-items: center;
+  background: var(--tblr-admin-card);
+  border: 1px solid var(--tblr-admin-border);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.admin-tabler-header h1 {
+  color: var(--tblr-admin-text);
+  font-size: 24px;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 4px 0;
+}
+
+.admin-tabler-header p {
+  color: var(--tblr-admin-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.admin-tabler-kicker {
+  color: var(--tblr-admin-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.admin-refresh-button {
+  flex: 0 0 auto;
+}
+
+.admin-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.admin-summary-card {
+  align-items: center;
+  background: var(--tblr-admin-card);
+  border: 1px solid var(--tblr-admin-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.045);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  padding: 14px;
+}
+
+.admin-summary-card strong,
+.admin-summary-card small,
+.admin-summary-card em {
+  display: block;
+  letter-spacing: 0;
+  min-width: 0;
+}
+
+.admin-summary-card strong {
+  color: var(--tblr-admin-text);
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.admin-summary-card small {
+  color: var(--tblr-admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+.admin-summary-card em {
+  color: #8a97a6;
+  font-size: 12px;
+  font-style: normal;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-summary-icon {
+  align-items: center;
+  background: var(--tblr-admin-primary-soft);
+  border-radius: 8px;
+  color: var(--tblr-admin-primary);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.admin-tabler-tabs {
+  background: var(--tblr-admin-card);
+  border-color: var(--tblr-admin-border);
+  box-shadow: none;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-start;
+  overflow-x: auto;
+  padding: 6px;
+}
+
+.admin-tabler-tabs .mode-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #4b5563;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 700;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.admin-tabler-tabs .mode-button:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #e1e8ef;
+  box-shadow: none;
+  color: var(--tblr-admin-primary);
+  transform: none;
+}
+
+.admin-tabler-tabs .mode-button.active {
+  background: var(--tblr-admin-primary);
+  border-color: var(--tblr-admin-primary);
+  color: #ffffff;
+}
+
+.admin-tabler-shell .workspace-grid {
+  gap: 16px;
+}
+
+.admin-tabler-shell .panel,
+.admin-tabler-shell .document-row,
+.admin-tabler-shell .result,
+.admin-tabler-shell .schema-profile-card,
+.admin-tabler-shell .allowed-domain-card,
+.admin-tabler-shell .detail-box,
+.admin-tabler-shell .transfer-note {
+  background: var(--tblr-admin-card);
+  border: 1px solid var(--tblr-admin-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.045);
+}
+
+.admin-tabler-shell .panel {
+  padding: 18px;
+}
+
+.admin-tabler-shell .panel:hover,
+.admin-tabler-shell .document-row:hover,
+.admin-tabler-shell .result:hover {
+  border-color: #c9d3df;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.065);
+  transform: none;
+}
+
+.admin-tabler-shell .panel-title {
+  border-bottom: 1px solid #edf1f5;
+  margin: -2px 0 14px;
+  padding-bottom: 12px;
+}
+
+.admin-tabler-shell .panel-title svg {
+  background: var(--tblr-admin-primary-soft);
+  border-radius: 8px;
+  color: var(--tblr-admin-primary);
+  padding: 6px;
+}
+
+.admin-tabler-shell .panel-title h2 {
+  color: var(--tblr-admin-text);
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.admin-tabler-shell .panel-title p,
+.admin-tabler-shell small,
+.admin-tabler-shell .field-help {
+  color: var(--tblr-admin-muted);
+}
+
+.admin-tabler-shell button {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.admin-tabler-shell button:not(.ghost-button):not(.icon-button):not(.mode-button) {
+  background: var(--tblr-admin-primary);
+  border-color: var(--tblr-admin-primary);
+}
+
+.admin-tabler-shell button:not(.ghost-button):not(.icon-button):not(.mode-button):hover:not(:disabled) {
+  background: #1a5aa3;
+  border-color: #1a5aa3;
+  box-shadow: none;
+  transform: none;
+}
+
+.admin-tabler-shell .ghost-button {
+  background: #ffffff;
+  border-color: var(--tblr-admin-border);
+  color: #354052;
+}
+
+.admin-tabler-shell .ghost-button:hover:not(:disabled) {
+  background: #f6f8fb;
+  border-color: #c9d3df;
+  color: var(--tblr-admin-primary);
+  transform: none;
+}
+
+.admin-tabler-shell input,
+.admin-tabler-shell select,
+.admin-tabler-shell textarea {
+  background: #ffffff;
+  border-color: var(--tblr-admin-border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.admin-tabler-shell input:focus,
+.admin-tabler-shell select:focus,
+.admin-tabler-shell textarea:focus {
+  border-color: var(--tblr-admin-primary);
+  box-shadow: 0 0 0 3px rgba(32, 107, 196, 0.14);
+}
+
+.admin-tabler-shell .document-list,
+.admin-tabler-shell .results {
+  gap: 8px;
+}
+
+.admin-tabler-shell .document-row,
+.admin-tabler-shell .result {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 12px 14px;
+}
+
+.admin-tabler-shell .result {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-tabler-shell .repo-list .repo-row {
+  align-items: start;
+  display: grid;
+  gap: 8px 12px;
+  grid-template-areas:
+    "main actions"
+    "meta actions"
+    "job job"
+    "credential credential";
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: unset;
+  overflow: visible;
+}
+
+.admin-tabler-shell .repo-list .repo-row .document-main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.admin-tabler-shell .repo-list .repo-row .document-meta {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  grid-area: meta;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.admin-tabler-shell .repo-list .repo-row .document-actions {
+  align-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  grid-area: actions;
+  justify-content: flex-end;
+}
+
+.admin-tabler-shell .repo-list .repo-row .job-strip {
+  border-top: 1px solid #edf1f5;
+  display: grid;
+  gap: 6px;
+  grid-area: job;
+  margin-top: 6px;
+  min-width: 0;
+  overflow: visible;
+  padding-top: 8px;
+  width: 100%;
+}
+
+.admin-tabler-shell .repo-list .repo-row > .detail-box {
+  grid-area: credential;
+  margin-top: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-tabler-shell .repo-list .repo-row .job-strip > span,
+.admin-tabler-shell .repo-list .repo-row .job-change-line,
+.admin-tabler-shell .repo-list .repo-row .enrichment-line,
+.admin-tabler-shell .repo-list .repo-row .document-main small,
+.admin-tabler-shell .repo-list .repo-row .document-meta small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-tabler-shell .repo-list .repo-row .progress-track {
+  width: 100%;
+}
+
+.admin-tabler-shell .document-main strong,
+.admin-tabler-shell .result-heading strong {
+  color: var(--tblr-admin-text);
+}
+
+.admin-tabler-shell .status {
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0;
+  padding: 4px 8px;
+}
+
+.admin-tabler-shell .status-indexed,
+.admin-tabler-shell .status-ready,
+.admin-tabler-shell .status-searchable,
+.admin-tabler-shell .success-note {
+  background: var(--tblr-admin-success-soft);
+  border-color: #bfe6c8;
+}
+
+.admin-tabler-shell .danger-note,
+.admin-tabler-shell .failure-line,
+.admin-tabler-shell .icon-button.danger {
+  background: var(--tblr-admin-danger-soft);
+  border-color: #ffc7c7;
+}
+
+.admin-tabler-shell .icon-button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--tblr-admin-border);
+  border-radius: 6px;
+  color: #475569;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.admin-tabler-shell .icon-button:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: var(--tblr-admin-primary);
+  transform: none;
+}
+
+.admin-tabler-shell .allowed-domain-chips span {
+  background: var(--tblr-admin-primary-soft);
+  border-color: #cfe2ff;
+  color: var(--tblr-admin-primary);
+}
+
+.admin-user-modal {
+  border-radius: 8px;
+}
+
+.admin-user-modal .code-modal-header {
+  background: #ffffff;
+  border-bottom: 1px solid var(--tblr-admin-border, #dce3ea);
+}
+
+.admin-user-modal .code-modal-title h2 {
+  color: var(--tblr-admin-text, #182433);
+}
+
+.admin-user-modal .code-modal-title p {
+  color: var(--tblr-admin-muted, #667085);
+}
+
+.admin-user-modal .code-modal-title svg {
+  color: var(--tblr-admin-primary, #206bc4);
+}
+
+.admin-user-modal .admin-user-modal-body {
+  background: #f6f8fb;
+}
+
+@media (max-width: 1180px) {
+  .admin-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-tabler-shell {
+    border-radius: 0;
+    margin: -10px;
+    padding: 12px;
+  }
+
+  .admin-tabler-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabler-shell .document-row {
+    align-items: start;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-tabler-shell .repo-list .repo-row {
+    grid-template-areas:
+      "main"
+      "meta"
+      "actions"
+      "job"
+      "credential";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-tabler-shell .repo-list .repo-row .document-actions {
+    justify-content: flex-start;
+  }
+}

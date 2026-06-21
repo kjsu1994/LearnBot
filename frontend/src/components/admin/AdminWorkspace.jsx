@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, Database, Download, FileUp, Globe, Info, Loader2, LockKeyhole, RefreshCw, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { IconActivity, IconDatabase, IconFiles, IconRefresh, IconSettings, IconShieldLock, IconUsersGroup, IconWorld } from '@tabler/icons-react';
 import { defaultSpaceId } from '../../config/constants.js';
 import { formatBrandText, formatDate, formatFileSize, formatTransferCounts } from '../../lib/formatters.js';
 import { IconButton, StatusBadge } from '../common/Common.jsx';
@@ -240,8 +241,17 @@ function AdminWorkspace({
   const allowedDomains = adminSettings?.allowedDomains || [];
   const allowedDomainPreview = allowedDomains.slice(0, 6);
   const retentionAreas = storageRetention?.areas || [];
+  const activeUsers = users.filter((item) => String(item.status || '').toUpperCase() !== 'DISABLED').length;
+  const enabledProfiles = documentSchemaProfiles.filter((profile) => profile.enabled).length;
+  const retentionCandidateCount = storageRetention?.totalCandidates ?? 0;
+  const adminSummary = [
+    { label: '사용자', value: users.length, hint: `${activeUsers} active`, icon: <IconUsersGroup size={20} /> },
+    { label: '공간', value: spaces.length, hint: selectedSpaceId ? 'selected scope' : 'global scope', icon: <IconDatabase size={20} /> },
+    { label: '허용 도메인', value: allowedDomains.length, hint: adminSettings?.respectRobotsTxt ?? true ? 'robots on' : 'robots off', icon: <IconWorld size={20} /> },
+    { label: 'Retention 후보', value: retentionCandidateCount, hint: formatFileSize(storageRetention?.totalEstimatedBytes), icon: <IconActivity size={20} /> },
+  ];
   const adminTabs = (
-    <div className="admin-tabs" role="tablist" aria-label="관리자 메뉴">
+    <div className="admin-tabs admin-tabler-tabs" role="tablist" aria-label="관리자 메뉴">
       <button
         className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
         type="button"
@@ -249,6 +259,7 @@ function AdminWorkspace({
         aria-selected={activeAdminTab === 'settings'}
         onClick={() => setActiveAdminTab('settings')}
       >
+        <IconSettings size={16} />
         관리자 설정
       </button>
       <button
@@ -258,14 +269,52 @@ function AdminWorkspace({
         aria-selected={activeAdminTab === 'sources'}
         onClick={() => setActiveAdminTab('sources')}
       >
+        <IconFiles size={16} />
         코드/문서 등록
       </button>
     </div>
   );
+  const adminHeader = (
+    <header className="admin-tabler-header">
+      <div>
+        <span className="admin-tabler-kicker">Admin Console</span>
+        <h1>관리자 운영</h1>
+        <p>모델, 소스, 사용자, 공간, 감사 로그를 한 곳에서 관리합니다.</p>
+      </div>
+      <button className="ghost-button compact-action admin-refresh-button" type="button" onClick={refreshAdmin}>
+        {loading('admin-refresh') ? <Loader2 className="spin" size={15} /> : <IconRefresh size={15} />}
+        새로고침
+      </button>
+    </header>
+  );
+  const adminSummaryCards = (
+    <section className="admin-summary-grid" aria-label="관리자 요약">
+      {adminSummary.map((item) => (
+        <article className="admin-summary-card" key={item.label}>
+          <span className="admin-summary-icon">{item.icon}</span>
+          <div>
+            <strong>{item.value}</strong>
+            <small>{item.label}</small>
+          </div>
+          <em>{item.hint}</em>
+        </article>
+      ))}
+      <article className="admin-summary-card">
+        <span className="admin-summary-icon"><IconShieldLock size={20} /></span>
+        <div>
+          <strong>{enabledProfiles}</strong>
+          <small>활성 스키마</small>
+        </div>
+        <em>{documentSchemaProfiles.length || 0} profiles</em>
+      </article>
+    </section>
+  );
 
   if (activeAdminTab === 'sources') {
     return (
-      <>
+      <div className="admin-tabler-shell">
+        {adminHeader}
+        {adminSummaryCards}
         {adminTabs}
         <section className="workspace-grid admin-source-grid">
           <div className="left-column">
@@ -275,12 +324,14 @@ function AdminWorkspace({
             <DocumentSourcePanel {...(documentSourceProps || {})} loading={loading} />
           </div>
         </section>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="admin-tabler-shell">
+    {adminHeader}
+    {adminSummaryCards}
     {adminTabs}
     <section className="workspace-grid">
       <div className="left-column">
@@ -968,7 +1019,7 @@ function AdminWorkspace({
         </AdminUserModal>
       )}
     </section>
-    </>
+    </div>
   );
 }
 
