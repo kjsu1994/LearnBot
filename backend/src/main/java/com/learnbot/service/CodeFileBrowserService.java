@@ -20,7 +20,7 @@ public class CodeFileBrowserService {
     }
 
     public List<CodeFileSummary> listFiles(UUID repositoryId, String query, Integer limit) {
-        int safeLimit = limit == null ? 80 : Math.max(1, Math.min(limit, 200));
+        int safeLimit = limit == null ? 200 : Math.max(1, Math.min(limit, 200));
         return repository.listActiveFiles(repositoryId, query, safeLimit);
     }
 

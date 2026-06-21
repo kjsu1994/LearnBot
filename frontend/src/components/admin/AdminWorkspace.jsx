@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Bot, CheckCircle2, Database, Download, FileUp, Globe, Info, Loader2, LockKeyhole, RefreshCw, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { IconActivity, IconDatabase, IconFiles, IconRefresh, IconSettings, IconShieldLock, IconUsersGroup, IconWorld } from '@tabler/icons-react';
 import { defaultSpaceId } from '../../config/constants.js';
@@ -1024,8 +1025,8 @@ function AdminWorkspace({
 }
 
 function AdminUserModal({ title, subtitle, icon, children, onClose, className = '', bodyClassName = '' }) {
-  return (
-    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+  const modal = (
+    <div className="code-modal-backdrop admin-modal-portal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
       <section className={`code-modal document-preview-modal admin-user-modal ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby="admin-user-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
@@ -1045,6 +1046,9 @@ function AdminUserModal({ title, subtitle, icon, children, onClose, className = 
       </section>
     </div>
   );
+
+  if (typeof document === 'undefined') return modal;
+  return createPortal(modal, document.body);
 }
 
 export { AdminWorkspace };

@@ -3080,6 +3080,139 @@
   background: rgba(10, 10, 11, 0.96);
   border-color: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.86);
+  position: relative;
+  z-index: 10001;
+}
+
+.workspace-shell-v3 .code-modal-backdrop {
+  z-index: 10000;
+}
+
+body > .code-modal-backdrop {
+  z-index: 10000;
+}
+
+body > .admin-modal-portal-backdrop {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 2147483000 !important;
+}
+
+body > .admin-modal-portal-backdrop::before {
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
+body > .code-modal-backdrop .admin-user-modal,
+body > .code-modal-backdrop .allowed-domain-modal {
+  position: relative;
+  z-index: 10001;
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal,
+body > .admin-modal-portal-backdrop .allowed-domain-modal {
+  background: rgba(10, 10, 11, 0.96);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 32px 120px rgba(0, 0, 0, 0.58);
+  color: rgba(255, 255, 255, 0.86);
+  position: relative;
+  z-index: 2147483001 !important;
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .code-modal-header,
+body > .admin-modal-portal-backdrop .allowed-domain-modal .code-modal-header {
+  background: rgba(255, 255, 255, 0.035);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .code-modal-title h2,
+body > .admin-modal-portal-backdrop .allowed-domain-modal .code-modal-title h2 {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .code-modal-title p,
+body > .admin-modal-portal-backdrop .allowed-domain-modal .code-modal-title p {
+  color: rgba(255, 255, 255, 0.48);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-modal-body {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 34%),
+    rgba(10, 10, 11, 0.96);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-form {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-editor-head strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-editor-head small,
+body > .admin-modal-portal-backdrop .allowed-domain-form > .field-help {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-form textarea {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    rgba(10, 10, 11, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.9);
+  outline: none;
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-form textarea:focus {
+  border-color: rgba(139, 92, 246, 0.48);
+  box-shadow:
+    0 0 0 3px rgba(139, 92, 246, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-footer {
+  background:
+    linear-gradient(180deg, rgba(18, 18, 20, 0.82), rgba(10, 10, 11, 0.96));
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-footer button {
+  align-items: center;
+  background: rgba(139, 92, 246, 0.88);
+  border: 1px solid rgba(196, 181, 253, 0.26);
+  border-radius: 10px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-footer .ghost-button {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+body > .admin-modal-portal-backdrop .allowed-domain-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.workspace-shell-v3 .code-modal-backdrop:has(.allowed-domain-modal) {
+  z-index: 10000;
 }
 
 .workspace-shell-v3 .admin-user-modal .code-modal-header,
@@ -3096,6 +3229,76 @@
 .workspace-shell-v3 .admin-user-modal .code-modal-title p,
 .workspace-shell-v3 .allowed-domain-modal .code-modal-title p {
   color: rgba(255, 255, 255, 0.48);
+}
+
+.workspace-shell-v3 .allowed-domain-modal-body {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 34%),
+    rgba(10, 10, 11, 0.96);
+}
+
+.workspace-shell-v3 .allowed-domain-form {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.workspace-shell-v3 .allowed-domain-editor-head strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-shell-v3 .allowed-domain-editor-head small,
+.workspace-shell-v3 .allowed-domain-form > .field-help {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.workspace-shell-v3 .allowed-domain-form textarea {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    rgba(10, 10, 11, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.9);
+  outline: none;
+}
+
+.workspace-shell-v3 .allowed-domain-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.workspace-shell-v3 .allowed-domain-form textarea:focus {
+  border-color: rgba(139, 92, 246, 0.48);
+  box-shadow:
+    0 0 0 3px rgba(139, 92, 246, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.workspace-shell-v3 .allowed-domain-footer {
+  background:
+    linear-gradient(180deg, rgba(18, 18, 20, 0.82), rgba(10, 10, 11, 0.96));
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.workspace-shell-v3 .allowed-domain-footer button {
+  align-items: center;
+  background: rgba(139, 92, 246, 0.88);
+  border: 1px solid rgba(196, 181, 253, 0.26);
+  border-radius: 10px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
+.workspace-shell-v3 .allowed-domain-footer .ghost-button {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.workspace-shell-v3 .allowed-domain-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .workspace-shell-v3 .workspace-topbar-v3 {

@@ -575,7 +575,7 @@ export default function App() {
     if (!repositoryId) return;
     const params = new URLSearchParams();
     if (queryText) params.set('query', queryText);
-    params.set('limit', '80');
+    params.set('limit', '200');
     const data = await request(`/api/code/repositories/${repositoryId}/files?${params.toString()}`);
     setCodeFiles(data || []);
   }
