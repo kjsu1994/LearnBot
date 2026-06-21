@@ -62,7 +62,7 @@ function SavedAnswersWorkspace({
       <div className="workspace-product-hero saved-product-hero">
         <div>
           <Badge variant="secondary">Knowledge Library</Badge>
-          <h1>저장된 답변 라이브러리</h1>
+          <h1>라이브러리</h1>
           <p>문서와 코드 RAG에서 검증한 답변을 다시 찾고 팀 지식으로 재사용합니다.</p>
         </div>
         <div className="workspace-product-metrics" aria-label="저장 답변 상태 요약">

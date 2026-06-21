@@ -4,6 +4,7 @@ import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
+import { RagAskComposer } from '../common/RagAskComposer.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
@@ -20,7 +21,7 @@ function DocumentWorkspace(props) {
       <div className="workspace-product-hero document-product-hero">
         <div>
           <Badge variant="secondary">Document RAG</Badge>
-          <h1>문서 근거 질의 워크스페이스</h1>
+          <h1>문서 어시스턴트</h1>
           <p>웹, PDF, 오피스 문서에서 원문 근거를 찾고 답변 품질을 진단합니다.</p>
         </div>
         <div className="workspace-product-metrics" aria-label="문서 RAG 상태 요약">
@@ -148,6 +149,31 @@ function DocumentWorkspace(props) {
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
         <form className="panel ask-panel rag-command-panel" onSubmit={props.ask}>
+          <RagAskComposer
+            title="문서에게 질문하기"
+            description="현재 선택한 공간의 문서 전체에서 원문 근거를 찾아 답변합니다."
+            icon={<MessageSquare size={18} />}
+            controls={(
+              <>
+                <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
+                <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
+              </>
+            )}
+            guide={<QuestionGuide guide={activeAnswerModeGuide} />}
+            value={props.question}
+            setValue={props.setQuestion}
+            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
+            placeholder={activeAnswerModeGuide.placeholder}
+            loading={props.loading('ask')}
+            disabled={!props.question.trim()}
+            submitLabel="답변 생성"
+            templates={[
+              { label: '요약', prompt: '이 문서들의 핵심 내용을 출처와 함께 요약해줘.' },
+              { label: '절차', prompt: '관련 절차를 단계별로 정리하고 각 단계의 근거를 알려줘.' },
+              { label: '표/수치', prompt: '질문과 관련된 표, 수치, 조건을 원문 근거와 함께 찾아줘.' },
+              { label: '출처 중심', prompt: '답변보다 근거 문서와 인용 위치를 중심으로 정리해줘.' },
+            ]}
+          />
           <div className="panel-title">
             <MessageSquare size={18} />
             <div>

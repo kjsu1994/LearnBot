@@ -5,6 +5,7 @@ import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChan
 import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
+import { RagAskComposer } from '../common/RagAskComposer.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
@@ -48,7 +49,7 @@ function CodeWorkspace(props) {
       <div className="workspace-product-hero code-product-hero">
         <div>
           <Badge variant="secondary">Code RAG</Badge>
-          <h1>코드 어시스턴트 콘솔</h1>
+          <h1>코드 어시스턴트</h1>
           <p>저장소의 실제 파일, 심볼, 참조 위치를 근거로 코드 질문에 답합니다.</p>
         </div>
         <div className="workspace-product-metrics" aria-label="코드 RAG 상태 요약">
@@ -61,6 +62,37 @@ function CodeWorkspace(props) {
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
         <form className="panel ask-panel rag-command-panel" onSubmit={askCode}>
+          <RagAskComposer
+            title="코드에게 질문하기"
+            description="파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 분석합니다."
+            icon={<MessageSquare size={18} />}
+            controls={(
+              <>
+                <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
+                <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
+              </>
+            )}
+            guide={<QuestionGuide guide={activeCodeModeGuide} />}
+            value={codeQuestion}
+            setValue={setCodeQuestion}
+            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
+            placeholder={activeCodeModeGuide.placeholder}
+            loading={loading('code-ask')}
+            disabled={!codeQuestion.trim()}
+            submitLabel="코드 질문"
+            templates={[
+              { label: '구조 요약', prompt: '선택한 저장소의 주요 구조와 진입점을 근거와 함께 요약해줘.' },
+              { label: '오류 원인', prompt: '이 오류가 발생할 수 있는 코드 경로와 수정 후보를 근거와 함께 알려줘.' },
+              { label: '참조 추적', prompt: '이 기능이 호출되는 위치와 영향 범위를 파일/라인 근거와 함께 추적해줘.' },
+              { label: '변경 영향', prompt: '이 코드를 변경하면 영향을 받을 수 있는 모듈과 테스트 포인트를 알려줘.' },
+            ]}
+            footer={selectedRepository && (
+              <div className="detail-box compact-box">
+                <strong>{selectedRepository.name}</strong>
+                <small>{selectedRepository.lastIndexedCommit ? `commit ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : '아직 인덱싱된 commit이 없습니다.'}</small>
+              </div>
+            )}
+          />
           <div className="panel-title">
             <MessageSquare size={18} />
             <div>

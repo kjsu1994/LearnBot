@@ -745,7 +745,7 @@ function WorkspaceShell({
         <header className="topbar workspace-topbar-v3">
           <div>
             <Badge className="mb-2 w-fit" variant="outline">Private RAG Workspace</Badge>
-            <h1>런봇</h1>
+            <h1>LearnBot</h1>
             <p>
               {selectedSpace?.name || '공간'} 안에서 사내 위키, 문서, 코드 저장소를 근거 기반으로 검색하고 답변합니다.
             </p>
