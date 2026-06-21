@@ -14,11 +14,14 @@ import com.learnbot.dto.SearchResult;
 import com.learnbot.dto.StoredObjectSummary;
 import com.learnbot.service.Chunk;
 import com.learnbot.service.CrawlAuditEvent;
+import com.learnbot.service.DocumentEntityMentionExtractor;
 import com.learnbot.service.DocumentGraphEdge;
 import com.learnbot.service.DocumentGraphNode;
+import com.learnbot.service.DocumentPageMetadata;
 import com.learnbot.service.StoredObject;
 import com.learnbot.service.StoredSource;
 import com.fasterxml.jackson.core.type.TypeReference;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -42,11 +45,23 @@ public class DocumentRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final LearnBotProperties properties;
+    private final DocumentEntityMentionExtractor entityMentionExtractor;
 
     public DocumentRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, LearnBotProperties properties) {
+        this(jdbc, objectMapper, properties, new DocumentEntityMentionExtractor());
+    }
+
+    @Autowired
+    public DocumentRepository(
+            NamedParameterJdbcTemplate jdbc,
+            ObjectMapper objectMapper,
+            LearnBotProperties properties,
+            DocumentEntityMentionExtractor entityMentionExtractor
+    ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.entityMentionExtractor = entityMentionExtractor == null ? new DocumentEntityMentionExtractor() : entityMentionExtractor;
     }
 
     public UUID createSource(SourceType type, String name, String location, UUID spaceId, UUID createdBy) {
@@ -813,7 +828,7 @@ public class DocumentRepository {
 
         List<GraphChunkRow> rows = jdbc.query("""
                 SELECT d.id AS document_id, d.title, d.source_uri, d.content_type, d.metadata::text AS document_metadata,
-                       c.id AS chunk_id, c.chunk_index, c.metadata::text AS metadata
+                       c.id AS chunk_id, c.chunk_index, c.content, c.metadata::text AS metadata
                 FROM documents d
                 LEFT JOIN document_chunks c ON c.document_id = d.id
                 WHERE d.source_id = :sourceId
@@ -827,6 +842,7 @@ public class DocumentRepository {
                 fromJson(rs.getString("document_metadata")),
                 rs.getObject("chunk_id", UUID.class),
                 rs.getObject("chunk_index", Integer.class),
+                rs.getString("content"),
                 fromJson(rs.getString("metadata"))
         ));
         if (rows.isEmpty()) {
@@ -864,6 +880,7 @@ public class DocumentRepository {
             previousChunkKey = chunkKey;
             addStructureNodes(sourceId, nodes, edges, sectionKey, chunkKey, row);
             addTopicNodes(sourceId, nodes, edges, chunkKey, row);
+            addEntityMentionNodes(sourceId, nodes, edges, chunkKey, row);
         }
 
         for (DocumentGraphNode node : nodes) {
@@ -912,49 +929,50 @@ public class DocumentRepository {
         if (seedChunkIds == null || seedChunkIds.isEmpty() || spaceIds == null || spaceIds.isEmpty()) {
             return List.of();
         }
+        int safeMaxHop = Math.max(1, Math.min(maxHop, 3));
         return jdbc.query("""
-                WITH seed_nodes AS (
+                WITH RECURSIVE seed_nodes AS (
                     SELECT source_id, id
                     FROM document_graph_nodes
                     WHERE chunk_id IN (:seedChunkIds)
                 ),
-                direct_expanded AS (
-                    SELECT n.chunk_id,
-                           MAX(e.weight) AS graph_score,
-                           MAX(e.edge_type) AS edge_type
+                graph_walk AS (
+                    SELECT seed.source_id,
+                           seed.id AS node_id,
+                           seed.id AS previous_node_id,
+                           0 AS depth,
+                           1.0::double precision AS path_score,
+                           ARRAY[seed.id] AS path,
+                           NULL::varchar AS edge_type
                     FROM seed_nodes seed
-                    JOIN document_graph_edges e ON e.source_id = seed.source_id
-                     AND (e.source_node_id = seed.id OR e.target_node_id = seed.id)
-                    JOIN document_graph_nodes n ON n.source_id = e.source_id
-                     AND n.id = CASE WHEN e.source_node_id = seed.id THEN e.target_node_id ELSE e.source_node_id END
-                    WHERE n.chunk_id IS NOT NULL
-                    GROUP BY n.chunk_id
-                ),
-                structure_expanded AS (
-                    SELECT target.chunk_id,
-                           MAX((first_edge.weight + second_edge.weight) / 2.0) AS graph_score,
-                           MAX(COALESCE(second_edge.metadata ->> 'relation', second_edge.edge_type)) AS edge_type
-                    FROM seed_nodes seed
-                    JOIN document_graph_edges first_edge ON first_edge.source_id = seed.source_id
-                     AND (first_edge.source_node_id = seed.id OR first_edge.target_node_id = seed.id)
-                    JOIN document_graph_nodes bridge ON bridge.source_id = first_edge.source_id
-                     AND bridge.id = CASE WHEN first_edge.source_node_id = seed.id THEN first_edge.target_node_id ELSE first_edge.source_node_id END
-                     AND bridge.chunk_id IS NULL
-                    JOIN document_graph_edges second_edge ON second_edge.source_id = bridge.source_id
-                     AND (second_edge.source_node_id = bridge.id OR second_edge.target_node_id = bridge.id)
-                    JOIN document_graph_nodes target ON target.source_id = second_edge.source_id
-                     AND target.id = CASE WHEN second_edge.source_node_id = bridge.id THEN second_edge.target_node_id ELSE second_edge.source_node_id END
-                    WHERE target.chunk_id IS NOT NULL
-                    GROUP BY target.chunk_id
+                    UNION ALL
+                    SELECT next_node.source_id,
+                           next_node.id AS node_id,
+                           walk.node_id AS previous_node_id,
+                           walk.depth + 1 AS depth,
+                           (walk.path_score * e.weight * POWER(0.75::double precision, GREATEST(walk.depth, 0))) AS path_score,
+                           walk.path || next_node.id,
+                           e.edge_type
+                    FROM graph_walk walk
+                    JOIN document_graph_edges e ON e.source_id = walk.source_id
+                     AND (e.source_node_id = walk.node_id OR e.target_node_id = walk.node_id)
+                    JOIN document_graph_nodes next_node ON next_node.source_id = e.source_id
+                     AND next_node.id = CASE WHEN e.source_node_id = walk.node_id THEN e.target_node_id ELSE e.source_node_id END
+                    WHERE walk.depth < :maxHop
+                      AND next_node.id <> ALL(walk.path)
                 ),
                 expanded AS (
-                    SELECT chunk_id, MAX(graph_score) AS graph_score, MAX(edge_type) AS edge_type
-                    FROM (
-                        SELECT * FROM direct_expanded
-                        UNION ALL
-                        SELECT * FROM structure_expanded
-                    ) combined
-                    GROUP BY chunk_id
+                    SELECT n.chunk_id,
+                           MAX(walk.path_score) AS graph_score,
+                           MIN(walk.depth) AS graph_depth,
+                           MAX(COALESCE(walk.edge_type, 'DOCUMENT_GRAPH')) AS edge_type
+                    FROM graph_walk walk
+                    JOIN document_graph_nodes n ON n.source_id = walk.source_id
+                     AND n.id = walk.node_id
+                    WHERE walk.depth > 0
+                      AND n.chunk_id IS NOT NULL
+                      AND n.chunk_id NOT IN (:seedChunkIds)
+                    GROUP BY n.chunk_id
                 )
                 SELECT c.id AS chunk_id,
                        d.id AS document_id,
@@ -966,6 +984,7 @@ public class DocumentRepository {
                        c.content,
                        c.metadata::text AS metadata,
                        e.graph_score AS score,
+                       e.graph_depth,
                        e.edge_type AS graph_edge_type
                 FROM expanded e
                 JOIN document_chunks c ON c.id = e.chunk_id
@@ -974,13 +993,13 @@ public class DocumentRepository {
                 WHERE s.deleted_at IS NULL
                   AND s.space_id IN (:spaceIds)
                   AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
-                  AND c.id NOT IN (:seedChunkIds)
-                ORDER BY e.graph_score DESC, c.chunk_index
+                ORDER BY e.graph_score DESC, e.graph_depth, c.chunk_index
                 LIMIT :limit
                 """, new MapSqlParameterSource()
                 .addValue("seedChunkIds", seedChunkIds)
                 .addValue("spaceIds", spaceIds)
                 .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("maxHop", safeMaxHop)
                 .addValue("limit", Math.max(1, limit)), this::mapGraphSearchResult);
     }
 
@@ -989,7 +1008,7 @@ public class DocumentRepository {
         String headingPath = string(metadata, "headingPath");
         String sectionTitle = string(metadata, "sectionTitle");
         String tableId = string(metadata, "tableId");
-        Integer pageNumber = integer(metadata.get("pageNumber"));
+        Integer pageNumber = DocumentPageMetadata.canonicalPageNumber(metadata);
         for (ContextChunkSeed seed : seeds) {
             if (seed == null || !candidate.documentId().equals(seed.documentId())) {
                 continue;
@@ -1043,7 +1062,7 @@ public class DocumentRepository {
         if (!heading.isBlank()) {
             return heading;
         }
-        Object page = row.metadata() == null ? null : row.metadata().get("pageStart");
+        Integer page = DocumentPageMetadata.canonicalPageNumber(row.metadata());
         if (page != null) {
             return "Page " + page;
         }
@@ -1076,7 +1095,10 @@ public class DocumentRepository {
         if (row.metadata() != null) {
             copyIfPresent(row.metadata(), metadata, "headingPath");
             copyIfPresent(row.metadata(), metadata, "sectionTitle");
-            copyIfPresent(row.metadata(), metadata, "pageNumber");
+            Integer pageNumber = DocumentPageMetadata.canonicalPageNumber(row.metadata());
+            if (pageNumber != null) {
+                metadata.put("pageNumber", pageNumber);
+            }
         }
         metadata.putIfAbsent("headingPath", "document_root");
         return metadata;
@@ -1115,6 +1137,30 @@ public class DocumentRepository {
         }
     }
 
+    private void addEntityMentionNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String chunkKey, GraphChunkRow row) {
+        try {
+            String text = (row.title() == null ? "" : row.title()) + "\n" + (row.content() == null ? "" : row.content());
+            for (DocumentEntityMentionExtractor.EntityMention mention : entityMentionExtractor.extract(text, row.metadata())) {
+                String normalizedValue = mention.value().toLowerCase(java.util.Locale.ROOT);
+                String entityKey = "entity:" + sourceId + ":" + mention.entityType() + ":" + normalizedValue;
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("entityType", mention.entityType());
+                metadata.put("entityValue", mention.value());
+                metadata.put("entitySource", "heuristic");
+                if (mention.schemaName() != null && !mention.schemaName().isBlank()) {
+                    metadata.put("schemaName", mention.schemaName());
+                }
+                if (mention.documentType() != null && !mention.documentType().isBlank()) {
+                    metadata.put("documentType", mention.documentType());
+                }
+                addNode(nodes, entityKey, "ENTITY", mention.value(), null, null, metadata);
+                addEdge(edges, chunkKey, entityKey, "CHUNK_MENTIONS_ENTITY", 0.62, metadata);
+            }
+        } catch (RuntimeException ignored) {
+            // Graph rebuild should not fail because optional heuristic entity extraction failed.
+        }
+    }
+
     private void addStructureNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String sectionKey, String chunkKey, GraphChunkRow row) {
         if (row.metadata() == null) {
             return;
@@ -1135,7 +1181,7 @@ public class DocumentRepository {
                 addEdge(edges, tableKey, chunkKey, "SECTION_CONTAINS_CHUNK", 0.90, Map.of("relation", "same_table"));
             }
         }
-        Integer pageNumber = integer(row.metadata().get("pageNumber"));
+        Integer pageNumber = DocumentPageMetadata.canonicalPageNumber(row.metadata());
         if (pageNumber != null) {
             String pageKey = "page:" + row.documentId() + ":" + pageNumber;
             addNode(nodes, pageKey, "PAGE", "Page " + pageNumber, row.documentId(), null, Map.of("pageNumber", pageNumber));
@@ -1171,7 +1217,7 @@ public class DocumentRepository {
 
     private SearchResult mapGraphSearchResult(ResultSet rs, int rowNum) throws SQLException {
         Map<String, Object> metadata = new LinkedHashMap<>(fromJson(rs.getString("metadata")));
-        metadata.put("graphDepth", 1);
+        metadata.put("graphDepth", rs.getInt("graph_depth"));
         metadata.put("graphEdgeType", rs.getString("graph_edge_type"));
         return new SearchResult(
                 rs.getObject("chunk_id", UUID.class),
@@ -1308,6 +1354,7 @@ public class DocumentRepository {
             Map<String, Object> documentMetadata,
             UUID chunkId,
             Integer chunkIndex,
+            String content,
             Map<String, Object> metadata
     ) {
     }

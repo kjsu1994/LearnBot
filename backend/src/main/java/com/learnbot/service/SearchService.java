@@ -22,18 +22,30 @@ public class SearchService {
     private final OllamaClient ollamaClient;
     private final DocumentReranker documentReranker;
     private final LearnBotProperties properties;
+    private final DocumentDomainProfileService domainProfileService;
     private final Map<String, CachedEmbedding> embeddingCache = new ConcurrentHashMap<>();
 
     public SearchService(DocumentRepository repository, OllamaClient ollamaClient) {
-        this(repository, ollamaClient, null, null);
+        this(repository, ollamaClient, null, null, new DocumentDomainProfileService());
+    }
+
+    public SearchService(DocumentRepository repository, OllamaClient ollamaClient, DocumentReranker documentReranker, LearnBotProperties properties) {
+        this(repository, ollamaClient, documentReranker, properties, new DocumentDomainProfileService());
     }
 
     @Autowired
-    public SearchService(DocumentRepository repository, OllamaClient ollamaClient, DocumentReranker documentReranker, LearnBotProperties properties) {
+    public SearchService(
+            DocumentRepository repository,
+            OllamaClient ollamaClient,
+            DocumentReranker documentReranker,
+            LearnBotProperties properties,
+            DocumentDomainProfileService domainProfileService
+    ) {
         this.repository = repository;
         this.ollamaClient = ollamaClient;
         this.documentReranker = documentReranker;
         this.properties = properties;
+        this.domainProfileService = domainProfileService == null ? new DocumentDomainProfileService() : domainProfileService;
     }
 
     public List<SearchResult> search(String query, SearchFilter filter, int limit) {
@@ -159,6 +171,11 @@ public class SearchService {
         }
         if (normalized.contains("요약")) {
             values.add("핵심 요약 주요 내용");
+        }
+        try {
+            values.addAll(domainProfileService.expandedQueries(safeQuery));
+        } catch (RuntimeException ignored) {
+            // Keep deterministic base expansions when profile lookup fails.
         }
         return values.stream()
                 .map(String::trim)

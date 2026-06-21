@@ -61,6 +61,17 @@ class SearchServiceTest {
     }
 
     @Test
+    void expandsSatelliteGseQuestionWithProfileTerms() {
+        SearchService service = new SearchService(null, null);
+
+        List<String> expanded = service.expandedQueries("How does the ICD command telemetry interface work?");
+
+        assertThat(expanded)
+                .contains("How does the ICD command telemetry interface work?")
+                .anySatisfy(query -> assertThat(query).contains("ICD").contains("telemetry"));
+    }
+
+    @Test
     void cachesQueryEmbeddingUntilTtlExpires() {
         DocumentRepository repository = mock(DocumentRepository.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);

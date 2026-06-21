@@ -378,7 +378,7 @@ public class Chunker {
             if (!headingPath.isBlank()) {
                 putIfNotBlank(metadata, "sectionTitle", lastHeading(headingPath));
             }
-            Integer page = sameNumber(metadata.get("pageStart"), metadata.get("pageEnd"));
+            Integer page = DocumentPageMetadata.canonicalPageNumber(metadata);
             if (page != null) {
                 metadata.putIfAbsent("pageNumber", page);
             }

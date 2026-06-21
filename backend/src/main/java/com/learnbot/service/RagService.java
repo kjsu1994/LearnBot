@@ -45,6 +45,7 @@ public class RagService {
     private final DocumentRepository documentRepository;
     private final LearnBotProperties properties;
     private final RagPipelineService pipelineService;
+    private final DocumentDomainProfileService domainProfileService;
 
     public RagService(
             SearchService searchService,
@@ -52,7 +53,17 @@ public class RagService {
             DocumentRepository documentRepository,
             LearnBotProperties properties
     ) {
-        this(searchService, ollamaClient, documentRepository, properties, new RagPipelineService(ollamaClient, properties));
+        this(searchService, ollamaClient, documentRepository, properties, new RagPipelineService(ollamaClient, properties), new DocumentDomainProfileService());
+    }
+
+    public RagService(
+            SearchService searchService,
+            OllamaClient ollamaClient,
+            DocumentRepository documentRepository,
+            LearnBotProperties properties,
+            RagPipelineService pipelineService
+    ) {
+        this(searchService, ollamaClient, documentRepository, properties, pipelineService, new DocumentDomainProfileService());
     }
 
     @Autowired
@@ -61,13 +72,15 @@ public class RagService {
             OllamaClient ollamaClient,
             DocumentRepository documentRepository,
             LearnBotProperties properties,
-            RagPipelineService pipelineService
+            RagPipelineService pipelineService,
+            DocumentDomainProfileService domainProfileService
     ) {
         this.searchService = searchService;
         this.ollamaClient = ollamaClient;
         this.documentRepository = documentRepository;
         this.properties = properties;
         this.pipelineService = pipelineService;
+        this.domainProfileService = domainProfileService == null ? new DocumentDomainProfileService() : domainProfileService;
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode) {
@@ -540,7 +553,7 @@ public class RagService {
                         result.documentId(),
                         metadataString(result, "headingPath"),
                         metadataString(result, "sectionTitle"),
-                        metadataInt(result, "pageNumber", -1) < 0 ? null : metadataInt(result, "pageNumber", -1),
+                        DocumentPageMetadata.canonicalPageNumber(result.metadata()),
                         metadataString(result, "tableId"),
                         result.score()
                 ))
@@ -609,7 +622,7 @@ public class RagService {
         }
         try {
             int limit = Math.max(1, properties.getDocument().getGraph().getMaxExpandedResults());
-            int maxHop = Math.max(1, properties.getDocument().getGraph().getMaxHop());
+            int maxHop = documentGraphMaxHop();
             for (SearchResult expanded : documentRepository.graphExpandedChunks(seedChunkIds, limit, maxHop, spaceIds, selectedSpaceId)) {
                 if (merged.containsKey(expanded.chunkId())) {
                     continue;
@@ -638,6 +651,10 @@ public class RagService {
                 result.metadata(),
                 result.score() + value
         );
+    }
+
+    private int documentGraphMaxHop() {
+        return Math.max(1, Math.min(properties.getDocument().getGraph().getMaxHop(), 3));
     }
 
     private SearchResult withMetadata(SearchResult result, Map<String, Object> additions) {
@@ -810,40 +827,19 @@ public class RagService {
         } else if ("context_related".equals(role) || "document_graph".equals(role)) {
             score += 0.07;
         }
-        if (expectedDocumentTypes(question).contains(metadataString(result, "documentType"))) {
+        if (domainExpectedDocumentTypes(question).contains(metadataString(result, "documentType"))) {
             score += 0.08;
         }
         score -= Math.min(0.24, seenForDocument * 0.06);
         return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument));
     }
 
-    private Set<String> expectedDocumentTypes(String question) {
-        String normalized = normalizeForSearch(question);
-        Set<String> types = new HashSet<>();
-        if (normalized.contains("requirement") || normalized.contains("shall") || normalized.contains("요구") || normalized.contains("요건")) {
-            types.add("REQUIREMENT_SPEC");
+    private Set<String> domainExpectedDocumentTypes(String question) {
+        try {
+            return domainProfileService.expectedDocumentTypes(question);
+        } catch (RuntimeException ignored) {
+            return Set.of();
         }
-        if (normalized.contains("design") || normalized.contains("architecture") || normalized.contains("설계") || normalized.contains("구조")) {
-            types.add("DESIGN_SPEC");
-        }
-        if (normalized.contains("icd") || normalized.contains("interface") || normalized.contains("command") || normalized.contains("telemetry")
-                || normalized.contains("인터페이스") || normalized.contains("명령") || normalized.contains("텔레메트리")) {
-            types.add("ICD");
-        }
-        if (normalized.contains("test procedure") || normalized.contains("시험 절차") || normalized.contains("검증 절차")) {
-            types.add("TEST_PROCEDURE");
-        }
-        if (normalized.contains("test result") || normalized.contains("시험 결과") || normalized.contains("pass") || normalized.contains("fail")) {
-            types.add("TEST_RESULT");
-        }
-        if (normalized.contains("operation") || normalized.contains("manual") || normalized.contains("운용") || normalized.contains("사용자")) {
-            types.add("OPERATION_MANUAL");
-        }
-        if (normalized.contains("troubleshooting") || normalized.contains("fault") || normalized.contains("error code")
-                || normalized.contains("장애") || normalized.contains("오류") || normalized.contains("조치")) {
-            types.add("TROUBLESHOOTING_GUIDE");
-        }
-        return types;
     }
 
     private String evidenceRole(AnswerMode answerMode, SearchResult result) {
@@ -1963,8 +1959,8 @@ public class RagService {
         if (properties.getDocument().getGraph().isEnabled()) {
             long graphCount = results.stream().filter(result -> metadataBoolean(result, "documentGraphExpanded")).count();
             notes.add("Document graph retrieval enabled with maxHop="
-                    + Math.max(1, properties.getDocument().getGraph().getMaxHop())
-                + "; graph-expanded citations=" + graphCount + ".");
+                    + documentGraphMaxHop()
+                    + "; graph-expanded citations=" + graphCount + ".");
         }
         if (results != null && !results.isEmpty()) {
             Map<String, Long> schemaCounts = results.stream()

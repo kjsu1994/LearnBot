@@ -1,12 +1,25 @@
 package com.learnbot.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 @Component
 public class DocumentTypeClassifier {
+    private final DocumentDomainProfileService domainProfileService;
+
+    public DocumentTypeClassifier() {
+        this(new DocumentDomainProfileService());
+    }
+
+    @Autowired
+    public DocumentTypeClassifier(DocumentDomainProfileService domainProfileService) {
+        this.domainProfileService = domainProfileService;
+    }
+
     public Classification classify(ExtractedDocument document) {
         String text = (
                 safe(document.title()) + " "
@@ -14,18 +27,10 @@ public class DocumentTypeClassifier {
                         + safe(document.contentType()) + " "
                         + safe(document.content())
         ).toLowerCase(Locale.ROOT);
-        Map<String, String[]> signals = Map.of(
-                "REQUIREMENT_SPEC", new String[]{"requirement", "shall", "요구사항", "요건", "specification"},
-                "DESIGN_SPEC", new String[]{"design", "architecture", "module", "설계", "구조"},
-                "ICD", new String[]{"icd", "interface control", "interface", "command", "telemetry"},
-                "TEST_PROCEDURE", new String[]{"test procedure", "procedure", "시험 절차", "검증 절차"},
-                "TEST_RESULT", new String[]{"test result", "result", "시험 결과", "pass", "fail"},
-                "OPERATION_MANUAL", new String[]{"operation manual", "manual", "운용", "사용자", "operator"},
-                "TROUBLESHOOTING_GUIDE", new String[]{"troubleshooting", "fault", "error code", "장애", "오류", "조치"}
-        );
+        Map<String, List<String>> signals = domainProfileService.documentTypeSignals();
         String bestType = DocumentSchemaProfileService.GENERAL_DOCUMENT;
         int bestScore = 0;
-        for (Map.Entry<String, String[]> entry : signals.entrySet()) {
+        for (Map.Entry<String, List<String>> entry : signals.entrySet()) {
             int score = 0;
             for (String signal : entry.getValue()) {
                 if (text.contains(signal.toLowerCase(Locale.ROOT))) {
