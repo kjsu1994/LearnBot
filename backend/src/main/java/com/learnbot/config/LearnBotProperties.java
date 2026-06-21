@@ -558,6 +558,19 @@ public class LearnBotProperties {
             private double minTopScore = 0.30;
             private double minCoverage = 0.15;
             private String defaultDocumentSpeedProfile = "BALANCED";
+            @Min(1)
+            private int rewriteMaxOutputTokens = 192;
+
+            @Min(1)
+            private int rewriteTimeoutSeconds = 3;
+
+            @Min(1)
+            private int maxQueryCountBalanced = 2;
+
+            @Min(512)
+            private int promptTokenBudgetBalanced = 3500;
+
+            private boolean answerRepairEnabled = true;
             private boolean queryEmbeddingCacheEnabled = true;
 
             @Min(1)
@@ -661,6 +674,46 @@ public class LearnBotProperties {
 
             public void setDefaultDocumentSpeedProfile(String defaultDocumentSpeedProfile) {
                 this.defaultDocumentSpeedProfile = defaultDocumentSpeedProfile;
+            }
+
+            public int getRewriteMaxOutputTokens() {
+                return rewriteMaxOutputTokens;
+            }
+
+            public void setRewriteMaxOutputTokens(int rewriteMaxOutputTokens) {
+                this.rewriteMaxOutputTokens = rewriteMaxOutputTokens;
+            }
+
+            public int getRewriteTimeoutSeconds() {
+                return rewriteTimeoutSeconds;
+            }
+
+            public void setRewriteTimeoutSeconds(int rewriteTimeoutSeconds) {
+                this.rewriteTimeoutSeconds = rewriteTimeoutSeconds;
+            }
+
+            public int getMaxQueryCountBalanced() {
+                return maxQueryCountBalanced;
+            }
+
+            public void setMaxQueryCountBalanced(int maxQueryCountBalanced) {
+                this.maxQueryCountBalanced = maxQueryCountBalanced;
+            }
+
+            public int getPromptTokenBudgetBalanced() {
+                return promptTokenBudgetBalanced;
+            }
+
+            public void setPromptTokenBudgetBalanced(int promptTokenBudgetBalanced) {
+                this.promptTokenBudgetBalanced = promptTokenBudgetBalanced;
+            }
+
+            public boolean isAnswerRepairEnabled() {
+                return answerRepairEnabled;
+            }
+
+            public void setAnswerRepairEnabled(boolean answerRepairEnabled) {
+                this.answerRepairEnabled = answerRepairEnabled;
             }
 
             public boolean isQueryEmbeddingCacheEnabled() {

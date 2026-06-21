@@ -70,6 +70,11 @@ learnbot:
       min-top-score: ${RAG_PIPELINE_MIN_TOP_SCORE:0.30}
       min-coverage: ${RAG_PIPELINE_MIN_COVERAGE:0.15}
       default-document-speed-profile: ${RAG_PIPELINE_DEFAULT_DOCUMENT_SPEED_PROFILE:BALANCED}
+      rewrite-max-output-tokens: ${RAG_PIPELINE_REWRITE_MAX_OUTPUT_TOKENS:192}
+      rewrite-timeout-seconds: ${RAG_PIPELINE_REWRITE_TIMEOUT_SECONDS:3}
+      max-query-count-balanced: ${RAG_PIPELINE_MAX_QUERY_COUNT_BALANCED:2}
+      prompt-token-budget-balanced: ${RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED:3500}
+      answer-repair-enabled: ${RAG_PIPELINE_ANSWER_REPAIR_ENABLED:true}
       query-embedding-cache-enabled: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_ENABLED:true}
       query-embedding-cache-max-entries: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_MAX_ENTRIES:1024}
       query-embedding-cache-ttl-seconds: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_TTL_SECONDS:3600}

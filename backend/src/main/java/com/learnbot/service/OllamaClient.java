@@ -10,6 +10,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.LinkedHashMap;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -78,12 +79,16 @@ public class OllamaClient {
     }
 
     public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role, Integer maxOutputTokens) {
+        return chatResult(systemPrompt, userPrompt, role, maxOutputTokens, null);
+    }
+
+    public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role, Integer maxOutputTokens, Duration timeout) {
         List<AdminSettingsService.LlmSettings> candidates = candidates(role);
         RuntimeException lastFailure = null;
         for (int index = 0; index < candidates.size(); index++) {
             AdminSettingsService.LlmSettings settings = candidates.get(index);
             try {
-                return chatResultWith(settings, systemPrompt, userPrompt, index > 0, maxOutputTokens);
+                return chatResultWith(settings, systemPrompt, userPrompt, index > 0, maxOutputTokens, timeout);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
                 if (index < candidates.size() - 1) {
@@ -115,7 +120,7 @@ public class OllamaClient {
         return primaryRequests.get() > 0;
     }
 
-    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens) {
+    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout) {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("temperature", properties.getOllama().getTemperature());
         options.put("num_ctx", properties.getOllama().getContextWindow());
@@ -124,7 +129,7 @@ public class OllamaClient {
             options.put("num_predict", requestedMaxOutputTokens);
         }
 
-        ChatResponse response = webClientBuilder.clone()
+        var responseMono = webClientBuilder.clone()
                 .baseUrl(settings.baseUrl())
                 .build()
                 .post()
@@ -139,8 +144,8 @@ public class OllamaClient {
                         "options", options
                 ))
                 .retrieve()
-                .bodyToMono(ChatResponse.class)
-                .block();
+                .bodyToMono(ChatResponse.class);
+        ChatResponse response = timeout == null ? responseMono.block() : responseMono.block(timeout);
 
         if (response == null || response.message() == null || response.message().content() == null) {
             throw new IllegalArgumentException("Ollama returned an empty chat response.");

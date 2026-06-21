@@ -138,8 +138,10 @@ public class RagService {
         }
 
         long contextStarted = System.nanoTime();
-        String context = buildContext(question, answerMode, questionType, retrieval.effectiveProfile(), citations);
         String systemPrompt = systemPrompt(answerMode, questionType);
+        ContextBundle contextBundle = buildBudgetedContext(question, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, citations);
+        citations = contextBundle.citations();
+        String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
 
         String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
@@ -158,20 +160,23 @@ public class RagService {
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
             String qualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
-            if (qualityReason != null && pipelineService.maxIterations() > 1) {
+            if (qualityReason != null && shouldRepairAnswer(qualityReason, retrieval.effectiveProfile())) {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
-                String retryPrompt = userPrompt
-                        + "\n\n이전 답변은 품질 검사에 실패했습니다. 실패 사유: " + qualityReason + "."
-                        + "\n인용된 문맥만 사용해 한국어로 다시 작성하세요. 모든 사실 주장에는 [n] 형식의 근거 번호를 붙이세요.";
+                List<SearchResult> retryCitations = compactRepairCitations(citations, answerMode, questionType, retrieval.effectiveProfile());
+                String retryContext = buildContext(question, answerMode, questionType, DocumentSpeedProfile.FAST, retryCitations);
+                String retryPrompt = "Question:\n" + question + "\n\nCompact context:\n" + retryContext
+                        + "\n\nPrevious answer failed validation because: " + qualityReason + "."
+                        + "\nAnswer briefly in Korean and attach evidence numbers like [1] to every factual claim.";
                 long retryStarted = System.nanoTime();
-                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\n반드시 한국어로 간결하게 답하고, 사실 주장마다 근거 번호를 엄격하게 붙이세요.", retryPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
+                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nKeep the answer concise and citation-grounded.", retryPrompt, repairMaxOutputTokens(answerMode, retrieval.effectiveProfile()));
                 llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
-                if (qualityFailureReason(retryAnswer, citations.size(), retryResult.doneReason()) == null) {
+                if (qualityFailureReason(retryAnswer, retryCitations.size(), retryResult.doneReason()) == null) {
                     answer = retryAnswer;
                     answerDoneReason = retryResult.doneReason();
                     finalChatResult = retryResult;
+                    citations = retryCitations;
                     answerRetried = true;
                 }
             }
@@ -283,6 +288,7 @@ public class RagService {
         if (!isCountQuestion(question)
                 && (!assessment.sufficient() || needsMoreOverviewEvidence(citations, questionType))
                 && speedProfile != DocumentSpeedProfile.FAST
+                && shouldAttemptRewrite(citations, assessment, questionType, effectiveProfile)
                 && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
                     question,
@@ -294,6 +300,7 @@ public class RagService {
                     .filter(query -> !query.isBlank())
                     .filter(query -> !queriesUsed.contains(query))
                     .distinct()
+                    .limit(maxRetryQueryCount(effectiveProfile))
                     .toList();
             int retrySearchLimit = searchLimit;
             DocumentSpeedProfile retryProfile = effectiveProfile;
@@ -731,6 +738,38 @@ public class RagService {
         };
     }
 
+    private boolean shouldAttemptRewrite(
+            List<SearchResult> citations,
+            RagPipelineService.EvidenceAssessment assessment,
+            DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile
+    ) {
+        if (speedProfile == DocumentSpeedProfile.FAST || !properties.getRag().getPipeline().isRewriteEnabled()) {
+            return false;
+        }
+        if (speedProfile == DocumentSpeedProfile.DEEP) {
+            return true;
+        }
+        int evidenceCount = citations == null ? 0 : citations.size();
+        double topScore = assessment == null ? 0.0 : assessment.topScore();
+        double coverage = assessment == null ? 0.0 : assessment.coverage();
+        if (evidenceCount == 0) {
+            return true;
+        }
+        if (isOverviewQuestionType(questionType)) {
+            return evidenceCount < 4 || coverage < 0.10;
+        }
+        return evidenceCount < 2 || topScore < 0.25 || coverage < 0.08;
+    }
+
+    private int maxRetryQueryCount(DocumentSpeedProfile speedProfile) {
+        return switch (speedProfile) {
+            case FAST -> 0;
+            case DEEP -> 4;
+            default -> Math.max(1, properties.getRag().getPipeline().getMaxQueryCountBalanced());
+        };
+    }
+
     private List<String> retryBaselineQueries(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
         List<String> queries = new ArrayList<>(searchService.expandedQueries(question));
         queries.addAll(overviewQueries(question, questionType, speedProfile));
@@ -1026,6 +1065,51 @@ public class RagService {
                             + relevantExcerpt(question, result.content(), excerptChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+    }
+
+    private ContextBundle buildBudgetedContext(
+            String question,
+            AnswerMode answerMode,
+            DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile,
+            String systemPrompt,
+            List<SearchResult> results
+    ) {
+        List<SearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
+        String context = buildContext(question, answerMode, questionType, speedProfile, selected);
+        int budget = promptTokenBudget(speedProfile);
+        int minCitations = Math.min(selected.size(), minContextCitations(answerMode, questionType));
+        while (selected.size() > minCitations
+                && estimateTokens(systemPrompt) + estimateTokens(question) + estimateTokens(context) > budget) {
+            selected.remove(selected.size() - 1);
+            context = buildContext(question, answerMode, questionType, speedProfile, selected);
+        }
+        return new ContextBundle(List.copyOf(selected), context);
+    }
+
+    private int minContextCitations(AnswerMode answerMode, DocumentQuestionType questionType) {
+        if (isOverviewQuestionType(questionType)) {
+            return 4;
+        }
+        return answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE ? 3 : 2;
+    }
+
+    private int promptTokenBudget(DocumentSpeedProfile speedProfile) {
+        int contextWindow = Math.max(2048, properties.getOllama().getContextWindow());
+        int configured = Math.max(512, properties.getRag().getPipeline().getPromptTokenBudgetBalanced());
+        return switch (speedProfile) {
+            case FAST -> Math.min(configured, Math.max(1024, contextWindow - 900));
+            case DEEP -> Math.max(configured, contextWindow - 700);
+            default -> Math.min(configured, Math.max(1800, contextWindow - 700));
+        };
+    }
+
+    private int estimateTokens(String value) {
+        String compact = safe(value).trim();
+        if (compact.isEmpty()) {
+            return 0;
+        }
+        return Math.max(1, (compact.length() + 2) / 3);
     }
 
     private String contextMetadataLabel(SearchResult result) {
@@ -1867,6 +1951,35 @@ public class RagService {
         return assessment.acceptable() ? null : assessment.reason();
     }
 
+    private boolean shouldRepairAnswer(String reason, DocumentSpeedProfile speedProfile) {
+        if (!properties.getRag().getPipeline().isAnswerRepairEnabled()
+                || speedProfile == DocumentSpeedProfile.FAST
+                || pipelineService.maxIterations() <= 1) {
+            return false;
+        }
+        String normalized = safe(reason).toLowerCase();
+        return normalized.contains("length")
+                || normalized.contains("incomplete")
+                || normalized.contains("too_short")
+                || normalized.contains("blank");
+    }
+
+    private List<SearchResult> compactRepairCitations(
+            List<SearchResult> citations,
+            AnswerMode answerMode,
+            DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile
+    ) {
+        if (citations == null || citations.isEmpty()) {
+            return List.of();
+        }
+        int limit = answerMode == AnswerMode.SUMMARY || isOverviewQuestionType(questionType) ? 5 : 4;
+        if (speedProfile == DocumentSpeedProfile.DEEP) {
+            limit++;
+        }
+        return citations.stream().limit(Math.min(citations.size(), limit)).toList();
+    }
+
     private String lowQualityReason(String answer) {
         String trimmed = safe(answer).trim();
         if (trimmed.isBlank()) {
@@ -1953,6 +2066,8 @@ public class RagService {
                     + ", outputTokens=" + timing.outputTokens()
                     + ", citations=" + results.size()
                     + ", queries=" + retrieval.queryCount()
+                    + ", embeddingCacheHits=" + retrieval.timing().embeddingCacheHits()
+                    + ", expandedQueries=" + retrieval.timing().expandedQueryCount()
                     + ", profile=" + retrieval.effectiveProfile().name() + ".");
         }
         if (isOverviewQuestionType(questionType)) {
@@ -2029,6 +2144,11 @@ public class RagService {
             case DEEP -> 1280;
             default -> 896;
         };
+    }
+
+    private int repairMaxOutputTokens(AnswerMode answerMode, DocumentSpeedProfile speedProfile) {
+        int base = answerMode == AnswerMode.SUMMARY || answerMode == AnswerMode.TABLE ? 640 : 448;
+        return speedProfile == DocumentSpeedProfile.DEEP ? Math.min(768, base + 128) : base;
     }
 
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
@@ -2228,6 +2348,9 @@ public class RagService {
             int promptTokens,
             int outputTokens
     ) {
+    }
+
+    private record ContextBundle(List<SearchResult> citations, String context) {
     }
 
     private record RetrievalTiming(

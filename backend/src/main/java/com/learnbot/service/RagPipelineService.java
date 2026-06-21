@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.time.Duration;
 
 @Service
 public class RagPipelineService {
@@ -45,11 +46,13 @@ public class RagPipelineService {
         }
 
         try {
-            String response = ollamaClient.chat(
+            String response = ollamaClient.chatResult(
                     rewriteSystemPrompt(domain),
                     rewriteUserPrompt(question, domain, baselineQueries),
-                    OllamaClient.ChatRole.AUXILIARY
-            );
+                    OllamaClient.ChatRole.AUXILIARY,
+                    Math.max(1, pipeline().getRewriteMaxOutputTokens()),
+                    Duration.ofSeconds(Math.max(1, pipeline().getRewriteTimeoutSeconds()))
+            ).content();
             List<String> rewritten = parseRewriteQueries(response);
             addQueries(queries, rewritten);
             boolean usedRewrite = !rewritten.isEmpty();
