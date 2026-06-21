@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Search } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Info, Loader2, Search } from 'lucide-react';
 import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
@@ -612,6 +612,7 @@ function LoginScreen({ onLogin, busy, error }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [rememberLogin, setRememberLogin] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   function submit(event) {
     event.preventDefault();
@@ -619,37 +620,61 @@ function LoginScreen({ onLogin, busy, error }) {
   }
 
   return (
-    <AnimatedPage className="login-screen commercial-shell bg-slate-950">
-      <AnimatedSection className="login-panel panel commercial-login-card">
-        <div className="brand login-brand">
-          <div className="brand-mark overflow-hidden bg-white">
+    <AnimatedPage className="login-screen commercial-shell commercial-login-screen bg-slate-950">
+      <div className="commercial-login-ambient" aria-hidden="true" />
+      <AnimatedSection className="commercial-login-layout">
+        <aside className="commercial-login-showcase" aria-hidden="true">
+          <div className="commercial-login-showcase-mark">
             <img src="/LearnBot_Mark.png" alt="" />
           </div>
           <div>
-            <span>LearnBot</span>
-            <small>사내 지식 RAG</small>
+            <span>Private Knowledge RAG</span>
+            <h2>Learn Bot</h2>
+            <p>문서 RAG, 코드 RAG, 저장 답변, 관리자 진단까지 하나의 워크스페이스에서 운영합니다.</p>
           </div>
-        </div>
-        <div>
-          <Badge className="mb-3 w-fit" variant="secondary">Private Workspace</Badge>
-          <h1>로그인</h1>
-          <p className="login-copy">관리자가 초대한 계정으로 사내 위키, 코드, 문서 RAG 공간에 접속합니다.</p>
-        </div>
-        {error && <div className="alert">{error}</div>}
-        <form className="stack" onSubmit={submit} autoComplete="off">
-          <label htmlFor="login-id">ID</label>
-          <input id="login-id" value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="off" spellCheck="false" />
-          <label htmlFor="login-password">비밀번호</label>
-          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
-          <label className="checkbox-row login-remember" htmlFor="login-remember">
-            <input id="login-remember" type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} />
-            자동 로그인
-          </label>
-          <Button disabled={!loginId || !password || busy}>
-            {busy ? <Loader2 className="spin" size={16} /> : <IconLock size={16} />}
-            로그인
-          </Button>
-        </form>
+          <div className="commercial-login-signal">
+            <span>Docs</span>
+            <span>Code</span>
+            <span>Audit</span>
+          </div>
+        </aside>
+
+        <section className="login-panel panel commercial-login-card">
+          <div className="brand login-brand">
+            <div className="brand-mark overflow-hidden bg-white">
+              <img src="/LearnBot_Mark.png" alt="" />
+            </div>
+            <div>
+              <span>LearnBot</span>
+              <small>사내 지식 RAG</small>
+            </div>
+          </div>
+          <div>
+            <Badge className="mb-3 w-fit" variant="secondary">Private Workspace</Badge>
+            <h1>로그인</h1>
+            <p className="login-copy">관리자가 초대한 계정으로 사내 위키, 코드, 문서 RAG 공간에 접속합니다.</p>
+          </div>
+          {error && <div className="alert">{error}</div>}
+          <form className="stack commercial-login-form" onSubmit={submit} autoComplete="off">
+            <label htmlFor="login-id">ID</label>
+            <input id="login-id" value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="off" spellCheck="false" />
+            <label htmlFor="login-password">비밀번호</label>
+            <div className="commercial-password-field">
+              <input id="login-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
+              <button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}>
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+            <label className="checkbox-row login-remember" htmlFor="login-remember">
+              <input id="login-remember" type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} />
+              자동 로그인
+            </label>
+            <Button disabled={!loginId || !password || busy}>
+              {busy ? <Loader2 className="spin" size={16} /> : <IconLock size={16} />}
+              로그인
+            </Button>
+          </form>
+        </section>
       </AnimatedSection>
     </AnimatedPage>
   );
@@ -1101,8 +1126,16 @@ function Sidebar({
   loading,
 }) {
   const userLabel = formatBrandText(user.displayName || user.loginId || user.email);
+  const sidebarViews = [
+    { key: 'code', label: '코드', detail: `${indexedRepoCount} repos`, icon: <IconCode size={16} />, path: routePaths.code },
+    { key: 'docs', label: '문서', detail: `${indexedCount} docs`, icon: <IconFileText size={16} />, path: routePaths.docs },
+    { key: 'saved', label: '저장됨', detail: 'Library', icon: <IconDatabase size={16} />, path: routePaths.saved },
+    ...(user.role === 'ADMIN'
+      ? [{ key: 'admin', label: '관리자', detail: 'Console', icon: <IconShieldCheck size={16} />, path: routePaths.admin }]
+      : []),
+  ];
   return (
-    <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
+    <aside className={collapsed ? 'sidebar learnbot-sidebar-v4 collapsed' : 'sidebar learnbot-sidebar-v4'}>
       <div className="brand">
         <button className="brand-home-button" type="button" title="메인 대시보드로 이동" onClick={() => navigateTo(routePaths.home)}>
           <span className="brand-mark brand-home-mark bg-white">
@@ -1117,6 +1150,24 @@ function Sidebar({
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
+
+      <nav className="sidebar-view-nav-v4" aria-label="작업 화면">
+        {sidebarViews.map((item) => (
+          <button
+            className={activeView === item.key ? 'active' : ''}
+            key={item.key}
+            type="button"
+            title={item.label}
+            onClick={() => navigateTo(item.path)}
+          >
+            <span className="sidebar-view-icon-v4">{item.icon}</span>
+            <span className="sidebar-view-copy-v4">
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </span>
+          </button>
+        ))}
+      </nav>
 
       <div className="side-section">
         <span className="section-label">공간</span>
