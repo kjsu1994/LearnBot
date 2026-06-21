@@ -58,6 +58,10 @@
     linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
     #020617;
   background-size: auto, auto, auto, auto, auto, 42px 42px, 42px 42px;
+  box-shadow: 0 0 0 100vmax #020617;
+  margin: 0;
+  min-width: 100%;
+  width: 100%;
 }
 
 .commercial-shell.home-shell::after {
@@ -1605,8 +1609,12 @@
     radial-gradient(ellipse 80% 60% at 10% -10%, rgba(255, 255, 255, 0.13), transparent 60%),
     radial-gradient(ellipse 90% 70% at 90% -20%, rgba(120, 120, 120, 0.12), transparent 70%),
     #040404;
+  box-shadow: 0 0 0 100vmax #040404;
   color: #ffffff;
+  margin: 0;
+  min-width: 100%;
   position: relative;
+  width: 100%;
 }
 
 .hero3-shell::after {
@@ -2262,14 +2270,19 @@
 
 /* Final sidebar polish: keep the 21st.dev black sidebar feel without outer gaps. */
 .workspace-shell-v3 .learnbot-sidebar-v4 {
+  align-self: stretch;
   background: #000000;
   box-shadow: none;
+  grid-column: 1;
   grid-template-columns: 64px minmax(0, 248px);
   justify-self: start;
   left: 0;
   margin-left: 0;
   min-width: 312px;
   padding: 0;
+  position: sticky;
+  top: 0;
+  transform: translateX(0);
   width: 312px;
 }
 
@@ -2284,20 +2297,15 @@
   position: relative;
 }
 
-.workspace-shell-v3::before {
-  background: #000000;
-  content: "";
-  inset: 0 auto 0 0;
-  pointer-events: none;
-  position: fixed;
-  width: 312px;
-  z-index: 0;
-}
-
 .workspace-shell-v3 .learnbot-sidebar-v4,
 .workspace-shell-v3 .content {
   position: relative;
   z-index: 1;
+}
+
+.workspace-shell-v3 .learnbot-sidebar-v4 {
+  position: sticky;
+  top: 0;
 }
 
 .workspace-shell-v3 .content {
@@ -2319,10 +2327,6 @@
   grid-template-columns: 64px minmax(0, 1fr);
 }
 
-.workspace-shell-v3.shell-sidebar-collapsed::before {
-  width: 64px;
-}
-
 .workspace-shell-v3 .sidebar-view-nav-v4 {
   background: #000000;
   border-color: #1f1f1f;
@@ -2335,6 +2339,8 @@
 .workspace-shell-v3 .learnbot-sidebar-v4 .side-section:not(.sidebar-code-files):not(.sidebar-documents) {
   background: #050505;
   border-color: transparent;
+  margin: 0;
+  width: 100%;
 }
 
 .workspace-shell-v3 .learnbot-sidebar-v4 .brand {
@@ -2360,7 +2366,11 @@
 
 .workspace-shell-v3 .learnbot-sidebar-v4 .sidebar-code-files,
 .workspace-shell-v3 .learnbot-sidebar-v4 .sidebar-documents {
-  padding-top: 0;
+  background: #050505;
+  border: 0;
+  margin: 0;
+  padding: 0 14px 14px;
+  width: 100%;
 }
 
 .workspace-shell-v3 .learnbot-sidebar-v4 .metric,
@@ -2370,6 +2380,17 @@
 .workspace-shell-v3 .sidebar-view-nav-v4 button.active {
   background: #111111;
   border-color: #262626;
+}
+
+.workspace-shell-v3 .learnbot-sidebar-v4 .dark-select {
+  color: #f8fafc;
+  font-weight: 700;
+  -webkit-text-fill-color: #f8fafc;
+}
+
+.workspace-shell-v3 .learnbot-sidebar-v4 .dark-select option {
+  background: #050505;
+  color: #f8fafc;
 }
 
 .workspace-shell-v3 .learnbot-sidebar-v4.collapsed {
@@ -2388,4 +2409,38 @@
   background: #000000;
   border-color: #1f1f1f;
   border-radius: 0;
+}
+
+/* Pin every workspace sidebar to the actual viewport edge. */
+@media (min-width: 821px) {
+  .workspace-shell-v3 {
+    display: block;
+    min-height: 100vh;
+    padding-left: 312px;
+  }
+
+  .workspace-shell-v3.shell-sidebar-collapsed {
+    padding-left: 64px;
+  }
+
+  .workspace-shell-v3 .learnbot-sidebar-v4 {
+    bottom: 0;
+    height: 100vh;
+    left: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    position: fixed;
+    top: 0;
+    width: 312px;
+    z-index: 20;
+  }
+
+  .workspace-shell-v3 .learnbot-sidebar-v4.collapsed {
+    width: 64px;
+  }
+
+  .workspace-shell-v3 .content {
+    min-height: 100vh;
+    width: 100%;
+  }
 }

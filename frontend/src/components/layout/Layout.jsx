@@ -1143,7 +1143,7 @@ function Sidebar({
           </span>
           <span className="brand-copy">
             <span>LearnBot</span>
-            <small>사내 지식 RAG</small>
+            <small>Private Knowledge RAG</small>
           </span>
         </button>
         <button className="icon-button sidebar-toggle" type="button" title={collapsed ? '사이드바 펼치기' : '사이드바 접기'} onClick={() => setCollapsed((current) => !current)}>
