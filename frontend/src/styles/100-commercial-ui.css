@@ -36,6 +36,24 @@
   width: 54px;
 }
 
+.landing-shell .home-brand-full-mark {
+  border-radius: 16px;
+  height: 46px;
+  padding: 0;
+  width: 176px;
+}
+
+.landing-shell .home-brand-full-mark img {
+  height: 100%;
+  object-fit: contain;
+  transform: none;
+  width: 100%;
+}
+
+.landing-shell .home-brand-full-mark + span {
+  display: none;
+}
+
 .commercial-shell .brand-full-mark {
   align-items: center;
   border-radius: 16px;
@@ -82,6 +100,13 @@
 .commercial-shell .login-brand .brand-mark img {
   object-fit: contain;
   transform: scale(1.16);
+}
+
+.commercial-shell .home-brand-full-mark img,
+.commercial-shell .login-brand-full-mark img,
+.commercial-shell .commercial-login-showcase-mark-full img {
+  object-fit: contain;
+  transform: none;
 }
 
 .commercial-shell .login-brand .brand-mark {
@@ -670,6 +695,17 @@
   width: 68px;
 }
 
+.commercial-login-showcase-mark-full {
+  height: 78px;
+  padding: 0;
+  width: 300px;
+}
+
+.commercial-login-showcase-mark-full img {
+  height: 100%;
+  width: 100%;
+}
+
 .commercial-login-showcase div {
   position: relative;
   z-index: 1;
@@ -726,6 +762,16 @@
 
 .commercial-login-card .login-brand {
   margin-bottom: 14px;
+}
+
+.commercial-login-card .login-brand-full-mark {
+  height: 58px;
+  padding: 0;
+  width: 224px;
+}
+
+.commercial-login-card .login-brand-full-mark + div {
+  display: none;
 }
 
 .commercial-login-card h1 {

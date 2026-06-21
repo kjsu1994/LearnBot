@@ -154,8 +154,8 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
       {!exitingToLogin && <ShaderBackground className="landing-shader-canvas command-deck-shader" />}
       <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
-          <span className="home-brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Logo_mini.png" alt="" />
+          <span className="home-brand-mark home-brand-full-mark overflow-hidden bg-white">
+            <img src="/LearnBot_Logo_Sidebar.png?v=20260622" alt="LearnBot Private Knowledge RAG" />
           </span>
           <span>
             <strong>LearnBot</strong>
@@ -436,8 +436,8 @@ function LegacyHomePage({ user, bootstrapping, navigateTo, logout }) {
       <ShaderBackground className="landing-shader-canvas" />
       <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
-          <span className="home-brand-mark overflow-hidden bg-white">
-            <img src="/LearnBot_Logo_mini.png" alt="" />
+          <span className="home-brand-mark home-brand-full-mark overflow-hidden bg-white">
+            <img src="/LearnBot_Logo_Sidebar.png?v=20260622" alt="LearnBot Private Knowledge RAG" />
           </span>
           <span>
             <strong>LearnBot</strong>
@@ -636,8 +636,8 @@ function LoginScreen({ onLogin, busy, error }) {
       <div className="commercial-login-ambient" aria-hidden="true" />
       <AnimatedSection className="commercial-login-layout">
         <aside className="commercial-login-showcase" aria-hidden="true">
-          <div className="commercial-login-showcase-mark">
-            <img src="/LearnBot_Logo_mini.png" alt="" />
+          <div className="commercial-login-showcase-mark commercial-login-showcase-mark-full">
+            <img src="/LearnBot_Logo_Sidebar.png?v=20260622" alt="" />
           </div>
           <div>
             <span>Private Knowledge RAG</span>
@@ -653,8 +653,8 @@ function LoginScreen({ onLogin, busy, error }) {
 
         <section className="login-panel panel commercial-login-card">
           <div className="brand login-brand">
-            <div className="brand-mark overflow-hidden bg-white">
-              <img src="/LearnBot_Logo_mini.png" alt="" />
+            <div className="brand-full-mark login-brand-full-mark bg-white">
+              <img src="/LearnBot_Logo_Sidebar.png?v=20260622" alt="LearnBot Private Knowledge RAG" />
             </div>
             <div>
               <span>LearnBot</span>
