@@ -10,6 +10,7 @@ function AdminWorkspace({
   currentUser,
   users,
   adminSettings,
+  documentSchemaProfiles = [],
   spaces,
   selectedSpaceId,
   auditLogs,
@@ -30,6 +31,7 @@ function AdminWorkspace({
   downloadSpaceArchive,
   spaceTransferResult,
   updateAdminSettings,
+  updateDocumentSchemaProfile,
   testAdminLlmSettings,
   refreshAdmin,
   loading,
@@ -198,6 +200,18 @@ function AdminWorkspace({
     if (result && typeof result === 'object') {
       setLlmTestResult(result);
     }
+  }
+
+  function parseProfileList(value) {
+    return String(value || '')
+      .split(/[,\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  async function updateSchemaProfile(profile, values) {
+    if (!updateDocumentSchemaProfile) return;
+    await updateDocumentSchemaProfile(profile.schemaName, values);
   }
 
   function beginSpaceImport(space) {
@@ -390,6 +404,68 @@ function AdminWorkspace({
             </button>
           </div>
         </form>
+
+        <section className="panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 그래프 스키마</h2>
+              <p>Core Document Graph는 항상 사용하고, 도메인 프로파일은 문서 타입 분류와 향후 관계 추출에 사용합니다.</p>
+            </div>
+          </div>
+          <div className="schema-profile-list">
+            {(documentSchemaProfiles || []).map((profile) => {
+              const loadingKey = `schema-profile-${profile.schemaName}`;
+              return (
+                <article className="schema-profile-card" key={profile.schemaName}>
+                  <div className="result-heading">
+                    <strong>{profile.schemaName}</strong>
+                    <span>{profile.defaultProfile ? '기본' : profile.enabled ? '활성' : '비활성'}</span>
+                  </div>
+                  <small>{profile.description}</small>
+                  <div className="form-grid two">
+                    <label className="checkbox-row" htmlFor={`schema-enabled-${profile.schemaName}`}>
+                      <input
+                        id={`schema-enabled-${profile.schemaName}`}
+                        type="checkbox"
+                        checked={profile.enabled}
+                        disabled={loading(loadingKey) || profile.defaultProfile}
+                        onChange={(event) => updateSchemaProfile(profile, { enabled: event.target.checked })}
+                      />
+                      <span>활성화</span>
+                    </label>
+                    <label className="checkbox-row" htmlFor={`schema-default-${profile.schemaName}`}>
+                      <input
+                        id={`schema-default-${profile.schemaName}`}
+                        type="checkbox"
+                        checked={profile.defaultProfile}
+                        disabled={loading(loadingKey) || profile.defaultProfile || !profile.enabled}
+                        onChange={(event) => updateSchemaProfile(profile, { defaultProfile: event.target.checked })}
+                      />
+                      <span>기본 프로파일</span>
+                    </label>
+                  </div>
+                  <label htmlFor={`schema-doc-types-${profile.schemaName}`}>문서 타입</label>
+                  <textarea
+                    id={`schema-doc-types-${profile.schemaName}`}
+                    rows={4}
+                    defaultValue={(profile.documentTypes || []).join('\n')}
+                    disabled={loading(loadingKey)}
+                    onBlur={(event) => updateSchemaProfile(profile, { documentTypes: parseProfileList(event.target.value) })}
+                  />
+                  <details>
+                    <summary>Entity / Relation 타입 보기</summary>
+                    <small>Entities: {(profile.entityTypes || []).join(', ') || '-'}</small>
+                    <small>Relations: {(profile.relationTypes || []).join(', ') || '-'}</small>
+                  </details>
+                </article>
+              );
+            })}
+            {!documentSchemaProfiles?.length && (
+              <p className="empty compact-empty">등록된 문서 그래프 스키마 프로파일을 불러오지 못했습니다. Core fallback으로 동작합니다.</p>
+            )}
+          </div>
+        </section>
 
         <form className="panel" onSubmit={inviteUser}>
           <div className="panel-title">

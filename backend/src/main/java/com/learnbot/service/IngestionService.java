@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,6 +38,8 @@ public class IngestionService {
     private final ObjectStorageService objectStorageService;
     private final Chunker chunker;
     private final DocumentContextBuilder documentContextBuilder;
+    private final DocumentTypeClassifier documentTypeClassifier;
+    private final DocumentSchemaProfileService documentSchemaProfileService;
     private final EmbeddingService embeddingService;
     private final LearnBotProperties properties;
     private final AuthService authService;
@@ -53,6 +56,8 @@ public class IngestionService {
             ObjectStorageService objectStorageService,
             Chunker chunker,
             DocumentContextBuilder documentContextBuilder,
+            DocumentTypeClassifier documentTypeClassifier,
+            DocumentSchemaProfileService documentSchemaProfileService,
             EmbeddingService embeddingService,
             LearnBotProperties properties,
             AuthService authService,
@@ -67,6 +72,8 @@ public class IngestionService {
         this.objectStorageService = objectStorageService;
         this.chunker = chunker;
         this.documentContextBuilder = documentContextBuilder;
+        this.documentTypeClassifier = documentTypeClassifier;
+        this.documentSchemaProfileService = documentSchemaProfileService;
         this.embeddingService = embeddingService;
         this.properties = properties;
         this.authService = authService;
@@ -266,8 +273,9 @@ public class IngestionService {
 
     private List<IndexedDocument> prepareIndex(UUID sourceId, List<ExtractedDocument> documents, boolean allowReuse, boolean recursiveWeb) {
         List<PreparedDocument> preparedDocuments = new ArrayList<>();
-        for (ExtractedDocument document : documents) {
-            List<Chunk> chunks = chunker.split(document);
+        for (ExtractedDocument rawDocument : documents) {
+            ExtractedDocument document = withGraphProfileMetadata(rawDocument);
+            List<Chunk> chunks = withDocumentGraphMetadata(chunker.split(document), document);
             if (chunks.isEmpty()) {
                 continue;
             }
@@ -304,6 +312,50 @@ public class IngestionService {
         }
 
         return indexedDocuments;
+    }
+
+    private ExtractedDocument withGraphProfileMetadata(ExtractedDocument document) {
+        try {
+            DocumentTypeClassifier.Classification classification = documentTypeClassifier.classify(document);
+            String documentType = classification.documentType() == null || classification.documentType().isBlank()
+                    ? DocumentSchemaProfileService.GENERAL_DOCUMENT
+                    : classification.documentType();
+            String schemaName = documentSchemaProfileService.schemaNameFor(documentType);
+            Map<String, Object> metadata = new LinkedHashMap<>(document.metadata() == null ? Map.of() : document.metadata());
+            metadata.putIfAbsent("documentType", documentType);
+            metadata.putIfAbsent("documentTypeConfidence", classification.confidence());
+            metadata.putIfAbsent("schemaName", schemaName);
+            return new ExtractedDocument(document.title(), document.sourceUri(), document.contentType(), document.content(), metadata);
+        } catch (RuntimeException ex) {
+            Map<String, Object> metadata = new LinkedHashMap<>(document.metadata() == null ? Map.of() : document.metadata());
+            metadata.putIfAbsent("documentType", DocumentSchemaProfileService.GENERAL_DOCUMENT);
+            metadata.putIfAbsent("schemaName", DocumentSchemaProfileService.CORE_SCHEMA);
+            metadata.putIfAbsent("documentTypeConfidence", 0.0);
+            return new ExtractedDocument(document.title(), document.sourceUri(), document.contentType(), document.content(), metadata);
+        }
+    }
+
+    private List<Chunk> withDocumentGraphMetadata(List<Chunk> chunks, ExtractedDocument document) {
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> documentMetadata = document.metadata() == null ? Map.of() : document.metadata();
+        List<Chunk> enriched = new ArrayList<>();
+        for (Chunk chunk : chunks) {
+            Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata() == null ? Map.of() : chunk.metadata());
+            copyMetadata(documentMetadata, metadata, "documentType");
+            copyMetadata(documentMetadata, metadata, "documentTypeConfidence");
+            copyMetadata(documentMetadata, metadata, "schemaName");
+            enriched.add(new Chunk(chunk.index(), chunk.content(), metadata));
+        }
+        return enriched;
+    }
+
+    private void copyMetadata(Map<String, Object> source, Map<String, Object> target, String key) {
+        Object value = source == null ? null : source.get(key);
+        if (value != null) {
+            target.putIfAbsent(key, value);
+        }
     }
 
     private List<PreparedDocument> enrichWithDocumentContext(List<PreparedDocument> documents, boolean recursiveWeb) {

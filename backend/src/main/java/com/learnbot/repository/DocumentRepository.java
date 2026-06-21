@@ -812,7 +812,7 @@ public class DocumentRepository {
                 new MapSqlParameterSource().addValue("sourceId", sourceId));
 
         List<GraphChunkRow> rows = jdbc.query("""
-                SELECT d.id AS document_id, d.title, d.source_uri, d.content_type,
+                SELECT d.id AS document_id, d.title, d.source_uri, d.content_type, d.metadata::text AS document_metadata,
                        c.id AS chunk_id, c.chunk_index, c.metadata::text AS metadata
                 FROM documents d
                 LEFT JOIN document_chunks c ON c.document_id = d.id
@@ -824,6 +824,7 @@ public class DocumentRepository {
                 rs.getString("title"),
                 rs.getString("source_uri"),
                 rs.getString("content_type"),
+                fromJson(rs.getString("document_metadata")),
                 rs.getObject("chunk_id", UUID.class),
                 rs.getObject("chunk_index", Integer.class),
                 fromJson(rs.getString("metadata"))
@@ -841,24 +842,27 @@ public class DocumentRepository {
         String previousChunkKey = null;
         for (GraphChunkRow row : rows) {
             String documentKey = "document:" + row.documentId();
-            addNode(nodes, documentKey, "DOCUMENT", row.title(), row.documentId(), null, Map.of(
+            addNode(nodes, documentKey, "DOCUMENT", row.title(), row.documentId(), null, mergedMetadata(row.documentMetadata(), Map.of(
                     "sourceUri", row.sourceUri(),
                     "contentType", row.contentType()
-            ));
-            addEdge(edges, "source:" + sourceId, documentKey, "CONTAINS", 1.0, Map.of());
+            )));
+            addEdge(edges, "source:" + sourceId, documentKey, "SOURCE_CONTAINS_DOCUMENT", 1.0, Map.of());
             if (row.chunkId() == null) {
                 continue;
             }
+            String sectionKey = sectionKey(row);
+            addNode(nodes, sectionKey, "SECTION", sectionLabel(row), row.documentId(), null, sectionMetadata(row));
+            addEdge(edges, documentKey, sectionKey, "DOCUMENT_CONTAINS_SECTION", 0.96, Map.of());
             String nodeType = chunkNodeType(row.metadata());
             String chunkKey = "chunk:" + row.chunkId();
             addNode(nodes, chunkKey, nodeType, chunkLabel(row), row.documentId(), row.chunkId(), row.metadata());
-            addEdge(edges, documentKey, chunkKey, "CONTAINS", 1.0, Map.of("chunkIndex", row.chunkIndex()));
+            addEdge(edges, sectionKey, chunkKey, "SECTION_CONTAINS_CHUNK", 1.0, Map.of("chunkIndex", row.chunkIndex()));
             if (previousDocumentId != null && previousDocumentId.equals(row.documentId()) && previousChunkKey != null) {
-                addEdge(edges, previousChunkKey, chunkKey, "NEXT", 0.7, Map.of());
+                addEdge(edges, previousChunkKey, chunkKey, "CHUNK_NEXT_CHUNK", 0.7, Map.of());
             }
             previousDocumentId = row.documentId();
             previousChunkKey = chunkKey;
-            addStructureNodes(sourceId, nodes, edges, chunkKey, row);
+            addStructureNodes(sourceId, nodes, edges, sectionKey, chunkKey, row);
             addTopicNodes(sourceId, nodes, edges, chunkKey, row);
         }
 
@@ -1046,6 +1050,56 @@ public class DocumentRepository {
         return row.title() + " #" + row.chunkIndex();
     }
 
+    private String sectionKey(GraphChunkRow row) {
+        String headingPath = string(row.metadata(), "headingPath");
+        if (headingPath.isBlank()) {
+            return "section:" + row.documentId() + ":document_root";
+        }
+        return "section:" + row.documentId() + ":" + headingPath.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String sectionLabel(GraphChunkRow row) {
+        String headingPath = string(row.metadata(), "headingPath");
+        if (!headingPath.isBlank()) {
+            return headingPath;
+        }
+        return row.title() == null || row.title().isBlank() ? "Document root" : row.title();
+    }
+
+    private Map<String, Object> sectionMetadata(GraphChunkRow row) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (row.documentMetadata() != null) {
+            copyIfPresent(row.documentMetadata(), metadata, "schemaName");
+            copyIfPresent(row.documentMetadata(), metadata, "documentType");
+            copyIfPresent(row.documentMetadata(), metadata, "documentTypeConfidence");
+        }
+        if (row.metadata() != null) {
+            copyIfPresent(row.metadata(), metadata, "headingPath");
+            copyIfPresent(row.metadata(), metadata, "sectionTitle");
+            copyIfPresent(row.metadata(), metadata, "pageNumber");
+        }
+        metadata.putIfAbsent("headingPath", "document_root");
+        return metadata;
+    }
+
+    private Map<String, Object> mergedMetadata(Map<String, Object> first, Map<String, Object> second) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (first != null) {
+            merged.putAll(first);
+        }
+        if (second != null) {
+            merged.putAll(second);
+        }
+        return merged;
+    }
+
+    private void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String key) {
+        Object value = source == null ? null : source.get(key);
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
     private void addTopicNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String chunkKey, GraphChunkRow row) {
         List<String> topics = new ArrayList<>();
         addTopic(topics, row.title());
@@ -1053,36 +1107,39 @@ public class DocumentRepository {
             addTopic(topics, String.valueOf(row.metadata().getOrDefault("headingPath", "")));
         }
         for (String topic : topics.stream().distinct().limit(3).toList()) {
-            String topicKey = "topic:" + sourceId + ":" + topic.toLowerCase(java.util.Locale.ROOT);
-            addNode(nodes, topicKey, "TOPIC", topic, null, null, Map.of());
-            addEdge(edges, chunkKey, topicKey, "SHARES_TOPIC", 0.35, Map.of());
+            String entityKey = "entity:" + sourceId + ":" + topic.toLowerCase(java.util.Locale.ROOT);
+            addNode(nodes, entityKey, "ENTITY", topic, null, null,
+                    Map.of("entityType", "TOPIC", "entitySource", "heuristic_topic"));
+            addEdge(edges, chunkKey, entityKey, "CHUNK_MENTIONS_ENTITY", 0.35,
+                    Map.of("entityType", "TOPIC", "entitySource", "heuristic_topic"));
         }
     }
 
-    private void addStructureNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String chunkKey, GraphChunkRow row) {
+    private void addStructureNodes(UUID sourceId, List<DocumentGraphNode> nodes, List<DocumentGraphEdge> edges, String sectionKey, String chunkKey, GraphChunkRow row) {
         if (row.metadata() == null) {
             return;
-        }
-        String headingPath = string(row.metadata(), "headingPath");
-        if (!headingPath.isBlank()) {
-            String sectionKey = "section:" + row.documentId() + ":" + headingPath.toLowerCase(java.util.Locale.ROOT);
-            addNode(nodes, sectionKey, "SECTION", headingPath, row.documentId(), null, Map.of(
-                    "headingPath", headingPath,
-                    "sectionTitle", string(row.metadata(), "sectionTitle")
-            ));
-            addEdge(edges, sectionKey, chunkKey, "CONTAINS", 0.92, Map.of("relation", "same_section"));
         }
         String tableId = string(row.metadata(), "tableId");
         if (!tableId.isBlank()) {
             String tableKey = "table:" + row.documentId() + ":" + tableId.toLowerCase(java.util.Locale.ROOT);
             addNode(nodes, tableKey, "TABLE", tableId, row.documentId(), null, Map.of("tableId", tableId));
-            addEdge(edges, tableKey, chunkKey, "CONTAINS", 0.90, Map.of("relation", "same_table"));
+            addEdge(edges, sectionKey, tableKey, "SECTION_HAS_TABLE", 0.92, Map.of("relation", "same_table"));
+            Integer rowNumber = integer(row.metadata().get("rowNumber"));
+            if (rowNumber != null) {
+                String rowKey = "table-row:" + row.documentId() + ":" + tableId.toLowerCase(java.util.Locale.ROOT) + ":" + rowNumber;
+                addNode(nodes, rowKey, "TABLE_ROW", tableId + " row " + rowNumber, row.documentId(), null,
+                        Map.of("tableId", tableId, "rowNumber", rowNumber));
+                addEdge(edges, tableKey, rowKey, "TABLE_HAS_ROW", 0.90, Map.of("relation", "same_table_row"));
+                addEdge(edges, rowKey, chunkKey, "SECTION_CONTAINS_CHUNK", 0.88, Map.of("relation", "same_table_row"));
+            } else {
+                addEdge(edges, tableKey, chunkKey, "SECTION_CONTAINS_CHUNK", 0.90, Map.of("relation", "same_table"));
+            }
         }
         Integer pageNumber = integer(row.metadata().get("pageNumber"));
         if (pageNumber != null) {
             String pageKey = "page:" + row.documentId() + ":" + pageNumber;
             addNode(nodes, pageKey, "PAGE", "Page " + pageNumber, row.documentId(), null, Map.of("pageNumber", pageNumber));
-            addEdge(edges, pageKey, chunkKey, "CONTAINS", 0.88, Map.of("relation", "same_page"));
+            addEdge(edges, pageKey, chunkKey, "SECTION_CONTAINS_CHUNK", 0.84, Map.of("relation", "same_page"));
         }
     }
 
@@ -1248,6 +1305,7 @@ public class DocumentRepository {
             String title,
             String sourceUri,
             String contentType,
+            Map<String, Object> documentMetadata,
             UUID chunkId,
             Integer chunkIndex,
             Map<String, Object> metadata

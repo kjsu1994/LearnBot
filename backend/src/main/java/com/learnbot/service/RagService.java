@@ -810,8 +810,40 @@ public class RagService {
         } else if ("context_related".equals(role) || "document_graph".equals(role)) {
             score += 0.07;
         }
+        if (expectedDocumentTypes(question).contains(metadataString(result, "documentType"))) {
+            score += 0.08;
+        }
         score -= Math.min(0.24, seenForDocument * 0.06);
         return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument));
+    }
+
+    private Set<String> expectedDocumentTypes(String question) {
+        String normalized = normalizeForSearch(question);
+        Set<String> types = new HashSet<>();
+        if (normalized.contains("requirement") || normalized.contains("shall") || normalized.contains("요구") || normalized.contains("요건")) {
+            types.add("REQUIREMENT_SPEC");
+        }
+        if (normalized.contains("design") || normalized.contains("architecture") || normalized.contains("설계") || normalized.contains("구조")) {
+            types.add("DESIGN_SPEC");
+        }
+        if (normalized.contains("icd") || normalized.contains("interface") || normalized.contains("command") || normalized.contains("telemetry")
+                || normalized.contains("인터페이스") || normalized.contains("명령") || normalized.contains("텔레메트리")) {
+            types.add("ICD");
+        }
+        if (normalized.contains("test procedure") || normalized.contains("시험 절차") || normalized.contains("검증 절차")) {
+            types.add("TEST_PROCEDURE");
+        }
+        if (normalized.contains("test result") || normalized.contains("시험 결과") || normalized.contains("pass") || normalized.contains("fail")) {
+            types.add("TEST_RESULT");
+        }
+        if (normalized.contains("operation") || normalized.contains("manual") || normalized.contains("운용") || normalized.contains("사용자")) {
+            types.add("OPERATION_MANUAL");
+        }
+        if (normalized.contains("troubleshooting") || normalized.contains("fault") || normalized.contains("error code")
+                || normalized.contains("장애") || normalized.contains("오류") || normalized.contains("조치")) {
+            types.add("TROUBLESHOOTING_GUIDE");
+        }
+        return types;
     }
 
     private String evidenceRole(AnswerMode answerMode, SearchResult result) {
@@ -1932,7 +1964,21 @@ public class RagService {
             long graphCount = results.stream().filter(result -> metadataBoolean(result, "documentGraphExpanded")).count();
             notes.add("Document graph retrieval enabled with maxHop="
                     + Math.max(1, properties.getDocument().getGraph().getMaxHop())
-                    + "; graph-expanded citations=" + graphCount + ".");
+                + "; graph-expanded citations=" + graphCount + ".");
+        }
+        if (results != null && !results.isEmpty()) {
+            Map<String, Long> schemaCounts = results.stream()
+                    .map(result -> metadataString(result, "schemaName"))
+                    .filter(value -> !value.isBlank())
+                    .collect(Collectors.groupingBy(value -> value, LinkedHashMap::new, Collectors.counting()));
+            Map<String, Long> documentTypeCounts = results.stream()
+                    .map(result -> metadataString(result, "documentType"))
+                    .filter(value -> !value.isBlank())
+                    .collect(Collectors.groupingBy(value -> value, LinkedHashMap::new, Collectors.counting()));
+            if (!schemaCounts.isEmpty() || !documentTypeCounts.isEmpty()) {
+                notes.add("Schema-aware retrieval context: schemas=" + schemaCounts
+                        + ", documentTypes=" + documentTypeCounts + ".");
+            }
         }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried retrieval once because the first evidence set was weak.");
@@ -2110,6 +2156,9 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "tableId");
         copyMetadata(result.metadata(), metadata, "sourceUrl");
         copyMetadata(result.metadata(), metadata, "parentDocumentId");
+        copyMetadata(result.metadata(), metadata, "schemaName");
+        copyMetadata(result.metadata(), metadata, "documentType");
+        copyMetadata(result.metadata(), metadata, "documentTypeConfidence");
         return metadata;
     }
 

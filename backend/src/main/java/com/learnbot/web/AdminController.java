@@ -4,6 +4,8 @@ import com.learnbot.dto.AuditLogSummary;
 import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
+import com.learnbot.dto.DocumentSchemaProfileResponse;
+import com.learnbot.dto.DocumentSchemaProfileUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
 import com.learnbot.dto.LlmSettingsTestRequest;
 import com.learnbot.dto.LlmSettingsTestResponse;
@@ -22,6 +24,7 @@ import com.learnbot.service.AdminSettingsService;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
+import com.learnbot.service.DocumentSchemaProfileService;
 import com.learnbot.service.SpaceTransferService;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
@@ -53,6 +56,7 @@ public class AdminController {
     private final AuthService authService;
     private final AuditService auditService;
     private final AdminSettingsService adminSettingsService;
+    private final DocumentSchemaProfileService documentSchemaProfileService;
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
 
@@ -60,12 +64,14 @@ public class AdminController {
             AuthService authService,
             AuditService auditService,
             AdminSettingsService adminSettingsService,
+            DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
             SpaceTransferService spaceTransferService
     ) {
         this.authService = authService;
         this.auditService = auditService;
         this.adminSettingsService = adminSettingsService;
+        this.documentSchemaProfileService = documentSchemaProfileService;
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
     }
@@ -205,5 +211,20 @@ public class AdminController {
                 request.primaryChatModel(),
                 request.auxiliaryChatModel()
         );
+    }
+
+    @GetMapping("/document-graph/schema-profiles")
+    List<DocumentSchemaProfileResponse> documentSchemaProfiles() {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        return documentSchemaProfileService.listProfiles();
+    }
+
+    @PatchMapping("/document-graph/schema-profiles/{schemaName}")
+    DocumentSchemaProfileResponse updateDocumentSchemaProfile(
+            @PathVariable String schemaName,
+            @RequestBody DocumentSchemaProfileUpdateRequest request
+    ) {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        return documentSchemaProfileService.updateProfile(schemaName, request);
     }
 }

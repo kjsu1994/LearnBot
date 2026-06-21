@@ -106,6 +106,7 @@ export default function App() {
     effectiveAuxiliaryChatModel: '',
     llmUsingDefaults: true,
   });
+  const [documentSchemaProfiles, setDocumentSchemaProfiles] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [spaceTransferResult, setSpaceTransferResult] = useState(null);
   const [inviteForm, setInviteForm] = useState({
@@ -838,13 +839,15 @@ export default function App() {
   }
 
   async function refreshAdmin() {
-    const [users, logs, settings] = await Promise.all([
+    const [users, logs, settings, schemaProfiles] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=50'),
       request('/api/admin/settings'),
+      request('/api/admin/document-graph/schema-profiles').catch(() => []),
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
+    setDocumentSchemaProfiles(schemaProfiles || []);
     setAdminSettings(settings || {
       respectRobotsTxt: true,
       allowedDomains: [],
@@ -1004,6 +1007,21 @@ export default function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+    });
+  }
+
+  async function updateDocumentSchemaProfile(schemaName, values) {
+    return await run(`schema-profile-${schemaName}`, async () => {
+      const profile = await request(`/api/admin/document-graph/schema-profiles/${encodeURIComponent(schemaName)}`, {
+        method: 'PATCH',
+        json: values,
+      });
+      if (profile) {
+        setDocumentSchemaProfiles((current) => (current || []).map((item) => (
+          item.schemaName === profile.schemaName ? profile : item
+        )));
+      }
+      return profile;
     });
   }
 
@@ -1220,6 +1238,7 @@ export default function App() {
             currentUser={user}
             users={adminUsers}
             adminSettings={adminSettings}
+            documentSchemaProfiles={documentSchemaProfiles}
             spaces={spaces}
             selectedSpaceId={activeSpaceId}
             auditLogs={auditLogs}
@@ -1240,6 +1259,7 @@ export default function App() {
             downloadSpaceArchive={downloadSpaceArchive}
             spaceTransferResult={spaceTransferResult}
             updateAdminSettings={updateAdminSettings}
+            updateDocumentSchemaProfile={updateDocumentSchemaProfile}
             testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
