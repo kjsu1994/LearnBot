@@ -34,7 +34,7 @@ function RobotSceneFallback() {
   );
 }
 
-function SplineRobotScene() {
+function SplineRobotScene({ disabled = false }) {
   const [ready, setReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -76,6 +76,10 @@ function SplineRobotScene() {
     setLoaded(true);
   }
 
+  if (disabled) {
+    return <RobotSceneFallback />;
+  }
+
   return (
     <div className="hero3-robot-stage" aria-label="LearnBot 3D assistant">
       {!loaded && <RobotSceneFallback />}
@@ -96,6 +100,7 @@ function SplineRobotScene() {
 function HomePage({ user, bootstrapping, navigateTo, logout }) {
   const shellRef = useRef(null);
   const [mode, setMode] = useState('docs');
+  const [exitingToLogin, setExitingToLogin] = useState(false);
   const supportedSources = ['PDF', 'DOCX', 'PPTX', 'Markdown', 'Excel', 'CSV', 'Web crawl', 'Git repository', 'Saved answers'];
   const activeMode = {
     docs: {
@@ -137,9 +142,16 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
     target.style.removeProperty('--hero3-y');
   }
 
+  function goToLogin() {
+    setExitingToLogin(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => navigateTo(routePaths.login));
+    });
+  }
+
   return (
     <AnimatedPage ref={shellRef} className="home-shell commercial-shell landing-shell hero3-shell min-h-screen bg-slate-950 text-slate-50">
-      <ShaderBackground className="landing-shader-canvas command-deck-shader" />
+      {!exitingToLogin && <ShaderBackground className="landing-shader-canvas command-deck-shader" />}
       <header className="home-nav">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
           <span className="home-brand-mark overflow-hidden bg-white">
@@ -163,7 +175,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
               로그아웃
             </Button>
           ) : (
-            <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+            <Button variant="outline" type="button" onClick={goToLogin}>
               <IconLock size={15} />
               로그인
             </Button>
@@ -252,7 +264,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
 
           <figure className="hero3-visual-card">
             <div className="hero3-visual-frame">
-              <SplineRobotScene />
+              <SplineRobotScene disabled={exitingToLogin} />
             </div>
             <figcaption>
               <span>Private RAG workspace</span>

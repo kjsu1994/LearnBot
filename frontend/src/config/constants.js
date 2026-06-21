@@ -4,6 +4,7 @@ export const evidencePreviewLimit = 3;
 
 export const routePaths = {
   home: '/app',
+  login: '/login',
   code: '/code',
   docs: '/docs',
   saved: '/saved',

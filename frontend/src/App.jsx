@@ -239,6 +239,10 @@ export default function App() {
   }, [routePath]);
 
   useEffect(() => {
+    if (user && routePath === routePaths.login) {
+      navigateTo(routePaths.home);
+      return;
+    }
     if (user && routePath === routePaths.admin && user.role !== 'ADMIN') {
       navigateTo(routePaths.code);
     }
