@@ -96,7 +96,7 @@ class DocumentContextBuilderTest {
     void fallsBackToDeterministicSummaryWhenLlmFails() {
         LearnBotProperties properties = properties(true);
         OllamaClient ollamaClient = mock(OllamaClient.class);
-        when(ollamaClient.chat(any(), any(), any())).thenThrow(new RuntimeException("model unavailable"));
+        when(ollamaClient.chatResult(any(), any(), any(), any())).thenThrow(new RuntimeException("model unavailable"));
         DocumentContextBuilder builder = new DocumentContextBuilder(properties, ollamaClient);
 
         List<Chunk> chunks = builder.buildDocumentContext(document("guide.md", "text/markdown"), List.of(
@@ -113,15 +113,35 @@ class DocumentContextBuilderTest {
     }
 
     @Test
+    void fallsBackToDeterministicSummaryWhenLlmStopsByLengthWithoutUsefulContent() {
+        LearnBotProperties properties = properties(true);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        when(ollamaClient.chatResult(any(), any(), any(), any()))
+                .thenReturn(new OllamaClient.ChatResult("", "length", true, 100, 384, "http://ollama", "test", "AUXILIARY", false));
+        DocumentContextBuilder builder = new DocumentContextBuilder(properties, ollamaClient);
+
+        List<Chunk> chunks = builder.buildDocumentContext(document("guide.md", "text/markdown"), List.of(
+                chunk(0, "# Intro\nWelcome", Map.of("strategy", "markdown_heading", "headingPath", "Intro"))
+        ));
+
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.metadata()).containsEntry("contextType", "document_summary");
+            assertThat(chunk.metadata()).containsEntry("generatedBy", "deterministic");
+            assertThat(chunk.metadata()).containsEntry("llmSucceeded", false);
+            assertThat(chunk.content()).contains("Document summary");
+        });
+    }
+
+    @Test
     void usesMapReduceSummaryWhenEnabled() {
         LearnBotProperties properties = properties(true);
         properties.getRag().getDocumentContext().setMapWindowChunks(1);
         properties.getRag().getDocumentContext().setMaxMapWindowsPerDocument(2);
         OllamaClient ollamaClient = mock(OllamaClient.class);
-        when(ollamaClient.chat(any(), any(), any()))
-                .thenReturn("Window summary one with setup details.")
-                .thenReturn("Window summary two with usage details.")
-                .thenReturn("Reduced document summary with setup and usage details.");
+        when(ollamaClient.chatResult(any(), any(), any(), any()))
+                .thenReturn(chatResult("Window summary one with setup details."))
+                .thenReturn(chatResult("Window summary two with usage details."))
+                .thenReturn(chatResult("Reduced document summary with setup and usage details."));
         DocumentContextBuilder builder = new DocumentContextBuilder(properties, ollamaClient);
 
         List<Chunk> chunks = builder.buildDocumentContext(document("guide.md", "text/markdown"), List.of(
@@ -160,7 +180,7 @@ class DocumentContextBuilderTest {
                 chunk(0, "Install and operate the service.", Map.of("strategy", "html_blocks", "headingPath", "Install"))
         ), true);
 
-        verify(ollamaClient, never()).chat(any(), any(), any());
+        verify(ollamaClient, never()).chatResult(any(), any(), any(), any());
         assertThat(chunks).anySatisfy(chunk -> {
             assertThat(chunk.metadata()).containsEntry("contextType", "document_summary");
             assertThat(chunk.metadata()).containsEntry("generatedBy", "deterministic");
@@ -180,5 +200,9 @@ class DocumentContextBuilderTest {
 
     private Chunk chunk(int index, String content, Map<String, Object> metadata) {
         return new Chunk(index, content, metadata);
+    }
+
+    private OllamaClient.ChatResult chatResult(String content) {
+        return new OllamaClient.ChatResult(content, "stop", true, 10, 20, "http://ollama", "test", "AUXILIARY", false);
     }
 }

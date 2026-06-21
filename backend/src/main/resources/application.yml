@@ -92,6 +92,8 @@ learnbot:
       map-window-chunks: ${LEARNBOT_DOCUMENT_CONTEXT_MAP_WINDOW_CHUNKS:6}
       max-map-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_MAP_INPUT_CHARS:7000}
       max-reduce-input-chars: ${LEARNBOT_DOCUMENT_CONTEXT_MAX_REDUCE_INPUT_CHARS:12000}
+      llm-max-output-tokens: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_MAX_OUTPUT_TOKENS:384}
+      llm-reduce-max-output-tokens: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_REDUCE_MAX_OUTPUT_TOKENS:512}
     overview:
       enabled: ${LEARNBOT_RAG_OVERVIEW_ENABLED:true}
       min-context-chunks: ${LEARNBOT_RAG_OVERVIEW_MIN_CONTEXT_CHUNKS:2}
@@ -143,6 +145,9 @@ learnbot:
       evidence-ranking-debug: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG:false}
   document:
     index-threads: ${LEARNBOT_DOCUMENT_INDEX_THREADS:2}
+    enrichment:
+      defer-when-primary-active: ${LEARNBOT_DOCUMENT_ENRICHMENT_DEFER_WHEN_PRIMARY_ACTIVE:true}
+      max-defer-seconds: ${LEARNBOT_DOCUMENT_ENRICHMENT_MAX_DEFER_SECONDS:900}
     ocr:
       enabled: ${LEARNBOT_DOCUMENT_OCR_ENABLED:false}
       command: ${LEARNBOT_DOCUMENT_OCR_COMMAND:ocrmypdf}

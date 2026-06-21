@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class OllamaClient {
@@ -22,6 +23,7 @@ public class OllamaClient {
     private final WebClient webClient;
     private final LearnBotProperties properties;
     private final AdminSettingsService adminSettingsService;
+    private final AtomicInteger primaryRequests = new AtomicInteger(0);
 
     public OllamaClient(WebClient.Builder builder, LearnBotProperties properties, AdminSettingsService adminSettingsService) {
         this.webClientBuilder = builder;
@@ -57,6 +59,10 @@ public class OllamaClient {
 
     public String chat(String systemPrompt, String userPrompt, ChatRole role) {
         return chatResult(systemPrompt, userPrompt, role).content();
+    }
+
+    public String chat(String systemPrompt, String userPrompt, ChatRole role, int maxOutputTokens) {
+        return chatResult(systemPrompt, userPrompt, role, maxOutputTokens).content();
     }
 
     public ChatResult chatResult(String systemPrompt, String userPrompt) {
@@ -95,6 +101,18 @@ public class OllamaClient {
             }
         }
         throw lastFailure == null ? new IllegalArgumentException("Ollama chat failed.") : lastFailure;
+    }
+
+    public void beginPrimaryRequest() {
+        primaryRequests.incrementAndGet();
+    }
+
+    public void finishPrimaryRequest() {
+        primaryRequests.updateAndGet(current -> Math.max(0, current - 1));
+    }
+
+    public boolean hasPrimaryRequestInFlight() {
+        return primaryRequests.get() > 0;
     }
 
     private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens) {

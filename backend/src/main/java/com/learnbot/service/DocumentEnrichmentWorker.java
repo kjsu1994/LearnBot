@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.repository.DocumentRepository;
 import jakarta.annotation.PostConstruct;
@@ -21,12 +22,22 @@ public class DocumentEnrichmentWorker {
     private final DocumentRepository repository;
     private final DocumentContextBuilder contextBuilder;
     private final EmbeddingService embeddingService;
+    private final OllamaClient ollamaClient;
+    private final LearnBotProperties properties;
     private final String workerId = "document-enrichment-" + UUID.randomUUID();
 
-    public DocumentEnrichmentWorker(DocumentRepository repository, DocumentContextBuilder contextBuilder, EmbeddingService embeddingService) {
+    public DocumentEnrichmentWorker(
+            DocumentRepository repository,
+            DocumentContextBuilder contextBuilder,
+            EmbeddingService embeddingService,
+            OllamaClient ollamaClient,
+            LearnBotProperties properties
+    ) {
         this.repository = repository;
         this.contextBuilder = contextBuilder;
         this.embeddingService = embeddingService;
+        this.ollamaClient = ollamaClient;
+        this.properties = properties;
     }
 
     @PostConstruct
@@ -42,6 +53,10 @@ public class DocumentEnrichmentWorker {
     private void process(DocumentEnrichmentJob job) {
         long started = System.nanoTime();
         try {
+            if (shouldDeferForPrimaryRequest()) {
+                defer(job, started);
+                return;
+            }
             repository.updateDocumentJobEnrichment(job.jobId(), "RUNNING", "LLM 품질 보강을 진행 중입니다.");
             if (!repository.heartbeatDocumentEnrichmentJob(job.id(), workerId)) {
                 return;
@@ -128,6 +143,22 @@ public class DocumentEnrichmentWorker {
         }
         if (repository.retryDocumentEnrichmentJob(job.id(), workerId, job.attempts(), message)) {
             repository.updateDocumentJobEnrichment(job.jobId(), "RETRYING", message);
+            repository.refreshSourceReadiness(job.sourceId());
+        }
+    }
+
+    private boolean shouldDeferForPrimaryRequest() {
+        return properties.getDocument().getEnrichment().isDeferWhenPrimaryActive()
+                && ollamaClient.hasPrimaryRequestInFlight();
+    }
+
+    private void defer(DocumentEnrichmentJob job, long started) {
+        String message = "사용자 질문을 우선 처리하기 위해 LLM 품질 보강을 잠시 대기합니다.";
+        int delaySeconds = Math.min(30, Math.max(1, properties.getDocument().getEnrichment().getMaxDeferSeconds()));
+        recordDiagnostic(job, "DEFERRED", 1, 0, 0, elapsedMs(started), message,
+                Map.of("reason", "PRIMARY_REQUEST_IN_FLIGHT", "delaySeconds", delaySeconds));
+        if (repository.deferDocumentEnrichmentJob(job.id(), workerId, delaySeconds, message)) {
+            repository.updateDocumentJobEnrichment(job.jobId(), "PENDING", message);
             repository.refreshSourceReadiness(job.sourceId());
         }
     }

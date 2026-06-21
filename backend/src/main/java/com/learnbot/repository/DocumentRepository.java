@@ -646,6 +646,26 @@ public class DocumentRepository {
         return updated > 0;
     }
 
+    public boolean deferDocumentEnrichmentJob(UUID enrichmentJobId, String workerId, int delaySeconds, String message) {
+        int updated = jdbc.update("""
+                UPDATE document_enrichment_jobs
+                SET status = 'PENDING',
+                    error_message = :message,
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL,
+                    next_attempt_at = now() + (:delaySeconds * interval '1 second'),
+                    updated_at = now()
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource()
+                .addValue("id", enrichmentJobId)
+                .addValue("workerId", workerId)
+                .addValue("delaySeconds", Math.max(1, delaySeconds))
+                .addValue("message", message));
+        return updated > 0;
+    }
+
     public void addDocumentProcessingDiagnostic(UUID sourceId, UUID jobId, DocumentProcessingDiagnostic diagnostic) {
         if (diagnostic == null) {
             return;

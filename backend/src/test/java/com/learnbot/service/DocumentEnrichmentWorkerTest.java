@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.repository.DocumentRepository;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class DocumentEnrichmentWorkerTest {
         when(embeddingService.embed(List.of("LLM summary"))).thenReturn(List.of(List.of(0.1, 0.2, 0.3)));
         when(repository.finishDocumentEnrichmentJob(eq(job.id()), anyString(), eq("SUCCEEDED"), eq("LLM 품질 보강이 완료되었습니다."))).thenReturn(true);
 
-        new DocumentEnrichmentWorker(repository, contextBuilder, embeddingService).processNext();
+        newWorker(repository, contextBuilder, embeddingService).processNext();
 
         verify(repository).updateDocumentJobEnrichment(jobId, "RUNNING", "LLM 품질 보강을 진행 중입니다.");
         verify(repository).replaceDocumentContextChunks(documentId, List.of(contextChunk), List.of(List.of(0.1, 0.2, 0.3)));
@@ -72,10 +73,24 @@ class DocumentEnrichmentWorkerTest {
         when(contextBuilder.buildSourceContext(anyList(), eq(false), eq(true))).thenThrow(new RuntimeException("model timeout"));
         when(repository.retryDocumentEnrichmentJob(eq(job.id()), anyString(), eq(1), eq("model timeout"))).thenReturn(true);
 
-        new DocumentEnrichmentWorker(repository, contextBuilder, embeddingService).processNext();
+        newWorker(repository, contextBuilder, embeddingService).processNext();
 
         verify(repository).updateDocumentJobEnrichment(jobId, "RUNNING", "LLM 품질 보강을 진행 중입니다.");
         verify(repository).retryDocumentEnrichmentJob(eq(job.id()), anyString(), eq(1), eq("model timeout"));
         verify(repository).updateDocumentJobEnrichment(jobId, "RETRYING", "model timeout");
+    }
+
+    private DocumentEnrichmentWorker newWorker(
+            DocumentRepository repository,
+            DocumentContextBuilder contextBuilder,
+            EmbeddingService embeddingService
+    ) {
+        return new DocumentEnrichmentWorker(
+                repository,
+                contextBuilder,
+                embeddingService,
+                mock(OllamaClient.class),
+                new LearnBotProperties()
+        );
     }
 }

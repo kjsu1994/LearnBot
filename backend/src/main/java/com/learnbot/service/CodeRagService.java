@@ -88,6 +88,15 @@ public class CodeRagService {
     }
 
     public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
         if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
             return commitInsightService.answer(repositoryId, question);
         }

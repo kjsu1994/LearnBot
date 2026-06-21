@@ -266,7 +266,8 @@ public class DocumentContextBuilder {
                     "Document: " + clean(document.title()) + "\nSource URI: " + clean(document.sourceUri())
                             + "\n\nWindow summaries:\n" + trim(String.join("\n\n---\n\n", mapSummaries), maxReduceInputChars()),
                     fallback,
-                    maxReduceInputChars()
+                    maxReduceInputChars(),
+                    llmReduceMaxOutputTokens()
             );
             if (reduced.llmSucceeded()) {
                 return new HybridText(reduced.content(), "llm_auxiliary_map_reduce", true);
@@ -316,7 +317,8 @@ public class DocumentContextBuilder {
                 "Summarize this multi-document source for retrieval. Mention the document map and likely question routing.",
                 deterministic + "\n\n" + sourceStructureContent(facts),
                 deterministic,
-                maxReduceInputChars()
+                maxReduceInputChars(),
+                llmReduceMaxOutputTokens()
         );
     }
 
@@ -325,18 +327,24 @@ public class DocumentContextBuilder {
     }
 
     private HybridText llmSummary(String instruction, String context, String fallback, int maxInputChars) {
+        return llmSummary(instruction, context, fallback, maxInputChars, llmMaxOutputTokens());
+    }
+
+    private HybridText llmSummary(String instruction, String context, String fallback, int maxInputChars, int maxOutputTokens) {
         try {
-            String response = ollamaClient.chat(
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
                     """
                             You create compact document retrieval summaries.
                             Use only the provided facts and excerpts. Do not invent facts, counts, pages, tables, or source names.
                             Return plain text with concrete titles, sections, pages, sheets, tables, and topics.
                             """,
                     instruction + "\n\nFacts:\n" + trim(maskSecrets(context), Math.max(1000, maxInputChars)),
-                    OllamaClient.ChatRole.AUXILIARY
+                    OllamaClient.ChatRole.AUXILIARY,
+                    maxOutputTokens
             );
+            String response = result.content();
             String clean = response == null ? "" : response.strip();
-            if (clean.length() < 20) {
+            if (clean.length() < 20 || (result.stoppedByLength() && clean.length() < 80)) {
                 return new HybridText(fallback, "deterministic", false);
             }
             return new HybridText(clean, "llm_auxiliary", true);
@@ -511,6 +519,14 @@ public class DocumentContextBuilder {
 
     private int maxReduceInputChars() {
         return Math.max(1000, properties.getRag().getDocumentContext().getMaxReduceInputChars());
+    }
+
+    private int llmMaxOutputTokens() {
+        return Math.max(1, properties.getRag().getDocumentContext().getLlmMaxOutputTokens());
+    }
+
+    private int llmReduceMaxOutputTokens() {
+        return Math.max(1, properties.getRag().getDocumentContext().getLlmReduceMaxOutputTokens());
     }
 
     private List<String> keywords(ExtractedDocument document, List<Chunk> chunks) {

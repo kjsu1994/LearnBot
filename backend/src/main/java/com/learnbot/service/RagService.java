@@ -92,6 +92,15 @@ public class RagService {
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(question, filter, mode, speedProfile, spaceIds, selectedSpaceId);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private AskResponse askPrioritized(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         long askStarted = System.nanoTime();
         AnswerMode answerMode = AnswerMode.from(mode);
         DocumentSpeedProfile requestedSpeedProfile = DocumentSpeedProfile.from(

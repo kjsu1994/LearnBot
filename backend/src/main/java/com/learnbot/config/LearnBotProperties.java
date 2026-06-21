@@ -771,6 +771,12 @@ public class LearnBotProperties {
             @Min(1000)
             private int maxReduceInputChars = 12000;
 
+            @Min(1)
+            private int llmMaxOutputTokens = 384;
+
+            @Min(1)
+            private int llmReduceMaxOutputTokens = 512;
+
             public boolean isEnabled() {
                 return enabled;
             }
@@ -865,6 +871,22 @@ public class LearnBotProperties {
 
             public void setMaxReduceInputChars(int maxReduceInputChars) {
                 this.maxReduceInputChars = maxReduceInputChars;
+            }
+
+            public int getLlmMaxOutputTokens() {
+                return llmMaxOutputTokens;
+            }
+
+            public void setLlmMaxOutputTokens(int llmMaxOutputTokens) {
+                this.llmMaxOutputTokens = llmMaxOutputTokens;
+            }
+
+            public int getLlmReduceMaxOutputTokens() {
+                return llmReduceMaxOutputTokens;
+            }
+
+            public void setLlmReduceMaxOutputTokens(int llmReduceMaxOutputTokens) {
+                this.llmReduceMaxOutputTokens = llmReduceMaxOutputTokens;
             }
         }
 
@@ -1290,6 +1312,7 @@ public class LearnBotProperties {
         private Preview preview = new Preview();
         private Ocr ocr = new Ocr();
         private Graph graph = new Graph();
+        private Enrichment enrichment = new Enrichment();
 
         public int getIndexThreads() {
             return indexThreads;
@@ -1321,6 +1344,14 @@ public class LearnBotProperties {
 
         public void setGraph(Graph graph) {
             this.graph = graph;
+        }
+
+        public Enrichment getEnrichment() {
+            return enrichment;
+        }
+
+        public void setEnrichment(Enrichment enrichment) {
+            this.enrichment = enrichment;
         }
 
         public static class Preview {
@@ -1415,6 +1446,29 @@ public class LearnBotProperties {
             public void setMaxExpandedResults(int maxExpandedResults) { this.maxExpandedResults = maxExpandedResults; }
             public boolean isDebug() { return debug; }
             public void setDebug(boolean debug) { this.debug = debug; }
+        }
+
+        public static class Enrichment {
+            private boolean deferWhenPrimaryActive = true;
+
+            @Min(1)
+            private int maxDeferSeconds = 900;
+
+            public boolean isDeferWhenPrimaryActive() {
+                return deferWhenPrimaryActive;
+            }
+
+            public void setDeferWhenPrimaryActive(boolean deferWhenPrimaryActive) {
+                this.deferWhenPrimaryActive = deferWhenPrimaryActive;
+            }
+
+            public int getMaxDeferSeconds() {
+                return maxDeferSeconds;
+            }
+
+            public void setMaxDeferSeconds(int maxDeferSeconds) {
+                this.maxDeferSeconds = maxDeferSeconds;
+            }
         }
     }
 
