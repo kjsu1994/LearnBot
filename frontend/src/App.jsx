@@ -108,6 +108,7 @@ export default function App() {
     llmUsingDefaults: true,
   });
   const [documentSchemaProfiles, setDocumentSchemaProfiles] = useState([]);
+  const [storageRetention, setStorageRetention] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [spaceTransferResult, setSpaceTransferResult] = useState(null);
   const [inviteForm, setInviteForm] = useState({
@@ -855,15 +856,17 @@ export default function App() {
   }
 
   async function refreshAdmin() {
-    const [users, logs, settings, schemaProfiles] = await Promise.all([
+    const [users, logs, settings, schemaProfiles, retentionPreview] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=50'),
       request('/api/admin/settings'),
       request('/api/admin/document-graph/schema-profiles').catch(() => []),
+      request('/api/admin/storage/retention/preview').catch(() => null),
     ]);
     setAdminUsers(users || []);
     setAuditLogs(logs || []);
     setDocumentSchemaProfiles(schemaProfiles || []);
+    setStorageRetention(retentionPreview);
     setAdminSettings(settings || {
       respectRobotsTxt: true,
       allowedDomains: [],
@@ -1023,6 +1026,37 @@ export default function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+    });
+  }
+
+  async function refreshStorageRetention() {
+    return await run('storage-retention-preview', async () => {
+      const preview = await request('/api/admin/storage/retention/preview');
+      setStorageRetention(preview);
+      return preview;
+    });
+  }
+
+  async function runStorageRetention(dryRun = true) {
+    if (!dryRun && !window.confirm('Delete retention-eligible logs, exports, cache files, and orphan objects? Search indexes and active source originals are kept.')) {
+      return false;
+    }
+    return await run(dryRun ? 'storage-retention-dry-run' : 'storage-retention-run', async () => {
+      const result = await request('/api/admin/storage/retention/run', {
+        method: 'POST',
+        json: { dryRun },
+      });
+      setStorageRetention({
+        generatedAt: result.executedAt,
+        dryRun: result.dryRun,
+        areas: result.areas || [],
+        totalCandidates: (result.areas || []).reduce((sum, area) => sum + Number(area.candidates || 0), 0),
+        totalEstimatedBytes: result.totalEstimatedBytes,
+      });
+      if (!dryRun) {
+        await refreshAdmin();
+      }
+      return result;
     });
   }
 
@@ -1258,6 +1292,7 @@ export default function App() {
             users={adminUsers}
             adminSettings={adminSettings}
             documentSchemaProfiles={documentSchemaProfiles}
+            storageRetention={storageRetention}
             spaces={spaces}
             selectedSpaceId={activeSpaceId}
             auditLogs={auditLogs}
@@ -1279,6 +1314,8 @@ export default function App() {
             spaceTransferResult={spaceTransferResult}
             updateAdminSettings={updateAdminSettings}
             updateDocumentSchemaProfile={updateDocumentSchemaProfile}
+            refreshStorageRetention={refreshStorageRetention}
+            runStorageRetention={runStorageRetention}
             testAdminLlmSettings={testAdminLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}

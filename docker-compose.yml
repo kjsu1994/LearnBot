@@ -2,6 +2,12 @@ x-timezone-env: &timezone-env
   TZ: Asia/Seoul
   JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Seoul
 
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LEARNBOT_DOCKER_LOG_MAX_SIZE:-50m}
+    max-file: ${LEARNBOT_DOCKER_LOG_MAX_FILE:-7}
+
 services:
   cloudflare-tunnel:
     container_name: learnbot-cloudflared-tunnel
@@ -14,6 +20,7 @@ services:
     command: tunnel run
     depends_on:
       - nginx
+    logging: *default-logging
 
   minio:
     image: minio/minio
@@ -28,6 +35,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-learnbot1234}
     volumes:
       - minio-data:/data
+    logging: *default-logging
 
   nginx:
     build:
@@ -43,6 +51,7 @@ services:
     depends_on:
       backend:
         condition: service_started
+    logging: *default-logging
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -61,6 +70,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   ollama:
     image: ollama/ollama:latest
@@ -75,6 +85,7 @@ services:
       - "127.0.0.1:11436:11434"
     volumes:
       - ollama-data:/root/.ollama
+    logging: *default-logging
 
   ollama-pull:
     image: ollama/ollama:latest
@@ -93,6 +104,7 @@ services:
        (ollama pull \"$${PRIMARY_LLM_MODEL}\" || echo \"Optional primary LLM pull failed: $${PRIMARY_LLM_MODEL}\") &&
        ollama pull \"$${EMBEDDING_MODEL}\" &&
        ollama list"
+    logging: *default-logging
 
   redis:
     image: redis:7
@@ -100,6 +112,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6380:6379"
+    logging: *default-logging
 
   backend:
     container_name: learnbot-backend
@@ -152,6 +165,13 @@ services:
       S3_BUCKET: ${S3_BUCKET:-learnbot-raw}
       LEARNBOT_CODE_WORKSPACE_PATH: /var/lib/learnbot/repos
       LEARNBOT_EXPORT_DIR: /var/lib/learnbot/export
+      LEARNBOT_RETENTION_ENABLED: ${LEARNBOT_RETENTION_ENABLED:-true}
+      LEARNBOT_RETENTION_DRY_RUN: ${LEARNBOT_RETENTION_DRY_RUN:-false}
+      LEARNBOT_RETENTION_OPERATION_LOG_DAYS: ${LEARNBOT_RETENTION_OPERATION_LOG_DAYS:-14}
+      LEARNBOT_RETENTION_AUDIT_LOG_DAYS: ${LEARNBOT_RETENTION_AUDIT_LOG_DAYS:-180}
+      LEARNBOT_RETENTION_EXPORT_DAYS: ${LEARNBOT_RETENTION_EXPORT_DAYS:-14}
+      LEARNBOT_RETENTION_ORPHAN_GRACE_DAYS: ${LEARNBOT_RETENTION_ORPHAN_GRACE_DAYS:-7}
+      LEARNBOT_RETENTION_DEPENDENCY_CACHE_DAYS: ${LEARNBOT_RETENTION_DEPENDENCY_CACHE_DAYS:-14}
       LEARNBOT_BOOTSTRAP_ADMIN_EMAIL: ${LEARNBOT_BOOTSTRAP_ADMIN_EMAIL:-jinsu.kim}
       LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD: ${LEARNBOT_BOOTSTRAP_ADMIN_PASSWORD:-admin1234}
       LEARNBOT_BOOTSTRAP_ADMIN_NAME: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:-런봇 Admin}
@@ -171,6 +191,7 @@ services:
     volumes:
       - code-repos:/var/lib/learnbot/repos
       - ./export:/var/lib/learnbot/export
+    logging: *default-logging
 
 volumes:
   postgres-data:

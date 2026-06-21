@@ -91,6 +91,25 @@ Git working copies can be recreated by reindexing registered repositories. MinIO
 
 If encrypted Git tokens are stored, keep the same `LEARNBOT_CODE_CREDENTIAL_SECRET` value when migrating the database. Changing that secret makes previously stored tokens unreadable; re-enter the token from the UI if that happens.
 
+## Disk retention and cleanup
+
+LearnBot keeps search-critical data by default and only purges operational data automatically.
+
+- Operation/crawl/diagnostic logs are retained for 14 days by default.
+- Admin/security audit logs are retained for 180 days by default.
+- RAG export ZIP files are retained for 14 days by default.
+- Deleted-source originals and MinIO objects with no `source_objects` DB reference are deleted only after a 7-day grace period.
+- Document/code chunks, embeddings, graph data, active source originals, saved answers, and Ollama models are not automatically deleted.
+
+Admins can inspect and run cleanup from `GET /api/admin/storage/retention/preview` and `POST /api/admin/storage/retention/run`. The run endpoint defaults to dry-run unless `{"dryRun": false}` is passed. Docker container logs are size-rotated through compose logging options; Docker build cache remains manual via:
+
+```powershell
+.\scripts\cleanup.ps1 -DockerCache -DryRun
+.\scripts\cleanup.ps1 -DockerCache -Until 168h
+```
+
+Named Docker volumes are intentionally never pruned by the helper script.
+
 ## Code RAG
 
 Git repositories support public/no-auth and username/token authentication for HTTP(S), plus standard Git SSH URLs when the container has usable SSH credentials. Token storage is opt-in from the UI. Stored tokens are encrypted in PostgreSQL and reused for later manual indexing.

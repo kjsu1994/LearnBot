@@ -16,6 +16,9 @@ import com.learnbot.dto.SpaceMemberRequest;
 import com.learnbot.dto.SpaceRoleUpdateRequest;
 import com.learnbot.dto.SpaceSummary;
 import com.learnbot.dto.SpaceUpdateRequest;
+import com.learnbot.dto.StorageRetentionPreview;
+import com.learnbot.dto.StorageRetentionRunRequest;
+import com.learnbot.dto.StorageRetentionRunResponse;
 import com.learnbot.dto.UserPasswordResetRequest;
 import com.learnbot.dto.UserSummary;
 import com.learnbot.dto.UserUpdateRequest;
@@ -26,6 +29,7 @@ import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.DocumentSchemaProfileService;
 import com.learnbot.service.SpaceTransferService;
+import com.learnbot.service.StorageRetentionService;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -59,6 +63,7 @@ public class AdminController {
     private final DocumentSchemaProfileService documentSchemaProfileService;
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
+    private final StorageRetentionService storageRetentionService;
 
     public AdminController(
             AuthService authService,
@@ -66,7 +71,8 @@ public class AdminController {
             AdminSettingsService adminSettingsService,
             DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
-            SpaceTransferService spaceTransferService
+            SpaceTransferService spaceTransferService,
+            StorageRetentionService storageRetentionService
     ) {
         this.authService = authService;
         this.auditService = auditService;
@@ -74,6 +80,7 @@ public class AdminController {
         this.documentSchemaProfileService = documentSchemaProfileService;
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
+        this.storageRetentionService = storageRetentionService;
     }
 
     @GetMapping("/users")
@@ -179,6 +186,19 @@ public class AdminController {
     List<AuditLogSummary> auditLogs(@RequestParam(required = false) Integer limit) {
         authService.requireAdmin(currentUserProvider.currentUser());
         return auditService.list(limit);
+    }
+
+    @GetMapping("/storage/retention/preview")
+    StorageRetentionPreview storageRetentionPreview() {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        return storageRetentionService.preview();
+    }
+
+    @PostMapping("/storage/retention/run")
+    StorageRetentionRunResponse runStorageRetention(@RequestBody(required = false) StorageRetentionRunRequest request) {
+        authService.requireAdmin(currentUserProvider.currentUser());
+        boolean dryRun = request == null || request.dryRun() == null || request.dryRun();
+        return storageRetentionService.run(dryRun);
     }
 
     @GetMapping("/settings")

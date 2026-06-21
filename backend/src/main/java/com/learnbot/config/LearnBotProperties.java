@@ -21,6 +21,7 @@ public class LearnBotProperties {
     private Document document = new Document();
     private Auth auth = new Auth();
     private Transfer transfer = new Transfer();
+    private Retention retention = new Retention();
 
     public Crawler getCrawler() {
         return crawler;
@@ -100,6 +101,14 @@ public class LearnBotProperties {
 
     public void setTransfer(Transfer transfer) {
         this.transfer = transfer;
+    }
+
+    public Retention getRetention() {
+        return retention;
+    }
+
+    public void setRetention(Retention retention) {
+        this.retention = retention;
     }
 
     public static class Crawler {
@@ -1528,6 +1537,82 @@ public class LearnBotProperties {
 
         public void setExportDir(String exportDir) {
             this.exportDir = exportDir;
+        }
+    }
+
+    public static class Retention {
+        private boolean enabled = true;
+        private boolean dryRun = false;
+
+        @Min(1)
+        private int operationLogDays = 14;
+
+        @Min(1)
+        private int auditLogDays = 180;
+
+        @Min(1)
+        private int exportDays = 14;
+
+        @Min(1)
+        private int orphanGraceDays = 7;
+
+        @Min(1)
+        private int dependencyCacheDays = 14;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isDryRun() {
+            return dryRun;
+        }
+
+        public void setDryRun(boolean dryRun) {
+            this.dryRun = dryRun;
+        }
+
+        public int getOperationLogDays() {
+            return operationLogDays;
+        }
+
+        public void setOperationLogDays(int operationLogDays) {
+            this.operationLogDays = operationLogDays;
+        }
+
+        public int getAuditLogDays() {
+            return auditLogDays;
+        }
+
+        public void setAuditLogDays(int auditLogDays) {
+            this.auditLogDays = auditLogDays;
+        }
+
+        public int getExportDays() {
+            return exportDays;
+        }
+
+        public void setExportDays(int exportDays) {
+            this.exportDays = exportDays;
+        }
+
+        public int getOrphanGraceDays() {
+            return orphanGraceDays;
+        }
+
+        public void setOrphanGraceDays(int orphanGraceDays) {
+            this.orphanGraceDays = orphanGraceDays;
+        }
+
+        public int getDependencyCacheDays() {
+            return dependencyCacheDays;
+        }
+
+        public void setDependencyCacheDays(int dependencyCacheDays) {
+            this.dependencyCacheDays = dependencyCacheDays;
         }
     }
 }

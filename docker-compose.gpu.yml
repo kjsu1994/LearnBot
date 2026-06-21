@@ -34,3 +34,8 @@ services:
       RERANKER_DEVICE: cuda
     ports:
       - "127.0.0.1:18081:8081"
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LEARNBOT_DOCKER_LOG_MAX_SIZE:-50m}
+        max-file: ${LEARNBOT_DOCKER_LOG_MAX_FILE:-7}

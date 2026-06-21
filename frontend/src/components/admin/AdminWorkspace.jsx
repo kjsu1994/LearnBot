@@ -11,6 +11,7 @@ function AdminWorkspace({
   users,
   adminSettings,
   documentSchemaProfiles = [],
+  storageRetention,
   spaces,
   selectedSpaceId,
   auditLogs,
@@ -32,6 +33,8 @@ function AdminWorkspace({
   spaceTransferResult,
   updateAdminSettings,
   updateDocumentSchemaProfile,
+  refreshStorageRetention,
+  runStorageRetention,
   testAdminLlmSettings,
   refreshAdmin,
   loading,
@@ -236,6 +239,7 @@ function AdminWorkspace({
   const transferSpaceName = spaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
   const allowedDomains = adminSettings?.allowedDomains || [];
   const allowedDomainPreview = allowedDomains.slice(0, 6);
+  const retentionAreas = storageRetention?.areas || [];
   const adminTabs = (
     <div className="admin-tabs" role="tablist" aria-label="관리자 메뉴">
       <button
@@ -464,6 +468,56 @@ function AdminWorkspace({
             {!documentSchemaProfiles?.length && (
               <p className="empty compact-empty">등록된 문서 그래프 스키마 프로파일을 불러오지 못했습니다. Core fallback으로 동작합니다.</p>
             )}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <Database size={18} />
+            <div>
+              <h2>Storage retention</h2>
+              <p>14-day operation logs, long audit logs, and safe orphan cleanup.</p>
+            </div>
+          </div>
+          <div className="detail-box compact-box">
+            <strong>Cleanup preview</strong>
+            <small>
+              Candidates {storageRetention?.totalCandidates ?? 0} · estimated {formatFileSize(storageRetention?.totalEstimatedBytes)}
+            </small>
+            <small>
+              Generated {storageRetention?.generatedAt ? formatDate(storageRetention.generatedAt) : '-'} · default run mode {storageRetention?.dryRun ? 'dry-run' : 'delete'}
+            </small>
+          </div>
+          <div className="results audit-list">
+            {retentionAreas.map((area) => (
+              <article className="result" key={area.key}>
+                <div className="result-heading">
+                  <strong>{area.label || area.key}</strong>
+                  <span>{area.retentionDays ? `${area.retentionDays}d` : '-'}</span>
+                </div>
+                <small>
+                  candidates {area.candidates || 0} · deleted {area.deleted || 0} · {formatFileSize(area.estimatedBytes)}
+                </small>
+                <p>{area.impact}</p>
+              </article>
+            ))}
+            {!retentionAreas.length && (
+              <p className="empty compact-empty">No retention diagnostics loaded.</p>
+            )}
+          </div>
+          <div className="action-row">
+            <button className="ghost-button" type="button" disabled={loading('storage-retention-preview')} onClick={refreshStorageRetention}>
+              {loading('storage-retention-preview') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+              Refresh
+            </button>
+            <button className="ghost-button" type="button" disabled={loading('storage-retention-dry-run')} onClick={() => runStorageRetention?.(true)}>
+              {loading('storage-retention-dry-run') ? <Loader2 className="spin" size={16} /> : <Info size={16} />}
+              Dry run
+            </button>
+            <button type="button" disabled={loading('storage-retention-run')} onClick={() => runStorageRetention?.(false)}>
+              {loading('storage-retention-run') ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+              Delete eligible data
+            </button>
           </div>
         </section>
 

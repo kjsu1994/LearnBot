@@ -172,3 +172,11 @@ learnbot:
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
   transfer:
     export-dir: ${LEARNBOT_EXPORT_DIR:export}
+  retention:
+    enabled: ${LEARNBOT_RETENTION_ENABLED:true}
+    dry-run: ${LEARNBOT_RETENTION_DRY_RUN:false}
+    operation-log-days: ${LEARNBOT_RETENTION_OPERATION_LOG_DAYS:14}
+    audit-log-days: ${LEARNBOT_RETENTION_AUDIT_LOG_DAYS:180}
+    export-days: ${LEARNBOT_RETENTION_EXPORT_DAYS:14}
+    orphan-grace-days: ${LEARNBOT_RETENTION_ORPHAN_GRACE_DAYS:7}
+    dependency-cache-days: ${LEARNBOT_RETENTION_DEPENDENCY_CACHE_DAYS:14}

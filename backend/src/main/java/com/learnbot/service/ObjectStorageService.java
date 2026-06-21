@@ -16,12 +16,18 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -115,6 +121,36 @@ public class ObjectStorageService {
         }
     }
 
+    public void delete(String bucket, String objectKey) {
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(objectKey)
+                    .build());
+        } catch (S3Exception ex) {
+            throw new IllegalArgumentException("Could not delete object: " + ex.awsErrorDetails().errorMessage(), ex);
+        }
+    }
+
+    public List<ObjectSummary> listObjects(String prefix) {
+        ensureBucket();
+        List<ObjectSummary> objects = new ArrayList<>();
+        String bucket = properties.getStorage().getBucket();
+        String token = null;
+        do {
+            ListObjectsV2Response response = s3Client.listObjectsV2(ListObjectsV2Request.builder()
+                    .bucket(bucket)
+                    .prefix(prefix)
+                    .continuationToken(token)
+                    .build());
+            for (S3Object object : response.contents()) {
+                objects.add(new ObjectSummary(bucket, object.key(), object.size(), object.lastModified()));
+            }
+            token = response.nextContinuationToken();
+        } while (token != null && !token.isBlank());
+        return objects;
+    }
+
     private void ensureBucket() {
         String bucket = properties.getStorage().getBucket();
         try {
@@ -133,5 +169,13 @@ public class ObjectStorageService {
 
     private String sanitize(String value) {
         return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    public record ObjectSummary(
+            String bucket,
+            String objectKey,
+            long sizeBytes,
+            Instant lastModified
+    ) {
     }
 }
