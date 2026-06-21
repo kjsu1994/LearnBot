@@ -1150,12 +1150,8 @@ function Sidebar({
     <aside className={collapsed ? 'sidebar learnbot-sidebar-v4 collapsed' : 'sidebar learnbot-sidebar-v4'}>
       <div className="brand">
         <button className="brand-home-button" type="button" title="메인 대시보드로 이동" onClick={() => navigateTo(routePaths.home)}>
-          <span className="brand-mark brand-home-mark bg-white">
-            <img src="/LearnBot_Logo_mini.png" alt="" />
-          </span>
-          <span className="brand-copy">
-            <span>LearnBot</span>
-            <small>Private Knowledge RAG</small>
+          <span className="brand-full-mark brand-home-full-mark bg-white">
+            <img src="/LearnBot_Logo_Sidebar.png?v=20260622" alt="LearnBot Private Knowledge RAG" />
           </span>
         </button>
         <button className="icon-button sidebar-toggle" type="button" title={collapsed ? '사이드바 펼치기' : '사이드바 접기'} onClick={() => setCollapsed((current) => !current)}>

@@ -10,6 +10,7 @@
 
 .home-brand-mark img,
 .brand-home-mark img,
+.brand-full-mark img,
 .login-brand .brand-mark img,
 .launch-logo-lockup img {
   display: block;
@@ -20,6 +21,7 @@
 
 .commercial-shell .home-brand-mark,
 .commercial-shell .brand-home-mark,
+.commercial-shell .brand-full-mark,
 .commercial-shell .login-brand .brand-mark {
   background: #ffffff;
   border: 1px solid rgba(226, 232, 240, 0.92);
@@ -34,6 +36,22 @@
   width: 54px;
 }
 
+.commercial-shell .brand-full-mark {
+  align-items: center;
+  border-radius: 16px;
+  display: inline-flex;
+  height: 54px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 3px 5px;
+  width: 196px;
+}
+
+.commercial-shell .brand-full-mark img {
+  object-fit: contain;
+  transform: none;
+}
+
 .workspace-shell-v3 .brand-home-mark {
   aspect-ratio: 1 / 1;
   border-radius: 12px;
@@ -41,6 +59,22 @@
   height: 42px;
   min-width: 42px;
   width: 42px;
+}
+
+.workspace-shell-v3 .brand-home-full-mark {
+  flex: 0 0 176px;
+  height: 46px;
+  min-width: 176px;
+  padding: 0;
+  width: 176px;
+}
+
+.workspace-shell-v3 .brand-home-full-mark img {
+  height: 100%;
+  max-height: none;
+  max-width: none;
+  object-fit: contain;
+  width: 100%;
 }
 
 .commercial-shell .home-brand-mark img,
@@ -820,6 +854,13 @@
 
 .workspace-shell-v3 .sidebar.collapsed .brand-home-mark {
   height: 48px;
+  width: 48px;
+}
+
+.workspace-shell-v3 .sidebar.collapsed .brand-home-full-mark {
+  flex: 0 0 48px;
+  height: 48px;
+  min-width: 48px;
   width: 48px;
 }
 
