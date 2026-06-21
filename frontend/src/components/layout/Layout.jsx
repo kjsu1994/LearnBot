@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Search } from 'lucide-react';
 import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
 import { routePaths } from '../../config/constants.js';
@@ -10,7 +10,285 @@ import { Button } from '../ui/button.jsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card.jsx';
 import { MetricBarChart } from '../ui/metric-chart.jsx';
 
+const Spline = lazy(() => import('@splinetool/react-spline'));
+
+function DeckGlyph() {
+  return (
+    <svg viewBox="0 0 120 120" className="deck-glyph" aria-hidden="true">
+      <circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" strokeWidth="1.4" className="deck-glyph-orbit" style={{ strokeDasharray: '18 14' }} />
+      <rect x="34" y="34" width="52" height="52" rx="14" fill="currentColor" fillOpacity="0.08" stroke="currentColor" strokeWidth="1.2" className="deck-glyph-grid" />
+      <circle cx="60" cy="60" r="7" fill="currentColor" />
+      <path d="M60 30v10M60 80v10M30 60h10M80 60h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="deck-glyph-pulse" />
+    </svg>
+  );
+}
+
+function RobotSceneFallback() {
+  return (
+    <div className="hero3-mini-console hero3-robot-fallback">
+      <div className="hero3-window-dots"><span /><span /><span /></div>
+      <div className="mockup-query">
+        <IconSparkles size={18} />
+        <span>“이 장애 코드의 원인과 조치 절차를 근거와 함께 알려줘”</span>
+      </div>
+      <MetricBarChart
+        data={[
+          { name: 'Code', value: 38 },
+          { name: 'Docs', value: 64 },
+          { name: 'Saved', value: 22 },
+        ]}
+      />
+    </div>
+  );
+}
+
+function SplineRobotScene() {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!loaded) {
+        setFailed(true);
+      }
+    }, 9000);
+
+    return () => window.clearTimeout(timer);
+  }, [loaded]);
+
+  return (
+    <div className="hero3-robot-stage" aria-label="LearnBot 3D assistant">
+      {!loaded && <RobotSceneFallback />}
+      {!failed && (
+        <Suspense fallback={null}>
+          <Spline
+            scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
+            className="hero3-spline-scene"
+            onLoad={() => setLoaded(true)}
+            onError={() => setFailed(true)}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
 function HomePage({ user, bootstrapping, navigateTo, logout }) {
+  const shellRef = useRef(null);
+  const [mode, setMode] = useState('docs');
+  const supportedSources = ['PDF', 'DOCX', 'PPTX', 'Markdown', 'Excel', 'CSV', 'Web crawl', 'Git repository', 'Saved answers'];
+  const activeMode = {
+    docs: {
+      label: '문서 RAG',
+      title: '문서 지식 운영',
+      description: '업로드 문서, 웹 수집 자료, 표 데이터를 근거 중심 지식으로 정리하고 답변 품질을 관리합니다.',
+      items: ['원문 청크와 출처 연결', '문서 상태와 진단 추적', 'PDF, Excel, Web crawl 통합'],
+      action: () => navigateTo(routePaths.docs),
+    },
+    code: {
+      label: '코드 RAG',
+      title: '코드 근거 분석',
+      description: 'Git 저장소의 파일, 청크, 변경 흐름을 기반으로 코드 질문에 검증 가능한 답변을 제공합니다.',
+      items: ['저장소 인덱싱 상태 확인', '파일 미리보기와 검색 연동', '코드 근거 기반 답변'],
+      action: () => navigateTo(routePaths.code),
+    },
+  }[mode];
+  const metrics = [
+    { label: 'Knowledge sources', value: 'Docs + Code' },
+    { label: 'Answer policy', value: 'Grounded' },
+    { label: 'Operations', value: 'Audit ready' },
+  ];
+  const protocols = [
+    { name: 'Source intake', detail: '문서, 웹, Git 저장소를 안전하게 가져오고 실패 사유를 추적합니다.', status: 'Ready' },
+    { name: 'Index pipeline', detail: '구조, 메타데이터, 청크, 근거 연결을 검색 가능한 상태로 정리합니다.', status: 'Running' },
+    { name: 'Answer guard', detail: '질문 의도에 맞는 근거만 사용해 출처가 남는 답변을 제공합니다.', status: 'Grounded' },
+  ];
+
+  function setSpotlight(event) {
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    target.style.setProperty('--hero3-x', `${event.clientX - rect.left}px`);
+    target.style.setProperty('--hero3-y', `${event.clientY - rect.top}px`);
+  }
+
+  function clearSpotlight(event) {
+    const target = event.currentTarget;
+    target.style.removeProperty('--hero3-x');
+    target.style.removeProperty('--hero3-y');
+  }
+
+  return (
+    <AnimatedPage ref={shellRef} className="home-shell commercial-shell landing-shell hero3-shell min-h-screen bg-slate-950 text-slate-50">
+      <ShaderBackground className="landing-shader-canvas command-deck-shader" />
+      <header className="home-nav">
+        <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
+          <span className="home-brand-mark overflow-hidden bg-white">
+            <img src="/LearnBot_Mark.png" alt="" />
+          </span>
+          <span>
+            <strong>LearnBot</strong>
+            <small>Private Knowledge RAG</small>
+          </span>
+        </button>
+        <nav aria-label="LearnBot 주요 영역">
+          <button type="button" onClick={() => navigateTo(routePaths.code)}>코드</button>
+          <button type="button" onClick={() => navigateTo(routePaths.docs)}>문서</button>
+          <button type="button" onClick={() => navigateTo(routePaths.admin)}>관리자</button>
+        </nav>
+        <div className="home-nav-actions">
+          {bootstrapping && <Loader2 className="spin" size={16} />}
+          {user ? (
+            <Button variant="outline" type="button" onClick={logout}>
+              <IconLogout size={15} />
+              로그아웃
+            </Button>
+          ) : (
+            <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+              <IconLock size={15} />
+              로그인
+            </Button>
+          )}
+        </div>
+      </header>
+
+      <section className="hero3-section">
+        <header className="hero3-header-grid">
+          <div className="hero3-copy">
+            <div className="hero3-badges">
+              <span className="hero3-pill"><IconSparkles size={14} /> Private Knowledge RAG</span>
+              <span className="hero3-pill hero3-pill-muted">Source-grounded answers</span>
+            </div>
+            <div className="hero3-title-block">
+              <h1>LearnBot: 사내 문서와 코드를 근거 중심 지식으로 운영하는 AI 커맨드 덱</h1>
+              <p>
+                문서 RAG, 코드 RAG, 저장 답변, 관리자 진단을 하나의 제품 경험으로 연결합니다.
+                모든 답변은 원문 근거와 운영 상태를 함께 남겨 팀이 검증 가능한 지식으로 활용할 수 있습니다.
+              </p>
+            </div>
+            <div className="hero3-action-row">
+              <div className="hero3-status-pill">
+                <span><span className="hero3-pulse-dot" /> 운영 준비 완료</span>
+                <span>·</span>
+                <span>로컬 중심 지식 운영</span>
+              </div>
+              <div className="hero3-metrics">
+                {metrics.map((metric) => (
+                  <div key={metric.label}>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="home-hero-actions hero3-primary-actions">
+              <Button type="button" onClick={() => navigateTo(routePaths.docs)}>
+                <IconFileText size={17} />
+                문서 RAG 시작
+              </Button>
+              <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+                <IconCode size={17} />
+                코드 분석 열기
+              </Button>
+            </div>
+          </div>
+
+          <div className="hero3-mode-card">
+            <div className="hero3-mode-head">
+              <div>
+                <p>Mode</p>
+                <h2>{activeMode.title}</h2>
+              </div>
+              <DeckGlyph />
+            </div>
+            <p>{activeMode.description}</p>
+            <div className="hero3-mode-toggle">
+              <button className={mode === 'docs' ? 'active' : ''} type="button" onClick={() => setMode('docs')}>Document</button>
+              <button className={mode === 'code' ? 'active' : ''} type="button" onClick={() => setMode('code')}>Code</button>
+            </div>
+            <ul>
+              {activeMode.items.map((item) => (
+                <li key={item}><span />{item}</li>
+              ))}
+            </ul>
+          </div>
+        </header>
+
+        <div className="hero3-main-grid">
+          <div className="hero3-control-card">
+            <div className="hero3-card-head">
+              <h3>Control stack</h3>
+              <span>v3.0</span>
+            </div>
+            <p>
+              문서와 코드 지식을 수집, 인덱싱, 진단, 검색, 답변까지 한 화면의 운영 흐름으로 관리합니다.
+            </p>
+            <div className="hero3-stack-list">
+              {['근거 출처 연결', '인덱싱 진단 표시', '감사 로그 기반 운영'].map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          </div>
+
+          <figure className="hero3-visual-card">
+            <div className="hero3-visual-frame">
+              <SplineRobotScene />
+            </div>
+            <figcaption>
+              <span>Private RAG workspace</span>
+              <span><span /> Source-grounded</span>
+            </figcaption>
+          </figure>
+
+          <aside className="hero3-protocol-card">
+            <div className="hero3-card-head">
+              <h3>Launch protocols</h3>
+              <span>Indexed</span>
+            </div>
+            <ul>
+              {protocols.map((protocol) => (
+                <li key={protocol.name} onMouseMove={setSpotlight} onMouseLeave={clearSpotlight}>
+                  <div>
+                    <h4>{protocol.name}</h4>
+                    <span>{protocol.status}</span>
+                  </div>
+                  <p>{protocol.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <AnimatedSection className="home-marquee landing-marquee hero3-marquee" aria-label="지원 데이터 소스" delay={0.08}>
+        <div className="landing-marquee-track">
+          {[...supportedSources, ...supportedSources].map((source, index) => (
+            <span key={`${source}-${index}`}>{source}</span>
+          ))}
+        </div>
+      </AnimatedSection>
+
+      <AnimatedSection className="landing-cta-section hero3-cta" delay={0.18}>
+        <div>
+          <span className="home-kicker">READY TO OPERATE</span>
+          <h2>지금 사내 문서와 코드를 LearnBot 지식으로 전환하세요</h2>
+          <p>문서 저장소, 코드 저장소, 관리자 진단까지 같은 제품 흐름 안에서 운영할 수 있습니다.</p>
+        </div>
+        <div className="landing-cta-actions">
+          <Button type="button" onClick={() => navigateTo(routePaths.docs)}>
+            <IconFileText size={17} />
+            문서 소스 등록
+          </Button>
+          <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+            <IconCode size={17} />
+            코드 저장소 등록
+          </Button>
+        </div>
+      </AnimatedSection>
+    </AnimatedPage>
+  );
+}
+
+function LegacyHomePage({ user, bootstrapping, navigateTo, logout }) {
   const shellRef = useRef(null);
   const visualRef = useRef(null);
   const proofRef = useRef(null);
