@@ -1,6 +1,8 @@
 import { Bookmark, Code2, Database, Edit3, Loader2, Search, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatDate, getAnswerModeLabel, getCodeModeLabel } from '../../lib/formatters.js';
+import { Badge } from '../ui/badge.jsx';
+import { DataTable } from '../ui/data-table.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
 function SavedAnswersWorkspace({
@@ -32,6 +34,28 @@ function SavedAnswersWorkspace({
     if (!selectedSavedAnswer || !editingTitle.trim()) return;
     updateSavedAnswerTitle(selectedSavedAnswer.id, editingTitle.trim());
   }
+  const columns = [
+    {
+      accessorKey: 'title',
+      header: '제목',
+      cell: ({ row }) => (
+        <div className="saved-table-title">
+          <strong>{row.original.title}</strong>
+          <small>{row.original.question}</small>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'answerType',
+      header: '유형',
+      cell: ({ row }) => <Badge variant="outline">{row.original.answerType}</Badge>,
+    },
+    {
+      accessorKey: 'createdAt',
+      header: '저장일',
+      cell: ({ row }) => <span className="text-muted-foreground">{formatDate(row.original.createdAt)}</span>,
+    },
+  ];
 
   return (
     <section className="workspace-grid saved-grid">
@@ -58,21 +82,13 @@ function SavedAnswersWorkspace({
             </div>
             <input value={savedAnswerQuery} onChange={(event) => setSavedAnswerQuery(event.target.value)} placeholder="저장된 답변 검색" />
           </form>
-          <div className="document-list scrollable-list saved-answer-list">
-            {savedAnswers.map((item) => (
-              <article className={selectedSavedAnswer?.id === item.id ? 'document-row selected saved-answer-row' : 'document-row saved-answer-row'} key={item.id} onClick={() => loadSavedAnswer(item.id)}>
-                <div className="document-main">
-                  <strong>{item.title}</strong>
-                  <small>{item.question}</small>
-                </div>
-                <div className="document-meta">
-                  <span className="status status-indexed">{item.answerType}</span>
-                  <small>{formatDate(item.createdAt)}</small>
-                </div>
-              </article>
-            ))}
-            {!savedAnswers.length && <p className="empty">저장된 답변이 없습니다.</p>}
-          </div>
+          <DataTable
+            className="saved-answer-table"
+            columns={columns}
+            data={savedAnswers}
+            empty="저장된 답변이 없습니다."
+            onRowClick={(item) => loadSavedAnswer(item.id)}
+          />
         </section>
       </div>
 

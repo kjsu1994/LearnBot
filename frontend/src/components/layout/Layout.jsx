@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Bookmark, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Database, FileCode2, FileSpreadsheet, GitPullRequest, Globe, Info, Loader2, LockKeyhole, LogOut, ShieldCheck, Search, Eye, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Search, Eye, Trash2 } from 'lucide-react';
+import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection, IconButton, StatusBadge } from '../common/Common.jsx';
+import { Badge } from '../ui/badge.jsx';
+import { Button } from '../ui/button.jsx';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card.jsx';
+import { MetricBarChart } from '../ui/metric-chart.jsx';
 
 function HomePage({ user, bootstrapping, navigateTo, logout }) {
   const shellRef = useRef(null);
@@ -11,7 +16,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
   const featureCards = [
     {
       path: routePaths.code,
-      icon: <Code2 size={22} />,
+      icon: <IconCode size={22} />,
       title: 'Code RAG',
       eyebrow: 'CODE',
       description: '저장소를 인덱싱하고 최신 커밋, 호출 흐름, UI 이벤트를 코드 근거와 함께 확인합니다.',
@@ -19,7 +24,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
     },
     {
       path: routePaths.docs,
-      icon: <Database size={22} />,
+      icon: <IconFileText size={22} />,
       title: 'Document RAG',
       eyebrow: 'DOCS',
       description: 'PDF, 엑셀, 웹 문서를 사내 지식으로 축적하고 원문 근거 기반 답변을 생성합니다.',
@@ -27,7 +32,7 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
     },
     {
       path: routePaths.admin,
-      icon: <ShieldCheck size={22} />,
+      icon: <IconShieldCheck size={22} />,
       title: 'Admin Console',
       eyebrow: 'ADMIN',
       description: '사용자, 공간, 크롤링 정책, 모델 설정, RAG 데이터 이관을 한 곳에서 관리합니다.',
@@ -86,12 +91,14 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
   }, []);
 
   return (
-    <AnimatedPage ref={shellRef} className="home-shell">
-      <header className="home-nav">
+    <AnimatedPage ref={shellRef} className="home-shell commercial-shell min-h-screen bg-slate-950 text-slate-50">
+      <header className="home-nav border-white/10 bg-slate-950/80 backdrop-blur-xl">
         <button className="home-brand" type="button" onClick={() => navigateTo(routePaths.home)}>
-          <span className="home-brand-mark"><Bot size={20} /></span>
+          <span className="home-brand-mark overflow-hidden bg-white">
+            <img src="/LearnBot_Logo.png" alt="" />
+          </span>
           <span>
-            <strong>런봇</strong>
+            <strong>LearnBot</strong>
             <small>Private Knowledge RAG</small>
           </span>
         </button>
@@ -103,49 +110,66 @@ function HomePage({ user, bootstrapping, navigateTo, logout }) {
         <div className="home-nav-actions">
           {bootstrapping && <Loader2 className="spin" size={16} />}
           {user ? (
-            <button className="ghost-button" type="button" onClick={logout}>
-              <LogOut size={15} />
+            <Button variant="outline" type="button" onClick={logout}>
+              <IconLogout size={15} />
               로그아웃
-            </button>
+            </Button>
           ) : (
-            <button className="ghost-button" type="button" onClick={() => navigateTo(routePaths.code)}>
-              <LockKeyhole size={15} />
+            <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+              <IconLock size={15} />
               로그인
-            </button>
+            </Button>
           )}
         </div>
       </header>
 
-      <AnimatedSection className="home-hero" delay={0.04}>
+      <AnimatedSection className="home-hero launch-hero" delay={0.04}>
         <div className="home-hero-copy">
-          <span className="home-kicker">CREATE KNOWLEDGE SYSTEM</span>
-          <h1>사내 <br />워크스페이스</h1>
+          <Badge className="w-fit border-blue-400/30 bg-blue-400/10 text-blue-100" variant="outline">
+            <IconSparkles size={14} />
+            Commercial-grade private RAG
+          </Badge>
+          <h1>사내 지식 운영을 위한<br />프라이빗 AI 워크스페이스</h1>
           <p>
-            코드, 문서, 관리자 운영을 분리된 경로로 정리하고,
-            팀별 공간에서 검색 가능한 RAG 지식 기반을 운영합니다.
+            코드, 문서, 저장 답변, 관리자 운영을 하나의 제품형 경험으로 연결하고
+            모든 답변을 근거 중심으로 검증합니다.
           </p>
           <div className="home-hero-actions">
-            <button type="button" onClick={() => navigateTo(routePaths.code)}>
-              <Code2 size={17} />
-              코드 RAG 시작
-            </button>
-            <button className="ghost-button" type="button" onClick={() => navigateTo(routePaths.docs)}>
-              <Database size={17} />
-              문서 지식 보기
-            </button>
+            <Button type="button" onClick={() => navigateTo(routePaths.docs)}>
+              <IconFileText size={17} />
+              문서 RAG 시작
+            </Button>
+            <Button variant="outline" type="button" onClick={() => navigateTo(routePaths.code)}>
+              <IconCode size={17} />
+              코드 분석 열기
+            </Button>
           </div>
         </div>
-        <div className="home-visual" aria-hidden="true" ref={visualRef}>
-          <div className="home-orbit home-orbit-one" />
-          <div className="home-orbit home-orbit-two" />
-          <div className="home-visual-core">
-            <Bot size={44} />
-            <span>RUNBOT</span>
-          </div>
-          <div className="home-floating-chip chip-code">CODE</div>
-          <div className="home-floating-chip chip-docs">DOCS</div>
-          <div className="home-floating-chip chip-admin">ADMIN</div>
-        </div>
+        <Card className="launch-hero-panel" ref={visualRef}>
+          <CardHeader>
+            <div className="launch-logo-lockup">
+              <img src="/LearnBot_Logo.png" alt="LearnBot" />
+              <div>
+                <CardTitle>LearnBot Console</CardTitle>
+                <CardDescription>Knowledge operations overview</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <MetricBarChart
+              data={[
+                { name: 'Code', value: 38 },
+                { name: 'Docs', value: 64 },
+                { name: 'Saved', value: 22 },
+              ]}
+            />
+            <div className="launch-proof-grid">
+              <span><IconCode size={15} /> Code RAG</span>
+              <span><IconFileText size={15} /> Document RAG</span>
+              <span><IconShieldCheck size={15} /> Admin Guardrails</span>
+            </div>
+          </CardContent>
+        </Card>
       </AnimatedSection>
 
       <AnimatedSection className="home-marquee" aria-label="런봇 핵심 가치" delay={0.08}>
@@ -191,19 +215,19 @@ function LoginScreen({ onLogin, busy, error }) {
   }
 
   return (
-    <AnimatedPage className="login-screen">
-      <AnimatedSection className="login-panel panel">
+    <AnimatedPage className="login-screen commercial-shell bg-slate-950">
+      <AnimatedSection className="login-panel panel commercial-login-card">
         <div className="brand login-brand">
-          <div className="brand-mark">
-            <Bot size={22} />
+          <div className="brand-mark overflow-hidden bg-white">
+            <img src="/LearnBot_Logo.png" alt="" />
           </div>
           <div>
-            <span>런봇</span>
+            <span>LearnBot</span>
             <small>사내 지식 RAG</small>
           </div>
         </div>
         <div>
-          <span className="eyebrow">Private Workspace</span>
+          <Badge className="mb-3 w-fit" variant="secondary">Private Workspace</Badge>
           <h1>로그인</h1>
           <p className="login-copy">관리자가 초대한 계정으로 사내 위키, 코드, 문서 RAG 공간에 접속합니다.</p>
         </div>
@@ -217,10 +241,10 @@ function LoginScreen({ onLogin, busy, error }) {
             <input id="login-remember" type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} />
             자동 로그인
           </label>
-          <button disabled={!loginId || !password || busy}>
-            {busy ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />}
+          <Button disabled={!loginId || !password || busy}>
+            {busy ? <Loader2 className="spin" size={16} /> : <IconLock size={16} />}
             로그인
-          </button>
+          </Button>
         </form>
       </AnimatedSection>
     </AnimatedPage>
@@ -263,7 +287,7 @@ function WorkspaceShell({
   loading,
 }) {
   return (
-    <AnimatedPage className={sidebarCollapsed ? 'shell shell-sidebar-collapsed' : 'shell'}>
+    <AnimatedPage className={sidebarCollapsed ? 'shell shell-sidebar-collapsed commercial-shell workspace-shell-v3' : 'shell commercial-shell workspace-shell-v3'}>
       <Sidebar
         user={user}
         spaces={spaces}
@@ -294,46 +318,46 @@ function WorkspaceShell({
       />
 
       <section className="content">
-        <header className="topbar">
+        <header className="topbar workspace-topbar-v3">
           <div>
-            <span className="eyebrow">Private RAG Workspace</span>
+            <Badge className="mb-2 w-fit" variant="outline">Private RAG Workspace</Badge>
             <h1>런봇</h1>
             <p>
               {selectedSpace?.name || '공간'} 안에서 사내 위키, 문서, 코드 저장소를 근거 기반으로 검색하고 답변합니다.
             </p>
           </div>
           <div className="top-actions">
-            <button className="ghost-button" type="button" onClick={refreshRepositories}>
-              <GitPullRequest size={16} />
+            <Button variant="outline" type="button" onClick={refreshRepositories}>
+              <IconRefresh size={16} />
               저장소 새로고침
-            </button>
-            <button className="ghost-button" type="button" onClick={refreshDocuments}>
-              <Database size={16} />
+            </Button>
+            <Button variant="outline" type="button" onClick={refreshDocuments}>
+              <IconDatabase size={16} />
               문서 새로고침
-            </button>
-            <button className="ghost-button compact-action top-logout" type="button" onClick={logout}>
-              <LogOut size={14} />
+            </Button>
+            <Button className="top-logout" variant="ghost" size="sm" type="button" onClick={logout}>
+              <IconLogout size={14} />
               로그아웃
-            </button>
+            </Button>
           </div>
         </header>
 
         <div className={user.role === 'ADMIN' ? 'view-tabs workspace-tabs-admin' : 'view-tabs workspace-tabs-user'} aria-label="작업 영역">
           <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.code)}>
-            <Code2 size={16} />
+            <IconCode size={16} />
             코드
           </button>
           <button className={activeView === 'docs' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.docs)}>
-            <Database size={16} />
+            <IconFileText size={16} />
             문서
           </button>
           <button className={activeView === 'saved' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.saved)}>
-            <Bookmark size={16} />
+            <IconBook size={16} />
             저장됨
           </button>
           {user.role === 'ADMIN' && (
             <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.admin)}>
-              <ShieldCheck size={16} />
+              <IconShieldCheck size={16} />
               관리자
             </button>
           )}
@@ -386,10 +410,10 @@ function Sidebar({
       <div className="brand">
         <button className="brand-home-button" type="button" title="메인 대시보드로 이동" onClick={() => navigateTo(routePaths.home)}>
           <span className="brand-mark brand-home-mark">
-            <Bot size={20} />
+            <img src="/LearnBot_Logo.png" alt="" />
           </span>
           <span className="brand-copy">
-            <span>런봇</span>
+            <span>LearnBot</span>
             <small>사내 지식 RAG</small>
           </span>
         </button>
@@ -426,17 +450,17 @@ function Sidebar({
         <span className="section-label">근거 데이터</span>
         <div className="source-stack">
           <div>
-            <FileCode2 size={15} />
+            <IconCode size={15} />
             <span>코드 청크</span>
             <strong>{codeChunkCount}</strong>
           </div>
           <div>
-            <Globe size={15} />
+            <IconSearch size={15} />
             <span>웹</span>
             <strong>{webCount}</strong>
           </div>
           <div>
-            <FileSpreadsheet size={15} />
+            <IconFileText size={15} />
             <span>파일</span>
             <strong>{fileCount}</strong>
           </div>

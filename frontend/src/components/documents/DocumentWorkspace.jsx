@@ -6,6 +6,8 @@ import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Co
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
+import { Badge } from '../ui/badge.jsx';
+import { DataTable } from '../ui/data-table.jsx';
 
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
@@ -923,20 +925,40 @@ function crawlAuditMetadataLine(audit = {}) {
 }
 
 function ResultList({ results, title }) {
+  const columns = [
+    {
+      accessorKey: 'title',
+      header: '문서',
+      cell: ({ row }) => (
+        <div className="document-table-title">
+          <strong>{row.original.title}</strong>
+          <small>{row.original.sourceUri}</small>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'chunkIndex',
+      header: '청크',
+      cell: ({ row }) => <Badge variant="outline">chunk {row.original.chunkIndex}</Badge>,
+    },
+    {
+      accessorKey: 'content',
+      header: '미리보기',
+      cell: ({ row }) => <span className="document-result-preview">{row.original.content}</span>,
+    },
+    {
+      accessorKey: 'score',
+      header: '점수',
+      cell: ({ row }) => Number(row.original.score || 0).toFixed(3),
+    },
+  ];
   return (
-    <div className="results">
-      {results.map((result) => (
-        <article className="result" key={result.chunkId}>
-          <div className="result-heading">
-            <strong>{result.title}</strong>
-            <span>{Number(result.score || 0).toFixed(3)}</span>
-          </div>
-          <small>{result.sourceUri} · chunk {result.chunkIndex}</small>
-          <p>{result.content}</p>
-        </article>
-      ))}
-      {!results.length && <p className="empty">{title}가 없습니다.</p>}
-    </div>
+    <DataTable
+      className="document-search-table"
+      columns={columns}
+      data={results}
+      empty={`${title}가 없습니다.`}
+    />
   );
 }
 

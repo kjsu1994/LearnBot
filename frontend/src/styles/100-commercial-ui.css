@@ -1,0 +1,203 @@
+/* Commercial UI layer for non-admin user surfaces. */
+.commercial-shell:not(.admin-tabler-shell) {
+  --commercial-bg: #f8fafc;
+  --commercial-card: #ffffff;
+  --commercial-border: #e2e8f0;
+  --commercial-ink: #0f172a;
+  --commercial-muted: #64748b;
+  --commercial-primary: #2563eb;
+}
+
+.home-brand-mark img,
+.brand-home-mark img,
+.login-brand .brand-mark img,
+.launch-logo-lockup img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.commercial-shell .home-brand-mark,
+.commercial-shell .brand-home-mark,
+.commercial-shell .login-brand .brand-mark {
+  padding: 4px;
+}
+
+.commercial-shell.home-shell {
+  background:
+    radial-gradient(circle at 72% 18%, rgba(59, 130, 246, 0.32), transparent 34%),
+    radial-gradient(circle at 22% 24%, rgba(20, 184, 166, 0.18), transparent 28%),
+    #020617;
+}
+
+.launch-hero {
+  align-items: center;
+  display: grid;
+  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
+}
+
+.launch-hero .home-hero-copy h1 {
+  color: #f8fafc;
+  font-size: clamp(44px, 6vw, 76px);
+  letter-spacing: 0;
+  line-height: 0.98;
+}
+
+.launch-hero .home-hero-copy p {
+  color: #cbd5e1;
+  max-width: 680px;
+}
+
+.launch-hero-panel {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.42);
+  box-shadow: 0 28px 90px rgba(15, 23, 42, 0.36);
+  color: #0f172a;
+  overflow: hidden;
+}
+
+.launch-logo-lockup {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.launch-logo-lockup img {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  height: 48px;
+  padding: 5px;
+  width: 48px;
+}
+
+.launch-proof-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.launch-proof-grid span {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #334155;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  justify-content: center;
+  padding: 9px;
+}
+
+.commercial-login-card {
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.workspace-shell-v3 {
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96)),
+    url("/background.jpg") center top / cover fixed;
+}
+
+.workspace-shell-v3 .content {
+  gap: 14px;
+}
+
+.workspace-topbar-v3 {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: var(--commercial-border);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.07);
+}
+
+.workspace-shell-v3 .view-tabs {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--commercial-border);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.055);
+}
+
+.workspace-shell-v3 .tab-button.active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.workspace-shell-v3 .panel,
+.workspace-shell-v3 .document-row,
+.workspace-shell-v3 .result,
+.workspace-shell-v3 .answer,
+.workspace-shell-v3 .detail-box,
+.workspace-shell-v3 .evidence-card {
+  border-color: var(--commercial-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.055);
+}
+
+.workspace-shell-v3 .panel:hover,
+.workspace-shell-v3 .document-row:hover,
+.workspace-shell-v3 .result:hover {
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.075);
+  transform: none;
+}
+
+.saved-table-title,
+.code-table-file,
+.document-table-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.saved-table-title strong,
+.code-table-file strong,
+.document-table-title strong {
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-table-title small,
+.code-table-file small,
+.document-table-title small {
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-result-preview {
+  color: #475569;
+  display: -webkit-box;
+  line-height: 1.45;
+  max-width: 520px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.saved-answer-table,
+.code-search-table,
+.document-search-table {
+  overflow: hidden;
+}
+
+.saved-answer-table table,
+.code-search-table table,
+.document-search-table table {
+  table-layout: fixed;
+}
+
+@media (max-width: 980px) {
+  .launch-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .launch-proof-grid {
+    grid-template-columns: 1fr;
+  }
+}

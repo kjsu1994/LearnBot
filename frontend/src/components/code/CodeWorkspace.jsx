@@ -7,6 +7,9 @@ import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Co
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
+import { Badge } from '../ui/badge.jsx';
+import { Button } from '../ui/button.jsx';
+import { DataTable } from '../ui/data-table.jsx';
 
 function CodeWorkspace(props) {
   const {
@@ -562,23 +565,54 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
 }
 
 function CodeSearchResults({ results = [], onOpenEvidence }) {
+  const columns = [
+    {
+      accessorKey: 'filePath',
+      header: '파일',
+      cell: ({ row }) => (
+        <div className="code-table-file">
+          <strong>{row.original.filePath}</strong>
+          <small>{row.original.repositoryName}</small>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'lineStart',
+      header: '라인',
+      cell: ({ row }) => <Badge variant="outline">{row.original.lineStart}-{row.original.lineEnd}</Badge>,
+    },
+    {
+      accessorKey: 'score',
+      header: '점수',
+      cell: ({ row }) => Number(row.original.score || 0).toFixed(3),
+    },
+    {
+      id: 'actions',
+      header: '',
+      cell: ({ row }) => (
+        <Button
+          size="sm"
+          variant="outline"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenEvidence?.(row.original.repositoryId, row.original.fileId, { start: row.original.lineStart, end: row.original.lineEnd });
+          }}
+        >
+          <Eye size={14} />
+          {'\uC5F4\uAE30'}
+        </Button>
+      ),
+    },
+  ];
   return (
-    <div className="results compact">
-      {results.map((item) => (
-        <article className="result" key={item.chunkId}>
-          <div className="result-heading">
-            <strong>{item.filePath}</strong>
-            <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
-              <Eye size={14} />
-              {'\uC5F4\uAE30'}
-            </button>
-          </div>
-          <small>{item.repositoryName} {'\u00B7'} {item.lineStart}-{item.lineEnd} {'\u00B7'} score {Number(item.score || 0).toFixed(3)}</small>
-          <p>{item.content}</p>
-        </article>
-      ))}
-      {!results.length && <p className="empty">{'\uCF54\uB4DC \uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>}
-    </div>
+    <DataTable
+      className="code-search-table"
+      columns={columns}
+      data={results}
+      empty={'\uCF54\uB4DC \uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}
+      onRowClick={(item) => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}
+    />
   );
 }
 

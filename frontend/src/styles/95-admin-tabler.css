@@ -158,6 +158,17 @@
 
 .admin-tabler-shell .workspace-grid {
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.admin-tabler-shell .admin-source-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.admin-tabler-shell .left-column,
+.admin-tabler-shell .right-column {
+  min-width: 0;
+  width: 100%;
 }
 
 .admin-tabler-shell .panel,
