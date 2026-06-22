@@ -3179,6 +3179,127 @@
   color: rgba(255, 255, 255, 0.72);
 }
 
+.workspace-shell-v3 .admin-tabler-shell .tuning-panel.panel {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(139, 92, 246, 0.16), transparent 34%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(8, 13, 24, 0.92));
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.26);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-preset-row,
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section,
+.workspace-shell-v3 .admin-tabler-shell .tuning-control,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section .detail-box,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section .llm-test-result {
+  background: rgba(8, 13, 24, 0.66);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 18px 48px rgba(0, 0, 0, 0.16);
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-control:hover {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(139, 92, 246, 0.34);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-control-head strong,
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile strong,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section .detail-box strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile span {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile em {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.94), rgba(79, 70, 229, 0.92));
+  border: 1px solid rgba(196, 181, 253, 0.42);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  padding: 4px 9px;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-control small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-active-profile small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section .detail-box small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-meta {
+  color: rgba(226, 232, 240, 0.58);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-control-head em {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.38);
+  color: #fbbf24;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-preset-row .mode-button {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.76);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-preset-row .mode-button:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(139, 92, 246, 0.34);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-preset-row .mode-button.active {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.94), rgba(79, 70, 229, 0.92));
+  border-color: rgba(196, 181, 253, 0.5);
+  color: #ffffff;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-section input,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section select,
+.workspace-shell-v3 .admin-tabler-shell .tuning-control input,
+.workspace-shell-v3 .admin-tabler-shell .tuning-control select,
+.workspace-shell-v3 .admin-tabler-shell .tuning-range-row input[type='number'] {
+  background: rgba(2, 6, 23, 0.72);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-section input:hover:not(:disabled),
+.workspace-shell-v3 .admin-tabler-shell .tuning-section select:hover:not(:disabled),
+.workspace-shell-v3 .admin-tabler-shell .tuning-control input:hover:not(:disabled),
+.workspace-shell-v3 .admin-tabler-shell .tuning-control select:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(139, 92, 246, 0.36);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-section input:focus,
+.workspace-shell-v3 .admin-tabler-shell .tuning-section select:focus,
+.workspace-shell-v3 .admin-tabler-shell .tuning-control input:focus,
+.workspace-shell-v3 .admin-tabler-shell .tuning-control select:focus {
+  background: rgba(15, 23, 42, 0.94);
+  border-color: rgba(167, 139, 250, 0.72);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-range-row input[type='range'] {
+  accent-color: #8b5cf6;
+  background: transparent;
+  box-shadow: none;
+}
+
 .workspace-shell-v3 .admin-user-modal,
 .workspace-shell-v3 .allowed-domain-modal {
   background: rgba(10, 10, 11, 0.96);

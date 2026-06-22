@@ -82,6 +82,7 @@ export default function App() {
     effectiveAuxiliaryChatModel: '',
     llmUsingDefaults: true,
   });
+  const [adminTuning, setAdminTuning] = useState(null);
   const [documentSchemaProfiles, setDocumentSchemaProfiles] = useState([]);
   const [storageRetention, setStorageRetention] = useState(null);
   const [adminTrash, setAdminTrash] = useState([]);
@@ -776,10 +777,11 @@ export default function App() {
 
   async function refreshAdmin() {
     const trashQuery = selectedSpaceId ? `?spaceId=${encodeURIComponent(selectedSpaceId)}` : '';
-    const [users, logs, settings, schemaProfiles, retentionPreview, trash, allSpaces] = await Promise.all([
+    const [users, logs, settings, tuning, schemaProfiles, retentionPreview, trash, allSpaces] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=50').catch(() => []),
       request('/api/admin/settings').catch(() => null),
+      request('/api/admin/tuning').catch(() => null),
       request('/api/admin/document-graph/schema-profiles').catch(() => []),
       request('/api/admin/storage/retention/preview').catch(() => null),
       request(`/api/admin/trash${trashQuery}`).catch(() => []),
@@ -788,6 +790,7 @@ export default function App() {
     setAdminUsers(users || []);
     setAdminSpaces(allSpaces || []);
     setAuditLogs(logs || []);
+    setAdminTuning(tuning);
     setDocumentSchemaProfiles(schemaProfiles || []);
     setStorageRetention(retentionPreview);
     setAdminTrash(trash || []);
@@ -821,6 +824,27 @@ export default function App() {
   async function testAdminLlmSettings(settings) {
     return await run('admin-llm-test', async () => {
       return await request('/api/admin/settings/llm/test', {
+        method: 'POST',
+        json: settings,
+      });
+    });
+  }
+
+  async function updateAdminTuning(nextTuning) {
+    return await run('admin-tuning', async () => {
+      const tuning = await request('/api/admin/tuning', {
+        method: 'PATCH',
+        json: nextTuning,
+      });
+      if (tuning) {
+        setAdminTuning(tuning);
+      }
+    });
+  }
+
+  async function testAdminTuningLlmSettings(settings) {
+    return await run('admin-tuning-llm-test', async () => {
+      return await request('/api/admin/tuning/llm/test', {
         method: 'POST',
         json: settings,
       });
@@ -1228,6 +1252,7 @@ export default function App() {
             isMaster={isMasterUser}
             users={adminUsers}
             adminSettings={adminSettings}
+            adminTuning={adminTuning}
             documentSchemaProfiles={documentSchemaProfiles}
             storageRetention={storageRetention}
             adminTrash={adminTrash}
@@ -1252,11 +1277,13 @@ export default function App() {
             downloadSpaceArchive={downloadSpaceArchive}
             spaceTransferResult={spaceTransferResult}
             updateAdminSettings={updateAdminSettings}
+            updateAdminTuning={updateAdminTuning}
             updateDocumentSchemaProfile={updateDocumentSchemaProfile}
             refreshStorageRetention={refreshStorageRetention}
             runStorageRetention={runStorageRetention}
             restoreTrashItem={restoreTrashItem}
             testAdminLlmSettings={testAdminLlmSettings}
+            testAdminTuningLlmSettings={testAdminTuningLlmSettings}
             refreshAdmin={refreshAdmin}
             loading={loading}
             codeSourceProps={{

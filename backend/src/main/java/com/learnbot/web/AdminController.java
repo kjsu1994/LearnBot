@@ -4,6 +4,8 @@ import com.learnbot.dto.AuditLogSummary;
 import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
+import com.learnbot.dto.AdminTuningResponse;
+import com.learnbot.dto.AdminTuningUpdateRequest;
 import com.learnbot.dto.DocumentSchemaProfileResponse;
 import com.learnbot.dto.DocumentSchemaProfileUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
@@ -29,6 +31,7 @@ import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.DocumentSchemaProfileService;
+import com.learnbot.service.RuntimeTuningService;
 import com.learnbot.service.SpaceTransferService;
 import com.learnbot.service.StorageRetentionService;
 import com.learnbot.service.TrashService;
@@ -62,6 +65,7 @@ public class AdminController {
     private final AuthService authService;
     private final AuditService auditService;
     private final AdminSettingsService adminSettingsService;
+    private final RuntimeTuningService runtimeTuningService;
     private final DocumentSchemaProfileService documentSchemaProfileService;
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
@@ -72,6 +76,7 @@ public class AdminController {
             AuthService authService,
             AuditService auditService,
             AdminSettingsService adminSettingsService,
+            RuntimeTuningService runtimeTuningService,
             DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
             SpaceTransferService spaceTransferService,
@@ -81,6 +86,7 @@ public class AdminController {
         this.authService = authService;
         this.auditService = auditService;
         this.adminSettingsService = adminSettingsService;
+        this.runtimeTuningService = runtimeTuningService;
         this.documentSchemaProfileService = documentSchemaProfileService;
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
@@ -242,6 +248,30 @@ public class AdminController {
 
     @PostMapping("/settings/llm/test")
     LlmSettingsTestResponse testLlmSettings(@RequestBody LlmSettingsTestRequest request) {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return adminSettingsService.testLlmSettings(
+                request.ollamaBaseUrl(),
+                request.chatModel(),
+                request.primaryChatModel(),
+                request.auxiliaryChatModel()
+        );
+    }
+
+    @GetMapping("/tuning")
+    AdminTuningResponse tuning() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return runtimeTuningService.current();
+    }
+
+    @PatchMapping("/tuning")
+    AdminTuningResponse updateTuning(@RequestBody AdminTuningUpdateRequest request) {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireMaster(user);
+        return runtimeTuningService.update(user, request);
+    }
+
+    @PostMapping("/tuning/llm/test")
+    LlmSettingsTestResponse testTuningLlmSettings(@RequestBody LlmSettingsTestRequest request) {
         authService.requireMaster(currentUserProvider.currentUser());
         return adminSettingsService.testLlmSettings(
                 request.ollamaBaseUrl(),

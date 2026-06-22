@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.learnbot.config.LearnBotProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,13 +25,25 @@ public class OllamaClient {
     private final WebClient webClient;
     private final LearnBotProperties properties;
     private final AdminSettingsService adminSettingsService;
+    private final RuntimeTuningService runtimeTuningService;
     private final AtomicInteger primaryRequests = new AtomicInteger(0);
 
-    public OllamaClient(WebClient.Builder builder, LearnBotProperties properties, AdminSettingsService adminSettingsService) {
+    @Autowired
+    public OllamaClient(
+            WebClient.Builder builder,
+            LearnBotProperties properties,
+            AdminSettingsService adminSettingsService,
+            RuntimeTuningService runtimeTuningService
+    ) {
         this.webClientBuilder = builder;
         this.properties = properties;
         this.adminSettingsService = adminSettingsService;
+        this.runtimeTuningService = runtimeTuningService;
         this.webClient = builder.baseUrl(properties.getOllama().getBaseUrl()).build();
+    }
+
+    public OllamaClient(WebClient.Builder builder, LearnBotProperties properties, AdminSettingsService adminSettingsService) {
+        this(builder, properties, adminSettingsService, null);
     }
 
     public List<List<Double>> embed(List<String> inputs) {
@@ -123,8 +136,8 @@ public class OllamaClient {
     private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout) {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("temperature", properties.getOllama().getTemperature());
-        options.put("num_ctx", properties.getOllama().getContextWindow());
-        int requestedMaxOutputTokens = maxOutputTokens == null ? properties.getOllama().getMaxOutputTokens() : maxOutputTokens;
+        options.put("num_ctx", effectiveContextWindow());
+        int requestedMaxOutputTokens = maxOutputTokens == null ? effectiveMaxOutputTokens() : maxOutputTokens;
         if (requestedMaxOutputTokens > 0) {
             options.put("num_predict", requestedMaxOutputTokens);
         }
@@ -170,6 +183,14 @@ public class OllamaClient {
                     result.content().length());
         }
         return result;
+    }
+
+    private int effectiveContextWindow() {
+        return runtimeTuningService == null ? properties.getOllama().getContextWindow() : runtimeTuningService.llmContextWindow();
+    }
+
+    private int effectiveMaxOutputTokens() {
+        return runtimeTuningService == null ? properties.getOllama().getMaxOutputTokens() : runtimeTuningService.llmMaxOutputTokens();
     }
 
     private List<Double> embedLegacy(String input) {

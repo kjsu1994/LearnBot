@@ -369,7 +369,7 @@ public class CodeRagService {
     }
 
     private int questionModeLimit(int limit) {
-        return Math.max(1, Math.min(limit, properties.getRag().getOverview().getMaxCodeCategories()));
+        return Math.max(1, Math.min(limit, pipelineService.overviewMaxCodeCategories()));
     }
 
     private List<String> codeOverviewQueries(String question, CodeQuestionMode questionMode) {

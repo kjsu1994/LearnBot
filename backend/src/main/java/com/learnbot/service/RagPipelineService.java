@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.SearchResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,11 +30,18 @@ public class RagPipelineService {
 
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
+    private final RuntimeTuningService runtimeTuningService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RagPipelineService(OllamaClient ollamaClient, LearnBotProperties properties) {
+        this(ollamaClient, properties, null);
+    }
+
+    @Autowired
+    public RagPipelineService(OllamaClient ollamaClient, LearnBotProperties properties, RuntimeTuningService runtimeTuningService) {
         this.ollamaClient = ollamaClient;
         this.properties = properties;
+        this.runtimeTuningService = runtimeTuningService;
     }
 
     public QueryPlan buildQueryPlan(String question, Domain domain, List<String> baselineQueries) {
@@ -173,11 +181,33 @@ public class RagPipelineService {
     }
 
     public int documentContextLimit(int fallback) {
-        return Math.max(1, Math.min(16, pipeline().getDocumentContextLimit() <= 0 ? fallback : pipeline().getDocumentContextLimit()));
+        int configured = runtimeTuningService == null ? pipeline().getDocumentContextLimit() : runtimeTuningService.documentContextLimit();
+        return Math.max(1, Math.min(16, configured <= 0 ? fallback : configured));
     }
 
     public int codeContextLimit(int fallback) {
-        return Math.max(1, Math.min(12, pipeline().getCodeContextLimit() <= 0 ? fallback : pipeline().getCodeContextLimit()));
+        int configured = runtimeTuningService == null ? pipeline().getCodeContextLimit() : runtimeTuningService.codeContextLimit();
+        return Math.max(1, Math.min(24, configured <= 0 ? fallback : configured));
+    }
+
+    public int promptTokenBudgetBalanced() {
+        return runtimeTuningService == null ? pipeline().getPromptTokenBudgetBalanced() : runtimeTuningService.promptTokenBudgetBalanced();
+    }
+
+    public int contextWindow() {
+        return runtimeTuningService == null ? properties.getOllama().getContextWindow() : runtimeTuningService.llmContextWindow();
+    }
+
+    public int maxOutputTokens() {
+        return runtimeTuningService == null ? properties.getOllama().getMaxOutputTokens() : runtimeTuningService.llmMaxOutputTokens();
+    }
+
+    public int overviewMaxDocuments() {
+        return runtimeTuningService == null ? properties.getRag().getOverview().getMaxDocuments() : runtimeTuningService.overviewMaxDocuments();
+    }
+
+    public int overviewMaxCodeCategories() {
+        return runtimeTuningService == null ? properties.getRag().getOverview().getMaxCodeCategories() : runtimeTuningService.overviewMaxCodeCategories();
     }
 
     private LearnBotProperties.Rag.Pipeline pipeline() {

@@ -960,7 +960,7 @@ public class RagService {
     private List<SearchResult> selectOverviewCitations(List<SearchResult> ordered, int limit, DocumentSpeedProfile speedProfile) {
         List<SearchResult> selected = new ArrayList<>();
         Set<UUID> seenChunks = new HashSet<>();
-        int maxDocuments = Math.max(1, properties.getRag().getOverview().getMaxDocuments());
+        int maxDocuments = Math.max(1, pipelineService.overviewMaxDocuments());
         int minContext = Math.max(1, properties.getRag().getOverview().getMinContextChunks());
         int minOriginal = Math.max(1, properties.getRag().getOverview().getMinOriginalChunks());
         if (speedProfile == DocumentSpeedProfile.FAST) {
@@ -1095,8 +1095,8 @@ public class RagService {
     }
 
     private int promptTokenBudget(DocumentSpeedProfile speedProfile) {
-        int contextWindow = Math.max(2048, properties.getOllama().getContextWindow());
-        int configured = Math.max(512, properties.getRag().getPipeline().getPromptTokenBudgetBalanced());
+        int contextWindow = Math.max(2048, pipelineService.contextWindow());
+        int configured = Math.max(512, pipelineService.promptTokenBudgetBalanced());
         return switch (speedProfile) {
             case FAST -> Math.min(configured, Math.max(1024, contextWindow - 900));
             case DEEP -> Math.max(configured, contextWindow - 700);
@@ -2128,7 +2128,7 @@ public class RagService {
     }
 
     private int maxOutputTokens(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
-        int configured = properties.getOllama().getMaxOutputTokens();
+        int configured = pipelineService.maxOutputTokens();
         if (configured > 0) {
             return configured;
         }

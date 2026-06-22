@@ -410,6 +410,157 @@
   color: var(--tblr-admin-primary);
 }
 
+.admin-tabler-shell .tuning-panel {
+  background:
+    linear-gradient(135deg, rgba(32, 107, 196, 0.055), rgba(246, 248, 251, 0.94)),
+    var(--tblr-admin-card);
+  display: grid;
+  gap: 16px;
+}
+
+.admin-tabler-shell .tuning-preset-row {
+  background: linear-gradient(135deg, #eef5ff, #f7fafe);
+  border: 1px solid #cdddf0;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+}
+
+.admin-tabler-shell .tuning-section {
+  background: rgba(248, 251, 255, 0.82);
+  border: 1px solid #d8e3ef;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.admin-tabler-shell .tuning-active-profile {
+  align-items: center;
+  background: #eef5ff;
+  border: 1px solid #cdddf0;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.admin-tabler-shell .tuning-active-profile span {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.admin-tabler-shell .tuning-active-profile strong {
+  color: var(--tblr-admin-text);
+  font-size: 13px;
+}
+
+.admin-tabler-shell .tuning-active-profile em {
+  background: var(--tblr-admin-primary);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  padding: 4px 9px;
+}
+
+.admin-tabler-shell .compact-title {
+  margin: 0;
+}
+
+.admin-tabler-shell .tuning-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-tabler-shell .tuning-control {
+  background: linear-gradient(180deg, #f9fbfe, #f2f6fb);
+  border: 1px solid #d4dfeb;
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.admin-tabler-shell .tuning-control:hover {
+  background: linear-gradient(180deg, #fbfdff, #eef4fb);
+  border-color: #bfd0e4;
+}
+
+.admin-tabler-shell .tuning-control-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.admin-tabler-shell .tuning-control-head strong {
+  color: var(--tblr-admin-text);
+  font-size: 14px;
+}
+
+.admin-tabler-shell .tuning-control-head em {
+  background: #fff3d6;
+  border: 1px solid #ebc66f;
+  border-radius: 999px;
+  color: #9a6700;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 3px 7px;
+}
+
+.admin-tabler-shell .tuning-range-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 92px;
+}
+
+.admin-tabler-shell .tuning-range-row input[type='range'] {
+  accent-color: var(--tblr-admin-primary);
+  background: transparent;
+  padding: 0;
+}
+
+.admin-tabler-shell .tuning-range-row input[type='number'],
+.admin-tabler-shell .tuning-control input,
+.admin-tabler-shell .tuning-control select,
+.admin-tabler-shell .tuning-section input,
+.admin-tabler-shell .tuning-section select {
+  background: linear-gradient(180deg, #edf4fc, #e7eff8);
+  border-color: #c9d7e7;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.045);
+  color: var(--tblr-admin-text);
+}
+
+.admin-tabler-shell .tuning-range-row input[type='number']:focus,
+.admin-tabler-shell .tuning-control input:focus,
+.admin-tabler-shell .tuning-control select:focus,
+.admin-tabler-shell .tuning-section input:focus,
+.admin-tabler-shell .tuning-section select:focus {
+  background: #f8fbff;
+  border-color: var(--tblr-admin-primary);
+}
+
+.admin-tabler-shell .tuning-meta {
+  color: #6f7d8d;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-user-modal {
   border-radius: 8px;
 }
@@ -474,5 +625,13 @@
 
   .admin-tabler-shell .repo-list .repo-row .document-actions {
     justify-content: flex-start;
+  }
+
+  .admin-tabler-shell .tuning-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabler-shell .tuning-range-row {
+    grid-template-columns: 1fr;
   }
 }

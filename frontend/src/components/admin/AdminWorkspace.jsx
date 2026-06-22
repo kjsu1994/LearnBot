@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bot, CheckCircle2, Database, Download, FileUp, Globe, Info, Loader2, LockKeyhole, RefreshCw, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, Cpu, Database, Download, FileUp, Globe, Info, Loader2, LockKeyhole, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { IconActivity, IconDatabase, IconFiles, IconRefresh, IconSettings, IconShieldLock, IconUsersGroup, IconWorld } from '@tabler/icons-react';
 import { defaultSpaceId } from '../../config/constants.js';
 import { formatBrandText, formatDate, formatFileSize, formatTransferCounts } from '../../lib/formatters.js';
@@ -8,11 +8,32 @@ import { IconButton, StatusBadge } from '../common/Common.jsx';
 import { CodeSourceManagementPanel } from '../code/CodeWorkspace.jsx';
 import { DocumentSourcePanel } from '../documents/DocumentWorkspace.jsx';
 
+const tuningText = {
+  LLM_CONTEXT_WINDOW: ['LLM 문맥 길이', '질문, 근거, 답변 지시문을 모델에 넣을 수 있는 최대 토큰 수입니다.', '높을수록 긴 문서를 더 잘 보지만 메모리 사용량이 증가합니다.'],
+  OLLAMA_CONTEXT_LENGTH: ['Ollama 컨텍스트 길이', 'Ollama 데몬이 모델에 허용하는 컨텍스트 길이입니다.', '저장 후 컨테이너 재시작이 필요합니다. LLM 문맥 길이와 맞추는 것을 권장합니다.'],
+  RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED: ['문서 답변 프롬프트 예산', '문서 답변에서 근거 청크와 질문에 배정할 토큰 예산입니다.', '높을수록 근거를 많이 넣지만 응답 속도가 느려질 수 있습니다.'],
+  RAG_PIPELINE_CODE_CONTEXT_LIMIT: ['코드 답변에 넣을 청크 수', '코드 질문 답변에 사용할 코드 근거 청크 개수입니다.', '높을수록 관련 파일과 메서드를 더 많이 봅니다.'],
+  RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT: ['문서 답변에 넣을 청크 수', '문서 질문 답변에 사용할 문서 근거 청크 개수입니다.', '높을수록 답변 근거가 늘고 속도는 느려질 수 있습니다.'],
+  LEARNBOT_RAG_OVERVIEW_MAX_DOCUMENTS: ['전체 요약 탐색 문서 수', '개요/요약형 질문에서 서로 다른 문서를 최대 몇 개까지 포함할지 정합니다.', '높을수록 전체 맥락은 좋아지고 답변 시간이 늘어납니다.'],
+  LEARNBOT_RAG_OVERVIEW_MAX_CODE_CATEGORIES: ['코드 개요 카테고리 수', '코드 구조/흐름 질문에서 서로 다른 범주의 근거를 최대 몇 개까지 쓸지 정합니다.', '높을수록 구조 답변이 풍부해지지만 잡음도 늘 수 있습니다.'],
+  LEARNBOT_RAG_OVERVIEW_MAX_RECURSIVE_ITERATIONS: ['개요 탐색 반복 횟수', '근거가 부족할 때 추가 탐색을 몇 번까지 허용할지 정합니다.', '높을수록 품질은 좋아질 수 있지만 지연 시간이 늘어납니다.'],
+  LLM_MAX_OUTPUT_TOKENS: ['답변 최대 길이', '모델이 생성할 수 있는 답변 토큰 상한입니다. 0은 자동값입니다.', '0은 기존 자동 길이 정책을 사용한다는 의미입니다. 너무 낮으면 답변이 잘릴 수 있고, 너무 높으면 응답이 느려질 수 있습니다.'],
+  OLLAMA_MAX_LOADED_MODELS: ['동시 로드 모델 수', 'Ollama가 메모리에 동시에 올려둘 모델 수입니다.', 'VRAM/RAM이 충분하지 않으면 1을 권장합니다.'],
+  OLLAMA_NUM_PARALLEL: ['Ollama 병렬 요청 수', 'Ollama가 한 모델에서 동시에 처리할 요청 수입니다.', '작은 장비는 1, 큰 GPU 서버만 2 이상을 권장합니다.'],
+};
+
+const presetText = {
+  default: ['현재 기본값', '현재 서버 설정값을 그대로 사용합니다.'],
+  performance: ['고성능', '품질을 올리되 일반적인 고사양 장비에서 무리하지 않는 권장값입니다.'],
+  lab: ['실험실', '큰 컨텍스트와 많은 근거를 사용합니다. 응답 지연과 메모리 사용량이 커질 수 있습니다.'],
+};
+
 function AdminWorkspace({
   currentUser,
   isMaster = false,
   users,
   adminSettings,
+  adminTuning,
   documentSchemaProfiles = [],
   storageRetention,
   adminTrash = [],
@@ -37,11 +58,13 @@ function AdminWorkspace({
   downloadSpaceArchive,
   spaceTransferResult,
   updateAdminSettings,
+  updateAdminTuning,
   updateDocumentSchemaProfile,
   refreshStorageRetention,
   runStorageRetention,
   restoreTrashItem,
   testAdminLlmSettings,
+  testAdminTuningLlmSettings,
   refreshAdmin,
   loading,
   codeSourceProps,
@@ -67,6 +90,14 @@ function AdminWorkspace({
     auxiliaryChatModel: adminSettings?.auxiliaryChatModel || '',
   });
   const [llmTestResult, setLlmTestResult] = useState(null);
+  const [tuningValues, setTuningValues] = useState({});
+  const [tuningPreset, setTuningPreset] = useState('default');
+  const [tuningLlmForm, setTuningLlmForm] = useState({
+    ollamaBaseUrl: '',
+    primaryChatModel: '',
+    auxiliaryChatModel: '',
+  });
+  const [tuningTestResult, setTuningTestResult] = useState(null);
 
   useEffect(() => {
     setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
@@ -86,6 +117,21 @@ function AdminWorkspace({
     });
     setLlmTestResult(null);
   }, [adminSettings?.ollamaBaseUrl, adminSettings?.chatModel, adminSettings?.primaryChatModel, adminSettings?.auxiliaryChatModel]);
+
+  useEffect(() => {
+    const nextValues = {};
+    (adminTuning?.settings || []).forEach((setting) => {
+      nextValues[setting.key] = setting.value;
+    });
+    setTuningValues(nextValues);
+    setTuningPreset(adminTuning?.activePreset || 'default');
+    setTuningLlmForm({
+      ollamaBaseUrl: adminTuning?.ollamaBaseUrl || '',
+      primaryChatModel: adminTuning?.primaryChatModel || '',
+      auxiliaryChatModel: adminTuning?.auxiliaryChatModel || '',
+    });
+    setTuningTestResult(null);
+  }, [adminTuning]);
 
   function beginEditSpace(space) {
     setEditingSpaceId(space.id);
@@ -135,7 +181,7 @@ function AdminWorkspace({
     event.preventDefault();
     if (!passwordUser) return;
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setModalError('비밀번호 확인이 일치하지 않습니다.');
+      setModalError('鍮꾨?踰덊샇 ?뺤씤???쇱튂?섏? ?딆뒿?덈떎.');
       return;
     }
     const saved = await resetAdminUserPassword(passwordUser.id, passwordForm.newPassword);
@@ -147,7 +193,7 @@ function AdminWorkspace({
     if (!permissionsUser) return;
     const assignedCount = manageableSpaces.filter((space) => permissionDraft[space.id]).length;
     if (assignedCount === 0) {
-      setModalError('최소 1개 공간 권한은 유지해야 합니다.');
+      setModalError('理쒖냼 1媛?怨듦컙 沅뚰븳? ?좎??댁빞 ?⑸땲??');
       return;
     }
     const currentRoles = new Map((permissionsUser.spaces || []).map((space) => [space.id, space.role ? 'MEMBER' : '']));
@@ -219,6 +265,48 @@ function AdminWorkspace({
     }
   }
 
+  function applyTuningPreset(presetId) {
+    const preset = (adminTuning?.presets || []).find((item) => item.id === presetId);
+    if (!preset) return;
+    setTuningPreset(presetId);
+    setTuningValues(preset.values || {});
+  }
+
+  function updateTuningValue(key, value) {
+    const numeric = Number(value);
+    setTuningPreset('custom');
+    setTuningValues((current) => ({
+      ...current,
+      [key]: Number.isFinite(numeric) ? numeric : 0,
+    }));
+  }
+
+  async function submitTuningSettings(event) {
+    event.preventDefault();
+    const saved = await updateAdminTuning?.({
+      preset: 'custom',
+      ollamaBaseUrl: tuningLlmForm.ollamaBaseUrl,
+      primaryChatModel: tuningLlmForm.primaryChatModel,
+      auxiliaryChatModel: tuningLlmForm.auxiliaryChatModel,
+      values: tuningValues,
+    });
+    if (saved) {
+      setTuningPreset('custom');
+    }
+  }
+
+  async function testTuningLlmSettings() {
+    const tester = testAdminTuningLlmSettings || testAdminLlmSettings;
+    const result = await tester?.({
+      ollamaBaseUrl: tuningLlmForm.ollamaBaseUrl,
+      primaryChatModel: tuningLlmForm.primaryChatModel,
+      auxiliaryChatModel: tuningLlmForm.auxiliaryChatModel,
+    });
+    if (result && typeof result === 'object') {
+      setTuningTestResult(result);
+    }
+  }
+
   function parseProfileList(value) {
     return String(value || '')
       .split(/[,\n]+/)
@@ -266,7 +354,7 @@ function AdminWorkspace({
     { label: '사용자', value: users.length, hint: `${activeUsers} active`, icon: <IconUsersGroup size={20} /> },
     { label: '공간', value: manageableSpaces.length, hint: selectedSpaceId ? 'selected scope' : 'global scope', icon: <IconDatabase size={20} /> },
     { label: '허용 도메인', value: allowedDomains.length, hint: adminSettings?.respectRobotsTxt ?? true ? 'robots on' : 'robots off', icon: <IconWorld size={20} /> },
-    { label: 'Retention 후보', value: retentionCandidateCount, hint: formatFileSize(storageRetention?.totalEstimatedBytes), icon: <IconActivity size={20} /> },
+    { label: '정리 후보', value: retentionCandidateCount, hint: formatFileSize(storageRetention?.totalEstimatedBytes), icon: <IconActivity size={20} /> },
   ];
   const adminTabs = (
     <div className="admin-tabs admin-tabler-tabs" role="tablist" aria-label="관리자 메뉴">
@@ -292,6 +380,18 @@ function AdminWorkspace({
       </button>
       {isMaster && (
         <button
+          className={activeAdminTab === 'tuning' ? 'mode-button active' : 'mode-button'}
+          type="button"
+          role="tab"
+          aria-selected={activeAdminTab === 'tuning'}
+          onClick={() => setActiveAdminTab('tuning')}
+        >
+          <SlidersHorizontal size={16} />
+          튜닝
+        </button>
+      )}
+      {isMaster && (
+        <button
           className={activeAdminTab === 'trash' ? 'mode-button active' : 'mode-button'}
           type="button"
           role="tab"
@@ -308,8 +408,8 @@ function AdminWorkspace({
     <header className="admin-tabler-header">
       <div>
         <span className="admin-tabler-kicker">Admin Console</span>
-        <h1>관리자 운영</h1>
-        <p>모델, 소스, 사용자, 공간, 감사 로그를 한 곳에서 관리합니다.</p>
+          <h1>관리자 운영</h1>
+          <p>모델, 소스, 사용자, 공간, 감사 로그를 한 곳에서 관리합니다.</p>
       </div>
       <button className="ghost-button compact-action admin-refresh-button" type="button" onClick={refreshAdmin}>
         {loading('admin-refresh') ? <Loader2 className="spin" size={15} /> : <IconRefresh size={15} />}
@@ -340,6 +440,201 @@ function AdminWorkspace({
     </section>
   );
 
+  if (activeAdminTab === 'tuning') {
+    const tuningSettings = adminTuning?.settings || [];
+    const tuningPresets = adminTuning?.presets || [];
+    const appliedPresetId = adminTuning?.activePreset || tuningPreset || 'custom';
+    const appliedPresetLabel = presetText[appliedPresetId]?.[0] || (appliedPresetId === 'custom' ? '사용자 지정' : appliedPresetId);
+    const editingPresetLabel = presetText[tuningPreset]?.[0] || (tuningPreset === 'custom' ? '사용자 지정' : tuningPreset);
+    const groupedSettings = tuningSettings.reduce((groups, setting) => {
+      const category = setting.category || '기타';
+      groups[category] = groups[category] || [];
+      groups[category].push(setting);
+      return groups;
+    }, {});
+
+    return (
+      <div className="admin-tabler-shell">
+        {adminHeader}
+        {adminSummaryCards}
+        {adminTabs}
+        <form className="panel tuning-panel" onSubmit={submitTuningSettings}>
+          <div className="panel-title">
+            <SlidersHorizontal size={18} />
+            <div>
+              <h2>LLM/RAG 튜닝</h2>
+              <p>답변 품질, 속도, 하드웨어 부하에 직접 영향을 주는 값만 조정합니다.</p>
+            </div>
+          </div>
+
+          {!adminTuning && (
+            <div className="danger-note">
+              튜닝 설정을 불러오지 못했습니다. 기존 서버 기본값으로 서비스는 계속 동작합니다.
+            </div>
+          )}
+
+          {adminTuning?.warnings?.map((warning) => (
+            <div className="danger-note" key={warning}>
+              <AlertTriangle size={14} />
+              {warning}
+            </div>
+          ))}
+
+          <div className="tuning-preset-row" role="radiogroup" aria-label="튜닝 프리셋">
+            {tuningPresets.map((preset) => (
+              <button
+                key={preset.id}
+                className={tuningPreset === preset.id ? 'mode-button active' : 'mode-button'}
+                type="button"
+                onClick={() => applyTuningPreset(preset.id)}
+                title={presetText[preset.id]?.[1] || preset.description}
+              >
+                {presetText[preset.id]?.[0] || preset.label}
+              </button>
+            ))}
+            <button className={tuningPreset === 'custom' ? 'mode-button active' : 'mode-button'} type="button" onClick={() => setTuningPreset('custom')}>
+              사용자 지정
+            </button>
+          </div>
+
+          <div className="tuning-active-profile">
+            <span>
+              <strong>현재 적용 중</strong>
+              <em>{appliedPresetLabel}</em>
+            </span>
+            <small>
+              편집 중: {editingPresetLabel}
+              {tuningPreset !== appliedPresetId ? ' · 저장하면 사용자 지정으로 적용됩니다.' : ''}
+            </small>
+          </div>
+
+          <section className="tuning-section">
+            <div className="panel-title compact-title">
+              <Bot size={18} />
+              <div>
+                <h2>모델 연결</h2>
+                <p>비워두면 서버 기본 모델과 Ollama 주소를 사용합니다.</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="stack">
+                <label htmlFor="tuning-ollama-url">Ollama 주소 / 포트</label>
+                <input
+                  id="tuning-ollama-url"
+                  value={tuningLlmForm.ollamaBaseUrl}
+                  onChange={(event) => setTuningLlmForm((current) => ({ ...current, ollamaBaseUrl: event.target.value }))}
+                  placeholder={adminTuning?.effectiveOllamaBaseUrl || 'http://ollama:11434'}
+                  spellCheck="false"
+                />
+              </div>
+            </div>
+            <div className="form-grid two">
+              <div className="stack">
+                <label htmlFor="tuning-primary-model">메인 모델</label>
+                <input
+                  id="tuning-primary-model"
+                  value={tuningLlmForm.primaryChatModel}
+                  onChange={(event) => setTuningLlmForm((current) => ({ ...current, primaryChatModel: event.target.value }))}
+                  placeholder={adminTuning?.effectivePrimaryChatModel || 'qwen3:8b-q4_K_M'}
+                  spellCheck="false"
+                />
+              </div>
+              <div className="stack">
+                <label htmlFor="tuning-aux-model">보조 모델</label>
+                <input
+                  id="tuning-aux-model"
+                  value={tuningLlmForm.auxiliaryChatModel}
+                  onChange={(event) => setTuningLlmForm((current) => ({ ...current, auxiliaryChatModel: event.target.value }))}
+                  placeholder={adminTuning?.effectiveAuxiliaryChatModel || 'qwen3.5:2b-q4_K_M'}
+                  spellCheck="false"
+                />
+              </div>
+            </div>
+            <div className="detail-box compact-box llm-effective-box">
+              <strong>현재 적용값</strong>
+              <small>주소: {adminTuning?.effectiveOllamaBaseUrl || '-'}</small>
+              <small>메인: {adminTuning?.effectivePrimaryChatModel || '-'}</small>
+              <small>보조: {adminTuning?.effectiveAuxiliaryChatModel || '-'}</small>
+            </div>
+            {tuningTestResult && (
+              <div className={tuningTestResult.success ? 'success-note llm-test-result' : 'danger-note llm-test-result'}>
+                {tuningTestResult.message}
+                <small>메인: {tuningTestResult.primaryModel || tuningTestResult.model || '-'}</small>
+                <small>보조: {tuningTestResult.auxiliaryModel || '-'}</small>
+              </div>
+            )}
+          </section>
+
+          {Object.entries(groupedSettings).map(([category, items]) => (
+            <section className="tuning-section" key={category}>
+              <div className="panel-title compact-title">
+                <Cpu size={18} />
+                <div>
+                  <h2>{category}</h2>
+                  <p>{category === 'Ollama' ? '저장 후 컨테이너 재시작이 필요한 항목입니다.' : '저장 즉시 새 요청부터 반영됩니다.'}</p>
+                </div>
+              </div>
+              <div className="tuning-grid">
+                {items.map((setting) => {
+                  const value = tuningValues[setting.key] ?? setting.value ?? setting.defaultValue;
+                  const isSelect = setting.control === 'select';
+                  const text = tuningText[setting.key] || [setting.label, setting.description, setting.impact];
+                  return (
+                    <label className="tuning-control" key={setting.key} title={`${text[1]} ${text[2]}`}>
+                      <span className="tuning-control-head">
+                        <strong>{text[0]}</strong>
+                        {setting.restartRequired && <em>재시작 필요</em>}
+                      </span>
+                      <small>{text[2]}</small>
+                      {isSelect ? (
+                        <select value={value} onChange={(event) => updateTuningValue(setting.key, event.target.value)}>
+                          {Array.from({ length: Math.floor((setting.max - setting.min) / setting.step) + 1 }, (_, index) => setting.min + index * setting.step).map((option) => (
+                            <option value={option} key={option}>{option}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="tuning-range-row">
+                          <input
+                            type="range"
+                            min={setting.min}
+                            max={setting.max}
+                            step={setting.step}
+                            value={value}
+                            onChange={(event) => updateTuningValue(setting.key, event.target.value)}
+                          />
+                          <input
+                            type="number"
+                            min={setting.min}
+                            max={setting.max}
+                            step={setting.step}
+                            value={value}
+                            onChange={(event) => updateTuningValue(setting.key, event.target.value)}
+                          />
+                        </div>
+                      )}
+                      <span className="tuning-meta">기본값 {setting.defaultValue} · {setting.envKey}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+
+          <div className="action-row">
+            <button type="button" className="ghost-button" disabled={loading('admin-tuning-llm-test') || loading('admin-tuning')} onClick={testTuningLlmSettings}>
+              {loading('admin-tuning-llm-test') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+              연결 테스트
+            </button>
+            <button disabled={loading('admin-tuning') || !adminTuning}>
+              {loading('admin-tuning') ? <Loader2 className="spin" size={16} /> : <SlidersHorizontal size={16} />}
+              튜닝 저장
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   if (activeAdminTab === 'trash') {
     return (
       <div className="admin-tabler-shell">
@@ -351,7 +646,7 @@ function AdminWorkspace({
             <Trash2 size={18} />
             <div>
               <h2>휴지통</h2>
-              <p>영구 삭제되기 전에 삭제된 항목을 복구할 수 있습니다.</p>
+                <p>영구 삭제되기 전에 삭제된 항목을 복구할 수 있습니다.</p>
             </div>
           </div>
           <div className="results audit-list">
@@ -365,7 +660,7 @@ function AdminWorkspace({
                   </div>
                   <small>{item.subtitle || '-'}</small>
                   <small>
-                    삭제일 {item.deletedAt ? formatDate(item.deletedAt) : '-'} · 영구삭제 예정일 {item.expiresAt ? formatDate(item.expiresAt) : '-'}
+                      삭제일 {item.deletedAt ? formatDate(item.deletedAt) : '-'} · 영구삭제 예정일 {item.expiresAt ? formatDate(item.expiresAt) : '-'}
                   </small>
                   <p>{item.message}</p>
                   <div className="action-row">
@@ -468,85 +763,13 @@ function AdminWorkspace({
           </div>
         </section>
 
-        <form className="panel" onSubmit={submitLlmSettings}>
-          <div className="panel-title">
-            <Bot size={18} />
-            <div>
-              <h2>LLM 설정</h2>
-              <p>{adminSettings?.llmUsingDefaults ? '시스템 기본값 사용 중' : '관리자 설정 사용 중'}</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <div className="stack">
-              <label htmlFor="llm-ollama-url">Ollama 주소 / 포트</label>
-              <input
-                id="llm-ollama-url"
-                value={llmForm.ollamaBaseUrl}
-                onChange={(event) => setLlmForm((current) => ({ ...current, ollamaBaseUrl: event.target.value }))}
-                placeholder={adminSettings?.effectiveOllamaBaseUrl || 'http://ollama:11434'}
-                spellCheck="false"
-              />
-            </div>
-          </div>
-          <div className="form-grid two">
-            <div className="stack">
-              <label htmlFor="llm-primary-model">메인 모델</label>
-              <input
-                id="llm-primary-model"
-                value={llmForm.primaryChatModel}
-                onChange={(event) => setLlmForm((current) => ({ ...current, primaryChatModel: event.target.value }))}
-                placeholder={adminSettings?.effectivePrimaryChatModel || 'qwen3:8b-q4_K_M'}
-                spellCheck="false"
-              />
-            </div>
-            <div className="stack">
-              <label htmlFor="llm-auxiliary-model">보조 모델</label>
-              <input
-                id="llm-auxiliary-model"
-                value={llmForm.auxiliaryChatModel}
-                onChange={(event) => setLlmForm((current) => ({ ...current, auxiliaryChatModel: event.target.value }))}
-                placeholder={adminSettings?.effectiveAuxiliaryChatModel || 'qwen3.5:2b-q4_K_M'}
-                spellCheck="false"
-              />
-            </div>
-          </div>
-          <small className="field-help">
-            빈 값은 기본 메인/보조 모델을 사용합니다. 포트만 입력하면 host.docker.internal 기준으로 연결합니다.
-          </small>
-          <div className="detail-box compact-box llm-effective-box">
-            <strong>현재 적용값</strong>
-            <small>주소: {adminSettings?.effectiveOllamaBaseUrl || '-'}</small>
-            <small>메인: {adminSettings?.effectivePrimaryChatModel || adminSettings?.effectiveChatModel || '-'}</small>
-            <small>보조: {adminSettings?.effectiveAuxiliaryChatModel || '-'}</small>
-          </div>
-          {llmTestResult && (
-            <div className={llmTestResult.success ? 'success-note llm-test-result' : 'danger-note llm-test-result'}>
-              {llmTestResult.message}
-              <small>메인: {llmTestResult.primaryModel || llmTestResult.model || '-'}</small>
-              <small>보조: {llmTestResult.auxiliaryModel || '-'}</small>
-              {llmTestResult.availableModels?.length > 0 && (
-                <small>사용 가능 모델: {llmTestResult.availableModels.slice(0, 5).join(', ')}</small>
-              )}
-            </div>
-          )}
-          <div className="action-row">
-            <button type="button" className="ghost-button" disabled={loading('admin-llm-test') || loading('admin-settings')} onClick={testLlmSettings}>
-              {loading('admin-llm-test') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-              연결 테스트
-            </button>
-            <button disabled={loading('admin-settings') || loading('admin-llm-test')}>
-              {loading('admin-settings') ? <Loader2 className="spin" size={16} /> : <Bot size={16} />}
-              LLM 설정 저장
-            </button>
-          </div>
-        </form>
 
         <section className="panel">
           <div className="panel-title">
             <Database size={18} />
             <div>
               <h2>문서 그래프 스키마</h2>
-              <p>Core Document Graph는 항상 사용하고, 도메인 프로파일은 문서 타입 분류와 향후 관계 추출에 사용합니다.</p>
+              <p>문서 유형별 스키마 프로필을 관리하고, 문서 그래프 분석에 사용할 엔티티와 관계를 확인합니다.</p>
             </div>
           </div>
           <div className="schema-profile-list">
@@ -578,10 +801,10 @@ function AdminWorkspace({
                         disabled={loading(loadingKey) || profile.defaultProfile || !profile.enabled}
                         onChange={(event) => updateSchemaProfile(profile, { defaultProfile: event.target.checked })}
                       />
-                      <span>기본 프로파일</span>
+                      <span>기본 프로필</span>
                     </label>
                   </div>
-                  <label htmlFor={`schema-doc-types-${profile.schemaName}`}>문서 타입</label>
+                  <label htmlFor={`schema-doc-types-${profile.schemaName}`}>문서 유형</label>
                   <textarea
                     id={`schema-doc-types-${profile.schemaName}`}
                     rows={4}
@@ -590,7 +813,7 @@ function AdminWorkspace({
                     onBlur={(event) => updateSchemaProfile(profile, { documentTypes: parseProfileList(event.target.value) })}
                   />
                   <details>
-                    <summary>Entity / Relation 타입 보기</summary>
+                    <summary>Entity / Relation 유형 보기</summary>
                     <small>Entities: {(profile.entityTypes || []).join(', ') || '-'}</small>
                     <small>Relations: {(profile.relationTypes || []).join(', ') || '-'}</small>
                   </details>
@@ -598,7 +821,7 @@ function AdminWorkspace({
               );
             })}
             {!documentSchemaProfiles?.length && (
-              <p className="empty compact-empty">등록된 문서 그래프 스키마 프로파일을 불러오지 못했습니다. Core fallback으로 동작합니다.</p>
+              <p className="empty compact-empty">등록된 문서 그래프 스키마 프로필을 불러오지 못했습니다. 기본 스키마로 동작합니다.</p>
             )}
           </div>
         </section>
@@ -662,7 +885,7 @@ function AdminWorkspace({
             <UserPlus size={18} />
             <div>
               <h2>사용자 초대</h2>
-              <p>현재 선택된 공간에 사용자를 추가합니다.</p>
+              <p>현재 선택한 공간에 사용자를 추가합니다.</p>
             </div>
           </div>
           <div className="form-grid two">
@@ -671,7 +894,7 @@ function AdminWorkspace({
               <input id="invite-login-id" value={inviteForm.loginId} onChange={(event) => setInviteForm((current) => ({ ...current, loginId: event.target.value }))} autoComplete="off" spellCheck="false" />
             </div>
             <div className="stack">
-              <label htmlFor="invite-name">표시 이름</label>
+                <label htmlFor="invite-name">표시 이름</label>
               <input id="invite-name" value={inviteForm.displayName} onChange={(event) => setInviteForm((current) => ({ ...current, displayName: event.target.value }))} />
             </div>
           </div>
@@ -703,8 +926,8 @@ function AdminWorkspace({
             </select>
           </div>
           <div className="detail-box compact-box">
-            <strong>{inviteSpace?.name || '선택된 공간'}</strong>
-            <small>초대 사용자는 이 공간의 자료만 접근합니다.</small>
+            <strong>{inviteSpace?.name || '선택한 공간'}</strong>
+            <small>초대 사용자는 이 공간의 자료에만 접근합니다.</small>
           </div>
           <div className="action-row">
             <button disabled={!inviteForm.loginId || !inviteForm.displayName || !inviteForm.initialPassword || !inviteSpaceId || loading('user-invite')}>
@@ -821,7 +1044,7 @@ function AdminWorkspace({
           {spaceTransferResult?.type === 'import' && (
             <div className="transfer-note success-note">
               <strong>{transferSpaceName || '공간'} Import 완료</strong>
-              <span>가져온 데이터: {formatTransferCounts(spaceTransferResult.result?.imported)}</span>
+              <span>가져온 데이터 {formatTransferCounts(spaceTransferResult.result?.imported)}</span>
               <small>건너뜀: {formatTransferCounts(spaceTransferResult.result?.skipped)}</small>
             </div>
           )}
@@ -900,7 +1123,7 @@ function AdminWorkspace({
             <ShieldCheck size={18} />
             <div>
               <h2>감사 로그</h2>
-              <p>핵심 작업 이력을 추적합니다.</p>
+              <p>주요 작업 이력을 추적합니다.</p>
             </div>
           </div>
           <div className="top-actions">
@@ -925,7 +1148,7 @@ function AdminWorkspace({
       </div>
 
       {editingUser && (
-        <AdminUserModal title="계정 편집" subtitle={editingUser.loginId || editingUser.email} icon={<Info size={18} />} onClose={closeUserModals}>
+        <AdminUserModal title="怨꾩젙 ?몄쭛" subtitle={editingUser.loginId || editingUser.email} icon={<Info size={18} />} onClose={closeUserModals}>
           <form className="admin-modal-form" onSubmit={submitUserEdit}>
             <div className="stack">
               <label htmlFor="edit-user-login-id">ID</label>
@@ -937,10 +1160,10 @@ function AdminWorkspace({
                 autoComplete="off"
                 spellCheck="false"
               />
-              {editingUser.id === currentUser?.id && <small className="field-help">현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.</small>}
+              {editingUser.id === currentUser?.id && <small className="field-help">?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙??ID?????붾㈃?먯꽌 蹂寃쏀븷 ???놁뒿?덈떎.</small>}
             </div>
             <div className="stack">
-              <label htmlFor="edit-user-name">표시 이름</label>
+              <label htmlFor="edit-user-name">?쒖떆 ?대쫫</label>
               <input
                 id="edit-user-name"
                 value={userEditForm.displayName}
@@ -948,7 +1171,7 @@ function AdminWorkspace({
               />
             </div>
             <div className="stack">
-              <label htmlFor="edit-user-role">시스템 권한</label>
+              <label htmlFor="edit-user-role">?쒖뒪??沅뚰븳</label>
               <select
                 id="edit-user-role"
                 value={isMaster ? userEditForm.role : 'USER'}
@@ -976,7 +1199,7 @@ function AdminWorkspace({
           <form className="admin-modal-form" onSubmit={submitPasswordReset}>
             {modalError && <div className="failure-line"><AlertTriangle size={14} />{modalError}</div>}
             <div className="stack">
-              <label htmlFor="reset-password">새 임시 비밀번호</label>
+              <label htmlFor="reset-password">새 비밀번호</label>
               <input
                 id="reset-password"
                 type="password"
@@ -985,7 +1208,7 @@ function AdminWorkspace({
               />
             </div>
             <div className="stack">
-              <label htmlFor="reset-password-confirm">새 임시 비밀번호 확인</label>
+              <label htmlFor="reset-password-confirm">새 비밀번호 확인</label>
               <input
                 id="reset-password-confirm"
                 type="password"
@@ -1012,7 +1235,7 @@ function AdminWorkspace({
             {permissionsUser.role === 'ADMIN' && (
               <div className="detail-box compact-box">
                 <strong>시스템 관리자</strong>
-                <small>ADMIN 계정도 선택된 공간에만 접근합니다. 최소 1개 공간 권한은 유지해야 합니다.</small>
+                <small>ADMIN 계정은 선택한 공간에만 접근합니다. 최소 1개 공간 권한이 필요합니다.</small>
               </div>
             )}
             <div className="permission-grid">
@@ -1050,7 +1273,7 @@ function AdminWorkspace({
             <div className="detail-box compact-box">
               <strong>병합 가져오기</strong>
               <small>기존 데이터는 삭제하지 않고, 같은 문서 출처나 같은 Git 커밋 저장소는 건너뜁니다.</small>
-              <small>Export 파일은 작업폴더 하위의 상대경로 `./export`에 생성된 ZIP을 선택하면 됩니다.</small>
+              <small>Export로 생성된 ZIP 파일을 선택하면 됩니다.</small>
             </div>
             <label className="file-picker import-file-picker" htmlFor="space-import-file">
               <FileUp size={16} />
@@ -1068,7 +1291,7 @@ function AdminWorkspace({
                 {loading(`space-import-${importSpace.id}`) ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}
                 Import
               </button>
-              <button className="ghost-button" type="button" onClick={closeSpaceImport}>취소</button>
+              <button className="ghost-button" type="button" onClick={closeSpaceImport}>痍⑥냼</button>
             </div>
           </form>
         </AdminUserModal>
@@ -1086,7 +1309,7 @@ function AdminWorkspace({
             <div className="allowed-domain-editor-head">
               <strong>웹 인덱싱 허용 목록</strong>
               <small>
-                한 줄에 하나씩 입력하거나 쉼표로 구분하세요. 전체 URL을 입력해도 서버에서 호스트만 저장합니다.
+                한 줄에 하나씩 입력하거나 쉼표로 구분하세요. 전체 URL을 입력해도 서버에서는 호스트만 저장합니다.
               </small>
             </div>
             <textarea
@@ -1098,7 +1321,7 @@ function AdminWorkspace({
               autoFocus
             />
             <small className="field-help">
-              예: `https://docs.example.com/guide` → `docs.example.com`. 등록한 도메인과 그 하위 도메인만 웹 인덱싱할 수 있습니다.
+              예: https://docs.example.com/guide 는 docs.example.com 으로 저장됩니다. 등록된 도메인과 하위 도메인만 웹 인덱싱할 수 있습니다.
             </small>
             <div className="allowed-domain-footer">
               <button className="ghost-button" type="button" disabled={loading('admin-settings')} onClick={closeAllowedDomains}>
@@ -1129,7 +1352,7 @@ function AdminUserModal({ title, subtitle, icon, children, onClose, className = 
               <p>{subtitle}</p>
             </div>
           </div>
-          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
+          <button className="icon-button code-modal-close" type="button" title="?リ린" onClick={() => onClose?.()}>
             <X size={18} />
           </button>
         </header>
