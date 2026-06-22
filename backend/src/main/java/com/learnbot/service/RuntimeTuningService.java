@@ -176,34 +176,34 @@ public class RuntimeTuningService {
             defaults.put(definition.key(), definition.defaultValue());
         }
 
-        Map<String, Integer> performance = new LinkedHashMap<>(defaults);
-        performance.put(LLM_CONTEXT_WINDOW, 6144);
-        performance.put(OLLAMA_CONTEXT_LENGTH, 6144);
-        performance.put(PROMPT_TOKEN_BUDGET_BALANCED, 5000);
-        performance.put(CODE_CONTEXT_LIMIT, 16);
-        performance.put(DOCUMENT_CONTEXT_LIMIT, 10);
-        performance.put(OVERVIEW_MAX_DOCUMENTS, 16);
-        performance.put(OVERVIEW_MAX_CODE_CATEGORIES, 14);
-        performance.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 3);
-        performance.put(LLM_MAX_OUTPUT_TOKENS, 1024);
-        performance.put(OLLAMA_MAX_LOADED_MODELS, 1);
-        performance.put(OLLAMA_NUM_PARALLEL, 1);
+        Map<String, Integer> slightlyHigh = new LinkedHashMap<>(defaults);
+        slightlyHigh.put(LLM_CONTEXT_WINDOW, 6144);
+        slightlyHigh.put(OLLAMA_CONTEXT_LENGTH, 6144);
+        slightlyHigh.put(PROMPT_TOKEN_BUDGET_BALANCED, 5000);
+        slightlyHigh.put(CODE_CONTEXT_LIMIT, 16);
+        slightlyHigh.put(DOCUMENT_CONTEXT_LIMIT, 10);
+        slightlyHigh.put(OVERVIEW_MAX_DOCUMENTS, 16);
+        slightlyHigh.put(OVERVIEW_MAX_CODE_CATEGORIES, 14);
+        slightlyHigh.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 3);
+        slightlyHigh.put(LLM_MAX_OUTPUT_TOKENS, 1024);
+        slightlyHigh.put(OLLAMA_MAX_LOADED_MODELS, 1);
+        slightlyHigh.put(OLLAMA_NUM_PARALLEL, 1);
 
-        Map<String, Integer> lab = new LinkedHashMap<>(performance);
-        lab.put(LLM_CONTEXT_WINDOW, 8192);
-        lab.put(OLLAMA_CONTEXT_LENGTH, 8192);
-        lab.put(PROMPT_TOKEN_BUDGET_BALANCED, 6500);
-        lab.put(DOCUMENT_CONTEXT_LIMIT, 14);
-        lab.put(CODE_CONTEXT_LIMIT, 20);
-        lab.put(OVERVIEW_MAX_DOCUMENTS, 24);
-        lab.put(OVERVIEW_MAX_CODE_CATEGORIES, 20);
-        lab.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 4);
-        lab.put(LLM_MAX_OUTPUT_TOKENS, 1536);
+        Map<String, Integer> performance = new LinkedHashMap<>(slightlyHigh);
+        performance.put(LLM_CONTEXT_WINDOW, 8192);
+        performance.put(OLLAMA_CONTEXT_LENGTH, 8192);
+        performance.put(PROMPT_TOKEN_BUDGET_BALANCED, 6500);
+        performance.put(DOCUMENT_CONTEXT_LIMIT, 14);
+        performance.put(CODE_CONTEXT_LIMIT, 20);
+        performance.put(OVERVIEW_MAX_DOCUMENTS, 24);
+        performance.put(OVERVIEW_MAX_CODE_CATEGORIES, 20);
+        performance.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 4);
+        performance.put(LLM_MAX_OUTPUT_TOKENS, 1536);
 
         return List.of(
                 new AdminTuningPreset("default", "Default", "Current server defaults.", defaults),
-                new AdminTuningPreset("performance", "Performance", "Higher quality without aggressive hardware pressure.", performance),
-                new AdminTuningPreset("lab", "Lab", "Large context and broad evidence. May be slower.", lab)
+                new AdminTuningPreset("slightly_high", "Slightly higher", "Slightly broader evidence and answer budget than defaults.", slightlyHigh),
+                new AdminTuningPreset("performance", "Performance", "Large context and broad evidence. May be slower.", performance)
         );
     }
 
