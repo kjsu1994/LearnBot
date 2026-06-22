@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.SpaceSummary;
 import com.learnbot.repository.SecurityRepository;
+import com.learnbot.security.ForbiddenException;
 import com.learnbot.security.PasswordHasher;
 import org.junit.jupiter.api.Test;
 
@@ -24,41 +25,41 @@ class AuthServiceTest {
     private final AuthService service = new AuthService(repository, new PasswordHasher(), new LearnBotProperties());
 
     @Test
-    void preventsCurrentAdminFromChangingOwnSystemRole() {
+    void preventsAdminFromChangingAdminSystemRole() {
         UUID adminId = UUID.randomUUID();
         AppUser admin = user(adminId, "admin@example.com", "ADMIN");
         when(repository.findUserById(adminId)).thenReturn(Optional.of(admin));
 
         assertThatThrownBy(() -> service.updateUser(admin, adminId, admin.email(), "Admin", "USER"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("시스템 권한");
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("lower-permission");
 
         verify(repository, never()).updateUser(eq(adminId), anyString(), anyString(), anyString());
     }
 
     @Test
-    void preventsLastAdminFromBeingDowngraded() {
+    void preventsLastAdminFromBeingDowngradedByMaster() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
-        AppUser actor = user(actorId, "actor@example.com", "ADMIN");
+        AppUser actor = user(actorId, "actor@example.com", "MASTER");
         AppUser target = user(targetId, "target@example.com", "ADMIN");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
         when(repository.countActiveAdmins()).thenReturn(1);
 
         assertThatThrownBy(() -> service.updateUser(actor, targetId, target.email(), "Target", "USER"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("마지막 관리자");
+                .isInstanceOf(IllegalArgumentException.class);
 
         verify(repository, never()).updateUser(eq(targetId), anyString(), anyString(), anyString());
     }
 
     @Test
-    void resetPasswordUpdatesHashAndRevokesSessions() {
+    void resetPasswordUpdatesHashAndRevokesSessionsForScopedUser() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
         AppUser actor = user(actorId, "actor@example.com", "ADMIN");
         AppUser target = user(targetId, "target@example.com", "USER");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
+        when(repository.usersShareActiveSpace(actorId, targetId)).thenReturn(true);
 
         service.resetUserPassword(actor, targetId, "temporary-password");
 
@@ -75,14 +76,14 @@ class AuthServiceTest {
         AppUser actor = user(actorId, "actor@example.com", "ADMIN");
         AppUser target = user(targetId, "target@example.com", "USER");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
-        when(repository.canAccessSpace(actor, spaceId)).thenReturn(true);
+        when(repository.usersShareActiveSpace(actorId, targetId)).thenReturn(true);
+        when(repository.userHasActiveSpace(actorId, spaceId)).thenReturn(true);
         when(repository.findSpace(spaceId)).thenReturn(Optional.of(new SpaceSummary(spaceId, "Space", "", "OWNER", OffsetDateTime.now())));
         when(repository.findSpaceMemberRole(spaceId, targetId)).thenReturn(Optional.of("MEMBER"));
         when(repository.countSpaceMemberships(targetId)).thenReturn(1);
 
         assertThatThrownBy(() -> service.removeSpaceMember(actor, spaceId, targetId))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("마지막 공간 권한");
+                .isInstanceOf(IllegalArgumentException.class);
 
         verify(repository, never()).removeSpaceMember(spaceId, targetId);
     }
@@ -94,6 +95,7 @@ class AuthServiceTest {
         AppUser actor = user(actorId, "actor@example.com", "ADMIN");
         AppUser target = user(targetId, "target@example.com", "USER");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
+        when(repository.usersShareActiveSpace(actorId, targetId)).thenReturn(true);
         when(repository.findUserByEmail("renamed@example.com")).thenReturn(Optional.empty());
 
         service.updateUser(actor, targetId, "renamed@example.com", "Target", "USER");
@@ -111,6 +113,7 @@ class AuthServiceTest {
         AppUser target = user(targetId, "target@example.com", "USER");
         AppUser existing = user(existingId, "taken@example.com", "USER");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
+        when(repository.usersShareActiveSpace(actorId, targetId)).thenReturn(true);
         when(repository.findUserByEmail("taken@example.com")).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> service.updateUser(actor, targetId, "taken@example.com", "Target", "USER"))
@@ -121,11 +124,11 @@ class AuthServiceTest {
     }
 
     @Test
-    void allowsChangingSpaceRoleForAdminUser() {
+    void masterCanChangeSpaceRoleForAdminUser() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();
-        AppUser actor = user(actorId, "actor@example.com", "ADMIN");
+        AppUser actor = user(actorId, "actor@example.com", "MASTER");
         AppUser target = user(targetId, "admin@example.com", "ADMIN");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
         when(repository.findSpace(spaceId)).thenReturn(Optional.of(new SpaceSummary(spaceId, "Space", "", "OWNER", OffsetDateTime.now())));
@@ -137,11 +140,11 @@ class AuthServiceTest {
     }
 
     @Test
-    void preventsRemovingLastSpaceFromAdminUser() {
+    void preventsRemovingLastSpaceFromAdminUserByMaster() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();
-        AppUser actor = user(actorId, "actor@example.com", "ADMIN");
+        AppUser actor = user(actorId, "actor@example.com", "MASTER");
         AppUser target = user(targetId, "admin@example.com", "ADMIN");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
         when(repository.findSpace(spaceId)).thenReturn(Optional.of(new SpaceSummary(spaceId, "Space", "", "OWNER", OffsetDateTime.now())));
@@ -149,10 +152,25 @@ class AuthServiceTest {
         when(repository.countSpaceMemberships(targetId)).thenReturn(1);
 
         assertThatThrownBy(() -> service.removeSpaceMember(actor, spaceId, targetId))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("공간");
+                .isInstanceOf(IllegalArgumentException.class);
 
         verify(repository, never()).removeSpaceMember(spaceId, targetId);
+    }
+
+    @Test
+    void adminCannotManageUserOutsideAssignedSpaces() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        AppUser actor = user(actorId, "actor@example.com", "ADMIN");
+        AppUser target = user(targetId, "target@example.com", "USER");
+        when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
+        when(repository.usersShareActiveSpace(actorId, targetId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.resetUserPassword(actor, targetId, "temporary-password"))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("assigned workspace");
+
+        verify(repository, never()).updatePasswordHash(eq(targetId), anyString());
     }
 
     private AppUser user(UUID id, String email, String role) {

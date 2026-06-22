@@ -102,6 +102,8 @@ export default function App() {
   const activeSpaceId = selectedSpaceId || spaces[0]?.id || '';
   const selectedSpace = spaces.find((space) => space.id === activeSpaceId);
   const selectedRepository = repositories.find((repo) => repo.id === selectedRepositoryId);
+  const isAdminUser = user?.role === 'MASTER' || user?.role === 'ADMIN';
+  const isMasterUser = user?.role === 'MASTER';
   const {
     documents,
     documentJobs,
@@ -226,7 +228,7 @@ export default function App() {
   }, [repositories]);
 
   useEffect(() => {
-    if (activeView === 'admin' && user?.role === 'ADMIN') {
+    if (activeView === 'admin' && isAdminUser) {
       refreshAdmin();
     }
   }, [activeView, user?.role, selectedSpaceId]);
@@ -271,7 +273,7 @@ export default function App() {
       navigateTo(routePaths.home);
       return;
     }
-    if (user && routePath === routePaths.admin && user.role !== 'ADMIN') {
+    if (user && routePath === routePaths.admin && !isAdminUser) {
       navigateTo(routePaths.code);
     }
   }, [user?.role, routePath]);
@@ -677,8 +679,8 @@ export default function App() {
     const trashQuery = selectedSpaceId ? `?spaceId=${encodeURIComponent(selectedSpaceId)}` : '';
     const [users, logs, settings, schemaProfiles, retentionPreview, trash, allSpaces] = await Promise.all([
       request('/api/admin/users'),
-      request('/api/admin/audit-logs?limit=50'),
-      request('/api/admin/settings'),
+      request('/api/admin/audit-logs?limit=50').catch(() => []),
+      request('/api/admin/settings').catch(() => null),
       request('/api/admin/document-graph/schema-profiles').catch(() => []),
       request('/api/admin/storage/retention/preview').catch(() => null),
       request(`/api/admin/trash${trashQuery}`).catch(() => []),
@@ -743,6 +745,8 @@ export default function App() {
         method: 'POST',
         json: {
           ...inviteForm,
+          role: isMasterUser ? inviteForm.role : 'USER',
+          spaceRole: 'MEMBER',
           spaceId: inviteForm.spaceId || activeSpaceId,
         },
       });
@@ -1119,9 +1123,10 @@ export default function App() {
           />
         )}
 
-        {activeView === 'admin' && user.role === 'ADMIN' && (
+        {activeView === 'admin' && isAdminUser && (
           <AdminWorkspace
             currentUser={user}
+            isMaster={isMasterUser}
             users={adminUsers}
             adminSettings={adminSettings}
             documentSchemaProfiles={documentSchemaProfiles}

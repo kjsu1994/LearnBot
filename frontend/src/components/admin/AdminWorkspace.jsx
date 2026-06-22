@@ -10,6 +10,7 @@ import { DocumentSourcePanel } from '../documents/DocumentWorkspace.jsx';
 
 function AdminWorkspace({
   currentUser,
+  isMaster = false,
   users,
   adminSettings,
   documentSchemaProfiles = [],
@@ -46,7 +47,7 @@ function AdminWorkspace({
   codeSourceProps,
   documentSourceProps,
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState('settings');
+  const [activeAdminTab, setActiveAdminTab] = useState(isMaster ? 'settings' : 'sources');
   const [editingSpaceId, setEditingSpaceId] = useState('');
   const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
   const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
@@ -70,6 +71,12 @@ function AdminWorkspace({
   useEffect(() => {
     setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
   }, [adminSettings?.allowedDomains]);
+
+  useEffect(() => {
+    if (!isMaster && (activeAdminTab === 'settings' || activeAdminTab === 'trash')) {
+      setActiveAdminTab('sources');
+    }
+  }, [activeAdminTab, isMaster]);
 
   useEffect(() => {
     setLlmForm({
@@ -110,7 +117,7 @@ function AdminWorkspace({
   function beginPermissionEdit(item) {
     const draft = {};
     (item.spaces || []).forEach((space) => {
-      draft[space.id] = space.role;
+      draft[space.id] = 'MEMBER';
     });
     setModalError('');
     setPermissionsUser(item);
@@ -143,7 +150,7 @@ function AdminWorkspace({
       setModalError('최소 1개 공간 권한은 유지해야 합니다.');
       return;
     }
-    const currentRoles = new Map((permissionsUser.spaces || []).map((space) => [space.id, space.role]));
+    const currentRoles = new Map((permissionsUser.spaces || []).map((space) => [space.id, space.role ? 'MEMBER' : '']));
     const operations = manageableSpaces
       .map((space) => {
         const currentRole = currentRoles.get(space.id) || '';
@@ -244,6 +251,7 @@ function AdminWorkspace({
   }
 
   const manageableSpaces = adminSpaces.length ? adminSpaces : spaces;
+  const canCreateAdmin = isMaster;
   const inviteSpaceId = inviteForm.spaceId || selectedSpaceId || manageableSpaces[0]?.id || '';
   const inviteSpace = manageableSpaces.find((space) => space.id === inviteSpaceId);
   const transferSpaceName = manageableSpaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
@@ -262,16 +270,18 @@ function AdminWorkspace({
   ];
   const adminTabs = (
     <div className="admin-tabs admin-tabler-tabs" role="tablist" aria-label="관리자 메뉴">
-      <button
-        className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
-        type="button"
-        role="tab"
-        aria-selected={activeAdminTab === 'settings'}
-        onClick={() => setActiveAdminTab('settings')}
-      >
-        <IconSettings size={16} />
-        관리자 설정
-      </button>
+      {isMaster && (
+        <button
+          className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
+          type="button"
+          role="tab"
+          aria-selected={activeAdminTab === 'settings'}
+          onClick={() => setActiveAdminTab('settings')}
+        >
+          <IconSettings size={16} />
+          관리자 설정
+        </button>
+      )}
       <button
         className={activeAdminTab === 'sources' ? 'mode-button active' : 'mode-button'}
         type="button"
@@ -282,16 +292,18 @@ function AdminWorkspace({
         <IconFiles size={16} />
         코드/문서 등록
       </button>
-      <button
-        className={activeAdminTab === 'trash' ? 'mode-button active' : 'mode-button'}
-        type="button"
-        role="tab"
-        aria-selected={activeAdminTab === 'trash'}
-        onClick={() => setActiveAdminTab('trash')}
-      >
-        <Trash2 size={16} />
-        휴지통
-      </button>
+      {isMaster && (
+        <button
+          className={activeAdminTab === 'trash' ? 'mode-button active' : 'mode-button'}
+          type="button"
+          role="tab"
+          aria-selected={activeAdminTab === 'trash'}
+          onClick={() => setActiveAdminTab('trash')}
+        >
+          <Trash2 size={16} />
+          휴지통
+        </button>
+      )}
     </div>
   );
   const adminHeader = (
@@ -671,16 +683,9 @@ function AdminWorkspace({
             <div className="form-grid two">
               <div className="stack">
                 <label htmlFor="invite-role">시스템 권한</label>
-                <select id="invite-role" value={inviteForm.role} onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}>
+                <select id="invite-role" value={canCreateAdmin ? inviteForm.role : 'USER'} disabled={!canCreateAdmin} onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}>
                   <option value="USER">USER</option>
-                  <option value="ADMIN">ADMIN</option>
-                </select>
-              </div>
-              <div className="stack">
-                <label htmlFor="invite-space-role">공간 권한</label>
-                <select id="invite-space-role" value={inviteForm.spaceRole} onChange={(event) => setInviteForm((current) => ({ ...current, spaceRole: event.target.value }))}>
-                  <option value="MEMBER">MEMBER</option>
-                  <option value="OWNER">OWNER</option>
+                  {canCreateAdmin && <option value="ADMIN">ADMIN</option>}
                 </select>
               </div>
             </div>
@@ -709,6 +714,7 @@ function AdminWorkspace({
           </div>
         </form>
 
+        {isMaster && (
         <form className="panel" onSubmit={createSpace}>
           <div className="panel-title">
             <Database size={18} />
@@ -732,6 +738,7 @@ function AdminWorkspace({
             </button>
           </div>
         </form>
+        )}
 
         <section className="panel">
           <div className="panel-title">
@@ -754,19 +761,19 @@ function AdminWorkspace({
                   <small>{item.role}</small>
                 </div>
                 <div className="document-actions">
-                  <IconButton title="계정 편집" onClick={() => beginEditUser(item)}>
+                  <IconButton title="계정 편집" disabled={item.role === 'MASTER' || (!isMaster && item.role !== 'USER')} onClick={() => beginEditUser(item)}>
                     <Info size={15} />
                   </IconButton>
                   <IconButton
                     title={item.id === currentUser?.id ? '현재 로그인한 계정의 비밀번호는 여기서 재설정할 수 없습니다.' : '비밀번호 재설정'}
-                    disabled={item.id === currentUser?.id || loading(`user-password-${item.id}`)}
+                    disabled={item.id === currentUser?.id || item.role === 'MASTER' || (!isMaster && item.role !== 'USER') || loading(`user-password-${item.id}`)}
                     onClick={() => beginPasswordReset(item)}
                   >
                     {loading(`user-password-${item.id}`) ? <Loader2 className="spin" size={15} /> : <LockKeyhole size={15} />}
                   </IconButton>
                   <IconButton
                     title="공간 권한 관리"
-                    disabled={loading(`user-spaces-${item.id}`)}
+                    disabled={item.role === 'MASTER' || (!isMaster && item.role !== 'USER') || loading(`user-spaces-${item.id}`)}
                     onClick={() => beginPermissionEdit(item)}
                   >
                     {loading(`user-spaces-${item.id}`) ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
@@ -774,7 +781,7 @@ function AdminWorkspace({
                   <IconButton
                     danger
                     title={item.id === currentUser?.id ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'}
-                    disabled={item.id === currentUser?.id || loading(`user-delete-${item.id}`)}
+                    disabled={item.id === currentUser?.id || item.role === 'MASTER' || (!isMaster && item.role !== 'USER') || loading(`user-delete-${item.id}`)}
                     onClick={() => deleteAdminUser(item.id, formatBrandText(item.displayName))}
                   >
                     {loading(`user-delete-${item.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
@@ -865,9 +872,12 @@ function AdminWorkspace({
                       >
                         {loading(`space-import-${space.id}`) ? <Loader2 className="spin" size={15} /> : <FileUp size={15} />}
                       </IconButton>
+                      {isMaster && (
                       <IconButton title="공간 이름/설명 편집" onClick={() => beginEditSpace(space)}>
                         <Info size={15} />
                       </IconButton>
+                      )}
+                      {isMaster && (
                       <IconButton
                         danger
                         title={space.id === defaultSpaceId ? '기본 공간은 삭제할 수 없습니다.' : '공간 삭제'}
@@ -876,6 +886,7 @@ function AdminWorkspace({
                       >
                         {loading(`space-delete-${space.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                       </IconButton>
+                      )}
                     </div>
                   </>
                 )}
@@ -940,12 +951,12 @@ function AdminWorkspace({
               <label htmlFor="edit-user-role">시스템 권한</label>
               <select
                 id="edit-user-role"
-                value={userEditForm.role}
-                disabled={editingUser.id === currentUser?.id}
+                value={isMaster ? userEditForm.role : 'USER'}
+                disabled={editingUser.id === currentUser?.id || !isMaster}
                 onChange={(event) => setUserEditForm((current) => ({ ...current, role: event.target.value }))}
               >
                 <option value="USER">USER</option>
-                <option value="ADMIN">ADMIN</option>
+                {isMaster && <option value="ADMIN">ADMIN</option>}
               </select>
               {editingUser.id === currentUser?.id && <small className="field-help">현재 로그인한 관리자 계정의 시스템 권한은 이 화면에서 변경할 수 없습니다.</small>}
             </div>
@@ -1016,8 +1027,7 @@ function AdminWorkspace({
                     onChange={(event) => setPermissionDraft((current) => ({ ...current, [space.id]: event.target.value }))}
                   >
                     <option value="">없음</option>
-                    <option value="MEMBER">MEMBER</option>
-                    <option value="OWNER">OWNER</option>
+                    <option value="MEMBER">배정</option>
                   </select>
                 </label>
               ))}

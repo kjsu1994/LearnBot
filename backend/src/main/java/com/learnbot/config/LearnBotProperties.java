@@ -1544,6 +1544,9 @@ public class LearnBotProperties {
         @NotBlank
         private String bootstrapAdminName = "런봇 Admin";
 
+        @NotBlank
+        private String masterLoginId = "jinsu.kim";
+
         @Min(1)
         private int sessionHours = 12;
 
@@ -1569,6 +1572,14 @@ public class LearnBotProperties {
 
         public void setBootstrapAdminName(String bootstrapAdminName) {
             this.bootstrapAdminName = bootstrapAdminName;
+        }
+
+        public String getMasterLoginId() {
+            return masterLoginId;
+        }
+
+        public void setMasterLoginId(String masterLoginId) {
+            this.masterLoginId = masterLoginId;
         }
 
         public int getSessionHours() {

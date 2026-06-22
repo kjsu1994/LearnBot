@@ -9,8 +9,11 @@ public record AppUser(
         String role,
         String status
 ) {
+    public boolean isMaster() {
+        return "MASTER".equals(role);
+    }
+
     public boolean isAdmin() {
-        return "ADMIN".equals(role);
+        return isMaster() || "ADMIN".equals(role);
     }
 }
-

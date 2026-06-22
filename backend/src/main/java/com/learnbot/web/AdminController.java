@@ -164,7 +164,7 @@ public class AdminController {
     @GetMapping("/spaces/{spaceId}/rag-export/files/{fileName:.+}")
     ResponseEntity<Resource> downloadExport(@PathVariable UUID spaceId, @PathVariable String fileName) throws IOException {
         AppUser user = currentUserProvider.currentUser();
-        authService.requireAdmin(user);
+        authService.requireAdminSpace(user, spaceId);
         Resource resource = spaceTransferService.exportFile(fileName);
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(fileName, StandardCharsets.UTF_8)
@@ -188,19 +188,19 @@ public class AdminController {
 
     @GetMapping("/audit-logs")
     List<AuditLogSummary> auditLogs(@RequestParam(required = false) Integer limit) {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return auditService.list(limit);
     }
 
     @GetMapping("/storage/retention/preview")
     StorageRetentionPreview storageRetentionPreview() {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return storageRetentionService.preview();
     }
 
     @PostMapping("/storage/retention/run")
     StorageRetentionRunResponse runStorageRetention(@RequestBody(required = false) StorageRetentionRunRequest request) {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         boolean dryRun = request == null || request.dryRun() == null || request.dryRun();
         return storageRetentionService.run(dryRun);
     }
@@ -208,27 +208,27 @@ public class AdminController {
     @GetMapping("/trash")
     List<TrashItemSummary> trash(@RequestParam(required = false) String type, @RequestParam(required = false) UUID spaceId) {
         AppUser user = currentUserProvider.currentUser();
-        authService.requireAdmin(user);
+        authService.requireMaster(user);
         return trashService.list(user, type, spaceId);
     }
 
     @PostMapping("/trash/{type}/{id}/restore")
     void restoreTrash(@PathVariable String type, @PathVariable UUID id) {
         AppUser user = currentUserProvider.currentUser();
-        authService.requireAdmin(user);
+        authService.requireMaster(user);
         trashService.restore(user, type, id);
     }
 
     @GetMapping("/settings")
     AdminSettingsResponse settings() {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return adminSettingsService.current();
     }
 
     @PatchMapping("/settings")
     AdminSettingsResponse updateSettings(@Valid @RequestBody AdminSettingsUpdateRequest request) {
         AppUser user = currentUserProvider.currentUser();
-        authService.requireAdmin(user);
+        authService.requireMaster(user);
         return adminSettingsService.update(
                 user,
                 request.respectRobotsTxt(),
@@ -242,7 +242,7 @@ public class AdminController {
 
     @PostMapping("/settings/llm/test")
     LlmSettingsTestResponse testLlmSettings(@RequestBody LlmSettingsTestRequest request) {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return adminSettingsService.testLlmSettings(
                 request.ollamaBaseUrl(),
                 request.chatModel(),
@@ -253,7 +253,7 @@ public class AdminController {
 
     @GetMapping("/document-graph/schema-profiles")
     List<DocumentSchemaProfileResponse> documentSchemaProfiles() {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return documentSchemaProfileService.listProfiles();
     }
 
@@ -262,7 +262,7 @@ public class AdminController {
             @PathVariable String schemaName,
             @RequestBody DocumentSchemaProfileUpdateRequest request
     ) {
-        authService.requireAdmin(currentUserProvider.currentUser());
+        authService.requireMaster(currentUserProvider.currentUser());
         return documentSchemaProfileService.updateProfile(schemaName, request);
     }
 }

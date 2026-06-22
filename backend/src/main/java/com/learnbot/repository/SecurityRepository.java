@@ -97,12 +97,40 @@ public class SecurityRepository {
     }
 
     public List<AdminUserSummary> listAdminUsers() {
+        return listAdminUsers(null, false);
+    }
+
+    public List<AdminUserSummary> listAdminUsersForSpaces(List<UUID> spaceIds) {
+        if (spaceIds == null || spaceIds.isEmpty()) {
+            return List.of();
+        }
+        return listAdminUsers(spaceIds, true);
+    }
+
+    private List<AdminUserSummary> listAdminUsers(List<UUID> spaceIds, boolean scopedUsersOnly) {
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        String scopeClause = "";
+        if (scopedUsersOnly) {
+            params.addValue("spaceIds", spaceIds);
+            scopeClause = """
+                    AND u.role = 'USER'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM space_members sm
+                        JOIN spaces s ON s.id = sm.space_id
+                        WHERE sm.user_id = u.id
+                          AND sm.space_id IN (:spaceIds)
+                          AND s.deleted_at IS NULL
+                    )
+                    """;
+        }
         List<AdminUserRow> users = jdbc.query("""
                 SELECT id, email, display_name, role, status
-                FROM app_users
-                WHERE status <> 'DELETED'
+                FROM app_users u
+                WHERE u.status <> 'DELETED'
+                %s
                 ORDER BY created_at DESC
-                """, new MapSqlParameterSource(), (rs, rowNum) -> new AdminUserRow(
+                """.formatted(scopeClause), params, (rs, rowNum) -> new AdminUserRow(
                 rs.getObject("id", UUID.class),
                 rs.getString("email"),
                 rs.getString("display_name"),
@@ -150,10 +178,39 @@ public class SecurityRepository {
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*)
                 FROM app_users
-                WHERE role = 'ADMIN'
+                WHERE role IN ('MASTER', 'ADMIN')
                   AND status = 'ACTIVE'
                 """, new MapSqlParameterSource(), Integer.class);
         return count == null ? 0 : count;
+    }
+
+    public boolean userHasActiveSpace(UUID userId, UUID spaceId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM space_members sm
+                JOIN spaces s ON s.id = sm.space_id
+                WHERE sm.user_id = :userId
+                  AND sm.space_id = :spaceId
+                  AND s.deleted_at IS NULL
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("spaceId", spaceId), Integer.class);
+        return count != null && count > 0;
+    }
+
+    public boolean usersShareActiveSpace(UUID actorId, UUID targetId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM space_members actor_sm
+                JOIN space_members target_sm ON target_sm.space_id = actor_sm.space_id
+                JOIN spaces s ON s.id = actor_sm.space_id
+                WHERE actor_sm.user_id = :actorId
+                  AND target_sm.user_id = :targetId
+                  AND s.deleted_at IS NULL
+                """, new MapSqlParameterSource()
+                .addValue("actorId", actorId)
+                .addValue("targetId", targetId), Integer.class);
+        return count != null && count > 0;
     }
 
     public void updateUser(UUID userId, String loginId, String displayName, String role) {

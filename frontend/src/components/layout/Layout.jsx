@@ -778,7 +778,7 @@ function WorkspaceShell({
           </div>
         </header>
 
-        <div className={user.role === 'ADMIN' ? 'view-tabs workspace-tabs-admin' : 'view-tabs workspace-tabs-user'} aria-label="작업 영역">
+        <div className={user.role === 'MASTER' || user.role === 'ADMIN' ? 'view-tabs workspace-tabs-admin' : 'view-tabs workspace-tabs-user'} aria-label="작업 영역">
           <button className={activeView === 'code' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.code)}>
             <IconCode size={16} />
             코드
@@ -791,7 +791,7 @@ function WorkspaceShell({
             <IconBook size={16} />
             저장됨
           </button>
-          {user.role === 'ADMIN' && (
+          {(user.role === 'MASTER' || user.role === 'ADMIN') && (
             <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.admin)}>
               <IconShieldCheck size={16} />
               관리자
@@ -1142,7 +1142,7 @@ function Sidebar({
     { key: 'code', label: '코드', detail: `${indexedRepoCount} repos`, icon: <IconCode size={16} />, path: routePaths.code },
     { key: 'docs', label: '문서', detail: `${indexedCount} docs`, icon: <IconFileText size={16} />, path: routePaths.docs },
     { key: 'saved', label: '저장됨', detail: 'Library', icon: <IconDatabase size={16} />, path: routePaths.saved },
-    ...(user.role === 'ADMIN'
+    ...(user.role === 'MASTER' || user.role === 'ADMIN'
       ? [{ key: 'admin', label: '관리자', detail: 'Console', icon: <IconShieldCheck size={16} />, path: routePaths.admin }]
       : []),
   ];

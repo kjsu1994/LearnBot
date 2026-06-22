@@ -40,13 +40,15 @@ public class AuthService {
     @Transactional
     void bootstrapAdmin() {
         if (securityRepository.countUsers() > 0) {
+            ensureConfiguredMaster();
             return;
         }
+        String adminLoginId = cleanLoginId(properties.getAuth().getBootstrapAdminEmail());
         AppUser admin = securityRepository.createUser(
-                cleanLoginId(properties.getAuth().getBootstrapAdminEmail()),
+                adminLoginId,
                 passwordHasher.hash(properties.getAuth().getBootstrapAdminPassword()),
                 properties.getAuth().getBootstrapAdminName(),
-                "ADMIN"
+                adminLoginId.equals(masterLoginId()) ? "MASTER" : "ADMIN"
         );
         securityRepository.addSpaceMember(SecurityRepository.DEFAULT_SPACE_ID, admin.id(), "OWNER");
         securityRepository.createAuditLog(
@@ -58,6 +60,7 @@ public class AuthService {
                 "Initial LearnBot admin account was created.",
                 java.util.Map.of("loginId", admin.email())
         );
+        ensureConfiguredMaster();
     }
 
     @Transactional
@@ -92,7 +95,10 @@ public class AuthService {
 
     public List<AdminUserSummary> listAdminUsers(AppUser actor) {
         requireAdmin(actor);
-        return securityRepository.listAdminUsers();
+        if (actor.isMaster()) {
+            return securityRepository.listAdminUsers();
+        }
+        return securityRepository.listAdminUsersForSpaces(securityRepository.accessibleSpaceIds(actor));
     }
 
     public void logout(String token, AppUser user) {
@@ -105,7 +111,8 @@ public class AuthService {
     public AppUser inviteUser(AppUser actor, String loginId, String displayName, String initialPassword, String role, UUID spaceId, String spaceRole) {
         requireAdmin(actor);
         UUID resolvedSpaceId = resolveAdminSpace(spaceId);
-        String cleanRole = normalizeUserRole(role);
+        requireManageableSpace(actor, resolvedSpaceId);
+        String cleanRole = actor.isMaster() ? normalizeManagedUserRole(role, false) : "USER";
         String cleanLoginId = cleanLoginId(loginId);
         AppUser user = securityRepository.createUser(
                 cleanLoginId,
@@ -121,12 +128,16 @@ public class AuthService {
     public AppUser updateUser(AppUser actor, UUID userId, String loginId, String displayName, String role) {
         requireAdmin(actor);
         AppUser target = activeUser(userId);
+        requireManageableUser(actor, target);
         String cleanLoginId = loginId == null || loginId.isBlank() ? target.email() : cleanLoginId(loginId);
         String cleanDisplayName = displayName == null || displayName.isBlank() ? null : displayName.trim();
         if (cleanDisplayName == null) {
             throw new IllegalArgumentException("표시 이름은 필수입니다.");
         }
-        String cleanRole = normalizeUserRole(role);
+        String cleanRole = target.isMaster() ? "MASTER" : (actor.isMaster() ? normalizeManagedUserRole(role, false) : "USER");
+        if (target.isMaster() && !target.email().equalsIgnoreCase(cleanLoginId)) {
+            throw new IllegalArgumentException("MASTER account ID cannot be changed.");
+        }
         if (actor.id().equals(userId) && !target.role().equals(cleanRole)) {
             throw new IllegalArgumentException("현재 로그인한 관리자 계정의 시스템 권한은 변경할 수 없습니다.");
         }
@@ -134,7 +145,7 @@ public class AuthService {
         if (actor.id().equals(userId) && loginIdChanged) {
             throw new IllegalArgumentException("현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.");
         }
-        if ("ADMIN".equals(target.role()) && "USER".equals(cleanRole) && securityRepository.countActiveAdmins() <= 1) {
+        if (target.isAdmin() && "USER".equals(cleanRole) && securityRepository.countActiveAdmins() <= 1) {
             throw new IllegalArgumentException("마지막 관리자 계정은 USER로 변경할 수 없습니다.");
         }
 
@@ -174,6 +185,7 @@ public class AuthService {
             throw new IllegalArgumentException("현재 로그인한 관리자 계정의 비밀번호는 이 화면에서 재설정할 수 없습니다.");
         }
         AppUser target = activeUser(userId);
+        requireManageableUser(actor, target);
         if (newPassword == null || newPassword.isBlank()) {
             throw new IllegalArgumentException("새 비밀번호는 필수입니다.");
         }
@@ -191,7 +203,7 @@ public class AuthService {
     }
 
     public UUID createSpace(AppUser actor, String name, String description) {
-        requireAdmin(actor);
+        requireMaster(actor);
         UUID spaceId = securityRepository.createSpace(name.trim(), description == null ? "" : description.trim(), actor.id());
         securityRepository.addSpaceMember(spaceId, actor.id(), "OWNER");
         securityRepository.createAuditLog(actor.id(), "SPACE_CREATED", "SPACE", spaceId.toString(), spaceId, "Space was created.", java.util.Map.of("name", name.trim()));
@@ -205,6 +217,10 @@ public class AuthService {
         }
         AppUser target = securityRepository.findUserById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        requireManageableUser(actor, target);
+        if (target.isMaster()) {
+            throw new IllegalArgumentException("MASTER account cannot be deleted.");
+        }
         if ("DELETED".equals(target.status())) {
             return;
         }
@@ -214,7 +230,7 @@ public class AuthService {
     }
 
     public void updateSpace(AppUser actor, UUID spaceId, String name, String description) {
-        requireAdmin(actor);
+        requireMaster(actor);
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         String cleanName = name == null || name.isBlank() ? null : name.trim();
@@ -227,7 +243,7 @@ public class AuthService {
     }
 
     public void deleteSpace(AppUser actor, UUID spaceId) {
-        requireAdmin(actor);
+        requireMaster(actor);
         if (SecurityRepository.DEFAULT_SPACE_ID.equals(spaceId)) {
             throw new IllegalArgumentException("기본 공간은 삭제할 수 없습니다.");
         }
@@ -239,7 +255,9 @@ public class AuthService {
 
     public void addSpaceMember(AppUser actor, UUID spaceId, UUID userId, String role) {
         requireAdmin(actor);
-        activeUser(userId);
+        AppUser target = activeUser(userId);
+        requireManageableUser(actor, target);
+        requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         securityRepository.addSpaceMember(spaceId, userId, normalizeSpaceRole(role));
@@ -249,6 +267,8 @@ public class AuthService {
     public void updateUserSpaceRole(AppUser actor, UUID userId, UUID spaceId, String role) {
         requireAdmin(actor);
         AppUser target = activeUser(userId);
+        requireManageableUser(actor, target);
+        requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         String cleanRole = normalizeSpaceRole(role);
@@ -273,11 +293,16 @@ public class AuthService {
     public void removeSpaceMember(AppUser actor, UUID spaceId, UUID userId) {
         requireAdmin(actor);
         AppUser target = activeUser(userId);
+        requireManageableUser(actor, target);
+        requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse(null);
         if (oldRole == null) {
             return;
+        }
+        if (target.isMaster()) {
+            throw new IllegalArgumentException("MASTER workspace assignment cannot be removed.");
         }
         if (securityRepository.countSpaceMemberships(userId) <= 1) {
             throw new IllegalArgumentException("사용자의 마지막 공간 권한은 제거할 수 없습니다.");
@@ -304,7 +329,7 @@ public class AuthService {
 
     public List<SpaceSummary> listAllSpaces(AppUser user) {
         requireAdmin(user);
-        return securityRepository.listAllSpaces();
+        return user.isMaster() ? securityRepository.listAllSpaces() : securityRepository.listSpacesForUser(user);
     }
 
     public List<UUID> accessibleSpaceIds(AppUser user) {
@@ -343,6 +368,17 @@ public class AuthService {
         }
     }
 
+    public void requireMaster(AppUser user) {
+        if (user == null || !user.isMaster()) {
+            throw new ForbiddenException("MASTER permission is required.");
+        }
+    }
+
+    public void requireAdminSpace(AppUser user, UUID spaceId) {
+        requireAdmin(user);
+        requireManageableSpace(user, spaceId);
+    }
+
     public UserSummary toSummary(AppUser user) {
         return new UserSummary(user.id(), user.email(), user.displayName(), user.role(), user.status());
     }
@@ -356,8 +392,11 @@ public class AuthService {
         return target;
     }
 
-    private String normalizeUserRole(String role) {
+    private String normalizeManagedUserRole(String role, boolean allowMaster) {
         String clean = role == null || role.isBlank() ? "USER" : role.trim().toUpperCase(Locale.ROOT);
+        if (allowMaster && clean.equals("MASTER")) {
+            return "MASTER";
+        }
         return clean.equals("ADMIN") ? "ADMIN" : "USER";
     }
 
@@ -371,6 +410,39 @@ public class AuthService {
             throw new IllegalArgumentException("ID is required.");
         }
         return loginId.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void ensureConfiguredMaster() {
+        String loginId = masterLoginId();
+        securityRepository.findUserByEmail(loginId)
+                .filter(user -> "ACTIVE".equals(user.status()))
+                .filter(user -> !user.isMaster())
+                .ifPresent(user -> securityRepository.updateUser(user.id(), user.email(), user.displayName(), "MASTER"));
+    }
+
+    private void requireManageableUser(AppUser actor, AppUser target) {
+        if (actor.isMaster()) {
+            return;
+        }
+        if (!"USER".equals(target.role())) {
+            throw new ForbiddenException("Only lower-permission users can be managed.");
+        }
+        if (!securityRepository.usersShareActiveSpace(actor.id(), target.id())) {
+            throw new ForbiddenException("User is outside the administrator's assigned workspace.");
+        }
+    }
+
+    private void requireManageableSpace(AppUser actor, UUID spaceId) {
+        if (actor.isMaster()) {
+            return;
+        }
+        if (!securityRepository.userHasActiveSpace(actor.id(), spaceId)) {
+            throw new ForbiddenException("Workspace is outside the administrator's assigned scope.");
+        }
+    }
+
+    private String masterLoginId() {
+        return cleanLoginId(properties.getAuth().getMasterLoginId());
     }
 
     private String newToken() {
