@@ -185,7 +185,7 @@ public class RuntimeTuningService {
         slightlyHigh.put(OVERVIEW_MAX_DOCUMENTS, 16);
         slightlyHigh.put(OVERVIEW_MAX_CODE_CATEGORIES, 14);
         slightlyHigh.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 3);
-        slightlyHigh.put(LLM_MAX_OUTPUT_TOKENS, 1024);
+        slightlyHigh.put(LLM_MAX_OUTPUT_TOKENS, 0);
         slightlyHigh.put(OLLAMA_MAX_LOADED_MODELS, 1);
         slightlyHigh.put(OLLAMA_NUM_PARALLEL, 1);
 
@@ -198,7 +198,7 @@ public class RuntimeTuningService {
         performance.put(OVERVIEW_MAX_DOCUMENTS, 24);
         performance.put(OVERVIEW_MAX_CODE_CATEGORIES, 20);
         performance.put(OVERVIEW_MAX_RECURSIVE_ITERATIONS, 4);
-        performance.put(LLM_MAX_OUTPUT_TOKENS, 1536);
+        performance.put(LLM_MAX_OUTPUT_TOKENS, 0);
 
         return List.of(
                 new AdminTuningPreset("default", "Default", "Current server defaults.", defaults),
@@ -231,7 +231,7 @@ public class RuntimeTuningService {
             warnings.add("LLM context window and Ollama context length differ. The smaller value may effectively limit prompts.");
         }
         if (settings.stream().anyMatch(item -> item.restartRequired() && item.value() != item.defaultValue())) {
-            warnings.add("Some Ollama daemon settings require a container restart.");
+            warnings.add("재시작 후에 해당 튜닝값이 적용됩니다.");
         }
         return warnings;
     }
@@ -279,7 +279,7 @@ public class RuntimeTuningService {
                 new TuningDefinition(OVERVIEW_MAX_DOCUMENTS, "Overview document count", "Different documents included in overview-style answers.", "Overview", "range", overview.getMaxDocuments(), 4, 32, 1, false, "Higher values improve broad context and add latency.", OVERVIEW_MAX_DOCUMENTS),
                 new TuningDefinition(OVERVIEW_MAX_CODE_CATEGORIES, "Code overview category count", "Different code evidence categories for architecture and flow answers.", "Overview", "range", overview.getMaxCodeCategories(), 4, 24, 1, false, "Higher values broaden code answers and may add noise.", OVERVIEW_MAX_CODE_CATEGORIES),
                 new TuningDefinition(OVERVIEW_MAX_RECURSIVE_ITERATIONS, "Overview search iterations", "Additional overview search passes.", "Overview", "select", overview.getMaxRecursiveIterations(), 1, 5, 1, false, "Higher values may improve quality but increase latency.", OVERVIEW_MAX_RECURSIVE_ITERATIONS),
-                new TuningDefinition(LLM_MAX_OUTPUT_TOKENS, "Max answer length", "Maximum generated answer tokens. 0 means automatic.", "LLM", "number", properties.getOllama().getMaxOutputTokens(), 0, 4096, 128, false, "Too low can truncate answers; too high may be slower.", LLM_MAX_OUTPUT_TOKENS),
+                new TuningDefinition(LLM_MAX_OUTPUT_TOKENS, "Max answer length", "Maximum generated answer tokens. 0 means no explicit limit.", "LLM", "number", properties.getOllama().getMaxOutputTokens(), 0, 4096, 128, false, "Too low can truncate answers; too high may be slower.", LLM_MAX_OUTPUT_TOKENS),
                 new TuningDefinition(OLLAMA_MAX_LOADED_MODELS, "Loaded model count", "Number of models kept loaded by Ollama.", "Ollama", "select", envInt(OLLAMA_MAX_LOADED_MODELS, 1), 1, 4, 1, true, "Use 1 unless VRAM/RAM is sufficient.", OLLAMA_MAX_LOADED_MODELS),
                 new TuningDefinition(OLLAMA_NUM_PARALLEL, "Parallel Ollama requests", "Parallel requests handled by Ollama.", "Ollama", "select", envInt(OLLAMA_NUM_PARALLEL, 1), 1, 8, 1, true, "Use 1 on small machines; increase only on larger GPU servers.", OLLAMA_NUM_PARALLEL)
         );

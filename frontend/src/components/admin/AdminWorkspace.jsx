@@ -17,7 +17,7 @@ const tuningText = {
   LEARNBOT_RAG_OVERVIEW_MAX_DOCUMENTS: ['전체 요약 탐색 문서 수', '개요/요약형 질문에서 서로 다른 문서를 최대 몇 개까지 포함할지 정합니다.', '높을수록 전체 맥락은 좋아지고 답변 시간이 늘어납니다.'],
   LEARNBOT_RAG_OVERVIEW_MAX_CODE_CATEGORIES: ['코드 개요 카테고리 수', '코드 구조/흐름 질문에서 서로 다른 범주의 근거를 최대 몇 개까지 쓸지 정합니다.', '높을수록 구조 답변이 풍부해지지만 잡음도 늘 수 있습니다.'],
   LEARNBOT_RAG_OVERVIEW_MAX_RECURSIVE_ITERATIONS: ['개요 탐색 반복 횟수', '근거가 부족할 때 추가 탐색을 몇 번까지 허용할지 정합니다.', '높을수록 품질은 좋아질 수 있지만 지연 시간이 늘어납니다.'],
-  LLM_MAX_OUTPUT_TOKENS: ['답변 최대 길이', '모델이 생성할 수 있는 답변 토큰 상한입니다. 0은 자동값입니다.', '[0 = 자동 길이 정책] 너무 낮으면 답변이 잘릴 수 있고, 너무 높으면 응답이 느려질 수 있습니다.'],
+  LLM_MAX_OUTPUT_TOKENS: ['답변 최대 길이', '모델이 생성할 수 있는 답변 토큰 상한입니다. 0은 제한 없음입니다.', '[0 = 제한 없음] 모델에 최대 생성 길이 옵션을 보내지 않습니다. 값이 낮으면 답변이 잘릴 수 있고, 높으면 응답이 느려질 수 있습니다.'],
   OLLAMA_MAX_LOADED_MODELS: ['동시 로드 모델 수', 'Ollama가 메모리에 동시에 올려둘 모델 수입니다.', 'VRAM/RAM이 충분하지 않으면 1을 권장합니다.'],
   OLLAMA_NUM_PARALLEL: ['Ollama 병렬 요청 수', 'Ollama가 한 모델에서 동시에 처리할 요청 수입니다.', '작은 장비는 1, 큰 GPU 서버만 2 이상을 권장합니다.'],
 };
@@ -283,15 +283,18 @@ function AdminWorkspace({
 
   async function submitTuningSettings(event) {
     event.preventDefault();
+    const selectedPreset = (adminTuning?.presets || []).find((item) => item.id === tuningPreset);
+    const presetUnchanged = selectedPreset && Object.entries(selectedPreset.values || {}).every(([key, value]) => Number(tuningValues[key]) === Number(value));
+    const nextPreset = presetUnchanged ? selectedPreset.id : 'custom';
     const saved = await updateAdminTuning?.({
-      preset: 'custom',
+      preset: nextPreset,
       ollamaBaseUrl: tuningLlmForm.ollamaBaseUrl,
       primaryChatModel: tuningLlmForm.primaryChatModel,
       auxiliaryChatModel: tuningLlmForm.auxiliaryChatModel,
-      values: tuningValues,
+      values: nextPreset === 'custom' ? tuningValues : null,
     });
     if (saved) {
-      setTuningPreset('custom');
+      setTuningPreset(nextPreset);
     }
   }
 
@@ -578,6 +581,7 @@ function AdminWorkspace({
                 {items.map((setting) => {
                   const value = tuningValues[setting.key] ?? setting.value ?? setting.defaultValue;
                   const isSelect = setting.control === 'select';
+                  const inputStep = setting.key === 'RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED' ? 1 : setting.step;
                   const text = tuningText[setting.key] || [setting.label, setting.description, setting.impact];
                   return (
                     <label className="tuning-control" key={setting.key} title={`${text[1]} ${text[2]}`}>
@@ -598,7 +602,7 @@ function AdminWorkspace({
                             type="range"
                             min={setting.min}
                             max={setting.max}
-                            step={setting.step}
+                            step={inputStep}
                             value={value}
                             onChange={(event) => updateTuningValue(setting.key, event.target.value)}
                           />
@@ -606,7 +610,7 @@ function AdminWorkspace({
                             type="number"
                             min={setting.min}
                             max={setting.max}
-                            step={setting.step}
+                            step={inputStep}
                             value={value}
                             onChange={(event) => updateTuningValue(setting.key, event.target.value)}
                           />

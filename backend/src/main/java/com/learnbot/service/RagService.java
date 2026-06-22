@@ -2132,18 +2132,7 @@ public class RagService {
         if (configured > 0) {
             return configured;
         }
-        if (answerMode == AnswerMode.TABLE || answerMode == AnswerMode.SUMMARY || isOverviewQuestionType(questionType)) {
-            return switch (speedProfile) {
-                case FAST -> 768;
-                case DEEP -> 1536;
-                default -> 1024;
-            };
-        }
-        return switch (speedProfile) {
-            case FAST -> 512;
-            case DEEP -> 1280;
-            default -> 896;
-        };
+        return 0;
     }
 
     private int repairMaxOutputTokens(AnswerMode answerMode, DocumentSpeedProfile speedProfile) {

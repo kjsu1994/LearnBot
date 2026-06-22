@@ -839,6 +839,7 @@ export default function App() {
       if (tuning) {
         setAdminTuning(tuning);
       }
+      return tuning;
     });
   }
 
