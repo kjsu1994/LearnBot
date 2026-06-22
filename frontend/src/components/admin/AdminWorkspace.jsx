@@ -47,7 +47,7 @@ function AdminWorkspace({
   codeSourceProps,
   documentSourceProps,
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState(isMaster ? 'settings' : 'sources');
+  const [activeAdminTab, setActiveAdminTab] = useState('settings');
   const [editingSpaceId, setEditingSpaceId] = useState('');
   const [spaceEditForm, setSpaceEditForm] = useState({ name: '', description: '' });
   const [allowedDomainText, setAllowedDomainText] = useState(() => (adminSettings?.allowedDomains || []).join('\n'));
@@ -73,8 +73,8 @@ function AdminWorkspace({
   }, [adminSettings?.allowedDomains]);
 
   useEffect(() => {
-    if (!isMaster && (activeAdminTab === 'settings' || activeAdminTab === 'trash')) {
-      setActiveAdminTab('sources');
+    if (!isMaster && activeAdminTab === 'trash') {
+      setActiveAdminTab('settings');
     }
   }, [activeAdminTab, isMaster]);
 
@@ -270,18 +270,16 @@ function AdminWorkspace({
   ];
   const adminTabs = (
     <div className="admin-tabs admin-tabler-tabs" role="tablist" aria-label="관리자 메뉴">
-      {isMaster && (
-        <button
-          className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
-          type="button"
-          role="tab"
-          aria-selected={activeAdminTab === 'settings'}
-          onClick={() => setActiveAdminTab('settings')}
-        >
-          <IconSettings size={16} />
-          관리자 설정
-        </button>
-      )}
+      <button
+        className={activeAdminTab === 'settings' ? 'mode-button active' : 'mode-button'}
+        type="button"
+        role="tab"
+        aria-selected={activeAdminTab === 'settings'}
+        onClick={() => setActiveAdminTab('settings')}
+      >
+        <IconSettings size={16} />
+        {isMaster ? '관리자 설정' : '사용자 관리'}
+      </button>
       <button
         className={activeAdminTab === 'sources' ? 'mode-button active' : 'mode-button'}
         type="button"
@@ -416,6 +414,7 @@ function AdminWorkspace({
     {adminSummaryCards}
     {adminTabs}
     <section className="workspace-grid">
+      {isMaster && (
       <div className="left-column">
         <section className="panel">
           <div className="panel-title">
@@ -655,6 +654,7 @@ function AdminWorkspace({
         </section>
 
       </div>
+      )}
 
       <div className="right-column">
         <form className="panel" onSubmit={inviteUser}>
