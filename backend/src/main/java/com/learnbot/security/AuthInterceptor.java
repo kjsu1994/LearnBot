@@ -4,6 +4,7 @@ import com.learnbot.service.AppUser;
 import com.learnbot.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Cookie;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -21,16 +22,38 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI();
-        if (path.equals("/api/auth/login")) {
+        if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)) {
             return true;
         }
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
+        String token = extractBearerHeaderToken(request.getHeader("Authorization"));
+        if (token == null || token.isBlank()) {
+            token = extractCookie(request, "learnbot_access_token");
+        }
+        if (token == null || token.isBlank()) {
             throw new UnauthorizedException("Authentication is required.");
         }
-        AppUser user = authService.authenticateToken(header.substring("Bearer ".length()).trim());
+        AppUser user = authService.authenticateToken(token);
         request.setAttribute(CurrentUserProvider.REQUEST_ATTRIBUTE, user);
         return true;
     }
-}
 
+    private String extractBearerHeaderToken(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return null;
+        }
+        return authorization.substring("Bearer ".length()).trim();
+    }
+
+    private String extractCookie(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
+    }
+}

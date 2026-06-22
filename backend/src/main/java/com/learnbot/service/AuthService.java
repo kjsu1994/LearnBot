@@ -25,6 +25,11 @@ import java.util.UUID;
 
 @Service
 public class AuthService {
+    private static final int REMEMBER_ME_REFRESH_TOKEN_DAYS = 14;
+    private static final int SESSION_REFRESH_TOKEN_DAYS = 1;
+    private static final String ACCESS_TOKEN_TYPE = "ACCESS";
+    private static final String REFRESH_TOKEN_TYPE = "REFRESH";
+
     private final SecurityRepository securityRepository;
     private final PasswordHasher passwordHasher;
     private final LearnBotProperties properties;
@@ -64,21 +69,26 @@ public class AuthService {
     }
 
     @Transactional
-    public AuthResponse login(String loginId, String password) {
+    public AuthResponse login(String loginId, String password, boolean rememberLogin) {
         String cleanLoginId = cleanLoginId(loginId);
         String passwordHash = securityRepository.findPasswordHashByEmail(cleanLoginId)
-                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
+                .orElseThrow(() -> new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎."));
         if (!passwordHasher.matches(password, passwordHash)) {
-            throw new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다.");
+            throw new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.");
         }
         AppUser user = securityRepository.findUserByEmail(cleanLoginId)
-                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
-        String token = newToken();
-        OffsetDateTime expiresAt = OffsetDateTime.now().plusHours(properties.getAuth().getSessionHours());
-        securityRepository.createSession(UUID.randomUUID(), user.id(), tokenHash(token), expiresAt);
+                .orElseThrow(() -> new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎."));
+        IssuedSession session = issueSessionTokens(user.id(), rememberLogin);
         securityRepository.updateLastLogin(user.id());
         securityRepository.createAuditLog(user.id(), "LOGIN", "USER", user.id().toString(), null, "User logged in.", java.util.Map.of());
-        return new AuthResponse(token, expiresAt, toSummary(user), securityRepository.listSpacesForUser(user));
+        return new AuthResponse(
+                session.accessToken(),
+                session.accessExpiresAt(),
+                session.refreshToken(),
+                session.refreshExpiresAt(),
+                toSummary(user),
+                securityRepository.listSpacesForUser(user)
+        );
     }
 
     public AppUser authenticateToken(String token) {
@@ -90,7 +100,37 @@ public class AuthService {
     }
 
     public AuthResponse currentSession(AppUser user) {
-        return new AuthResponse(null, null, toSummary(user), securityRepository.listSpacesForUser(user));
+        return new AuthResponse(null, null, null, null, toSummary(user), securityRepository.listSpacesForUser(user));
+    }
+
+    public AuthResponse refreshSession(String refreshToken) {
+        String refreshTokenHash = tokenHash(refreshToken);
+        AppUser user;
+        if (securityRepository.supportsRefreshSessions()) {
+            user = securityRepository.findUserByRefreshTokenHash(refreshTokenHash)
+                    .orElseThrow(() -> new UnauthorizedException("Session is invalid or expired."));
+        } else {
+            user = securityRepository.findUserBySessionTokenHash(refreshTokenHash)
+                    .orElseThrow(() -> new UnauthorizedException("Session is invalid or expired."));
+        }
+        IssuedSession session = issueAccessTokenOnly(user.id());
+        securityRepository.createAuditLog(
+                user.id(),
+                "TOKEN_REFRESH",
+                "USER",
+                user.id().toString(),
+                null,
+                "User refreshed access token.",
+                java.util.Map.of()
+        );
+        return new AuthResponse(
+                session.accessToken(),
+                session.accessExpiresAt(),
+                null,
+                null,
+                toSummary(user),
+                securityRepository.listSpacesForUser(user)
+        );
     }
 
     public List<AdminUserSummary> listAdminUsers(AppUser actor) {
@@ -101,9 +141,12 @@ public class AuthService {
         return securityRepository.listAdminUsersForSpaces(securityRepository.accessibleSpaceIds(actor));
     }
 
-    public void logout(String token, AppUser user) {
-        if (token != null && token.startsWith("Bearer ")) {
-            securityRepository.revokeSession(tokenHash(token.substring("Bearer ".length()).trim()));
+    public void logout(String accessToken, String refreshToken, AppUser user) {
+        if (accessToken != null && !accessToken.isBlank()) {
+            securityRepository.revokeSession(tokenHash(accessToken));
+        }
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            securityRepository.revokeSession(tokenHash(refreshToken));
         }
         securityRepository.createAuditLog(user.id(), "LOGOUT", "USER", user.id().toString(), null, "User logged out.", java.util.Map.of());
     }
@@ -132,28 +175,28 @@ public class AuthService {
         String cleanLoginId = loginId == null || loginId.isBlank() ? target.email() : cleanLoginId(loginId);
         String cleanDisplayName = displayName == null || displayName.isBlank() ? null : displayName.trim();
         if (cleanDisplayName == null) {
-            throw new IllegalArgumentException("표시 이름은 필수입니다.");
+            throw new IllegalArgumentException("?쒖떆 ?대쫫? ?꾩닔?낅땲??");
         }
         String cleanRole = target.isMaster() ? "MASTER" : (actor.isMaster() ? normalizeManagedUserRole(role, false) : "USER");
         if (target.isMaster() && !target.email().equalsIgnoreCase(cleanLoginId)) {
             throw new IllegalArgumentException("MASTER account ID cannot be changed.");
         }
         if (actor.id().equals(userId) && !target.role().equals(cleanRole)) {
-            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 시스템 권한은 변경할 수 없습니다.");
+            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙???쒖뒪??沅뚰븳? 蹂寃쏀븷 ???놁뒿?덈떎.");
         }
         boolean loginIdChanged = !target.email().equalsIgnoreCase(cleanLoginId);
         if (actor.id().equals(userId) && loginIdChanged) {
-            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.");
+            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙??ID?????붾㈃?먯꽌 蹂寃쏀븷 ???놁뒿?덈떎.");
         }
         if (target.isAdmin() && "USER".equals(cleanRole) && securityRepository.countActiveAdmins() <= 1) {
-            throw new IllegalArgumentException("마지막 관리자 계정은 USER로 변경할 수 없습니다.");
+            throw new IllegalArgumentException("留덉?留?愿由ъ옄 怨꾩젙? USER濡?蹂寃쏀븷 ???놁뒿?덈떎.");
         }
 
         if (loginIdChanged) {
             securityRepository.findUserByEmail(cleanLoginId)
                     .filter(existing -> !existing.id().equals(userId))
                     .ifPresent(existing -> {
-                        throw new IllegalArgumentException("이미 사용 중인 ID입니다.");
+                        throw new IllegalArgumentException("?대? ?ъ슜 以묒씤 ID?낅땲??");
                     });
         }
 
@@ -182,12 +225,12 @@ public class AuthService {
     public void resetUserPassword(AppUser actor, UUID userId, String newPassword) {
         requireAdmin(actor);
         if (actor.id().equals(userId)) {
-            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 비밀번호는 이 화면에서 재설정할 수 없습니다.");
+            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙??鍮꾨?踰덊샇?????붾㈃?먯꽌 ?ъ꽕?뺥븷 ???놁뒿?덈떎.");
         }
         AppUser target = activeUser(userId);
         requireManageableUser(actor, target);
         if (newPassword == null || newPassword.isBlank()) {
-            throw new IllegalArgumentException("새 비밀번호는 필수입니다.");
+            throw new IllegalArgumentException("??鍮꾨?踰덊샇???꾩닔?낅땲??");
         }
         securityRepository.updatePasswordHash(userId, passwordHasher.hash(newPassword));
         securityRepository.revokeSessionsForUser(userId);
@@ -213,10 +256,10 @@ public class AuthService {
     public void deleteUser(AppUser actor, UUID userId) {
         requireAdmin(actor);
         if (actor.id().equals(userId)) {
-            throw new IllegalArgumentException("현재 로그인한 관리자 계정은 삭제할 수 없습니다.");
+            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙? ??젣?????놁뒿?덈떎.");
         }
         AppUser target = securityRepository.findUserById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎."));
         requireManageableUser(actor, target);
         if (target.isMaster()) {
             throw new IllegalArgumentException("MASTER account cannot be deleted.");
@@ -232,10 +275,10 @@ public class AuthService {
     public void updateSpace(AppUser actor, UUID spaceId, String name, String description) {
         requireMaster(actor);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
         String cleanName = name == null || name.isBlank() ? null : name.trim();
         if (cleanName == null) {
-            throw new IllegalArgumentException("공간 이름은 필수입니다.");
+            throw new IllegalArgumentException("怨듦컙 ?대쫫? ?꾩닔?낅땲??");
         }
         String cleanDescription = description == null ? "" : description.trim();
         securityRepository.updateSpace(spaceId, cleanName, cleanDescription);
@@ -245,10 +288,10 @@ public class AuthService {
     public void deleteSpace(AppUser actor, UUID spaceId) {
         requireMaster(actor);
         if (SecurityRepository.DEFAULT_SPACE_ID.equals(spaceId)) {
-            throw new IllegalArgumentException("기본 공간은 삭제할 수 없습니다.");
+            throw new IllegalArgumentException("湲곕낯 怨듦컙? ??젣?????놁뒿?덈떎.");
         }
         SpaceSummary target = securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
         securityRepository.deleteSpace(spaceId);
         securityRepository.createAuditLog(actor.id(), "SPACE_DELETED", "SPACE", spaceId.toString(), spaceId, "Space was deleted.", java.util.Map.of("name", target.name()));
     }
@@ -259,7 +302,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
         securityRepository.addSpaceMember(spaceId, userId, normalizeSpaceRole(role));
         securityRepository.createAuditLog(actor.id(), "SPACE_MEMBER_UPDATED", "SPACE", spaceId.toString(), spaceId, "Space member was updated.", Map.of("userId", userId.toString()));
     }
@@ -270,7 +313,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
         String cleanRole = normalizeSpaceRole(role);
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse("");
         securityRepository.addSpaceMember(spaceId, userId, cleanRole);
@@ -296,7 +339,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse(null);
         if (oldRole == null) {
             return;
@@ -305,7 +348,7 @@ public class AuthService {
             throw new IllegalArgumentException("MASTER workspace assignment cannot be removed.");
         }
         if (securityRepository.countSpaceMemberships(userId) <= 1) {
-            throw new IllegalArgumentException("사용자의 마지막 공간 권한은 제거할 수 없습니다.");
+            throw new IllegalArgumentException("?ъ슜?먯쓽 留덉?留?怨듦컙 沅뚰븳? ?쒓굅?????놁뒿?덈떎.");
         }
         securityRepository.removeSpaceMember(spaceId, userId);
         securityRepository.createAuditLog(
@@ -385,9 +428,9 @@ public class AuthService {
 
     private AppUser activeUser(UUID userId) {
         AppUser target = securityRepository.findUserById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎."));
         if ("DELETED".equals(target.status())) {
-            throw new IllegalArgumentException("삭제된 사용자는 수정할 수 없습니다.");
+            throw new IllegalArgumentException("??젣???ъ슜?먮뒗 ?섏젙?????놁뒿?덈떎.");
         }
         return target;
     }
@@ -403,6 +446,31 @@ public class AuthService {
     private String normalizeSpaceRole(String role) {
         String clean = role == null || role.isBlank() ? "MEMBER" : role.trim().toUpperCase(Locale.ROOT);
         return clean.equals("OWNER") ? "OWNER" : "MEMBER";
+    }
+
+    private IssuedSession issueSessionTokens(UUID userId, boolean rememberLogin) {
+        OffsetDateTime now = OffsetDateTime.now();
+        String accessToken = newToken();
+        String refreshToken = newToken();
+        OffsetDateTime accessExpiresAt = now.plusHours(properties.getAuth().getSessionHours());
+        OffsetDateTime refreshExpiresAt = now.plusDays(rememberLogin ? REMEMBER_ME_REFRESH_TOKEN_DAYS : SESSION_REFRESH_TOKEN_DAYS);
+
+        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(accessToken), accessExpiresAt, ACCESS_TOKEN_TYPE);
+        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(refreshToken), refreshExpiresAt, REFRESH_TOKEN_TYPE);
+
+        return new IssuedSession(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt);
+    }
+
+    private IssuedSession issueAccessTokenOnly(UUID userId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        String accessToken = newToken();
+        OffsetDateTime accessExpiresAt = now.plusHours(properties.getAuth().getSessionHours());
+
+        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(accessToken), accessExpiresAt, ACCESS_TOKEN_TYPE);
+        return new IssuedSession(accessToken, accessExpiresAt, null, null);
+    }
+
+    private record IssuedSession(String accessToken, OffsetDateTime accessExpiresAt, String refreshToken, OffsetDateTime refreshExpiresAt) {
     }
 
     private String cleanLoginId(String loginId) {
@@ -460,3 +528,4 @@ public class AuthService {
         }
     }
 }
+

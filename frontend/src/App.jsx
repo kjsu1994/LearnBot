@@ -1,9 +1,9 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { fetchBlob, fetchJson } from './lib/api.js';
-import { clearStoredToken, readStoredToken, storeSessionToken } from './lib/session.js';
 import { defaultSpaceId, routePaths } from './config/constants.js';
 import { normalizeRoute, routeToView } from './lib/routing.js';
+import { clearStoredToken, readStoredToken, storeSessionToken } from './lib/session.js';
 import { AdminWorkspace } from './components/admin/AdminWorkspace.jsx';
 import { CodeWorkspace } from './components/code/CodeWorkspace.jsx';
 import { DocumentWorkspace } from './components/documents/DocumentWorkspace.jsx';
@@ -13,7 +13,6 @@ import { useDocumentRagController } from './features/documents/useDocumentRagCon
 import { getProgressMessage } from './lib/formatters.js';
 
 export default function App() {
-  const [token, setToken] = useState(readStoredToken);
   const [user, setUser] = useState(null);
   const [spaces, setSpaces] = useState([]);
   const [adminSpaces, setAdminSpaces] = useState([]);
@@ -175,16 +174,14 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    async function loadSession() {
-      if (!token) {
-        setBootstrapping(false);
-        return;
-      }
+  async function loadSession() {
       try {
-        const data = await fetchJson('/api/auth/me', { token });
-        if (mounted) applySession(data, token);
+        const data = await request('/api/auth/me');
+        if (mounted) applySession(data);
       } catch {
-        if (mounted) clearSession();
+        if (mounted) {
+          clearSession();
+        }
       } finally {
         if (mounted) setBootstrapping(false);
       }
@@ -278,8 +275,7 @@ export default function App() {
     }
   }, [user?.role, routePath]);
 
-  function applySession(data, nextToken = token) {
-    setToken(nextToken || data.token || '');
+  function applySession(data) {
     setUser(data.user);
     setSpaces(data.spaces || []);
     setSelectedSpaceId((current) => {
@@ -289,8 +285,6 @@ export default function App() {
   }
 
   function clearSession() {
-    clearStoredToken();
-    setToken('');
     setUser(null);
     setSpaces([]);
     setAdminSpaces([]);
@@ -306,24 +300,93 @@ export default function App() {
     setSavedAnswers([]);
     setSelectedSavedAnswer(null);
     setCodeAnswerSavedId('');
+    clearStoredToken();
   }
 
   async function request(path, options = {}) {
+    const fallbackToken = readStoredToken();
     try {
-      return await fetchJson(path, { ...options, token });
+      return await fetchJson(path, options);
     } catch (err) {
-      if (err.status === 401) clearSession();
+      const isAuthEndpoint = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/refresh');
+      if (err.status !== 401 || isAuthEndpoint) {
+        if (err.status === 401) {
+          clearSession();
+        }
+        throw err;
+      }
+
+      if (fallbackToken) {
+        try {
+          return await fetchJson(path, {
+            ...options,
+            headers: buildAuthHeaders(options.headers, fallbackToken),
+          });
+        } catch (fallbackErr) {
+          if (fallbackErr.status === 401) {
+            clearStoredToken();
+          } else {
+            throw fallbackErr;
+          }
+        }
+      }
+
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return await fetchJson(path, options);
+      }
+      clearSession();
       throw err;
     }
   }
 
   async function requestBlob(path, options = {}) {
+    const fallbackToken = readStoredToken();
     try {
-      return await fetchBlob(path, { ...options, token });
+      return await fetchBlob(path, options);
     } catch (err) {
-      if (err.status === 401) clearSession();
+      const isAuthEndpoint = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/refresh');
+      if (err.status !== 401 || isAuthEndpoint) {
+        if (err.status === 401) {
+          clearSession();
+        }
+        throw err;
+      }
+      if (fallbackToken) {
+        try {
+          return await fetchBlob(path, {
+            ...options,
+            headers: buildAuthHeaders(options.headers, fallbackToken),
+          });
+        } catch (fallbackErr) {
+          if (fallbackErr.status === 401) {
+            clearStoredToken();
+          } else {
+            throw fallbackErr;
+          }
+        }
+      }
+
+      const refreshedToken = await refreshAccessToken();
+      if (refreshedToken) {
+        return await fetchBlob(path, options);
+      }
+      clearSession();
       throw err;
     }
+  }
+
+  async function refreshAccessToken() {
+    try {
+      const data = await fetchJson('/api/auth/refresh', { method: 'POST' });
+      if (data?.user) {
+        applySession(data);
+        return true;
+      }
+    } catch {
+      clearSession();
+    }
+    return false;
   }
 
   async function run(label, task) {
@@ -358,13 +421,16 @@ export default function App() {
     setError('');
     setBusy('login');
     try {
-      const { rememberLogin, ...loginPayload } = credentials;
       const data = await fetchJson('/api/auth/login', {
         method: 'POST',
-        json: loginPayload,
+        json: credentials,
       });
-      storeSessionToken(data.token, Boolean(rememberLogin));
-      applySession(data, data.token);
+      applySession(data);
+      if (data?.token) {
+        storeSessionToken(data.token, credentials.rememberLogin || false);
+      } else {
+        clearStoredToken();
+      }
       navigateTo(routePaths.home);
     } catch (err) {
       setError(err.message || '濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎.');
@@ -379,6 +445,7 @@ export default function App() {
       try {
         await request('/api/auth/logout', { method: 'POST' });
       } finally {
+        clearStoredToken();
         clearSession();
         navigateTo(routePaths.home);
       }
@@ -387,7 +454,13 @@ export default function App() {
 
   async function refreshSession() {
     const data = await request('/api/auth/me');
-    applySession(data, token);
+    applySession(data);
+  }
+
+  function buildAuthHeaders(existingHeaders, fallbackToken) {
+    const headers = new Headers(existingHeaders || {});
+    headers.set('Authorization', `Bearer ${fallbackToken}`);
+    return headers;
   }
 
   async function refreshRepositories() {

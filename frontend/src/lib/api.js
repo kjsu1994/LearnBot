@@ -2,9 +2,6 @@ const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 
 async function fetchJson(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.token) {
-    headers.set('Authorization', `Bearer ${options.token}`);
-  }
   let body = options.body;
   if (Object.prototype.hasOwnProperty.call(options, 'json')) {
     headers.set('Content-Type', 'application/json');
@@ -15,6 +12,7 @@ async function fetchJson(path, options = {}) {
     method: options.method || 'GET',
     headers,
     body,
+    credentials: 'include',
   });
   if (!response.ok) {
     const message = await responseMessage(response);
@@ -31,13 +29,10 @@ async function fetchJson(path, options = {}) {
 
 async function fetchBlob(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.token) {
-    headers.set('Authorization', `Bearer ${options.token}`);
-  }
-
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method || 'GET',
     headers,
+    credentials: 'include',
   });
   if (!response.ok) {
     const message = await responseMessage(response);

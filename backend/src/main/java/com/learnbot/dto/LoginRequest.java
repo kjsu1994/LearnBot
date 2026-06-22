@@ -5,7 +5,8 @@ import jakarta.validation.constraints.NotBlank;
 public record LoginRequest(
         String loginId,
         String email,
-        @NotBlank String password
+        @NotBlank String password,
+        boolean rememberLogin
 ) {
     public String identifier() {
         if (loginId != null && !loginId.isBlank()) {

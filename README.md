@@ -16,7 +16,7 @@ Uploaded source files are stored in MinIO. Git repositories are cloned into a Do
 - Backend: Spring Boot
 - Database: PostgreSQL + pgvector
 - Local LLM runtime: Ollama
-- Default chat model: `gemma4:e2b`
+- Default chat model: `qwen3:8b-q4_K_M`
 - Default embedding model: `bge-m3`
 
 ## Run

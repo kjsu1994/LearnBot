@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
-import { highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
+import { escapeHtml, highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { RagAskComposer } from '../common/RagAskComposer.jsx';
@@ -11,6 +11,75 @@ import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
 import { DataTable } from '../ui/data-table.jsx';
+
+const SPACE_PLACEHOLDER = '\u00A0';
+
+function sanitizeHighlightClassName(className) {
+  return String(className || '')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token && /^(?:hljs|hljs-[\w-]+)$/.test(token))
+    .join(' ');
+}
+
+function parseHighlightedLine(lineMarkup, fallback) {
+  const rawFallback = fallback || SPACE_PLACEHOLDER;
+  if (!lineMarkup || typeof lineMarkup !== 'string') {
+    return rawFallback;
+  }
+  if (lineMarkup.indexOf('<') < 0) {
+    return lineMarkup || rawFallback;
+  }
+
+  if (typeof DOMParser === 'undefined' || typeof window === 'undefined' || typeof document === 'undefined') {
+    return lineMarkup || rawFallback;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(`<span>${lineMarkup}</span>`, 'text/html');
+    const root = parsed.body?.firstElementChild;
+    if (!root) return lineMarkup || rawFallback;
+
+    function renderNodes(node) {
+      if (!node || !node.childNodes?.length) {
+        return null;
+      }
+      return Array.from(node.childNodes).map((child, index) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          return <span key={`text-${index}`}>{child.textContent || ''}</span>;
+        }
+
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tagName = String(child.tagName || '').toLowerCase();
+          if (tagName === 'span') {
+            const className = sanitizeHighlightClassName(child.getAttribute('class'));
+            return (
+              <span key={`span-${index}`} className={className || undefined}>
+                {renderNodes(child)}
+              </span>
+            );
+          }
+          return (
+            <span key={`text-${index}`} className="whitespace-pre-wrap">
+              {child.textContent || ''}
+            </span>
+          );
+        }
+
+        return null;
+      });
+    }
+
+    const rendered = renderNodes(root);
+    if (!rendered || rendered.length === 0) {
+      return rawFallback;
+    }
+    return rendered;
+  } catch {
+    return escapeHtml(lineMarkup) || rawFallback;
+  }
+}
 
 function CodeWorkspace(props) {
   const {
@@ -698,7 +767,7 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
   const language = detail?.language || 'code';
   const syntaxLanguage = highlightLanguage(detail?.filePath, language);
   const renderedLines = useMemo(
-    () => lines.map((line) => highlightedLineHtml(line, syntaxLanguage)),
+    () => lines.map((line) => parseHighlightedLine(highlightedLineHtml(line, syntaxLanguage), line)),
     [detail?.content, syntaxLanguage]
   );
   const chunkCount = detail?.chunks?.length || 0;
@@ -769,7 +838,7 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
                       ref={lineNumber === highlightRange?.start ? highlightedLineRef : null}
                     >
                       <span className="ide-line-number">{lineNumber}</span>
-                      <span className="ide-line-content" dangerouslySetInnerHTML={{ __html: renderedLines[index] || '&nbsp;' }} />
+                      <span className="ide-line-content">{renderedLines[index] || SPACE_PLACEHOLDER}</span>
                     </div>
                   );
                 })}

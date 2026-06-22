@@ -28,10 +28,12 @@ public class SecurityRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final boolean tokenTypeColumnExists;
 
     public SecurityRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.tokenTypeColumnExists = hasTokenTypeColumn();
     }
 
     public int countUsers() {
@@ -270,6 +272,10 @@ public class SecurityRepository {
     }
 
     public void createSession(UUID sessionId, UUID userId, String tokenHash, OffsetDateTime expiresAt) {
+        if (tokenTypeColumnExists) {
+            createSession(sessionId, userId, tokenHash, expiresAt, "ACCESS");
+            return;
+        }
         jdbc.update("""
                 INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
                 VALUES (:id, :userId, :tokenHash, :expiresAt)
@@ -280,7 +286,76 @@ public class SecurityRepository {
                 .addValue("expiresAt", expiresAt));
     }
 
+    public void createSession(UUID sessionId, UUID userId, String tokenHash, OffsetDateTime expiresAt, String tokenType) {
+        if (!tokenTypeColumnExists) {
+            createSession(sessionId, userId, tokenHash, expiresAt);
+            return;
+        }
+        jdbc.update("""
+                INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, token_type)
+                VALUES (:id, :userId, :tokenHash, :expiresAt, :tokenType)
+                """, new MapSqlParameterSource()
+                .addValue("id", sessionId)
+                .addValue("userId", userId)
+                .addValue("tokenHash", tokenHash)
+                .addValue("expiresAt", expiresAt)
+                .addValue("tokenType", tokenType));
+    }
+
     public Optional<AppUser> findUserBySessionTokenHash(String tokenHash) {
+        if (!tokenTypeColumnExists) {
+            return findUserByLegacySessionTokenHash(tokenHash);
+        }
+        List<AppUser> users = jdbc.query("""
+                SELECT u.id, u.email, u.display_name, u.role, u.status
+                FROM auth_sessions s
+                JOIN app_users u ON u.id = s.user_id
+                WHERE s.token_hash = :tokenHash
+                AND s.revoked_at IS NULL
+                  AND s.expires_at > now()
+                  AND u.status = 'ACTIVE'
+                  AND (s.token_type = 'ACCESS' OR s.token_type IS NULL)
+                """, new MapSqlParameterSource().addValue("tokenHash", tokenHash), this::mapUser);
+        return users.stream().findFirst();
+    }
+
+    public Optional<AppUser> findUserByRefreshTokenHash(String tokenHash) {
+        if (!tokenTypeColumnExists) {
+            return Optional.empty();
+        }
+        List<AppUser> users = jdbc.query("""
+                SELECT u.id, u.email, u.display_name, u.role, u.status
+                FROM auth_sessions s
+                JOIN app_users u ON u.id = s.user_id
+                WHERE s.token_hash = :tokenHash
+                  AND s.revoked_at IS NULL
+                  AND s.expires_at > now()
+                  AND u.status = 'ACTIVE'
+                  AND s.token_type = 'REFRESH'
+                """, new MapSqlParameterSource().addValue("tokenHash", tokenHash), this::mapUser);
+        return users.stream().findFirst();
+    }
+
+    public boolean supportsRefreshSessions() {
+        return tokenTypeColumnExists;
+    }
+
+    private boolean hasTokenTypeColumn() {
+        try {
+            Integer count = jdbc.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'auth_sessions'
+                      AND column_name = 'token_type'
+                    """, new MapSqlParameterSource(), Integer.class);
+            return count != null && count > 0;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private Optional<AppUser> findUserByLegacySessionTokenHash(String tokenHash) {
         List<AppUser> users = jdbc.query("""
                 SELECT u.id, u.email, u.display_name, u.role, u.status
                 FROM auth_sessions s
