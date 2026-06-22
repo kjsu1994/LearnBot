@@ -87,7 +87,8 @@ public class AuthService {
                 session.refreshToken(),
                 session.refreshExpiresAt(),
                 toSummary(user),
-                securityRepository.listSpacesForUser(user)
+                securityRepository.listSpacesForUser(user),
+                rememberLogin
         );
     }
 
@@ -100,37 +101,58 @@ public class AuthService {
     }
 
     public AuthResponse currentSession(AppUser user) {
-        return new AuthResponse(null, null, null, null, toSummary(user), securityRepository.listSpacesForUser(user));
+        return new AuthResponse(null, null, null, null, toSummary(user), securityRepository.listSpacesForUser(user), null);
     }
 
     public AuthResponse refreshSession(String refreshToken) {
         String refreshTokenHash = tokenHash(refreshToken);
-        AppUser user;
         if (securityRepository.supportsRefreshSessions()) {
-            user = securityRepository.findUserByRefreshTokenHash(refreshTokenHash)
+            SecurityRepository.RefreshSession session = securityRepository.findRefreshSession(refreshTokenHash)
                     .orElseThrow(() -> new UnauthorizedException("Session is invalid or expired."));
+            AppUser user = session.user();
+            IssuedSession issuedSession = issueSessionTokens(user.id(), session.rememberLogin());
+            securityRepository.revokeSession(refreshTokenHash);
+            securityRepository.createAuditLog(
+                    user.id(),
+                    "TOKEN_REFRESH",
+                    "USER",
+                    user.id().toString(),
+                    null,
+                    "User refreshed access token.",
+                    java.util.Map.of()
+            );
+            return new AuthResponse(
+                    issuedSession.accessToken(),
+                    issuedSession.accessExpiresAt(),
+                    issuedSession.refreshToken(),
+                    issuedSession.refreshExpiresAt(),
+                    toSummary(user),
+                    securityRepository.listSpacesForUser(user),
+                    session.rememberLogin()
+            );
         } else {
-            user = securityRepository.findUserBySessionTokenHash(refreshTokenHash)
+            AppUser user = securityRepository.findUserBySessionTokenHash(refreshTokenHash)
                     .orElseThrow(() -> new UnauthorizedException("Session is invalid or expired."));
+            IssuedSession session = issueAccessTokenOnly(user.id());
+            securityRepository.createAuditLog(
+                    user.id(),
+                    "TOKEN_REFRESH",
+                    "USER",
+                    user.id().toString(),
+                    null,
+                    "User refreshed access token.",
+                    java.util.Map.of()
+            );
+            return new AuthResponse(
+                    session.accessToken(),
+                    session.accessExpiresAt(),
+                    null,
+                    null,
+                    toSummary(user),
+                    securityRepository.listSpacesForUser(user),
+                    null
+            );
         }
-        IssuedSession session = issueAccessTokenOnly(user.id());
-        securityRepository.createAuditLog(
-                user.id(),
-                "TOKEN_REFRESH",
-                "USER",
-                user.id().toString(),
-                null,
-                "User refreshed access token.",
-                java.util.Map.of()
-        );
-        return new AuthResponse(
-                session.accessToken(),
-                session.accessExpiresAt(),
-                null,
-                null,
-                toSummary(user),
-                securityRepository.listSpacesForUser(user)
-        );
     }
 
     public List<AdminUserSummary> listAdminUsers(AppUser actor) {
@@ -455,8 +477,8 @@ public class AuthService {
         OffsetDateTime accessExpiresAt = now.plusHours(properties.getAuth().getSessionHours());
         OffsetDateTime refreshExpiresAt = now.plusDays(rememberLogin ? REMEMBER_ME_REFRESH_TOKEN_DAYS : SESSION_REFRESH_TOKEN_DAYS);
 
-        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(accessToken), accessExpiresAt, ACCESS_TOKEN_TYPE);
-        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(refreshToken), refreshExpiresAt, REFRESH_TOKEN_TYPE);
+        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(accessToken), accessExpiresAt, ACCESS_TOKEN_TYPE, false);
+        securityRepository.createSession(UUID.randomUUID(), userId, tokenHash(refreshToken), refreshExpiresAt, REFRESH_TOKEN_TYPE, rememberLogin);
 
         return new IssuedSession(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt);
     }

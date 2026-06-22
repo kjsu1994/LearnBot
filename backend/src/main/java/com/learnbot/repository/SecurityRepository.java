@@ -29,11 +29,13 @@ public class SecurityRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final boolean tokenTypeColumnExists;
+    private final boolean rememberLoginColumnExists;
 
     public SecurityRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.tokenTypeColumnExists = hasTokenTypeColumn();
+        this.rememberLoginColumnExists = hasRememberLoginColumn();
     }
 
     public int countUsers() {
@@ -302,6 +304,24 @@ public class SecurityRepository {
                 .addValue("tokenType", tokenType));
     }
 
+    public void createSession(UUID sessionId, UUID userId, String tokenHash, OffsetDateTime expiresAt, String tokenType,
+                             boolean rememberLogin) {
+        if (!tokenTypeColumnExists || !rememberLoginColumnExists) {
+            createSession(sessionId, userId, tokenHash, expiresAt, tokenType);
+            return;
+        }
+        jdbc.update("""
+                INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, token_type, remember_login)
+                VALUES (:id, :userId, :tokenHash, :expiresAt, :tokenType, :rememberLogin)
+                """, new MapSqlParameterSource()
+                .addValue("id", sessionId)
+                .addValue("userId", userId)
+                .addValue("tokenHash", tokenHash)
+                .addValue("expiresAt", expiresAt)
+                .addValue("tokenType", tokenType)
+                .addValue("rememberLogin", rememberLogin));
+    }
+
     public Optional<AppUser> findUserBySessionTokenHash(String tokenHash) {
         if (!tokenTypeColumnExists) {
             return findUserByLegacySessionTokenHash(tokenHash);
@@ -336,6 +356,42 @@ public class SecurityRepository {
         return users.stream().findFirst();
     }
 
+    public Optional<RefreshSession> findRefreshSession(String tokenHash) {
+        if (!tokenTypeColumnExists) {
+            return Optional.empty();
+        }
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tokenHash", tokenHash);
+        List<RefreshSession> sessions;
+        if (rememberLoginColumnExists) {
+            sessions = jdbc.query("""
+                    SELECT u.id, u.email, u.display_name, u.role, u.status, s.expires_at, s.remember_login
+                    FROM auth_sessions s
+                    JOIN app_users u ON u.id = s.user_id
+                    WHERE s.token_hash = :tokenHash
+                      AND s.revoked_at IS NULL
+                      AND s.expires_at > now()
+                      AND u.status = 'ACTIVE'
+                      AND s.token_type = 'REFRESH'
+                    """, params, this::mapRefreshSession);
+        } else {
+            sessions = jdbc.query("""
+                    SELECT u.id, u.email, u.display_name, u.role, u.status, s.expires_at
+                    FROM auth_sessions s
+                    JOIN app_users u ON u.id = s.user_id
+                    WHERE s.token_hash = :tokenHash
+                      AND s.revoked_at IS NULL
+                      AND s.expires_at > now()
+                      AND u.status = 'ACTIVE'
+                      AND s.token_type = 'REFRESH'
+                    """, params, (rs, rowNum) -> {
+                AppUser user = mapUser(rs, rowNum);
+                OffsetDateTime refreshExpiresAt = rs.getObject("expires_at", OffsetDateTime.class);
+                return new RefreshSession(user, refreshExpiresAt, inferRememberLoginFromRefreshExpiry(refreshExpiresAt));
+            });
+        }
+        return sessions.stream().findFirst();
+    }
+
     public boolean supportsRefreshSessions() {
         return tokenTypeColumnExists;
     }
@@ -348,6 +404,21 @@ public class SecurityRepository {
                     WHERE table_schema = 'public'
                       AND table_name = 'auth_sessions'
                       AND column_name = 'token_type'
+                    """, new MapSqlParameterSource(), Integer.class);
+            return count != null && count > 0;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private boolean hasRememberLoginColumn() {
+        try {
+            Integer count = jdbc.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'auth_sessions'
+                      AND column_name = 'remember_login'
                     """, new MapSqlParameterSource(), Integer.class);
             return count != null && count > 0;
         } catch (Exception ex) {
@@ -595,6 +666,9 @@ public class SecurityRepository {
     private record AdminUserRow(UUID id, String email, String displayName, String role, String status) {
     }
 
+    public record RefreshSession(AppUser user, OffsetDateTime refreshExpiresAt, boolean rememberLogin) {
+    }
+
     private AppUser mapUser(ResultSet rs, int rowNum) throws SQLException {
         return new AppUser(
                 rs.getObject("id", UUID.class),
@@ -603,6 +677,21 @@ public class SecurityRepository {
                 rs.getString("role"),
                 rs.getString("status")
         );
+    }
+
+    private RefreshSession mapRefreshSession(ResultSet rs, int rowNum) throws SQLException {
+        return new RefreshSession(
+                mapUser(rs, rowNum),
+                rs.getObject("expires_at", OffsetDateTime.class),
+                rs.getBoolean("remember_login")
+        );
+    }
+
+    private boolean inferRememberLoginFromRefreshExpiry(OffsetDateTime refreshExpiresAt) {
+        if (refreshExpiresAt == null) {
+            return false;
+        }
+        return refreshExpiresAt.isAfter(OffsetDateTime.now().plusDays(2));
     }
 
     private SpaceSummary mapSpace(ResultSet rs, int rowNum) throws SQLException {

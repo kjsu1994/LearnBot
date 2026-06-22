@@ -71,6 +71,14 @@ public class AuthController {
                 servletRequest,
                 false
         );
+        setCookie(
+                servletResponse,
+                REFRESH_TOKEN_COOKIE_NAME,
+                authResponse.refreshToken(),
+                authResponse.refreshExpiresAt(),
+                servletRequest,
+                Boolean.TRUE.equals(authResponse.rememberLogin())
+        );
         return withoutTokens(authResponse);
     }
 
@@ -153,6 +161,6 @@ public class AuthController {
     }
 
     private AuthResponse withoutTokens(AuthResponse authResponse) {
-        return new AuthResponse(null, null, null, null, authResponse.user(), authResponse.spaces());
+        return new AuthResponse(null, null, null, null, authResponse.user(), authResponse.spaces(), null);
     }
 }

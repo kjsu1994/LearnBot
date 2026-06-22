@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { fetchBlob, fetchJson } from './lib/api.js';
 import { defaultSpaceId, routePaths } from './config/constants.js';
@@ -11,6 +11,8 @@ import { HomePage, LoginScreen, WorkspaceShell } from './components/layout/Layou
 import { SavedAnswersWorkspace } from './components/saved/SavedAnswersWorkspace.jsx';
 import { useDocumentRagController } from './features/documents/useDocumentRagController.js';
 import { getProgressMessage } from './lib/formatters.js';
+
+const LEGACY_AUTH_FALLBACK_ENABLED = import.meta.env.VITE_AUTH_LEGACY_FALLBACK === 'true';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -97,6 +99,7 @@ export default function App() {
 
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const refreshInFlightRef = useRef(null);
 
   const activeSpaceId = selectedSpaceId || spaces[0]?.id || '';
   const selectedSpace = spaces.find((space) => space.id === activeSpaceId);
@@ -300,11 +303,10 @@ export default function App() {
     setSavedAnswers([]);
     setSelectedSavedAnswer(null);
     setCodeAnswerSavedId('');
-    clearStoredToken();
   }
 
   async function request(path, options = {}) {
-    const fallbackToken = readStoredToken();
+    const fallbackToken = LEGACY_AUTH_FALLBACK_ENABLED ? readStoredToken() : '';
     try {
       return await fetchJson(path, options);
     } catch (err) {
@@ -316,19 +318,25 @@ export default function App() {
         throw err;
       }
 
-      if (fallbackToken) {
-        try {
-          return await fetchJson(path, {
-            ...options,
-            headers: buildAuthHeaders(options.headers, fallbackToken),
-          });
-        } catch (fallbackErr) {
-          if (fallbackErr.status === 401) {
-            clearStoredToken();
-          } else {
-            throw fallbackErr;
+      if (LEGACY_AUTH_FALLBACK_ENABLED) {
+        if (fallbackToken) {
+          try {
+            return await fetchJson(path, {
+              ...options,
+              headers: buildAuthHeaders(options.headers, fallbackToken),
+            });
+          } catch (fallbackErr) {
+            if (fallbackErr.status === 401) {
+              clearStoredToken();
+              clearSession();
+              throw fallbackErr;
+            } else {
+              throw fallbackErr;
+            }
           }
         }
+        clearSession();
+        throw err;
       }
 
       const refreshed = await refreshAccessToken();
@@ -341,7 +349,7 @@ export default function App() {
   }
 
   async function requestBlob(path, options = {}) {
-    const fallbackToken = readStoredToken();
+    const fallbackToken = LEGACY_AUTH_FALLBACK_ENABLED ? readStoredToken() : '';
     try {
       return await fetchBlob(path, options);
     } catch (err) {
@@ -352,19 +360,25 @@ export default function App() {
         }
         throw err;
       }
-      if (fallbackToken) {
-        try {
-          return await fetchBlob(path, {
-            ...options,
-            headers: buildAuthHeaders(options.headers, fallbackToken),
-          });
-        } catch (fallbackErr) {
-          if (fallbackErr.status === 401) {
-            clearStoredToken();
-          } else {
-            throw fallbackErr;
+      if (LEGACY_AUTH_FALLBACK_ENABLED) {
+        if (fallbackToken) {
+          try {
+            return await fetchBlob(path, {
+              ...options,
+              headers: buildAuthHeaders(options.headers, fallbackToken),
+            });
+          } catch (fallbackErr) {
+            if (fallbackErr.status === 401) {
+              clearStoredToken();
+              clearSession();
+              throw fallbackErr;
+            } else {
+              throw fallbackErr;
+            }
           }
         }
+        clearSession();
+        throw err;
       }
 
       const refreshedToken = await refreshAccessToken();
@@ -377,16 +391,24 @@ export default function App() {
   }
 
   async function refreshAccessToken() {
-    try {
-      const data = await fetchJson('/api/auth/refresh', { method: 'POST' });
-      if (data?.user) {
-        applySession(data);
-        return true;
-      }
-    } catch {
-      clearSession();
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
     }
-    return false;
+    refreshInFlightRef.current = (async () => {
+      try {
+        const data = await fetchJson('/api/auth/refresh', { method: 'POST' });
+        if (data?.user) {
+          applySession(data);
+          return true;
+        }
+      } catch {
+        clearSession();
+      } finally {
+        refreshInFlightRef.current = null;
+      }
+      return false;
+    })();
+    return refreshInFlightRef.current;
   }
 
   async function run(label, task) {
@@ -396,7 +418,7 @@ export default function App() {
       const result = await task();
       return result === undefined ? true : result;
     } catch (err) {
-      setError(err.message || '?붿껌??泥섎━?섏? 紐삵뻽?듬땲??');
+      setError(err.message || '요청 처리 중 오류가 발생했습니다.');
       return false;
     } finally {
       setBusy('');
@@ -426,14 +448,16 @@ export default function App() {
         json: credentials,
       });
       applySession(data);
-      if (data?.token) {
-        storeSessionToken(data.token, credentials.rememberLogin || false);
-      } else {
-        clearStoredToken();
+      if (LEGACY_AUTH_FALLBACK_ENABLED) {
+        if (data?.token) {
+          storeSessionToken(data.token, credentials.rememberLogin || false);
+        } else {
+          clearStoredToken();
+        }
       }
       navigateTo(routePaths.home);
     } catch (err) {
-      setError(err.message || '濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎.');
+      setError(err.message || '로그인에 실패했습니다.');
     } finally {
       setBusy('');
       setBootstrapping(false);
@@ -445,7 +469,9 @@ export default function App() {
       try {
         await request('/api/auth/logout', { method: 'POST' });
       } finally {
-        clearStoredToken();
+        if (LEGACY_AUTH_FALLBACK_ENABLED) {
+          clearStoredToken();
+        }
         clearSession();
         navigateTo(routePaths.home);
       }
@@ -512,7 +538,7 @@ export default function App() {
       const tokenRequired = targetRepository?.authType === 'TOKEN' && !targetRepository?.credentialStored;
       if (tokenRequired && !indexCredential.token) {
         setSelectedRepositoryId(repositoryId);
-        throw new Error('??μ냼 ?몃뜳?깆뿉 ?ъ슜??Git ?좏겙???낅젰?섏꽭??');
+        throw new Error('입력한 계정으로 저장소를 인덱싱하려면 Git 자격 증명을 입력하세요.');
       }
       await request(`/api/code/repositories/${repositoryId}/index`, {
         method: 'POST',
@@ -579,7 +605,7 @@ export default function App() {
   }
 
   async function deleteRepository(repositoryId, name) {
-    if (!window.confirm(`'${name}' ??μ냼瑜???젣?좉퉴??`)) return;
+    if (!window.confirm(`'${name}' 저장소를 삭제하시겠습니까?`)) return;
     await run(`repo-delete-${repositoryId}`, async () => {
       await request(`/api/code/repositories/${repositoryId}`, { method: 'DELETE' });
       setRepositories((current) => current.filter((repo) => repo.id !== repositoryId));
@@ -885,7 +911,7 @@ export default function App() {
   }
 
   async function deleteSpace(spaceId, name) {
-    if (!window.confirm(`${name || '怨듦컙'} 怨듦컙????젣?좉퉴?? ??젣??怨듦컙??臾몄꽌? 肄붾뱶 ??μ냼?????댁긽 紐⑸줉???쒖떆?섏? ?딆뒿?덈떎.`)) return;
+    if (!window.confirm(`${name || '공간'} 공간을 삭제하면 연결된 소스와 문서도 함께 삭제됩니다. 삭제는 되돌릴 수 없습니다.`)) return;
     await run(`space-delete-${spaceId}`, async () => {
       await request(`/api/admin/spaces/${spaceId}`, { method: 'DELETE' });
       await refreshSession();
@@ -962,7 +988,7 @@ export default function App() {
 
   async function restoreTrashItem(type, id) {
     if (!type || !id) return false;
-    if (!window.confirm('????ぉ??蹂듦뎄?좉퉴?? 蹂듦뎄?섎㈃ 湲곗〈 紐⑸줉???ㅼ떆 ?쒖떆?⑸땲??')) return false;
+    if (!window.confirm('휴지통 항목을 복원할까요? 복원 시 해당 항목이 기존 목록에 다시 표시됩니다.')) return false;
     return await run(`trash-restore-${type}-${id}`, async () => {
       await request(`/api/admin/trash/${encodeURIComponent(type)}/${id}/restore`, { method: 'POST' });
       await Promise.all([refreshSession(), refreshDocuments(), refreshRepositories(), refreshSavedAnswers(), refreshAdmin()]);
@@ -1004,7 +1030,7 @@ export default function App() {
   const loading = (name) => busy === name;
   const runningDocumentJobs = documentJobs.filter((job) => job.status === 'RUNNING');
   const documentProgressMessage = runningDocumentJobs.length
-    ? `臾몄꽌 ?몃뜳??${runningDocumentJobs.length}嫄댁씠 諛깃렇?쇱슫?쒖뿉??吏꾪뻾 以묒엯?덈떎.`
+    ? `현재 ${runningDocumentJobs.length}개 인덱싱 작업이 진행 중입니다.`
     : '';
   const progressMessage = getProgressMessage(busy) || documentProgressMessage;
 
@@ -1016,7 +1042,7 @@ export default function App() {
     return (
       <div className="boot-screen">
         <Loader2 className="spin" size={24} />
-        <span>?곕큸 ?몄뀡???뺤씤?섎뒗 以묒엯?덈떎.</span>
+        <span>시작 화면을 불러오는 중입니다.</span>
       </div>
     );
   }
@@ -1303,3 +1329,4 @@ export default function App() {
     </WorkspaceShell>
   );
 }
+

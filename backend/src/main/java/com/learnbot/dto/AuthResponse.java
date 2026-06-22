@@ -9,6 +9,7 @@ public record AuthResponse(
         String refreshToken,
         OffsetDateTime refreshExpiresAt,
         UserSummary user,
-        List<SpaceSummary> spaces
+        List<SpaceSummary> spaces,
+        Boolean rememberLogin
 ) {
 }
