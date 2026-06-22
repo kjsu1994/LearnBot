@@ -156,7 +156,6 @@ public class CodeRagService {
             );
         }
 
-        List<CodeSearchResult> answerResults = answerContextResults(questionMode, effectiveQuestion, results);
         String systemPrompt = """
                 You are LearnBot Code, a private source-code RAG assistant.
                 Answer in Korean using only the provided source-code context.
@@ -177,10 +176,19 @@ public class CodeRagService {
                 Explain not only what the code does, but also why it exists and how it interacts with related components.
                 Do not speculate beyond the provided evidence.
                 """ + "\n" + questionMode.instruction();
-
-        String userPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
-                + conversationFocus(conversationContext)
-                + "\n\nSource-code context:\n" + buildContext(effectiveQuestion, questionMode, answerResults);
+        long contextStarted = System.nanoTime();
+        String promptPrefix = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
+                + conversationFocus(conversationContext);
+        CodeContextBundle contextBundle = buildBudgetedContext(
+                effectiveQuestion,
+                questionMode,
+                systemPrompt,
+                promptPrefix,
+                answerContextResults(questionMode, effectiveQuestion, results)
+        );
+        List<CodeSearchResult> answerResults = contextBundle.results();
+        String userPrompt = promptPrefix + "\n\nSource-code context:\n" + contextBundle.context();
+        long contextMs = elapsedMs(contextStarted);
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -226,7 +234,7 @@ public class CodeRagService {
                 questionMode.value(),
                 retrieval,
                 retrievalMs,
-                0,
+                contextMs,
                 llmMs,
                 answerResults.size(),
                 finalChatResult == null ? 0 : finalChatResult.promptEvalCount(),
@@ -475,7 +483,6 @@ public class CodeRagService {
             return "";
         }
         return "- Q: " + trimInline(turn.question())
-                + "\n  A: " + trimInline(turn.answer())
                 + "\n  Evidence: " + conversationEvidenceSummary(turn.evidence());
     }
 
@@ -566,17 +573,43 @@ public class CodeRagService {
     private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
         int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
+        List<CodeSearchResult> selected;
         if (questionMode == CodeQuestionMode.CALL_FLOW) {
-            return ranked.stream()
+            selected = ranked.stream()
                     .sorted(Comparator.comparingDouble((CodeSearchResult result) -> evidenceRanker.score(result)).reversed()
                             .thenComparingInt(this::flowRank))
                     .limit(limit)
                     .toList();
+            return preservePinnedEvidence(ranked, selected, limit);
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT) {
-            return diverseByCategory(ranked, limit);
+            selected = diverseByCategory(ranked, limit);
+            return preservePinnedEvidence(ranked, selected, limit);
         }
-        return ranked.stream().limit(limit).toList();
+        selected = ranked.stream().limit(limit).toList();
+        return preservePinnedEvidence(ranked, selected, limit);
+    }
+
+    private List<CodeSearchResult> preservePinnedEvidence(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, int limit) {
+        if (ranked == null || selected == null || selected.stream().anyMatch(this::isConversationPinned)) {
+            return selected == null ? List.of() : selected;
+        }
+        java.util.Optional<CodeSearchResult> pinned = ranked.stream().filter(this::isConversationPinned).findFirst();
+        if (pinned.isEmpty() || selected.stream().anyMatch(result -> result.chunkId().equals(pinned.get().chunkId()))) {
+            return selected;
+        }
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
+        if (adjusted.size() < limit) {
+            adjusted.add(pinned.get());
+            return adjusted;
+        }
+        for (int index = adjusted.size() - 1; index >= 0; index--) {
+            if (!isConversationPinned(adjusted.get(index))) {
+                adjusted.set(index, pinned.get());
+                return adjusted;
+            }
+        }
+        return selected;
     }
 
     private List<CodeSearchResult> diverseByCategory(List<CodeSearchResult> ranked, int limit) {
@@ -653,6 +686,53 @@ public class CodeRagService {
                             + "\n" + codeExcerpt(question, result, maxChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+    }
+
+    private CodeContextBundle buildBudgetedContext(
+            String question,
+            CodeQuestionMode questionMode,
+            String systemPrompt,
+            String promptPrefix,
+            List<CodeSearchResult> results
+    ) {
+        List<CodeSearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
+        String context = buildContext(question, questionMode, selected);
+        int budget = promptTokenBudget();
+        int minResults = Math.min(selected.size(), isConversationPinned(selected) ? 1 : Math.min(2, selected.size()));
+        while (selected.size() > minResults
+                && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
+            removeBudgetCandidate(selected);
+            context = buildContext(question, questionMode, selected);
+        }
+        return new CodeContextBundle(List.copyOf(selected), context);
+    }
+
+    private boolean isConversationPinned(List<CodeSearchResult> results) {
+        return results != null && results.stream().anyMatch(this::isConversationPinned);
+    }
+
+    private void removeBudgetCandidate(List<CodeSearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isConversationPinned(selected.get(index))) {
+                selected.remove(index);
+                return;
+            }
+        }
+        selected.remove(selected.size() - 1);
+    }
+
+    private int promptTokenBudget() {
+        int contextWindow = Math.max(2048, pipelineService.contextWindow());
+        int configured = Math.max(512, pipelineService.promptTokenBudgetBalanced());
+        return Math.min(configured, Math.max(1800, contextWindow - 700));
+    }
+
+    private int estimateTokens(String value) {
+        String compact = safe(value, "").trim();
+        if (compact.isEmpty()) {
+            return 0;
+        }
+        return Math.max(1, (compact.length() + 2) / 3);
     }
 
     private String fallbackAnswer(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
@@ -1390,6 +1470,9 @@ public class CodeRagService {
             int pinnedCandidateCount,
             int pinnedUsedCount
     ) {
+    }
+
+    private record CodeContextBundle(List<CodeSearchResult> results, String context) {
     }
 
     enum CodeQuestionMode {

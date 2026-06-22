@@ -213,7 +213,8 @@ public class CodeController {
             selectedSpaceId = accessibleSpaceIds.get(0);
         }
         if (request.repositoryId() != null) {
-            authService.requireSpace(user, repositorySpace(request.repositoryId()));
+            selectedSpaceId = repositorySpace(request.repositoryId());
+            authService.requireSpace(user, selectedSpaceId);
         }
         boolean conversational = Boolean.TRUE.equals(request.conversational()) || request.conversationId() != null;
         if (!conversational) {

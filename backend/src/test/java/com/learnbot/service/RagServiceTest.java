@@ -2,7 +2,9 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.DocumentConversationAnchor;
 import com.learnbot.dto.DocumentChunkDetail;
+import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
@@ -374,6 +376,77 @@ class RagServiceTest {
         verify(documentRepository, never()).graphExpandedChunks(any(), anyInt(), any(), isNull());
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("requested=FAST").contains("effective=FAST"));
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("embedding=4ms").contains("vector=5ms").contains("keyword=6ms"));
+    }
+
+    @Test
+    void conversationalAskKeepsPinnedDocumentEvidenceWhenSearchRanksHigher() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        UUID spaceId = UUID.randomUUID();
+        UUID pinnedDocumentId = UUID.randomUUID();
+        UUID pinnedChunkId = UUID.randomUUID();
+        SearchResult pinned = searchResult(
+                pinnedDocumentId,
+                pinnedChunkId,
+                4,
+                "policy.pdf",
+                "application/pdf",
+                "The previous policy evidence requires MFA for administrators."
+        );
+        SearchResult generic = searchResult(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                0,
+                "generic.pdf",
+                "application/pdf",
+                "A higher ranked generic search result."
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "that document",
+                List.of(),
+                List.of(),
+                List.of(new DocumentConversationAnchor(
+                        pinnedChunkId,
+                        pinnedDocumentId,
+                        pinned.title(),
+                        pinned.sourceUri(),
+                        pinned.chunkIndex(),
+                        null,
+                        "Access",
+                        "Security > Access",
+                        "policy"
+                )),
+                true
+        );
+
+        when(documentRepository.findActiveChunksByIds(any(), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(pinned));
+        when(searchService.searchDetailed(anyString(), isNull(SearchFilter.class), anyInt(), any(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(generic),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 3, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        AskResponse response = service.askConversational(
+                "that document",
+                context,
+                null,
+                "qa",
+                "BALANCED",
+                List.of(spaceId),
+                null
+        );
+
+        assertThat(response.evidence()).anySatisfy(evidence -> {
+            assertThat(evidence.chunkId()).isEqualTo(pinnedChunkId);
+            assertThat(evidence.metadata()).containsEntry("conversationPinned", true);
+        });
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("pinned"));
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {

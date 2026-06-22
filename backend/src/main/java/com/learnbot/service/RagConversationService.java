@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -66,6 +67,7 @@ public class RagConversationService {
                 ? repository.create(user.id(), spaceId, normalizedDomain, repositoryId, title(question))
                 : repository.findSummary(user.id(), conversationId)
                 .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
+        validateConversationScope(conversation, spaceId, normalizedDomain, repositoryId);
         List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
         boolean contextual = looksContextual(normalizedDomain, question) && recentTurns != null && !recentTurns.isEmpty();
         if (CODE.equals(normalizedDomain)) {
@@ -87,6 +89,7 @@ public class RagConversationService {
         if (context == null || context.conversationId() == null || response == null) {
             return response;
         }
+        validateParentTurn(context.conversationId(), parentTurnId);
         RagConversationTurn turn = repository.addTurn(
                 context.conversationId(),
                 parentTurnId,
@@ -112,6 +115,7 @@ public class RagConversationService {
         if (context == null || context.conversationId() == null || response == null) {
             return response;
         }
+        validateParentTurn(context.conversationId(), parentTurnId);
         RagConversationTurn turn = repository.addTurn(
                 context.conversationId(),
                 parentTurnId,
@@ -174,17 +178,34 @@ public class RagConversationService {
             return false;
         }
         boolean common = containsAny(normalized,
-                "이거", "그거", "저거", "위", "앞", "방금", "이전", "아까",
-                "이어", "계속", "근거", "출처", "예외", "조건",
-                "this", "that", "above", "previous", "continue");
+                "그 ", "그거", "그것", "이 ", "이거", "이것", "저 ", "저거", "해당", "위 ", "앞서", "방금", "이전", "같은", "계속",
+                "this", "that", "above", "previous", "same", "continue");
         if (CODE.equals(domain)) {
             return common || containsAny(normalized,
-                    "그 파일", "그 메서드", "그 함수", "이 파일", "이 메서드", "이 함수", "흐름", "호출", "영향",
-                    "same file", "same method");
+                    "그 파일", "그 메서드", "그 함수", "이 파일", "이 메서드", "이 함수",
+                    "해당 파일", "해당 메서드", "해당 함수", "same file", "same method");
         }
         return common || containsAny(normalized,
-                "이 문서", "그 문서", "위 내용", "앞 내용", "그 조항", "그 표", "그 페이지",
-                "해당 문서", "해당 조항", "페이지", "표", "조항", "요약");
+                "그 문서", "이 문서", "해당 문서", "그 내용", "이 내용", "해당 내용",
+                "그 조항", "이 조항", "해당 조항", "그 페이지", "이 페이지", "해당 페이지");
+    }
+
+    private void validateConversationScope(RagConversationSummary conversation, UUID spaceId, String domain, UUID repositoryId) {
+        if (!Objects.equals(conversation.spaceId(), spaceId)) {
+            throw new IllegalArgumentException("RAG conversation workspace does not match the request.");
+        }
+        if (!Objects.equals(normalizeDomain(conversation.domain()), domain)) {
+            throw new IllegalArgumentException("RAG conversation domain does not match the request.");
+        }
+        if (!Objects.equals(conversation.repositoryId(), repositoryId)) {
+            throw new IllegalArgumentException("RAG conversation repository does not match the request.");
+        }
+    }
+
+    private void validateParentTurn(UUID conversationId, UUID parentTurnId) {
+        if (parentTurnId != null && !repository.turnBelongsToConversation(conversationId, parentTurnId)) {
+            throw new IllegalArgumentException("RAG conversation parent turn does not match the conversation.");
+        }
     }
 
     private List<DocumentConversationAnchor> documentAnchors(List<RagConversationTurnContext> recentTurns) {
@@ -289,7 +310,7 @@ public class RagConversationService {
     }
 
     private String pageLabel(Integer pageNumber) {
-        return pageNumber == null || pageNumber <= 0 ? "" : pageNumber + "페이지";
+        return pageNumber == null || pageNumber <= 0 ? "" : "page " + pageNumber;
     }
 
     private String normalizeDomain(String domain) {
@@ -298,7 +319,7 @@ public class RagConversationService {
 
     private String title(String question) {
         String clean = clean(question);
-        return clean.isBlank() ? "새 RAG 대화" : compact(clean, 60);
+        return clean.isBlank() ? "New RAG conversation" : compact(clean, 60);
     }
 
     private UUID uuid(String value) {

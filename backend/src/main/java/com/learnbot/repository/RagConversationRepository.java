@@ -96,6 +96,21 @@ public class RagConversationRepository {
                 """, new MapSqlParameterSource().addValue("conversationId", conversationId), this::mapTurn);
     }
 
+    public boolean turnBelongsToConversation(UUID conversationId, UUID turnId) {
+        if (conversationId == null || turnId == null) {
+            return false;
+        }
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM rag_conversation_turns
+                WHERE conversation_id = :conversationId
+                  AND id = :turnId
+                """, new MapSqlParameterSource()
+                .addValue("conversationId", conversationId)
+                .addValue("turnId", turnId), Integer.class);
+        return count != null && count > 0;
+    }
+
     public List<RagConversationTurnContext> recentTurnContexts(UUID conversationId, int limit) {
         return jdbc.query("""
                 SELECT question, answer, evidence::text AS evidence

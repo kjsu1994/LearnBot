@@ -159,14 +159,14 @@ public class RagService {
 
         long contextStarted = System.nanoTime();
         String systemPrompt = systemPrompt(answerMode, questionType) + conversationSystemRule(conversationContext);
-        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, citations);
+        String promptPrefix = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
+                + conversationFocus(conversationContext);
+        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations);
         citations = contextBundle.citations();
         String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
 
-        String userPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
-                + conversationFocus(conversationContext)
-                + "\n\nContext:\n" + context;
+        String userPrompt = promptPrefix + "\n\nContext:\n" + context;
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -187,7 +187,7 @@ public class RagService {
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
                 List<SearchResult> retryCitations = compactRepairCitations(citations, answerMode, questionType, retrieval.effectiveProfile());
                 String retryContext = buildContext(effectiveQuestion, answerMode, questionType, DocumentSpeedProfile.FAST, retryCitations);
-                String retryPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
+                String retryPrompt = promptPrefix
                         + "\n\nCompact context:\n" + retryContext
                         + "\n\nPrevious answer failed validation because: " + qualityReason + "."
                         + "\nAnswer briefly in Korean and attach evidence numbers like [1] to every factual claim.";
@@ -340,7 +340,6 @@ public class RagService {
             return "";
         }
         return "- Q: " + abbreviate(turn.question())
-                + "\n  A: " + abbreviate(turn.answer())
                 + "\n  Evidence: " + conversationEvidenceSummary(turn.evidence());
     }
 
@@ -1006,12 +1005,12 @@ public class RagService {
         };
         List<SearchResult> ordered = orderDocumentEvidence(question, answerMode, results);
         if (isOverviewQuestionType(questionType)) {
-            return selectOverviewCitations(ordered, limit, speedProfile);
+            return preservePinnedCitation(ordered, selectOverviewCitations(ordered, limit, speedProfile), limit);
         }
         if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
             List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
             if (!originals.isEmpty()) {
-                return originals;
+                return preservePinnedCitation(ordered, originals, limit);
             }
         }
         List<SearchResult> selected = new ArrayList<>();
@@ -1026,6 +1025,28 @@ public class RagService {
             selected.add(result);
             if (selected.size() >= limit) {
                 break;
+            }
+        }
+        return preservePinnedCitation(ordered, selected, limit);
+    }
+
+    private List<SearchResult> preservePinnedCitation(List<SearchResult> ordered, List<SearchResult> selected, int limit) {
+        if (ordered == null || selected == null || selected.stream().anyMatch(this::isConversationPinned)) {
+            return selected == null ? List.of() : selected;
+        }
+        Optional<SearchResult> pinned = ordered.stream().filter(this::isConversationPinned).findFirst();
+        if (pinned.isEmpty() || selected.stream().anyMatch(result -> result.chunkId().equals(pinned.get().chunkId()))) {
+            return selected;
+        }
+        List<SearchResult> adjusted = new ArrayList<>(selected);
+        if (adjusted.size() < limit) {
+            adjusted.add(pinned.get());
+            return adjusted;
+        }
+        for (int index = adjusted.size() - 1; index >= 0; index--) {
+            if (!isConversationPinned(adjusted.get(index))) {
+                adjusted.set(index, pinned.get());
+                return adjusted;
             }
         }
         return selected;
@@ -1292,6 +1313,7 @@ public class RagService {
             DocumentQuestionType questionType,
             DocumentSpeedProfile speedProfile,
             String systemPrompt,
+            String promptPrefix,
             List<SearchResult> results
     ) {
         List<SearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
@@ -1299,11 +1321,21 @@ public class RagService {
         int budget = promptTokenBudget(speedProfile);
         int minCitations = Math.min(selected.size(), minContextCitations(answerMode, questionType));
         while (selected.size() > minCitations
-                && estimateTokens(systemPrompt) + estimateTokens(question) + estimateTokens(context) > budget) {
-            selected.remove(selected.size() - 1);
+                && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
+            removeBudgetCandidate(selected);
             context = buildContext(question, answerMode, questionType, speedProfile, selected);
         }
         return new ContextBundle(List.copyOf(selected), context);
+    }
+
+    private void removeBudgetCandidate(List<SearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isConversationPinned(selected.get(index))) {
+                selected.remove(index);
+                return;
+            }
+        }
+        selected.remove(selected.size() - 1);
     }
 
     private int minContextCitations(AnswerMode answerMode, DocumentQuestionType questionType) {
