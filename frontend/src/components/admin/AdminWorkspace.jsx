@@ -10,7 +10,7 @@ import { DocumentSourcePanel } from '../documents/DocumentWorkspace.jsx';
 
 const tuningText = {
   LLM_CONTEXT_WINDOW: ['LLM 문맥 길이', '질문, 근거, 답변 지시문을 모델에 넣을 수 있는 최대 토큰 수입니다.', '높을수록 긴 문서를 더 잘 보지만 메모리 사용량이 증가합니다.'],
-  OLLAMA_CONTEXT_LENGTH: ['Ollama 컨텍스트 길이', 'Ollama 데몬이 모델에 허용하는 컨텍스트 길이입니다.', '저장 후 컨테이너 재시작이 필요합니다. LLM 문맥 길이와 맞추는 것을 권장합니다.'],
+  OLLAMA_CONTEXT_LENGTH: ['Ollama 컨텍스트 길이', 'Ollama 요청에 전달하는 num_ctx 값입니다.', '저장 즉시 새 질문부터 적용됩니다. LLM 문맥 길이와 맞추는 것을 권장합니다.'],
   RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED: ['문서 답변 프롬프트 예산', '문서 답변에서 근거 청크와 질문에 배정할 토큰 예산입니다.', '높을수록 근거를 많이 넣지만 응답 속도가 느려질 수 있습니다.'],
   RAG_PIPELINE_CODE_CONTEXT_LIMIT: ['코드 답변에 넣을 청크 수', '코드 질문 답변에 사용할 코드 근거 청크 개수입니다.', '높을수록 관련 파일과 메서드를 더 많이 봅니다.'],
   RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT: ['문서 답변에 넣을 청크 수', '문서 질문 답변에 사용할 문서 근거 청크 개수입니다.', '높을수록 답변 근거가 늘고 속도는 느려질 수 있습니다.'],
@@ -1061,7 +1061,7 @@ function AdminWorkspace({
                 <Cpu size={18} />
                 <div>
                   <h2>{category}</h2>
-                  <p>{category === 'Ollama' ? '저장 후 컨테이너 재시작이 필요한 항목입니다.' : '저장 즉시 새 요청부터 반영됩니다.'}</p>
+                  <p>{category === 'Ollama' ? 'Ollama 데몬 시작값입니다. 병렬/로드 모델 수 변경은 컨테이너 재시작 후 적용됩니다.' : '저장 즉시 새 요청부터 반영됩니다.'}</p>
                 </div>
               </div>
               <div className="tuning-grid">

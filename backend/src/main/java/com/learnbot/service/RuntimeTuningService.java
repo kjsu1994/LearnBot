@@ -114,6 +114,10 @@ public class RuntimeTuningService {
         return value(LLM_CONTEXT_WINDOW);
     }
 
+    public int ollamaContextLength() {
+        return value(OLLAMA_CONTEXT_LENGTH);
+    }
+
     public int promptTokenBudgetBalanced() {
         return value(PROMPT_TOKEN_BUDGET_BALANCED);
     }
@@ -245,10 +249,14 @@ public class RuntimeTuningService {
                 .map(AdminTuningSetting::value)
                 .orElse(llmContext);
         if (llmContext != ollamaContext) {
-            warnings.add("LLM context window and Ollama context length differ. The smaller value may effectively limit prompts.");
+            warnings.add("LLM 문맥 길이와 Ollama 컨텍스트 길이가 다릅니다. 실제 요청에서는 더 작은 값이 프롬프트 한계가 될 수 있습니다.");
         }
-        if (settings.stream().anyMatch(item -> item.restartRequired() && item.value() != item.effectiveValue())) {
-            warnings.add("컨테이너 환경값과 저장된 튜닝값이 달라 아직 일부 Ollama 튜닝값이 실제 적용되지 않았습니다. Docker 환경변수 반영 후 Ollama 컨테이너를 재시작하세요.");
+        boolean daemonRestartPending = settings.stream()
+                .anyMatch(item -> (OLLAMA_MAX_LOADED_MODELS.equals(item.key()) || OLLAMA_NUM_PARALLEL.equals(item.key()))
+                        && item.restartRequired()
+                        && item.value() != item.effectiveValue());
+        if (daemonRestartPending) {
+            warnings.add("Ollama 데몬 시작값이 저장된 튜닝값과 다릅니다. 동시 로드 모델 수와 병렬 요청 수는 Ollama 컨테이너 재시작 후 적용됩니다.");
         }
         return warnings;
     }
@@ -260,12 +268,17 @@ public class RuntimeTuningService {
             throw new IllegalArgumentException(definition.label() + " must be between " + definition.min() + " and " + definition.max() + ".");
         }
         if (PROMPT_TOKEN_BUDGET_BALANCED.equals(definition.key())) {
-            int contextWindow = Math.max(2048, requestedValues.getOrDefault(
+            int llmContextWindow = Math.max(2048, requestedValues.getOrDefault(
                     LLM_CONTEXT_WINDOW,
                     valueOrDefault(LLM_CONTEXT_WINDOW, properties.getOllama().getContextWindow())
             ));
+            int ollamaContextLength = Math.max(2048, requestedValues.getOrDefault(
+                    OLLAMA_CONTEXT_LENGTH,
+                    valueOrDefault(OLLAMA_CONTEXT_LENGTH, llmContextWindow)
+            ));
+            int contextWindow = Math.min(llmContextWindow, ollamaContextLength);
             if (value > contextWindow - 700) {
-                throw new IllegalArgumentException("Prompt budget must be at least 700 tokens smaller than the LLM context window.");
+                throw new IllegalArgumentException("Prompt budget must be at least 700 tokens smaller than the effective context window.");
             }
         }
         return value;
@@ -288,7 +301,7 @@ public class RuntimeTuningService {
         int contextWindow = properties.getOllama().getContextWindow();
         return List.of(
                 new TuningDefinition(LLM_CONTEXT_WINDOW, "LLM context window", "Maximum prompt context sent to the model.", "LLM", "range", contextWindow, 2048, 32768, 512, false, "Higher values allow more evidence but use more memory.", LLM_CONTEXT_WINDOW),
-                new TuningDefinition(OLLAMA_CONTEXT_LENGTH, "Ollama context length", "Ollama daemon context length.", "LLM", "range", envInt(OLLAMA_CONTEXT_LENGTH, contextWindow), 2048, 32768, 512, true, "Requires container restart. Keep it aligned with LLM context window.", OLLAMA_CONTEXT_LENGTH),
+                new TuningDefinition(OLLAMA_CONTEXT_LENGTH, "Ollama context length", "Ollama request context length.", "LLM", "range", contextWindow, 2048, 32768, 512, false, "Applied to new Ollama requests through num_ctx. Keep it aligned with LLM context window.", OLLAMA_CONTEXT_LENGTH),
                 new TuningDefinition(PROMPT_TOKEN_BUDGET_BALANCED, "Document prompt token budget", "Token budget for document evidence and question.", "RAG", "range", pipeline.getPromptTokenBudgetBalanced(), 1024, 32000, 256, false, "Higher values include more evidence but may be slower.", PROMPT_TOKEN_BUDGET_BALANCED),
                 new TuningDefinition(DOCUMENT_CONTEXT_LIMIT, "Document answer chunk count", "Evidence chunks used for document answers.", "RAG", "range", pipeline.getDocumentContextLimit(), 2, 16, 1, false, "Higher values add evidence and latency.", DOCUMENT_CONTEXT_LIMIT),
                 new TuningDefinition(CODE_CONTEXT_LIMIT, "Code answer chunk count", "Evidence chunks used for code answers.", "RAG", "range", pipeline.getCodeContextLimit(), 4, 24, 1, false, "Higher values include more files and methods.", CODE_CONTEXT_LIMIT),
@@ -340,4 +353,5 @@ public class RuntimeTuningService {
     ) {
     }
 }
+
 

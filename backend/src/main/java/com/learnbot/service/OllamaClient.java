@@ -198,7 +198,7 @@ public class OllamaClient {
     }
 
     private int effectiveContextWindow() {
-        return runtimeTuningService == null ? properties.getOllama().getContextWindow() : runtimeTuningService.llmContextWindow();
+        return runtimeTuningService == null ? properties.getOllama().getContextWindow() : runtimeTuningService.ollamaContextLength();
     }
 
     private int effectiveMaxOutputTokens() {
