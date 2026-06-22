@@ -121,14 +121,13 @@ public class RagService {
             recordMetrics("document", answerMode.value(), requestedSpeedProfile.name(), retrieval, retrievalMs, 0, 0, 0, 0, 0, 0, false, false, elapsedMs(askStarted));
             return new AskResponse(
                     answerMode.value(),
-                    "근거가 부족해 답변할 수 없습니다.",
+                    "검색된 문서 근거가 부족해 답변을 생성할 수 없습니다.",
                     citations,
                     List.of(),
                     "낮음",
-                    List.of("검색된 문서 근거가 없어 추측 답변을 생성하지 않았습니다.")
+                    List.of("검색된 문서 근거가 없어 추측 답변 생성을 중단했습니다.")
             );
         }
-
         Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(question, citations);
         if (computedAnswer.isPresent()) {
             ComputedAnswer computed = computedAnswer.get();
@@ -1082,13 +1081,13 @@ public class RagService {
                     return "[" + (index + 1) + "] " + result.title()
                             + " · " + result.sourceUri()
                             + " · " + safe(result.contentType())
-                            + " · chunk " + result.chunkIndex()
+                            + " · chunk=" + result.chunkIndex()
+                            + " · chunkId=" + result.chunkId()
                             + contextMetadataLabel(result) + "\n"
                             + relevantExcerpt(question, result.content(), excerptChars);
                 })
                 .collect(Collectors.joining("\n\n"));
     }
-
     private ContextBundle buildBudgetedContext(
             String question,
             AnswerMode answerMode,
@@ -1139,14 +1138,16 @@ public class RagService {
             return "";
         }
         List<String> parts = new ArrayList<>();
+        addMetadataLabel(parts, "page", metadataString(result, "pageNumber"));
         addMetadataLabel(parts, "section", metadataString(result, "sectionTitle"));
         addMetadataLabel(parts, "heading", metadataString(result, "headingPath"));
-        addMetadataLabel(parts, "page", metadataString(result, "pageNumber"));
         addMetadataLabel(parts, "table", metadataString(result, "tableId"));
+        addMetadataLabel(parts, "documentType", metadataString(result, "documentType"));
+        addMetadataLabel(parts, "schema", metadataString(result, "schemaName"));
+        addMetadataLabel(parts, "role", metadataString(result, "evidenceRole"));
         addMetadataLabel(parts, "context", contextType(result));
         return parts.isEmpty() ? "" : " · " + String.join(" · ", parts);
     }
-
     private void addMetadataLabel(List<String> parts, String label, String value) {
         if (value != null && !value.isBlank()) {
             parts.add(label + "=" + value);
@@ -1191,40 +1192,33 @@ public class RagService {
     private String systemPrompt(AnswerMode answerMode, DocumentQuestionType questionType) {
         String overviewInstruction = isOverviewQuestionType(questionType)
                 ? """
-                개요, 구조, 아키텍처, 프로세스 질문에 대한 추가 규칙:
-                - 먼저 전체 구조나 흐름을 한국어로 설명하세요.
-                - 문서/소스 컨텍스트 청크는 방향을 잡는 데 사용하되, 중요한 주장은 원문 근거 청크로 뒷받침하세요.
-                - 필요하면 "전체 구조", "주요 흐름", "근거", "한계" 섹션으로 나누세요.
-                - 근거가 일부 문서에만 한정된다면 그 한계를 명확히 말하세요.
+                개요/구조/흐름 질문 추가 규칙:
+                - 먼저 전체 구조와 핵심 흐름을 요약하세요.
+                - 여러 문서를 종합할 때는 문서별 역할과 공통점/차이점을 분리하세요.
+                - 특정 문서 근거만 있는 주장에는 그 한계를 명확히 쓰세요.
+                - 가능하면 "요약", "핵심 근거", "문서별 차이", "한계" 섹션을 사용하세요.
                 """
                 : "";
         return """
-                당신은 LearnBot이라는 사내 문서 RAG 답변 도우미입니다.
-                 반드시 지켜야 할 답변 규칙:
-                 - 답변은 반드시 한국어로 작성하세요.
-                 - 사용자가 영어로 질문해도, 최종 답변은 한국어로 작성하세요.
-                 - 문서 제목, 코드명, API명, 제품명, 고유명사는 원문 표기를 유지해도 됩니다.
-                 - 본문 설명, 결론, 근거, 한계는 한국어로 작성하세요.
-                 - Markdown 형식으로 답변하세요.
-                 - 제공된 Context 안의 내용만 사용하세요.
-                 - 사실 주장에는 [1], [2] 같은 근거 번호를 붙이세요.
-                 - 근거가 부족하면 어떤 부분의 근거가 부족한지 한국어로 말하세요.
-                 - 출처, 개수, 파일명, 페이지, 조항을 임의로 만들지 마세요.
-                 - 출처 목록만 나열하지 말고, 결론과 근거를 포함한 자연스러운 답변을 작성하세요.
-                 - QA 답변은 가능하면 "결론", "근거", "한계" 구조를 사용하세요.
-                 - 요약 답변은 주제별로 묶고 대표 근거를 표시하세요.
-                 - 표 추출은 근거에 실제로 있는 필드만 사용하세요.
-                 - 원문 인용은 짧게 인용하고 왜 중요한지 설명하세요.
-                
-                 출력 언어 규칙:
-                 - 최종 답변의 기본 언어는 한국어입니다.
-                 - 영어 문장을 그대로 번역 없이 길게 출력하지 마세요.
-                 - Context가 영어여도 한국어로 요약·설명하세요.
-                 - 답변 전체가 영어로 작성되면 잘못된 답변입니다.
-                 - 단, 고유명사, 클래스명, 메서드명, URL, 표 컬럼명은 원문을 유지할 수 있습니다.
+                당신은 LearnBot의 사내 문서 RAG 답변 도우미입니다.
+
+                반드시 지켜야 할 규칙:
+                - 최종 답변은 한국어로 작성하세요.
+                - 제공된 Context 안의 정보만 사용하세요.
+                - 사실 주장에는 반드시 [1], [2] 같은 근거 번호를 붙이세요.
+                - 출처, 페이지, 조항, 파일명, 개수는 Context에 있는 경우에만 말하세요.
+                - 근거가 부족하면 부족한 부분과 확인이 필요한 내용을 명확히 말하세요.
+                - 출처 목록만 나열하지 말고, 결론과 근거를 구조적으로 설명하세요.
+                - 사용자가 영어로 질문해도 답변은 한국어로 작성하세요.
+                - 고유명사, 제품명, API명, URL, 표 컬럼명은 원문 표기를 유지해도 됩니다.
+
+                권장 답변 구조:
+                - 일반 질문: "결론", "근거", "한계"
+                - 요약/개요 질문: "요약", "주요 근거", "문서별 차이", "한계"
+                - 표/수치 질문: "결과", "계산 근거", "한계"
+                - 원문 인용 질문: 짧은 인용과 그 의미를 함께 설명
                 """ + "\n" + overviewInstruction + "\n" + answerMode.instruction();
     }
-
     private String fallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
         if (results.isEmpty()) {
             return "근거가 부족해 답변할 수 없습니다.";
@@ -1831,21 +1825,17 @@ public class RagService {
         String normalized = safe(question).replaceAll("\\s+", "").toLowerCase();
         return normalized.contains("총몇")
                 || normalized.contains("몇명")
-                || normalized.contains("몇명이")
                 || normalized.contains("몇개")
-                || normalized.contains("몇개의")
-                || normalized.contains("인원")
-                || normalized.contains("대상자수")
-                || normalized.contains("총원")
                 || normalized.contains("몇건")
+                || normalized.contains("인원")
+                || normalized.contains("대상자")
+                || normalized.contains("총원")
                 || normalized.contains("건수")
                 || normalized.contains("개수")
-                || normalized.contains("총개수")
-                || normalized.contains("총건수")
+                || normalized.contains("합계")
                 || normalized.contains("count")
                 || normalized.contains("total");
     }
-
     private boolean isSpreadsheet(SearchResult result) {
         String contentType = safe(result.contentType()).toLowerCase();
         String title = safe(result.title()).toLowerCase();
@@ -1859,22 +1849,10 @@ public class RagService {
 
     private boolean isStructureQuestion(String question) {
         String normalized = normalizeForSearch(question);
-        return normalized.contains("structure")
-                || normalized.contains("section")
-                || normalized.contains("page")
-                || normalized.contains("slide")
-                || normalized.contains("sheet")
-                || normalized.contains("table")
-                || normalized.contains("where")
-                || normalized.contains("구조")
-                || normalized.contains("목차")
-                || normalized.contains("섹션")
-                || normalized.contains("페이지")
-                || normalized.contains("표")
-                || normalized.contains("시트")
-                || normalized.contains("어디");
+        return containsAny(normalized,
+                "structure", "section", "page", "slide", "sheet", "table", "where",
+                "구조", "목차", "섹션", "페이지", "슬라이드", "시트", "표", "테이블", "조항", "위치", "어디");
     }
-
     private DocumentQuestionType classifyDocumentQuestion(String question, AnswerMode answerMode) {
         if (!properties.getRag().getOverview().isEnabled()) {
             return DocumentQuestionType.GENERAL;
@@ -1884,23 +1862,22 @@ public class RagService {
         }
         String normalized = normalizeForSearch(question);
         String compact = safe(question).replaceAll("\\s+", "").toLowerCase();
-        if (containsAny(normalized, "architecture", "아키텍처", "구성도", "구성 방식", "전체 구조")) {
+        if (containsAny(normalized, "architecture", "아키텍처", "구성", "구조", "전체 구조", "컴포넌트", "모듈")) {
             return DocumentQuestionType.ARCHITECTURE;
         }
         if (containsAny(normalized, "flow", "process", "workflow", "sequence", "흐름", "과정", "절차", "순서", "프로세스")) {
             return DocumentQuestionType.PROCESS_FLOW;
         }
-        if (isStructureQuestion(question) || containsAny(normalized, "구조", "목차", "섹션", "구성", "어떻게 되어")) {
+        if (isStructureQuestion(question) || containsAny(normalized, "목차", "섹션", "어떻게 구성")) {
             return DocumentQuestionType.STRUCTURE;
         }
-        if (containsAny(normalized, "overview", "summary", "summarize", "개요", "요약", "전체적으로", "큰 그림", "무엇을 다루", "어떤 내용")
+        if (containsAny(normalized, "overview", "summary", "summarize", "개요", "요약", "정리", "전체", "주요", "핵심", "무엇")
                 || compact.contains("뭐하는")
                 || compact.contains("어떤문서")) {
             return DocumentQuestionType.OVERVIEW;
         }
         return DocumentQuestionType.GENERAL;
     }
-
     private boolean isOverviewQuestionType(DocumentQuestionType questionType) {
         return questionType != null && questionType != DocumentQuestionType.GENERAL;
     }
@@ -1931,7 +1908,6 @@ public class RagService {
         };
         return queries.stream().limit(limit).toList();
     }
-
     private boolean containsAny(String value, String... needles) {
         String safeValue = safe(value);
         for (String needle : needles) {
@@ -2007,7 +1983,7 @@ public class RagService {
         if (trimmed.isBlank()) {
             return "blank";
         }
-        if ("the".equalsIgnoreCase(trimmed) || "제".equals(trimmed)) {
+        if ("the".equalsIgnoreCase(trimmed) || "-".equals(trimmed)) {
             return "placeholder";
         }
         if (trimmed.startsWith("The chat LLM is unavailable")) {
@@ -2016,7 +1992,7 @@ public class RagService {
         if (!containsCitation(trimmed)) {
             return "missing_citation";
         }
-        boolean hasConcreteValue = trimmed.matches("(?s).*\\d+\\s*(명|건|개|행).*");
+        boolean hasConcreteValue = trimmed.matches("(?s).*\\d+\\s*(명|건|개|%|원|페이지|page|row|행).*" );
         if (!hasConcreteValue && trimmed.length() < 12) {
             return "too_short";
         }
@@ -2060,7 +2036,6 @@ public class RagService {
         }
         return value;
     }
-
     private List<String> diagnostics(
             AnswerMode answerMode,
             List<SearchResult> results,
@@ -2209,28 +2184,26 @@ public class RagService {
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
         long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
         List<String> notes = new ArrayList<>();
-        notes.add("검색된 문서 근거 " + results.size() + "개, 문서 " + distinctDocuments + "개를 " + getModeLabel(answerMode) + " 후보로 사용했습니다.");
+        notes.add("검색된 문서 근거 " + results.size() + "개를 " + distinctDocuments + "개 문서에서 선별해 " + getModeLabel(answerMode) + " 후보로 사용했습니다.");
         if (llmUnavailable) {
             notes.add("LLM 호출이 실패해 검색 근거 기반 fallback 답변을 반환했습니다.");
         }
         if (answerRewritten) {
-            notes.add("LLM 응답이 너무 짧거나 인용이 부족해, 검색 근거 기반 답변으로 대체했습니다.");
+            notes.add("LLM 답변이 너무 짧거나 citation이 부족해 검색 근거 기반 답변으로 대체했습니다.");
         }
         if ("낮음".equals(confidence(results, llmUnavailable, answerRewritten))) {
-            notes.add("직접적인 근거 점수가 낮아 답변을 후보 수준으로 검토해야 합니다.");
+            notes.add("직접적인 근거 수가 적어 답변을 후보 수준으로 검토해야 합니다.");
         }
         return notes;
     }
-
     private String getModeLabel(AnswerMode answerMode) {
         return switch (answerMode) {
             case SUMMARY -> "요약";
-            case TABLE -> "표 추출";
+            case TABLE -> "표/수치 추출";
             case QUOTE -> "원문 인용";
             default -> "질문 답변";
         };
     }
-
     private String relevantExcerpt(String question, String content, int maxChars) {
         String compact = safe(content).replaceAll("\\s+", " ").trim();
         if (compact.length() <= maxChars) {

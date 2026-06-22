@@ -131,12 +131,11 @@ public class SearchService {
         if ("FAST".equals(profile)) {
             return documentReranker.skip(ranked, "fast_profile");
         }
-        if (!"DEEP".equals(profile) && hasClearWinner(ranked)) {
+        if (!"DEEP".equals(profile) && !isOverviewQuestion(query) && !isStructureQuestion(query) && hasClearWinner(ranked)) {
             return documentReranker.skip(ranked, "clear_winner");
         }
         return documentReranker.rerank(query, ranked);
     }
-
     private boolean hasClearWinner(List<SearchResult> ranked) {
         if (ranked == null || ranked.size() < 2) {
             return true;
@@ -154,23 +153,26 @@ public class SearchService {
         String normalized = normalize(safeQuery);
         List<String> values = new ArrayList<>();
         values.add(safeQuery);
-        if (normalized.contains("차별")) {
-            values.addAll(List.of("차별 예방 개선", "임금 복리후생 교육훈련 고충처리", "기간제 단시간 파견 근로자"));
+        if (containsAny(normalized, "요약", "개요", "정리", "전체", "핵심", "summary", "overview")) {
+            values.addAll(List.of("문서 요약 주요 내용", "전체 구조 핵심 근거", "document summary overview main topics"));
         }
-        if (normalized.contains("기간제") || normalized.contains("단시간") || normalized.contains("파견")) {
-            values.add("기간제 단시간 파견 근로자 차별");
+        if (containsAny(normalized, "구조", "목차", "섹션", "페이지", "조항", "위치", "어디", "structure", "section", "page", "where")) {
+            values.addAll(List.of("문서 구조 목차 섹션 페이지 조항", "document structure section page heading"));
         }
-        if (normalized.contains("로그인")) {
-            values.addAll(List.of("login auth authentication session token", "인증 세션 토큰"));
+        if (containsAny(normalized, "표", "테이블", "시트", "행", "열", "건수", "개수", "합계", "table", "sheet", "row", "count", "total")) {
+            values.addAll(List.of("표 테이블 시트 행 열 건수 합계", "table sheet row column count total"));
         }
-        if (normalized.contains("인덱싱") || normalized.contains("색인")) {
-            values.addAll(List.of("index indexing embedding chunk", "인덱싱 임베딩 청크 실패"));
+        if (containsAny(normalized, "원문", "인용", "근거", "조항", "quote", "citation", "evidence")) {
+            values.addAll(List.of("원문 인용 근거 조항", "quote citation evidence clause"));
         }
-        if (normalized.contains("오류") || normalized.contains("실패")) {
+        if (containsAny(normalized, "로그인", "인증", "세션", "토큰", "login", "auth", "session", "token")) {
+            values.addAll(List.of("login auth authentication session token", "로그인 인증 세션 토큰"));
+        }
+        if (containsAny(normalized, "인덱싱", "임베딩", "청크", "검색", "index", "embedding", "chunk", "search")) {
+            values.addAll(List.of("index indexing embedding chunk search", "인덱싱 임베딩 청크 검색"));
+        }
+        if (containsAny(normalized, "오류", "실패", "예외", "에러", "error", "exception", "failure", "failed")) {
             values.addAll(List.of("error exception failure failed", "오류 예외 실패 원인"));
-        }
-        if (normalized.contains("요약")) {
-            values.add("핵심 요약 주요 내용");
         }
         try {
             values.addAll(domainProfileService.expandedQueries(safeQuery));
@@ -184,7 +186,6 @@ public class SearchService {
                 .limit(12)
                 .toList();
     }
-
     private double rerankBoost(String query, SearchResult result) {
         List<String> terms = queryTerms(query);
         if (terms.isEmpty()) {
@@ -243,13 +244,13 @@ public class SearchService {
                 terms.add(token);
             }
         }
-        if (normalized.contains("차별")) {
-            terms.addAll(List.of("차별", "개선", "예방", "처우", "임금", "복리후생", "교육훈련", "고충"));
+        if (containsAny(normalized, "요약", "개요", "정리", "핵심")) {
+            terms.addAll(List.of("요약", "개요", "핵심", "구조", "근거"));
         }
-        if (normalized.contains("근로자")) {
-            terms.addAll(List.of("기간제", "단시간", "파견", "근로자"));
+        if (containsAny(normalized, "구조", "목차", "섹션", "페이지", "조항")) {
+            terms.addAll(List.of("구조", "목차", "섹션", "페이지", "조항", "heading", "section"));
         }
-        if (normalized.contains("로그인")) {
+        if (containsAny(normalized, "로그인", "인증", "세션", "토큰")) {
             terms.addAll(List.of("로그인", "인증", "세션", "토큰", "login", "auth"));
         }
         return terms.stream()
@@ -258,7 +259,6 @@ public class SearchService {
                 .distinct()
                 .toList();
     }
-
     private boolean isSpreadsheetQuestion(String query) {
         String normalized = normalize(query);
         return normalized.contains("몇명")
@@ -283,42 +283,32 @@ public class SearchService {
 
     private boolean isOverviewQuestion(String query) {
         String normalized = normalize(query);
-        return normalized.contains("summary")
-                || normalized.contains("summarize")
-                || normalized.contains("overview")
-                || normalized.contains("outline")
-                || normalized.contains("main")
-                || normalized.contains("topic")
-                || normalized.contains("요약")
-                || normalized.contains("개요")
-                || normalized.contains("정리")
-                || normalized.contains("주요")
-                || normalized.contains("핵심");
+        return containsAny(normalized,
+                "summary", "summarize", "overview", "outline", "main", "topic",
+                "요약", "개요", "정리", "전체", "핵심", "주요", "무엇", "어떤 내용");
     }
-
     private boolean isStructureQuestion(String query) {
         String normalized = normalize(query);
-        return normalized.contains("structure")
-                || normalized.contains("section")
-                || normalized.contains("page")
-                || normalized.contains("slide")
-                || normalized.contains("sheet")
-                || normalized.contains("table")
-                || normalized.contains("where")
-                || normalized.contains("구조")
-                || normalized.contains("목차")
-                || normalized.contains("섹션")
-                || normalized.contains("페이지")
-                || normalized.contains("표")
-                || normalized.contains("시트")
-                || normalized.contains("어디");
+        return containsAny(normalized,
+                "structure", "section", "page", "slide", "sheet", "table", "where",
+                "구조", "목차", "섹션", "페이지", "슬라이드", "시트", "표", "테이블", "조항", "위치", "어디");
     }
-
     private boolean isStopWord(String token) {
-        return List.of("관련", "대해", "무엇", "뭐가", "어떤", "어디", "있어", "있나요", "되는거야", "되나요", "설명", "알려줘")
-                .contains(token);
+        return List.of(
+                "관련", "대해", "무엇", "뭐", "어떤", "어디", "있는", "없는", "설명", "알려줘", "보여줘",
+                "the", "and", "for", "with", "what", "where", "when", "how", "about", "please", "show", "tell"
+        ).contains(token);
     }
 
+    private boolean containsAny(String value, String... needles) {
+        String safeValue = value == null ? "" : value;
+        for (String needle : needles) {
+            if (safeValue.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
     private void merge(Map<UUID, SearchResult> merged, SearchResult result) {
         SearchResult current = merged.get(result.chunkId());
         if (current == null || result.score() > current.score()) {

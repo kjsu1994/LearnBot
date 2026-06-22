@@ -60,7 +60,7 @@ public class DocumentReranker {
                                     .map(result -> new RerankDocument(
                                             result.chunkId().toString(),
                                             safe(result.title()),
-                                            trim(usefulText(result), 1200)))
+                                            trim(rerankText(result), 1400)))
                                     .toList()))
                     .retrieve()
                     .bodyToMono(RerankResponse.class)
@@ -189,6 +189,35 @@ public class DocumentReranker {
 
     private String usefulText(SearchResult result) {
         return safe(result == null ? "" : result.content()).replaceAll("\\s+", " ").trim();
+    }
+
+    private String rerankText(SearchResult result) {
+        if (result == null) {
+            return "";
+        }
+        List<String> metadata = new ArrayList<>();
+        addMetadata(metadata, "source", result.sourceUri());
+        addMetadata(metadata, "contentType", result.contentType());
+        addMetadata(metadata, "page", metadataString(result, "pageNumber"));
+        addMetadata(metadata, "section", metadataString(result, "sectionTitle"));
+        addMetadata(metadata, "heading", metadataString(result, "headingPath"));
+        addMetadata(metadata, "table", metadataString(result, "tableId"));
+        addMetadata(metadata, "documentType", metadataString(result, "documentType"));
+        addMetadata(metadata, "schema", metadataString(result, "schemaName"));
+        String header = metadata.isEmpty() ? "" : String.join(" | ", metadata) + "\n";
+        return header + usefulText(result);
+    }
+
+    private void addMetadata(List<String> output, String label, String value) {
+        String clean = safe(value).trim();
+        if (!clean.isBlank()) {
+            output.add(label + "=" + clean);
+        }
+    }
+
+    private String metadataString(SearchResult result, String key) {
+        Object value = result == null || result.metadata() == null ? null : result.metadata().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private String trim(String value, int maxChars) {
