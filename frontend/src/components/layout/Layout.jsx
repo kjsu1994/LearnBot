@@ -799,8 +799,6 @@ function WorkspaceShell({
           )}
         </div>
 
-        <ScreenGuide activeView={activeView} />
-
         {error && <div className="alert">{error}</div>}
         {progressMessage && <div className="progress-banner"><Loader2 className="spin" size={16} />{progressMessage}</div>}
 

@@ -34,6 +34,8 @@ function AdminWorkspace({
   users,
   adminSettings,
   adminTuning,
+  adminTuningMetrics,
+  adminTuningRecommendations,
   documentSchemaProfiles = [],
   storageRetention,
   adminTrash = [],
@@ -65,6 +67,8 @@ function AdminWorkspace({
   restoreTrashItem,
   testAdminLlmSettings,
   testAdminTuningLlmSettings,
+  refreshAdminTuningMetrics,
+  resetAdminTuningMetrics,
   refreshAdmin,
   loading,
   codeSourceProps,
@@ -98,6 +102,7 @@ function AdminWorkspace({
     auxiliaryChatModel: '',
   });
   const [tuningTestResult, setTuningTestResult] = useState(null);
+  const [recommendedTuningKeys, setRecommendedTuningKeys] = useState([]);
 
   useEffect(() => {
     setAllowedDomainText((adminSettings?.allowedDomains || []).join('\n'));
@@ -131,6 +136,7 @@ function AdminWorkspace({
       auxiliaryChatModel: adminTuning?.auxiliaryChatModel || '',
     });
     setTuningTestResult(null);
+    setRecommendedTuningKeys([]);
   }, [adminTuning]);
 
   function beginEditSpace(space) {
@@ -279,6 +285,20 @@ function AdminWorkspace({
       ...current,
       [key]: Number.isFinite(numeric) ? numeric : 0,
     }));
+  }
+
+  function previewRecommendedTuning() {
+    const changes = adminTuningRecommendations?.changes || [];
+    if (!changes.length) return;
+    setTuningPreset('custom');
+    setRecommendedTuningKeys(changes.map((change) => change.key));
+    setTuningValues((current) => {
+      const next = { ...current };
+      changes.forEach((change) => {
+        next[change.key] = change.recommendedValue;
+      });
+      return next;
+    });
   }
 
   async function submitTuningSettings(event) {
@@ -455,6 +475,20 @@ function AdminWorkspace({
       groups[category].push(setting);
       return groups;
     }, {});
+    const metricsSummary = adminTuningMetrics?.summary || {};
+    const ollamaStatus = adminTuningMetrics?.ollama || {};
+    const hasMetrics = Number(metricsSummary.requestCount || 0) > 0;
+    const metricValue = (value, suffix = 'ms') => (hasMetrics ? `${value || 0}${suffix}` : '수집 대기');
+    const metricHint = (value, suffix = 'ms', label = '') => (hasMetrics ? `${label}${value || 0}${suffix}` : '질문 실행 후 표시');
+    const metricCards = [
+      { label: '평균 응답', value: metricValue(metricsSummary.avgTotalMs), hint: metricHint(metricsSummary.p95TotalMs, 'ms', 'p95 ') },
+      { label: 'LLM 비중', value: hasMetrics ? `${metricsSummary.avgLlmSharePercent || 0}%` : '수집 대기', hint: hasMetrics ? '생성 단계 비율' : '답변 생성 후 계산' },
+      { label: '검색/임베딩', value: metricValue(metricsSummary.avgSearchMs), hint: metricHint(metricsSummary.avgEmbeddingMs, 'ms', 'embedding ') },
+      { label: 'rerank', value: metricValue(metricsSummary.avgRerankMs), hint: hasMetrics ? '문서 재정렬' : 'rerank 사용 시 표시' },
+      { label: '토큰 예산', value: hasMetrics ? `${metricsSummary.avgPromptTokens || 0}` : '수집 대기', hint: hasMetrics ? `budget ${metricsSummary.promptTokenBudget || '-'}` : `budget ${metricsSummary.promptTokenBudget || adminTuning?.settings?.find((item) => item.key === 'RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED')?.value || '-'}` },
+      { label: 'Ollama 대기', value: hasMetrics ? `${ollamaStatus.estimatedQueue || 0}` : '대기 없음', hint: `parallel ${ollamaStatus.configuredParallel || '-'}` },
+      { label: 'GPU 상태', value: ollamaStatus.gpuMode === 'UNKNOWN' ? '확인 대기' : (ollamaStatus.gpuMode || '확인 대기'), hint: ollamaStatus.primaryModel || adminTuning?.effectivePrimaryChatModel || '-' },
+    ];
 
     return (
       <div className="admin-tabler-shell">
@@ -510,6 +544,100 @@ function AdminWorkspace({
               {tuningPreset !== appliedPresetId ? ' · 저장하면 사용자 지정으로 적용됩니다.' : ''}
             </small>
           </div>
+
+          <section className="tuning-section tuning-metrics-section">
+            <div className="panel-title compact-title">
+              <Cpu size={18} />
+              <div>
+                <h2>모델 상태 / 성능 계측</h2>
+                <p>최근 요청 기준으로 병목과 튜닝 후보를 확인합니다.</p>
+              </div>
+              <div className="tuning-metrics-actions">
+                <button className="ghost-button compact-action" type="button" disabled={loading('admin-tuning-metrics')} onClick={refreshAdminTuningMetrics}>
+                  {loading('admin-tuning-metrics') ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+                  갱신
+                </button>
+                <button className="ghost-button compact-action" type="button" disabled={loading('admin-tuning-metrics-reset')} onClick={resetAdminTuningMetrics}>
+                  {loading('admin-tuning-metrics-reset') ? <Loader2 className="spin" size={14} /> : <Trash2 size={14} />}
+                  리셋
+                </button>
+              </div>
+            </div>
+            <div className="tuning-metric-grid">
+              {metricCards.map((card) => (
+                <article className="tuning-metric-card" key={card.label}>
+                  <small>{card.label}</small>
+                  <strong>{card.value}</strong>
+                  <span>{card.hint}</span>
+                </article>
+              ))}
+            </div>
+            <div className="tuning-recommendation-card">
+              <div>
+                <span className="tuning-recommendation-kicker">{hasMetrics ? '튜닝 추천' : '계측 준비 중'}</span>
+                <strong>{adminTuningRecommendations?.summary || '최근 계측 데이터가 아직 부족합니다.'}</strong>
+                <small>{hasMetrics ? `추천 신뢰도 ${adminTuningRecommendations?.confidence || 'LOW'} · 최근 ${metricsSummary.requestCount || 0}건 기준` : '문서 또는 코드 질문을 실행하면 이 영역에 병목과 추천값이 표시됩니다.'}</small>
+              </div>
+              <button
+                type="button"
+                className="ghost-button compact-action"
+                disabled={!(adminTuningRecommendations?.changes || []).length}
+                onClick={previewRecommendedTuning}
+              >
+                추천값 미리보기
+              </button>
+            </div>
+            {!!(adminTuningRecommendations?.changes || []).length && (
+              <div className="tuning-recommendation-list">
+                {adminTuningRecommendations.changes.map((change) => (
+                  <article key={change.key}>
+                    <strong>{tuningText[change.key]?.[0] || change.key}</strong>
+                    <span>{change.currentValue} → {change.recommendedValue}</span>
+                    <small title={change.risk}>{change.reason}</small>
+                  </article>
+                ))}
+              </div>
+            )}
+            {!!(adminTuningRecommendations?.notes || []).length && (
+              <div className="tuning-note-list">
+                {adminTuningRecommendations.notes.map((note) => (
+                  <small key={note}>{note}</small>
+                ))}
+              </div>
+            )}
+            {!!(adminTuningMetrics?.recent || []).length && (
+              <div className="tuning-recent-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>영역</th>
+                      <th>모드</th>
+                      <th>총 시간</th>
+                      <th>LLM</th>
+                      <th>검색</th>
+                      <th>임베딩</th>
+                      <th>청크</th>
+                      <th>토큰</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminTuningMetrics.recent.slice(0, 8).map((item, index) => (
+                      <tr key={`${item.createdAt}-${index}`}>
+                        <td>{item.domain}</td>
+                        <td>{item.mode}</td>
+                        <td>{item.totalMs}ms</td>
+                        <td>{item.llmMs}ms</td>
+                        <td>{item.searchMs}ms</td>
+                        <td>{item.embeddingMs}ms</td>
+                        <td>{item.contextChunkCount}</td>
+                        <td>{item.promptEvalTokens || 0}/{item.promptTokenBudget || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
           <section className="tuning-section">
             <div className="panel-title compact-title">
@@ -587,6 +715,7 @@ function AdminWorkspace({
                     <label className="tuning-control" key={setting.key} title={`${text[1]} ${text[2]}`}>
                       <span className="tuning-control-head">
                         <strong>{text[0]}</strong>
+                        {recommendedTuningKeys.includes(setting.key) && <em>추천값</em>}
                         {setting.restartRequired && <em>재시작 필요</em>}
                       </span>
                       <small>{text[2]}</small>

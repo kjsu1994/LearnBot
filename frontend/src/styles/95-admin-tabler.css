@@ -561,6 +561,150 @@
   white-space: nowrap;
 }
 
+.admin-tabler-shell .tuning-metrics-section .panel-title {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.admin-tabler-shell .tuning-metrics-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.admin-tabler-shell .tuning-metric-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-tabler-shell .tuning-metric-card,
+.admin-tabler-shell .tuning-recommendation-card,
+.admin-tabler-shell .tuning-recommendation-list article {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(32, 107, 196, 0.12), transparent 42%),
+    linear-gradient(180deg, #eef5ff, #e8f0fa);
+  border: 1px solid #c9d8ea;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 6px 16px rgba(15, 23, 42, 0.045);
+  min-width: 0;
+  padding: 12px;
+}
+
+.admin-tabler-shell .tuning-metric-card small,
+.admin-tabler-shell .tuning-metric-card span,
+.admin-tabler-shell .tuning-recommendation-card small,
+.admin-tabler-shell .tuning-recommendation-list small,
+.admin-tabler-shell .tuning-note-list small {
+  color: var(--tblr-admin-muted);
+  display: block;
+}
+
+.admin-tabler-shell .tuning-metric-card strong {
+  color: var(--tblr-admin-text);
+  display: block;
+  font-size: 20px;
+  font-weight: 850;
+  line-height: 1.1;
+  margin: 5px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-tabler-shell .tuning-recommendation-card {
+  align-items: center;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(32, 107, 196, 0.14), transparent 38%),
+    linear-gradient(135deg, #eaf2ff, #e7eff8);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.admin-tabler-shell .tuning-recommendation-card strong,
+.admin-tabler-shell .tuning-recommendation-list strong {
+  color: var(--tblr-admin-text);
+  display: block;
+}
+
+.admin-tabler-shell .tuning-recommendation-kicker {
+  background: #dcecff;
+  border: 1px solid #cdddf0;
+  border-radius: 999px;
+  color: var(--tblr-admin-primary);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  margin-bottom: 8px;
+  padding: 4px 9px;
+}
+
+.admin-tabler-shell .tuning-recommendation-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-tabler-shell .tuning-recommendation-list span {
+  background: #eef5ff;
+  border: 1px solid #cdddf0;
+  border-radius: 999px;
+  color: var(--tblr-admin-primary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  margin: 8px 0;
+  padding: 4px 9px;
+}
+
+.admin-tabler-shell .tuning-note-list {
+  background:
+    linear-gradient(135deg, #eef5ff, #e8f0fa);
+  border: 1px solid #c9d8ea;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.admin-tabler-shell .tuning-note-list small {
+  color: #4f6073;
+}
+
+.admin-tabler-shell .tuning-recent-table {
+  background: #ffffff;
+  border: 1px solid var(--tblr-admin-border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.admin-tabler-shell .tuning-recent-table table {
+  border-collapse: collapse;
+  min-width: 760px;
+  width: 100%;
+}
+
+.admin-tabler-shell .tuning-recent-table th,
+.admin-tabler-shell .tuning-recent-table td {
+  border-bottom: 1px solid #edf1f5;
+  color: var(--tblr-admin-text);
+  font-size: 12px;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-tabler-shell .tuning-recent-table th {
+  background: #f6f8fb;
+  color: var(--tblr-admin-muted);
+  font-weight: 800;
+}
+
 .admin-user-modal {
   border-radius: 8px;
 }
@@ -629,6 +773,22 @@
 
   .admin-tabler-shell .tuning-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-tabler-shell .tuning-metric-grid,
+  .admin-tabler-shell .tuning-recommendation-list {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabler-shell .tuning-metrics-section .panel-title,
+  .admin-tabler-shell .tuning-recommendation-card {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .admin-tabler-shell .tuning-metrics-actions {
+    justify-content: flex-start;
   }
 
   .admin-tabler-shell .tuning-range-row {

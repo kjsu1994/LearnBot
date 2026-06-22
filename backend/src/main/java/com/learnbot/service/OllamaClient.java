@@ -27,6 +27,7 @@ public class OllamaClient {
     private final AdminSettingsService adminSettingsService;
     private final RuntimeTuningService runtimeTuningService;
     private final AtomicInteger primaryRequests = new AtomicInteger(0);
+    private final AtomicInteger embeddingRequests = new AtomicInteger(0);
 
     @Autowired
     public OllamaClient(
@@ -47,6 +48,7 @@ public class OllamaClient {
     }
 
     public List<List<Double>> embed(List<String> inputs) {
+        embeddingRequests.incrementAndGet();
         try {
             EmbedResponse response = webClient.post()
                     .uri("/api/embed")
@@ -64,6 +66,8 @@ public class OllamaClient {
             return response.embeddings();
         } catch (WebClientResponseException.NotFound ex) {
             return inputs.stream().map(this::embedLegacy).toList();
+        } finally {
+            embeddingRequests.updateAndGet(current -> Math.max(0, current - 1));
         }
     }
 
@@ -131,6 +135,14 @@ public class OllamaClient {
 
     public boolean hasPrimaryRequestInFlight() {
         return primaryRequests.get() > 0;
+    }
+
+    public int primaryRequestCount() {
+        return primaryRequests.get();
+    }
+
+    public int embeddingRequestCount() {
+        return embeddingRequests.get();
     }
 
     private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout) {

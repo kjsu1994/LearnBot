@@ -3811,6 +3811,92 @@ body > .answer-modal-portal-backdrop .answer-modal .markdown-code {
   background: rgba(255, 255, 255, 0.045);
 }
 
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(139, 92, 246, 0.12), transparent 34%),
+    rgba(10, 10, 11, 0.66);
+  border-color: rgba(255, 255, 255, 0.075);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 24px 70px rgba(0, 0, 0, 0.2);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section .panel-title {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section .panel-title svg {
+  background: rgba(139, 92, 246, 0.14);
+  color: rgba(216, 180, 254, 0.94);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section h2,
+.workspace-shell-v3 .admin-tabler-shell .tuning-metric-card strong,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-card strong,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-list strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section p,
+.workspace-shell-v3 .admin-tabler-shell .tuning-metric-card small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-metric-card span,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-card small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-list small,
+.workspace-shell-v3 .admin-tabler-shell .tuning-note-list small {
+  color: rgba(226, 232, 240, 0.58);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metric-card,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-card,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-list article,
+.workspace-shell-v3 .admin-tabler-shell .tuning-note-list,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.024)),
+    rgba(10, 10, 11, 0.62);
+  border-color: rgba(255, 255, 255, 0.085);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 16px 44px rgba(0, 0, 0, 0.16);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-kicker,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recommendation-list span {
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(167, 139, 250, 0.26);
+  color: rgba(237, 233, 254, 0.9);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section .ghost-button {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-metrics-section .ghost-button:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.16);
+  border-color: rgba(167, 139, 250, 0.26);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table table {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table th {
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(226, 232, 240, 0.48);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table td,
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table th {
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .tuning-recent-table td {
+  color: rgba(226, 232, 240, 0.74);
+}
+
 .workspace-product .code-table-file strong,
 .workspace-product .document-table-title strong,
 .workspace-product .saved-table-title strong {
@@ -4061,4 +4147,101 @@ body > .answer-modal-portal-backdrop .answer-modal .markdown-code {
     justify-content: center;
     width: 100%;
   }
+}
+
+/* Product-theme overrides for diagnostics and saved evidence surfaces. */
+.workspace-shell-v3 .code-workspace-product .confidence-strip,
+.workspace-shell-v3 .document-workspace-product .confidence-strip {
+  background: rgba(9, 9, 11, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 46px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-summary,
+.workspace-shell-v3 .document-workspace-product .confidence-summary {
+  gap: 10px;
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-summary strong,
+.workspace-shell-v3 .document-workspace-product .confidence-summary strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-toggle,
+.workspace-shell-v3 .document-workspace-product .confidence-toggle {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(167, 139, 250, 0.28);
+  color: rgba(237, 233, 254, 0.9);
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-toggle:hover:not(:disabled),
+.workspace-shell-v3 .document-workspace-product .confidence-toggle:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(196, 181, 253, 0.42);
+  color: #ffffff;
+}
+
+.workspace-shell-v3 .code-workspace-product .diagnostic-preview,
+.workspace-shell-v3 .document-workspace-product .diagnostic-preview {
+  background: rgba(2, 6, 23, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px;
+  color: rgba(226, 232, 240, 0.68);
+  display: block;
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-strip ul,
+.workspace-shell-v3 .document-workspace-product .confidence-strip ul {
+  background: rgba(2, 6, 23, 0.48);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  margin-top: 10px;
+  padding: 10px 12px 10px 28px;
+}
+
+.workspace-shell-v3 .code-workspace-product .confidence-strip li,
+.workspace-shell-v3 .document-workspace-product .confidence-strip li {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-section {
+  background: rgba(9, 9, 11, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 20px 54px rgba(0, 0, 0, 0.18);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-header small {
+  color: rgba(226, 232, 240, 0.52);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-card {
+  background: rgba(2, 6, 23, 0.58);
+  border-color: rgba(148, 163, 184, 0.14);
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-card:hover {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-card strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-card small {
+  color: rgba(226, 232, 240, 0.54);
+}
+
+.workspace-shell-v3 .saved-workspace-product .evidence-card p {
+  color: rgba(226, 232, 240, 0.68);
 }

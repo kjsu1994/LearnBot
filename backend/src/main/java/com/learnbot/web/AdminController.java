@@ -5,6 +5,8 @@ import com.learnbot.dto.AdminUserSummary;
 import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
 import com.learnbot.dto.AdminTuningResponse;
+import com.learnbot.dto.AdminTuningMetricsResponse;
+import com.learnbot.dto.AdminTuningRecommendationResponse;
 import com.learnbot.dto.AdminTuningUpdateRequest;
 import com.learnbot.dto.DocumentSchemaProfileResponse;
 import com.learnbot.dto.DocumentSchemaProfileUpdateRequest;
@@ -32,6 +34,7 @@ import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.DocumentSchemaProfileService;
 import com.learnbot.service.RuntimeTuningService;
+import com.learnbot.service.RagMetricsService;
 import com.learnbot.service.SpaceTransferService;
 import com.learnbot.service.StorageRetentionService;
 import com.learnbot.service.TrashService;
@@ -66,6 +69,7 @@ public class AdminController {
     private final AuditService auditService;
     private final AdminSettingsService adminSettingsService;
     private final RuntimeTuningService runtimeTuningService;
+    private final RagMetricsService ragMetricsService;
     private final DocumentSchemaProfileService documentSchemaProfileService;
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
@@ -77,6 +81,7 @@ public class AdminController {
             AuditService auditService,
             AdminSettingsService adminSettingsService,
             RuntimeTuningService runtimeTuningService,
+            RagMetricsService ragMetricsService,
             DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
             SpaceTransferService spaceTransferService,
@@ -87,6 +92,7 @@ public class AdminController {
         this.auditService = auditService;
         this.adminSettingsService = adminSettingsService;
         this.runtimeTuningService = runtimeTuningService;
+        this.ragMetricsService = ragMetricsService;
         this.documentSchemaProfileService = documentSchemaProfileService;
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
@@ -279,6 +285,25 @@ public class AdminController {
                 request.primaryChatModel(),
                 request.auxiliaryChatModel()
         );
+    }
+
+    @GetMapping("/tuning/metrics")
+    AdminTuningMetricsResponse tuningMetrics() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return ragMetricsService.current();
+    }
+
+    @PostMapping("/tuning/metrics/reset")
+    AdminTuningMetricsResponse resetTuningMetrics() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        ragMetricsService.reset();
+        return ragMetricsService.current();
+    }
+
+    @GetMapping("/tuning/recommendations")
+    AdminTuningRecommendationResponse tuningRecommendations() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return ragMetricsService.recommendations();
     }
 
     @GetMapping("/document-graph/schema-profiles")

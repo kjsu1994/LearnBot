@@ -78,7 +78,14 @@ function ModeControl({ modes, value, setValue, className = '' }) {
   return (
     <div className={`mode-control ${className}`} aria-label="답변 모드">
       {modes.map((mode) => (
-        <button className={value === mode.value ? 'mode-button active' : 'mode-button'} key={mode.value} type="button" onClick={() => setValue(mode.value)}>
+        <button
+          className={value === mode.value ? 'mode-button active' : 'mode-button'}
+          key={mode.value}
+          type="button"
+          title={mode.description || mode.label}
+          aria-label={mode.description ? `${mode.label}: ${mode.description}` : mode.label}
+          onClick={() => setValue(mode.value)}
+        >
           {mode.label}
         </button>
       ))}

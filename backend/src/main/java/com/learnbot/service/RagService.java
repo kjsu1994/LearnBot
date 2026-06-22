@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.AdminTuningMetricSample;
 import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.DocumentChunkDetail;
@@ -46,6 +47,7 @@ public class RagService {
     private final LearnBotProperties properties;
     private final RagPipelineService pipelineService;
     private final DocumentDomainProfileService domainProfileService;
+    private final RagMetricsService ragMetricsService;
 
     public RagService(
             SearchService searchService,
@@ -53,7 +55,7 @@ public class RagService {
             DocumentRepository documentRepository,
             LearnBotProperties properties
     ) {
-        this(searchService, ollamaClient, documentRepository, properties, new RagPipelineService(ollamaClient, properties), new DocumentDomainProfileService());
+        this(searchService, ollamaClient, documentRepository, properties, new RagPipelineService(ollamaClient, properties), new DocumentDomainProfileService(), null);
     }
 
     public RagService(
@@ -63,7 +65,7 @@ public class RagService {
             LearnBotProperties properties,
             RagPipelineService pipelineService
     ) {
-        this(searchService, ollamaClient, documentRepository, properties, pipelineService, new DocumentDomainProfileService());
+        this(searchService, ollamaClient, documentRepository, properties, pipelineService, new DocumentDomainProfileService(), null);
     }
 
     @Autowired
@@ -73,7 +75,8 @@ public class RagService {
             DocumentRepository documentRepository,
             LearnBotProperties properties,
             RagPipelineService pipelineService,
-            DocumentDomainProfileService domainProfileService
+            DocumentDomainProfileService domainProfileService,
+            RagMetricsService ragMetricsService
     ) {
         this.searchService = searchService;
         this.ollamaClient = ollamaClient;
@@ -81,6 +84,7 @@ public class RagService {
         this.properties = properties;
         this.pipelineService = pipelineService;
         this.domainProfileService = domainProfileService == null ? new DocumentDomainProfileService() : domainProfileService;
+        this.ragMetricsService = ragMetricsService;
     }
 
     public AskResponse ask(String question, SearchFilter filter, String mode) {
@@ -114,6 +118,7 @@ public class RagService {
         long retrievalMs = elapsedMs(retrievalStarted);
         List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
+            recordMetrics("document", answerMode.value(), requestedSpeedProfile.name(), retrieval, retrievalMs, 0, 0, 0, 0, 0, 0, false, false, elapsedMs(askStarted));
             return new AskResponse(
                     answerMode.value(),
                     "근거가 부족해 답변할 수 없습니다.",
@@ -127,6 +132,7 @@ public class RagService {
         Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(question, citations);
         if (computedAnswer.isPresent()) {
             ComputedAnswer computed = computedAnswer.get();
+            recordMetrics("document", answerMode.value(), requestedSpeedProfile.name(), retrieval, retrievalMs, 0, 0, computed.citations().size(), 0, 0, 0, false, false, elapsedMs(askStarted));
             return new AskResponse(
                     answerMode.value(),
                     computed.answer(),
@@ -207,6 +213,22 @@ public class RagService {
                 context.length(),
                 finalChatResult == null ? 0 : finalChatResult.promptEvalCount(),
                 finalChatResult == null ? 0 : finalChatResult.evalCount()
+        );
+        recordMetrics(
+                "document",
+                answerMode.value(),
+                retrieval.effectiveProfile().name(),
+                retrieval,
+                timing.retrievalMs(),
+                timing.contextMs(),
+                timing.llmMs(),
+                citations.size(),
+                timing.promptTokens(),
+                timing.outputTokens(),
+                timing.contextChars(),
+                llmUnavailable || answerRewritten,
+                llmUnavailable,
+                timing.totalMs()
         );
         log.info("RAG answer timing domain=document profile={} effectiveProfile={} retrievalMs={} embeddingMs={} vectorSearchMs={} keywordSearchMs={} rerankMs={} adjacentMs={} graphExpansionMs={} contextMs={} llmMs={} totalMs={} contextChars={} promptTokens={} outputTokens={} citations={} queryCount={} question={}",
                 requestedSpeedProfile.name(),
@@ -2125,6 +2147,50 @@ public class RagService {
 
     private long elapsedMs(long startedNanos) {
         return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
+    }
+
+    private void recordMetrics(
+            String domain,
+            String mode,
+            String profile,
+            DocumentRetrieval retrieval,
+            long retrievalMs,
+            long contextMs,
+            long llmMs,
+            int contextChunkCount,
+            int promptTokens,
+            int outputTokens,
+            int contextChars,
+            boolean fallbackUsed,
+            boolean llmUnavailable,
+            long totalMs
+    ) {
+        if (ragMetricsService == null || retrieval == null) {
+            return;
+        }
+        try {
+            ragMetricsService.record(new AdminTuningMetricSample(
+                    java.time.Instant.now(),
+                    domain,
+                    mode,
+                    totalMs,
+                    llmMs,
+                    retrievalMs,
+                    retrieval.timing().embeddingMs(),
+                    retrieval.timing().rerankMs(),
+                    contextMs,
+                    pipelineService.promptTokenBudgetBalanced(),
+                    promptTokens,
+                    outputTokens,
+                    contextChunkCount,
+                    retrieval.queryCount(),
+                    fallbackUsed,
+                    llmUnavailable,
+                    profile == null ? "" : profile
+            ));
+        } catch (RuntimeException ex) {
+            log.debug("Document RAG metrics skipped contextChars={} reason={}", contextChars, ex.getMessage());
+        }
     }
 
     private int maxOutputTokens(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {

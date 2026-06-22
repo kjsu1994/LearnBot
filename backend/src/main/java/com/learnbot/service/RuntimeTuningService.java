@@ -142,6 +142,14 @@ public class RuntimeTuningService {
         return value(LLM_MAX_OUTPUT_TOKENS);
     }
 
+    public int ollamaMaxLoadedModels() {
+        return value(OLLAMA_MAX_LOADED_MODELS);
+    }
+
+    public int ollamaNumParallel() {
+        return value(OLLAMA_NUM_PARALLEL);
+    }
+
     private int value(String key) {
         TuningDefinition definition = definition(key);
         return settingsRepository.findValue(settingKey(key))

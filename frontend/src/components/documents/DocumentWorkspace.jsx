@@ -1,11 +1,10 @@
 ﻿import { useEffect, useState } from 'react';
-import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, HelpCircle, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { RagAskComposer } from '../common/RagAskComposer.jsx';
-import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { DataTable } from '../ui/data-table.jsx';
@@ -48,7 +47,7 @@ function DocumentWorkspace(props) {
                 <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
               </>
             )}
-            guide={<QuestionGuide guide={activeAnswerModeGuide} />}
+            guide={null}
             value={props.question}
             setValue={props.setQuestion}
             onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
@@ -170,8 +169,6 @@ function DocumentSourcePanel(props) {
     ingestFile = (event) => event.preventDefault(),
     loading = () => false,
   } = props;
-  const [webIngestHelpOpen, setWebIngestHelpOpen] = useState(false);
-
   return (
     <section className="panel">
       <div className="panel-title">
@@ -180,9 +177,6 @@ function DocumentSourcePanel(props) {
           <h2>문서 소스 추가</h2>
           <p>웹 URL과 PDF, DOCX, PPTX, Markdown, TXT, CSV, Excel 파일을 RAG 근거로 인덱싱합니다.</p>
         </div>
-            <button className="icon-button" type="button" title="문서 수집 옵션 안내" onClick={() => setWebIngestHelpOpen(true)}>
-          <HelpCircle size={16} />
-        </button>
       </div>
       <form className="stack" onSubmit={ingestWeb}>
         <label htmlFor="admin-web-url">웹 URL</label>
@@ -297,7 +291,6 @@ function DocumentSourcePanel(props) {
           onClose={closeDocumentPreview}
         />
       )}
-      {webIngestHelpOpen && <WebIngestHelpModal onClose={() => setWebIngestHelpOpen(false)} />}
     </section>
   );
 }

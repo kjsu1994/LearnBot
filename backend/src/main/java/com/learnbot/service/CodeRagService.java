@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.AdminTuningMetricSample;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.CodeSearchResult;
@@ -33,6 +34,7 @@ public class CodeRagService {
     private final LearnBotProperties properties;
     private final RagPipelineService pipelineService;
     private final CodeEvidenceRanker evidenceRanker;
+    private final RagMetricsService ragMetricsService;
 
     @Autowired
     public CodeRagService(
@@ -42,7 +44,8 @@ public class CodeRagService {
             OllamaClient ollamaClient,
             LearnBotProperties properties,
             RagPipelineService pipelineService,
-            CodeEvidenceRanker evidenceRanker
+            CodeEvidenceRanker evidenceRanker,
+            RagMetricsService ragMetricsService
     ) {
         this.searchService = searchService;
         this.referenceService = referenceService;
@@ -51,6 +54,19 @@ public class CodeRagService {
         this.properties = properties;
         this.pipelineService = pipelineService;
         this.evidenceRanker = evidenceRanker;
+        this.ragMetricsService = ragMetricsService;
+    }
+
+    public CodeRagService(
+            CodeSearchService searchService,
+            CodeReferenceService referenceService,
+            CommitInsightService commitInsightService,
+            OllamaClient ollamaClient,
+            LearnBotProperties properties,
+            RagPipelineService pipelineService,
+            CodeEvidenceRanker evidenceRanker
+    ) {
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, evidenceRanker, null);
     }
 
     public CodeRagService(
@@ -61,7 +77,7 @@ public class CodeRagService {
             LearnBotProperties properties,
             RagPipelineService pipelineService
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, new CodeEvidenceRanker(properties));
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, new CodeEvidenceRanker(properties), null);
     }
 
     CodeRagService(
@@ -71,7 +87,7 @@ public class CodeRagService {
             OllamaClient ollamaClient,
             LearnBotProperties properties
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties), new CodeEvidenceRanker(properties));
+        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties), new CodeEvidenceRanker(properties), null);
     }
 
     CodeRagService(
@@ -88,6 +104,9 @@ public class CodeRagService {
     }
 
     public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
+        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
+            return commitInsightService.answer(repositoryId, question);
+        }
         ollamaClient.beginPrimaryRequest();
         try {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit);
@@ -97,14 +116,15 @@ public class CodeRagService {
     }
 
     private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
-        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
-            return commitInsightService.answer(repositoryId, question);
-        }
+        long askStarted = System.nanoTime();
         CodeQuestionMode questionMode = classifyCodeQuestion(question, mode);
         int safeLimit = safeLimit(questionMode, limit);
+        long retrievalStarted = System.nanoTime();
         CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);
+        long retrievalMs = elapsedMs(retrievalStarted);
         List<CodeSearchResult> results = retrieval.results();
         if (results.isEmpty()) {
+            recordMetrics(questionMode.value(), retrieval, retrievalMs, 0, 0, 0, 0, 0, false, false, elapsedMs(askStarted));
             return new CodeAskResponse(
                     questionMode.value(),
                     "코드 근거가 부족해 답변할 수 없습니다. 질문 범위를 좁히거나 파일명, 화면명, 메서드명 같은 단서를 더 넣어주세요.",
@@ -142,8 +162,13 @@ public class CodeRagService {
         boolean answerRewritten = false;
         boolean answerRetried = false;
         String answerDoneReason = null;
+        OllamaClient.ChatResult finalChatResult = null;
+        long llmMs = 0;
         try {
+            long llmStarted = System.nanoTime();
             OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            llmMs += elapsedMs(llmStarted);
+            finalChatResult = chatResult;
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
@@ -151,11 +176,14 @@ public class CodeRagService {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
+                long retryStarted = System.nanoTime();
                 OllamaClient.ChatResult retryResult = ollamaClient.chatResult(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
                 if (qualityFailureReason(retryAnswer, answerResults.size(), retryResult.doneReason()) == null) {
                     answer = retryAnswer;
                     answerDoneReason = retryResult.doneReason();
+                    finalChatResult = retryResult;
                     answerRetried = true;
                 }
             }
@@ -170,6 +198,19 @@ public class CodeRagService {
                     : fallbackAnswer(questionMode, question, answerResults);
             answerRewritten = true;
         }
+        recordMetrics(
+                questionMode.value(),
+                retrieval,
+                retrievalMs,
+                0,
+                llmMs,
+                answerResults.size(),
+                finalChatResult == null ? 0 : finalChatResult.promptEvalCount(),
+                finalChatResult == null ? 0 : finalChatResult.evalCount(),
+                llmUnavailable || answerRewritten,
+                llmUnavailable,
+                elapsedMs(askStarted)
+        );
         return new CodeAskResponse(
                 questionMode.value(),
                 answer,
@@ -1060,6 +1101,51 @@ public class CodeRagService {
 
     private String nullable(String prefix, String value) {
         return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
+    private long elapsedMs(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
+    }
+
+    private void recordMetrics(
+            String mode,
+            CodeRetrieval retrieval,
+            long retrievalMs,
+            long contextMs,
+            long llmMs,
+            int contextChunkCount,
+            int promptTokens,
+            int outputTokens,
+            boolean fallbackUsed,
+            boolean llmUnavailable,
+            long totalMs
+    ) {
+        if (ragMetricsService == null || retrieval == null) {
+            return;
+        }
+        try {
+            ragMetricsService.record(new AdminTuningMetricSample(
+                    java.time.Instant.now(),
+                    "code",
+                    mode,
+                    totalMs,
+                    llmMs,
+                    retrievalMs,
+                    0,
+                    0,
+                    contextMs,
+                    pipelineService.promptTokenBudgetBalanced(),
+                    promptTokens,
+                    outputTokens,
+                    contextChunkCount,
+                    retrieval.queryPlan().queries().size(),
+                    fallbackUsed,
+                    llmUnavailable,
+                    ""
+            ));
+        } catch (RuntimeException ignored) {
+            // Metrics must never block code answers.
+        }
     }
 
     private record CodeRetrieval(

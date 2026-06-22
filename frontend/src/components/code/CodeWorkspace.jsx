@@ -6,7 +6,6 @@ import { escapeHtml, highlightLanguage, highlightedLineHtml } from '../../lib/hi
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { RagAskComposer } from '../common/RagAskComposer.jsx';
-import { QuestionGuide } from '../layout/Layout.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
@@ -141,7 +140,7 @@ function CodeWorkspace(props) {
                 <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
               </>
             )}
-            guide={<QuestionGuide guide={activeCodeModeGuide} />}
+            guide={null}
             value={codeQuestion}
             setValue={setCodeQuestion}
             onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
@@ -172,7 +171,6 @@ function CodeWorkspace(props) {
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
           <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
           <div className="code-question-toolbar">
-            <QuestionGuide guide={activeCodeModeGuide} />
             <button className="code-ask-button" disabled={!codeQuestion || loading('code-ask')}>
               {loading('code-ask') ? <Loader2 className="spin" size={15} /> : <MessageSquare size={15} />}
               코드 질문
