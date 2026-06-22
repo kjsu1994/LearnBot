@@ -159,14 +159,15 @@ public class RuntimeTuningService {
     }
 
     private AdminTuningSetting toResponse(TuningDefinition definition) {
-        int effective = value(definition.key());
+        int requested = value(definition.key());
+        int effective = definition.restartRequired() ? definition.defaultValue() : requested;
         return new AdminTuningSetting(
                 definition.key(),
                 definition.label(),
                 definition.description(),
                 definition.category(),
                 definition.control(),
-                effective,
+                requested,
                 effective,
                 definition.defaultValue(),
                 definition.min(),
@@ -233,17 +234,24 @@ public class RuntimeTuningService {
 
     private List<String> warnings(List<AdminTuningSetting> settings) {
         List<String> warnings = new ArrayList<>();
-        int llmContext = settings.stream().filter(item -> LLM_CONTEXT_WINDOW.equals(item.key())).findFirst().map(AdminTuningSetting::value).orElse(properties.getOllama().getContextWindow());
-        int ollamaContext = settings.stream().filter(item -> OLLAMA_CONTEXT_LENGTH.equals(item.key())).findFirst().map(AdminTuningSetting::value).orElse(llmContext);
+        int llmContext = settings.stream()
+                .filter(item -> LLM_CONTEXT_WINDOW.equals(item.key()))
+                .findFirst()
+                .map(AdminTuningSetting::value)
+                .orElse(properties.getOllama().getContextWindow());
+        int ollamaContext = settings.stream()
+                .filter(item -> OLLAMA_CONTEXT_LENGTH.equals(item.key()))
+                .findFirst()
+                .map(AdminTuningSetting::value)
+                .orElse(llmContext);
         if (llmContext != ollamaContext) {
             warnings.add("LLM context window and Ollama context length differ. The smaller value may effectively limit prompts.");
         }
-        if (settings.stream().anyMatch(item -> item.restartRequired() && item.value() != item.defaultValue())) {
-            warnings.add("재시작 후에 해당 튜닝값이 적용됩니다.");
+        if (settings.stream().anyMatch(item -> item.restartRequired() && item.value() != item.effectiveValue())) {
+            warnings.add("컨테이너 환경값과 저장된 튜닝값이 달라 아직 일부 Ollama 튜닝값이 실제 적용되지 않았습니다. Docker 환경변수 반영 후 Ollama 컨테이너를 재시작하세요.");
         }
         return warnings;
     }
-
     private int validate(TuningDefinition definition, Integer value, Map<String, Integer> requestedValues) {
         if (value == null) {
             throw new IllegalArgumentException(definition.label() + " is required.");
@@ -332,3 +340,4 @@ public class RuntimeTuningService {
     ) {
     }
 }
+

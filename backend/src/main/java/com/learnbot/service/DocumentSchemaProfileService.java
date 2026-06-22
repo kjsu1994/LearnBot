@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.learnbot.dto.DocumentSchemaProfileCreateRequest;
 import com.learnbot.dto.DocumentSchemaProfileResponse;
 import com.learnbot.dto.DocumentSchemaProfileUpdateRequest;
 import com.learnbot.repository.DocumentSchemaProfileRepository;
@@ -53,6 +54,9 @@ public class DocumentSchemaProfileService {
     public DocumentSchemaProfileResponse updateProfile(String schemaName, DocumentSchemaProfileUpdateRequest request) {
         DocumentSchemaProfileResponse current = repository.findByName(normalizeName(schemaName))
                 .orElseThrow(() -> new IllegalArgumentException("Unknown schema profile: " + schemaName));
+        if (CORE_SCHEMA.equals(current.schemaName())) {
+            throw new IllegalArgumentException("Core schema profile cannot be edited.");
+        }
         String description = nonBlank(request.description(), current.description());
         List<String> documentTypes = normalizeTokens(request.documentTypes(), current.documentTypes());
         List<String> entityTypes = normalizeTokens(request.entityTypes(), current.entityTypes());
@@ -62,10 +66,41 @@ public class DocumentSchemaProfileService {
         if (documentTypes.isEmpty()) {
             throw new IllegalArgumentException("At least one document type is required.");
         }
+        if (defaultProfile && !CORE_SCHEMA.equals(current.schemaName())) {
+            throw new IllegalArgumentException("Only CORE can be the default schema profile.");
+        }
         if (defaultProfile && !enabled) {
             throw new IllegalArgumentException("Default schema profile must be enabled.");
         }
+        ensureDocumentTypesNotUsedByAnotherEnabledProfile(current.schemaName(), documentTypes, enabled);
         return repository.update(current.schemaName(), description, documentTypes, entityTypes, relationTypes, enabled, defaultProfile);
+    }
+
+    public DocumentSchemaProfileResponse createProfile(DocumentSchemaProfileCreateRequest request) {
+        String schemaName = normalizeName(request.schemaName());
+        if (schemaName.isBlank()) {
+            throw new IllegalArgumentException("Schema name is required.");
+        }
+        if (repository.findByName(schemaName).isPresent()) {
+            throw new IllegalArgumentException("Schema profile already exists: " + schemaName);
+        }
+        String description = nonBlank(request.description(), "Custom document graph schema profile.");
+        List<String> documentTypes = normalizeTokens(request.documentTypes(), List.of());
+        List<String> entityTypes = normalizeTokens(request.entityTypes(), List.of());
+        List<String> relationTypes = normalizeTokens(request.relationTypes(), List.of());
+        boolean enabled = request.enabled() == null || request.enabled();
+        boolean defaultProfile = Boolean.TRUE.equals(request.defaultProfile());
+        if (documentTypes.isEmpty()) {
+            throw new IllegalArgumentException("At least one document type is required.");
+        }
+        if (defaultProfile && !CORE_SCHEMA.equals(schemaName)) {
+            throw new IllegalArgumentException("Only CORE can be the default schema profile.");
+        }
+        if (defaultProfile && !enabled) {
+            throw new IllegalArgumentException("Default schema profile must be enabled.");
+        }
+        ensureDocumentTypesNotUsedByAnotherEnabledProfile(schemaName, documentTypes, enabled);
+        return repository.create(UUID.randomUUID(), schemaName, description, documentTypes, entityTypes, relationTypes, enabled, defaultProfile);
     }
 
     public String schemaNameFor(String documentType) {
@@ -96,5 +131,28 @@ public class DocumentSchemaProfileService {
 
     private String nonBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private void ensureDocumentTypesNotUsedByAnotherEnabledProfile(String schemaName, List<String> documentTypes, boolean enabled) {
+        if (!enabled || documentTypes == null || documentTypes.isEmpty()) {
+            return;
+        }
+        List<String> normalizedDocumentTypes = documentTypes.stream()
+                .map(this::normalizeName)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        for (DocumentSchemaProfileResponse profile : repository.findAll()) {
+            if (!profile.enabled() || schemaName.equals(profile.schemaName())) {
+                continue;
+            }
+            for (String type : profile.documentTypes()) {
+                String normalizedType = normalizeName(type);
+                if (normalizedDocumentTypes.contains(normalizedType)) {
+                    throw new IllegalArgumentException("Document type already used by enabled schema profile "
+                            + profile.schemaName() + ": " + normalizedType);
+                }
+            }
+        }
     }
 }

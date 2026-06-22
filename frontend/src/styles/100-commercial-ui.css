@@ -3897,6 +3897,268 @@ body > .answer-modal-portal-backdrop .answer-modal .markdown-code {
   color: rgba(226, 232, 240, 0.74);
 }
 
+.workspace-shell-v3 .admin-tabler-shell.admin-schema-shell,
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(139, 92, 246, 0.12), transparent 34%),
+    rgba(10, 10, 11, 0.66);
+  border-color: rgba(255, 255, 255, 0.075);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 24px 70px rgba(0, 0, 0, 0.2);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel .panel-title {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel .panel-title svg {
+  background: rgba(139, 92, 246, 0.14);
+  color: rgba(216, 180, 254, 0.94);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel h2,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .result-heading strong,
+.workspace-shell-v3 .admin-tabler-shell .schema-detail-editor summary,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card label,
+.workspace-shell-v3 .admin-tabler-shell .schema-detail-editor label,
+.workspace-shell-v3 .admin-tabler-shell .schema-operator-note strong {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel p,
+.workspace-shell-v3 .admin-tabler-shell .schema-admin-panel small,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card small,
+.workspace-shell-v3 .admin-tabler-shell .schema-operator-note small,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .field-help {
+  color: rgba(226, 232, 240, 0.58) !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-operator-note,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card,
+.workspace-shell-v3 .admin-tabler-shell .schema-detail-editor {
+  backdrop-filter: blur(18px);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.024)),
+    rgba(10, 10, 11, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 16px 44px rgba(0, 0, 0, 0.16) !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card textarea,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .schema-detail-editor textarea {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.024)),
+    rgba(2, 6, 23, 0.62) !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 32px rgba(0, 0, 0, 0.12) !important;
+  color: rgba(255, 255, 255, 0.86) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.86);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card textarea:hover,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .schema-detail-editor textarea:hover {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(255, 255, 255, 0.028)),
+    rgba(2, 6, 23, 0.68) !important;
+  border-color: rgba(167, 139, 250, 0.22) !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card textarea:focus,
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .schema-detail-editor textarea:focus {
+  background: rgba(2, 6, 23, 0.78) !important;
+  border-color: rgba(196, 181, 253, 0.38) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 0 0 3px rgba(139, 92, 246, 0.16) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  outline: none;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card textarea::placeholder {
+  color: rgba(226, 232, 240, 0.32) !important;
+  -webkit-text-fill-color: rgba(226, 232, 240, 0.32);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-editor-card .result-heading span,
+.workspace-shell-v3 .admin-tabler-shell .schema-detail-editor summary::after {
+  background: rgba(139, 92, 246, 0.14) !important;
+  border-color: rgba(167, 139, 250, 0.26) !important;
+  color: rgba(237, 233, 254, 0.9) !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-detail-editor[open] summary {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-title-actions button:not(.ghost-button) {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.88), rgba(37, 99, 235, 0.82)),
+    rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(196, 181, 253, 0.42) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 14px 34px rgba(79, 70, 229, 0.24) !important;
+  color: #ffffff !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-title-actions button:not(.ghost-button) svg {
+  color: #ffffff !important;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-title-actions button:not(.ghost-button):hover:not(:disabled) {
+  background:
+    linear-gradient(135deg, rgba(167, 139, 250, 0.94), rgba(59, 130, 246, 0.9)),
+    rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(221, 214, 254, 0.58) !important;
+  transform: translateY(-1px);
+}
+
+.workspace-shell-v3 .admin-user-modal .schema-help-content .detail-box,
+.workspace-shell-v3 .admin-user-modal .schema-help-grid article {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.024)),
+    rgba(10, 10, 11, 0.66) !important;
+  border-color: rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 14px 36px rgba(0, 0, 0, 0.16) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal .schema-help-content strong,
+.workspace-shell-v3 .admin-user-modal .schema-help-grid strong {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal .schema-help-content small,
+.workspace-shell-v3 .admin-user-modal .schema-help-grid small {
+  color: rgba(226, 232, 240, 0.66) !important;
+  line-height: 1.65;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(139, 92, 246, 0.14), transparent 34%),
+    rgba(10, 10, 11, 0.76) !important;
+  border-color: rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 28px 84px rgba(0, 0, 0, 0.42) !important;
+}
+
+.admin-user-modal.schema-create-modal {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(139, 92, 246, 0.14), transparent 34%),
+    rgba(10, 10, 11, 0.76) !important;
+  border-color: rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 28px 84px rgba(0, 0, 0, 0.42) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .code-modal-header,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .admin-user-modal-body,
+.admin-user-modal.schema-create-modal .code-modal-header,
+.admin-user-modal.schema-create-modal .admin-user-modal-body {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(10, 10, 11, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .code-modal-title h2,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .admin-modal-form label,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .checkbox-row span,
+.admin-user-modal.schema-create-modal .code-modal-title h2,
+.admin-user-modal.schema-create-modal .admin-modal-form label,
+.admin-user-modal.schema-create-modal .checkbox-row span {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .code-modal-title p,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .field-help,
+.admin-user-modal.schema-create-modal .code-modal-title p,
+.admin-user-modal.schema-create-modal .field-help {
+  color: rgba(226, 232, 240, 0.58) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal input:not([type="checkbox"]),
+.workspace-shell-v3 .admin-user-modal.schema-create-modal textarea,
+.admin-user-modal.schema-create-modal input:not([type="checkbox"]),
+.admin-user-modal.schema-create-modal textarea {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.024)),
+    rgba(2, 6, 23, 0.62) !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 32px rgba(0, 0, 0, 0.12) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.88);
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal input:not([type="checkbox"])::placeholder,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal textarea::placeholder,
+.admin-user-modal.schema-create-modal input:not([type="checkbox"])::placeholder,
+.admin-user-modal.schema-create-modal textarea::placeholder {
+  color: rgba(226, 232, 240, 0.32) !important;
+  -webkit-text-fill-color: rgba(226, 232, 240, 0.32);
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal input:not([type="checkbox"]):focus,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal textarea:focus,
+.admin-user-modal.schema-create-modal input:not([type="checkbox"]):focus,
+.admin-user-modal.schema-create-modal textarea:focus {
+  background: rgba(2, 6, 23, 0.78) !important;
+  border-color: rgba(196, 181, 253, 0.38) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 0 0 3px rgba(139, 92, 246, 0.16) !important;
+  outline: none;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .checkbox-row,
+.admin-user-modal.schema-create-modal .checkbox-row {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(2, 6, 23, 0.48) !important;
+  border: 1px solid rgba(255, 255, 255, 0.075) !important;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.workspace-shell-v3 .admin-tabler-shell .schema-fixed-default-note,
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .schema-fixed-default-note,
+.admin-user-modal.schema-create-modal .schema-fixed-default-note {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(255, 255, 255, 0.024)),
+    rgba(2, 6, 23, 0.48) !important;
+  border: 1px solid rgba(167, 139, 250, 0.18) !important;
+  color: rgba(226, 232, 240, 0.68) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .action-row .ghost-button,
+.admin-user-modal.schema-create-modal .action-row .ghost-button {
+  background: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.workspace-shell-v3 .admin-user-modal.schema-create-modal .action-row button:not(.ghost-button),
+.admin-user-modal.schema-create-modal .action-row button:not(.ghost-button) {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.88), rgba(37, 99, 235, 0.82)),
+    rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(196, 181, 253, 0.42) !important;
+  color: #ffffff !important;
+}
+
 .workspace-product .code-table-file strong,
 .workspace-product .document-table-title strong,
 .workspace-product .saved-table-title strong {

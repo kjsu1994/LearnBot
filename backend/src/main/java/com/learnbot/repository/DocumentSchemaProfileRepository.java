@@ -57,6 +57,42 @@ public class DocumentSchemaProfileRepository {
         return profiles.stream().findFirst();
     }
 
+    public DocumentSchemaProfileResponse create(
+            UUID id,
+            String schemaName,
+            String description,
+            List<String> documentTypes,
+            List<String> entityTypes,
+            List<String> relationTypes,
+            boolean enabled,
+            boolean defaultProfile
+    ) {
+        if (defaultProfile) {
+            jdbc.update("""
+                    UPDATE document_schema_profiles
+                    SET default_profile = false, updated_at = now()
+                    WHERE schema_name <> :schemaName
+                    """, new MapSqlParameterSource().addValue("schemaName", schemaName));
+        }
+        jdbc.update("""
+                INSERT INTO document_schema_profiles (
+                    id, schema_name, description, document_types, entity_types, relation_types, enabled, default_profile
+                ) VALUES (
+                    :id, :schemaName, :description, CAST(:documentTypes AS jsonb), CAST(:entityTypes AS jsonb),
+                    CAST(:relationTypes AS jsonb), :enabled, :defaultProfile
+                )
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("schemaName", schemaName)
+                .addValue("description", description)
+                .addValue("documentTypes", toJson(documentTypes))
+                .addValue("entityTypes", toJson(entityTypes))
+                .addValue("relationTypes", toJson(relationTypes))
+                .addValue("enabled", enabled)
+                .addValue("defaultProfile", defaultProfile));
+        return findByName(schemaName).orElseThrow(() -> new IllegalArgumentException("Unknown schema profile: " + schemaName));
+    }
+
     public DocumentSchemaProfileResponse update(
             String schemaName,
             String description,

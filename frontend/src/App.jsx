@@ -753,6 +753,23 @@ export default function App() {
     });
   }
 
+  async function createDocumentSchemaProfile(values) {
+    const key = values?.schemaName || 'new';
+    return await run(`schema-profile-create-${key}`, async () => {
+      const profile = await request('/api/admin/document-graph/schema-profiles', {
+        method: 'POST',
+        json: values,
+      });
+      if (profile) {
+        setDocumentSchemaProfiles((current) => [
+          ...(current || []).filter((item) => item.schemaName !== profile.schemaName),
+          profile,
+        ]);
+      }
+      return profile;
+    });
+  }
+
   function savedSummary(saved) {
     return {
       id: saved.id,
@@ -1002,6 +1019,7 @@ export default function App() {
             spaceTransferResult={spaceTransferResult}
             updateAdminSettings={updateAdminSettings}
             updateAdminTuning={updateAdminTuning}
+            createDocumentSchemaProfile={createDocumentSchemaProfile}
             updateDocumentSchemaProfile={updateDocumentSchemaProfile}
             refreshStorageRetention={refreshStorageRetention}
             runStorageRetention={runStorageRetention}

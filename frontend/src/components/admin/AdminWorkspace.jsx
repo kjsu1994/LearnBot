@@ -61,6 +61,7 @@ function AdminWorkspace({
   spaceTransferResult,
   updateAdminSettings,
   updateAdminTuning,
+  createDocumentSchemaProfile,
   updateDocumentSchemaProfile,
   refreshStorageRetention,
   runStorageRetention,
@@ -88,6 +89,17 @@ function AdminWorkspace({
   const [importSpace, setImportSpace] = useState(null);
   const [importFile, setImportFile] = useState(null);
   const [modalError, setModalError] = useState('');
+  const [schemaHelpOpen, setSchemaHelpOpen] = useState(false);
+  const [schemaCreateOpen, setSchemaCreateOpen] = useState(false);
+  const [schemaCreateForm, setSchemaCreateForm] = useState({
+    schemaName: '',
+    description: '',
+    documentTypes: '',
+    entityTypes: '',
+    relationTypes: '',
+    enabled: true,
+    defaultProfile: false,
+  });
   const [llmForm, setLlmForm] = useState({
     ollamaBaseUrl: adminSettings?.ollamaBaseUrl || '',
     primaryChatModel: adminSettings?.primaryChatModel || adminSettings?.chatModel || '',
@@ -109,7 +121,7 @@ function AdminWorkspace({
   }, [adminSettings?.allowedDomains]);
 
   useEffect(() => {
-    if (!isMaster && activeAdminTab === 'trash') {
+    if (!isMaster && ['schema', 'tuning', 'trash'].includes(activeAdminTab)) {
       setActiveAdminTab('settings');
     }
   }, [activeAdminTab, isMaster]);
@@ -339,7 +351,74 @@ function AdminWorkspace({
 
   async function updateSchemaProfile(profile, values) {
     if (!updateDocumentSchemaProfile) return;
+    if (values.documentTypes && hasSchemaDocumentTypeConflict(profile.schemaName, values.documentTypes, true)) {
+      window.alert('이미 활성화된 다른 스키마에서 사용하는 문서 유형이 있습니다. 여러 산업군 운영 시 문서 유형은 스키마마다 겹치지 않아야 합니다.');
+      return;
+    }
+    if (values.enabled === true && hasSchemaDocumentTypeConflict(profile.schemaName, profile.documentTypes || [], true)) {
+      window.alert('이 스키마의 문서 유형이 이미 활성화된 다른 스키마와 겹칩니다. 문서 유형을 먼저 변경한 뒤 활성화하세요.');
+      return;
+    }
     await updateDocumentSchemaProfile(profile.schemaName, values);
+  }
+
+  function hasSchemaDocumentTypeConflict(schemaName, documentTypes, enabled = true) {
+    if (!enabled) return false;
+    const requested = new Set(parseProfileList(documentTypes).map((item) => item.toUpperCase()));
+    if (!requested.size) return false;
+    return (documentSchemaProfiles || []).some((profile) => (
+      profile.enabled
+      && profile.schemaName !== schemaName
+      && (profile.documentTypes || []).some((type) => requested.has(String(type || '').trim().toUpperCase()))
+    ));
+  }
+
+  function openSchemaCreate() {
+    setModalError('');
+    setSchemaCreateForm({
+      schemaName: '',
+      description: '',
+      documentTypes: '',
+      entityTypes: 'DOCUMENT\nSECTION\nTOPIC\nTERM\nREQUIREMENT\nPROCEDURE',
+      relationTypes: 'DOCUMENT_HAS_SECTION\nSECTION_HAS_TOPIC\nTOPIC_RELATED_TO_TERM',
+      enabled: true,
+      defaultProfile: false,
+    });
+    setSchemaCreateOpen(true);
+  }
+
+  function closeSchemaCreate() {
+    setSchemaCreateOpen(false);
+    setModalError('');
+  }
+
+  async function submitSchemaCreate(event) {
+    event.preventDefault();
+    const documentTypes = parseProfileList(schemaCreateForm.documentTypes);
+    if (!schemaCreateForm.schemaName.trim()) {
+      setModalError('스키마 이름을 입력하세요. 예: FINANCE_REPORT, MEDICAL_MANUAL');
+      return;
+    }
+    if (!documentTypes.length) {
+      setModalError('문서 유형을 최소 1개 입력하세요. 예: FINANCE_REPORT, MANUFACTURING_MANUAL');
+      return;
+    }
+    if (hasSchemaDocumentTypeConflict(schemaCreateForm.schemaName, documentTypes, schemaCreateForm.enabled)) {
+      setModalError('이미 활성화된 다른 스키마에서 사용하는 문서 유형이 있습니다. 산업군별 문서 유형은 서로 겹치지 않게 입력하세요.');
+      return;
+    }
+    const saved = await createDocumentSchemaProfile?.({
+      schemaName: schemaCreateForm.schemaName,
+      description: schemaCreateForm.description,
+      documentTypes,
+      entityTypes: parseProfileList(schemaCreateForm.entityTypes),
+      relationTypes: parseProfileList(schemaCreateForm.relationTypes),
+      enabled: schemaCreateForm.enabled,
+      defaultProfile: schemaCreateForm.defaultProfile,
+    });
+    if (saved) {
+      closeSchemaCreate();
+    }
   }
 
   function beginSpaceImport(space) {
@@ -403,6 +482,18 @@ function AdminWorkspace({
       </button>
       {isMaster && (
         <button
+          className={activeAdminTab === 'schema' ? 'mode-button active' : 'mode-button'}
+          type="button"
+          role="tab"
+          aria-selected={activeAdminTab === 'schema'}
+          onClick={() => setActiveAdminTab('schema')}
+        >
+          <Database size={16} />
+          스키마
+        </button>
+      )}
+      {isMaster && (
+        <button
           className={activeAdminTab === 'tuning' ? 'mode-button active' : 'mode-button'}
           type="button"
           role="tab"
@@ -422,7 +513,7 @@ function AdminWorkspace({
           onClick={() => setActiveAdminTab('trash')}
         >
           <Trash2 size={16} />
-          휴지통
+          복구
         </button>
       )}
     </div>
@@ -462,6 +553,274 @@ function AdminWorkspace({
       </article>
     </section>
   );
+
+  if (activeAdminTab === 'schema') {
+    return (
+      <div className="admin-tabler-shell admin-schema-shell">
+        {adminHeader}
+        {adminTabs}
+        {adminSummaryCards}
+
+        <section className="panel schema-admin-panel">
+          <div className="panel-title schema-panel-title">
+            <Database size={18} />
+            <div>
+              <h2>문서 그래프 스키마</h2>
+              <p>사업군별 문서 유형, 엔티티, 관계를 관리합니다. 삭제 대신 비활성화해서 기존 인덱스 회귀를 방지합니다.</p>
+            </div>
+            <div className="top-actions schema-title-actions">
+              <button className="ghost-button compact-action" type="button" onClick={() => setSchemaHelpOpen(true)}>
+                <Info size={14} />
+                도움말
+              </button>
+              <button className="compact-action" type="button" onClick={openSchemaCreate}>
+                <UserPlus size={14} />
+                스키마 추가
+              </button>
+            </div>
+          </div>
+
+          <div className="detail-box compact-box schema-operator-note">
+            <strong>운영 원칙</strong>
+            <small>기본값은 CORE 공통 스키마입니다. 새 사업군은 별도 스키마를 추가한 뒤 문서 유형을 매핑하고, 관련 문서는 재인덱싱해야 새 스키마가 분석에 반영됩니다.</small>
+          </div>
+
+          <div className="schema-profile-list">
+            {(documentSchemaProfiles || []).map((profile) => {
+              const loadingKey = `schema-profile-${profile.schemaName}`;
+              const isExampleProfile = profile.schemaName === 'SATELLITE_GSE' && !profile.enabled;
+              const isCoreProfile = profile.schemaName === 'CORE';
+              return (
+                <article className="schema-profile-card schema-editor-card" key={profile.schemaName}>
+                  <div className="result-heading">
+                    <strong>{profile.schemaName}</strong>
+                    <span>{isExampleProfile ? '예시' : profile.defaultProfile ? '기본' : profile.enabled ? '활성' : '비활성'}</span>
+                  </div>
+                  <small>{profile.description}</small>
+                  <div className="form-grid two">
+                    <label className="checkbox-row" htmlFor={`schema-enabled-${profile.schemaName}`}>
+                      <input
+                        id={`schema-enabled-${profile.schemaName}`}
+                        type="checkbox"
+                        checked={profile.enabled}
+                        disabled={loading(loadingKey) || profile.defaultProfile || isCoreProfile}
+                        onChange={(event) => updateSchemaProfile(profile, { enabled: event.target.checked })}
+                      />
+                      <span>활성화</span>
+                    </label>
+                    {isCoreProfile ? (
+                      <label className="checkbox-row" htmlFor={`schema-default-${profile.schemaName}`}>
+                        <input
+                          id={`schema-default-${profile.schemaName}`}
+                          type="checkbox"
+                          checked={profile.defaultProfile}
+                          disabled
+                          readOnly
+                        />
+                        <span>기본 프로필 고정</span>
+                      </label>
+                    ) : (
+                      <div className="schema-fixed-default-note">
+                        <span>기본 프로필은 CORE로 고정됩니다.</span>
+                      </div>
+                    )}
+                  </div>
+                  <label htmlFor={`schema-doc-types-${profile.schemaName}`}>문서 유형</label>
+                  <textarea
+                    id={`schema-doc-types-${profile.schemaName}`}
+                    rows={4}
+                    defaultValue={(profile.documentTypes || []).join('\n')}
+                    disabled={loading(loadingKey) || isCoreProfile}
+                    onBlur={(event) => updateSchemaProfile(profile, { documentTypes: parseProfileList(event.target.value) })}
+                    spellCheck="false"
+                  />
+                  <details className="schema-detail-editor">
+                    <summary>엔티티 / 관계 유형 편집</summary>
+                    <label htmlFor={`schema-entities-${profile.schemaName}`}>엔티티 유형</label>
+                    <textarea
+                      id={`schema-entities-${profile.schemaName}`}
+                      rows={5}
+                      defaultValue={(profile.entityTypes || []).join('\n')}
+                      disabled={loading(loadingKey) || isCoreProfile}
+                      onBlur={(event) => updateSchemaProfile(profile, { entityTypes: parseProfileList(event.target.value) })}
+                      spellCheck="false"
+                    />
+                    <label htmlFor={`schema-relations-${profile.schemaName}`}>관계 유형</label>
+                    <textarea
+                      id={`schema-relations-${profile.schemaName}`}
+                      rows={5}
+                      defaultValue={(profile.relationTypes || []).join('\n')}
+                      disabled={loading(loadingKey) || isCoreProfile}
+                      onBlur={(event) => updateSchemaProfile(profile, { relationTypes: parseProfileList(event.target.value) })}
+                      spellCheck="false"
+                    />
+                  </details>
+                  <small className="field-help">
+                    {isCoreProfile
+                      ? 'CORE는 모든 문서의 안전한 기본 폴백 스키마라 편집할 수 없습니다. 사업군별 변경은 새 스키마를 추가해서 적용하세요.'
+                      : '스키마 변경 후 이미 인덱싱된 문서에는 자동 소급 적용되지 않습니다. 해당 문서를 재인덱싱하세요.'}
+                  </small>
+                </article>
+              );
+            })}
+            {!documentSchemaProfiles?.length && (
+              <p className="empty compact-empty">등록된 스키마를 불러오지 못했습니다. 서버는 CORE 기본 스키마 폴백으로 동작합니다.</p>
+            )}
+          </div>
+        </section>
+
+        {schemaHelpOpen && (
+          <AdminUserModal title="스키마 추가 도움말" subtitle="사업군별 문서 RAG를 설정하는 방법" icon={<Info size={18} />} onClose={() => setSchemaHelpOpen(false)}>
+            <div className="admin-modal-form schema-help-content">
+              <div className="detail-box compact-box">
+                <strong>스키마를 왜 추가하나요?</strong>
+                <small>스키마는 문서를 읽을 때 "무엇을 중요한 항목으로 보고, 항목끼리 어떤 관계로 연결할지" 알려주는 업무 사전입니다.</small>
+                <small>기본 CORE 스키마는 어느 문서에나 무난하게 동작하지만, 제조/금융/의료/장비 매뉴얼처럼 업무 용어가 뚜렷한 문서는 전용 스키마를 쓰면 더 정확한 요약, 원인 파악, 영향 범위 분석을 기대할 수 있습니다.</small>
+                <small>예를 들어 장애 매뉴얼에서 ERROR_CODE, FAULT, RESOLUTION을 엔티티로 넣으면 "오류 코드가 어떤 고장을 의미하고 어떤 절차로 해결되는지"를 그래프로 더 잘 묶을 수 있습니다.</small>
+              </div>
+              <div className="schema-help-grid">
+                <article>
+                  <strong>스키마 이름</strong>
+                  <small>관리자가 구분하기 위한 이름입니다. 업무명이나 문서군을 영문 대문자와 밑줄로 적습니다.</small>
+                  <small>예: FINANCE_REPORT, MEDICAL_MANUAL, MANUFACTURING_QA, CUSTOMER_SUPPORT_GUIDE</small>
+                  <small>왜 이렇게 넣나요? 나중에 로그, 분석 결과, 재인덱싱 대상에서 어떤 업무 스키마가 쓰였는지 명확히 구분하기 위해서입니다.</small>
+                </article>
+                <article>
+                  <strong>문서 유형</strong>
+                  <small>이 스키마를 적용할 문서 분류입니다. 한 줄에 하나씩 입력합니다.</small>
+                  <small>처음에는 GENERAL_DOCUMENT를 그대로 둬도 됩니다. 운영이 익숙해지면 REQUIREMENT_SPEC, OPERATION_MANUAL, FAQ, INCIDENT_REPORT처럼 문서 종류를 나눌 수 있습니다.</small>
+                  <small>왜 필요하나요? 문서가 어떤 스키마로 분석되어야 하는지 매칭하는 기준이기 때문입니다.</small>
+                </article>
+                <article>
+                  <strong>엔티티 유형</strong>
+                  <small>문서 안에서 "중요한 명사"로 뽑고 싶은 항목입니다. 한 줄에 하나씩 입력합니다.</small>
+                  <small>예: REQUIREMENT, PRODUCT, CUSTOMER, POLICY, ERROR_CODE, PROCEDURE, COMPONENT, RISK, REGULATION</small>
+                  <small>왜 필요하나요? RAG가 단순 문장 검색을 넘어서 "어떤 개념들이 문서에 반복되고 연결되는지" 파악하는 기준이 됩니다.</small>
+                </article>
+                <article>
+                  <strong>관계 유형</strong>
+                  <small>엔티티끼리 어떤 의미로 연결되는지 적습니다. 보통 A_VERB_B 형태의 영문 대문자와 밑줄을 사용합니다.</small>
+                  <small>예: PRODUCT_HAS_COMPONENT, ERROR_CODE_INDICATES_FAULT, POLICY_APPLIES_TO_REGION, REQUIREMENT_VERIFIED_BY_TEST</small>
+                  <small>왜 필요하나요? "무엇이 무엇을 포함하는지", "무엇이 무엇의 원인인지", "무엇이 어떤 절차로 해결되는지" 같은 질문에 답하기 쉬워집니다.</small>
+                </article>
+              </div>
+              <div className="detail-box compact-box">
+                <strong>어떤 식으로 넣으면 되나요?</strong>
+                <small>개발 지식이 없어도 업무 문서를 보면서 반복적으로 나오는 중요 단어를 엔티티로 고르고, 그 단어들 사이의 관계를 짧은 영문 규칙으로 적으면 됩니다.</small>
+                <small>너무 많이 넣기보다 처음에는 엔티티 5~12개, 관계 3~8개 정도로 시작하세요. 실제 질문 결과를 보고 부족한 항목을 추가하는 방식이 안전합니다.</small>
+                <small>입력은 쉼표로 구분하거나 한 줄에 하나씩 넣을 수 있습니다. 화면에서는 한 줄에 하나씩 넣는 방식을 권장합니다.</small>
+              </div>
+              <div className="detail-box compact-box">
+                <strong>사업군별 예시</strong>
+                <small>제조: PRODUCT, COMPONENT, PROCESS, DEFECT / PRODUCT_HAS_COMPONENT, DEFECT_CAUSED_BY_PROCESS</small>
+                <small>금융: REPORT, ACCOUNT, RISK, REGULATION / REPORT_MENTIONS_RISK, REGULATION_APPLIES_TO_ACCOUNT</small>
+                <small>의료/매뉴얼: PROCEDURE, SYMPTOM, DEVICE, WARNING / PROCEDURE_USES_DEVICE, WARNING_RELATED_TO_SYMPTOM</small>
+                <small>고객지원: ISSUE, PRODUCT, CUSTOMER_TYPE, SOLUTION / ISSUE_RESOLVED_BY_SOLUTION, PRODUCT_HAS_ISSUE</small>
+              </div>
+              <div className="detail-box compact-box">
+                <strong>운영 순서</strong>
+                <small>1. 스키마 이름을 업무 기준으로 정합니다. 예: MANUFACTURING_QA</small>
+                <small>2. 문서 유형을 입력합니다. 모르면 GENERAL_DOCUMENT로 시작합니다.</small>
+                <small>3. 문서에서 반복되는 핵심 단어를 엔티티로 입력합니다. 예: PRODUCT, DEFECT, PROCESS</small>
+                <small>4. 엔티티 사이의 의미를 관계로 입력합니다. 예: DEFECT_CAUSED_BY_PROCESS</small>
+                <small>5. 활성화한 뒤 관련 문서를 재인덱싱합니다. 이미 인덱싱된 문서는 자동으로 새 스키마가 소급 적용되지 않습니다.</small>
+                <small>6. 결과가 이상하면 삭제하지 말고 비활성화하세요. 기존 문서 그래프와 감사 추적을 안전하게 유지할 수 있습니다.</small>
+              </div>
+              <div className="detail-box compact-box">
+                <strong>언제 기본 프로필로 지정하나요?</strong>
+                <small>대부분의 문서가 특정 사업군 문서라면 해당 스키마를 기본 프로필로 지정할 수 있습니다.</small>
+                <small>여러 사업군 문서가 섞여 있거나 아직 확신이 없으면 CORE를 기본값으로 유지하고, 새 스키마는 활성화만 해두는 것을 권장합니다.</small>
+              </div>
+            </div>
+          </AdminUserModal>
+        )}
+
+        {schemaCreateOpen && (
+          <AdminUserModal title="문서 그래프 스키마 추가" subtitle="새 사업군 또는 문서 유형용 프로필" icon={<Database size={18} />} className="schema-create-modal" onClose={closeSchemaCreate}>
+            <form className="admin-modal-form" onSubmit={submitSchemaCreate}>
+              {modalError && <div className="failure-line"><AlertTriangle size={14} />{modalError}</div>}
+              <div className="stack">
+                <label htmlFor="schema-create-name">스키마 이름</label>
+                <input
+                  id="schema-create-name"
+                  value={schemaCreateForm.schemaName}
+                  onChange={(event) => setSchemaCreateForm((current) => ({ ...current, schemaName: event.target.value }))}
+                  placeholder="예: FINANCE_REPORT"
+                  spellCheck="false"
+                  autoFocus
+                />
+                <small className="field-help">저장 시 영문 대문자/밑줄 형식으로 정규화됩니다.</small>
+              </div>
+              <div className="stack">
+                <label htmlFor="schema-create-description">설명</label>
+                <textarea
+                  id="schema-create-description"
+                  rows={3}
+                  value={schemaCreateForm.description}
+                  onChange={(event) => setSchemaCreateForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="어떤 문서와 사업군에 쓰는 스키마인지 적어주세요."
+                />
+              </div>
+              <div className="form-grid two">
+                <div className="stack">
+                  <label htmlFor="schema-create-doc-types">문서 유형</label>
+                  <textarea
+                    id="schema-create-doc-types"
+                    rows={5}
+                    value={schemaCreateForm.documentTypes}
+                    onChange={(event) => setSchemaCreateForm((current) => ({ ...current, documentTypes: event.target.value }))}
+                    spellCheck="false"
+                  />
+                </div>
+                <div className="stack">
+                  <label htmlFor="schema-create-entities">엔티티 유형</label>
+                  <textarea
+                    id="schema-create-entities"
+                    rows={5}
+                    value={schemaCreateForm.entityTypes}
+                    onChange={(event) => setSchemaCreateForm((current) => ({ ...current, entityTypes: event.target.value }))}
+                    spellCheck="false"
+                  />
+                </div>
+              </div>
+              <div className="stack">
+                <label htmlFor="schema-create-relations">관계 유형</label>
+                <textarea
+                  id="schema-create-relations"
+                  rows={5}
+                  value={schemaCreateForm.relationTypes}
+                  onChange={(event) => setSchemaCreateForm((current) => ({ ...current, relationTypes: event.target.value }))}
+                  spellCheck="false"
+                />
+              </div>
+              <div className="form-grid two">
+                <label className="checkbox-row" htmlFor="schema-create-enabled">
+                  <input
+                    id="schema-create-enabled"
+                    type="checkbox"
+                    checked={schemaCreateForm.enabled}
+                    onChange={(event) => setSchemaCreateForm((current) => ({ ...current, enabled: event.target.checked }))}
+                  />
+                  <span>생성 후 활성화</span>
+                </label>
+                <div className="schema-fixed-default-note">
+                  <span>기본 프로필은 CORE로 고정됩니다.</span>
+                </div>
+              </div>
+              <small className="field-help">기본 프로필은 문서 유형이 명확히 매칭되지 않을 때 사용하는 폴백 스키마입니다. 처음에는 CORE를 유지하는 것을 권장합니다.</small>
+              <div className="action-row">
+                <button disabled={!schemaCreateForm.schemaName.trim() || loading(`schema-profile-create-${schemaCreateForm.schemaName || 'new'}`)}>
+                  {loading(`schema-profile-create-${schemaCreateForm.schemaName || 'new'}`) ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                  추가
+                </button>
+                <button className="ghost-button" type="button" onClick={closeSchemaCreate}>취소</button>
+              </div>
+            </form>
+          </AdminUserModal>
+        )}
+      </div>
+    );
+  }
 
   if (activeAdminTab === 'tuning') {
     const tuningSettings = adminTuning?.settings || [];
@@ -708,6 +1067,7 @@ function AdminWorkspace({
               <div className="tuning-grid">
                 {items.map((setting) => {
                   const value = tuningValues[setting.key] ?? setting.value ?? setting.defaultValue;
+                  const restartPending = setting.restartRequired && Number(setting.value) !== Number(setting.effectiveValue);
                   const isSelect = setting.control === 'select';
                   const inputStep = setting.key === 'RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED' ? 1 : setting.step;
                   const text = tuningText[setting.key] || [setting.label, setting.description, setting.impact];
@@ -716,9 +1076,12 @@ function AdminWorkspace({
                       <span className="tuning-control-head">
                         <strong>{text[0]}</strong>
                         {recommendedTuningKeys.includes(setting.key) && <em>추천값</em>}
-                        {setting.restartRequired && <em>재시작 필요</em>}
+                        {restartPending ? <em>적용 대기</em> : setting.restartRequired && <em>재시작 항목</em>}
                       </span>
                       <small>{text[2]}</small>
+                      {restartPending && (
+                        <small className="field-help">저장값 {setting.value} · 현재 적용값 {setting.effectiveValue}</small>
+                      )}
                       {isSelect ? (
                         <select value={value} onChange={(event) => updateTuningValue(setting.key, event.target.value)}>
                           {Array.from({ length: Math.floor((setting.max - setting.min) / setting.step) + 1 }, (_, index) => setting.min + index * setting.step).map((option) => (
@@ -778,7 +1141,7 @@ function AdminWorkspace({
           <div className="panel-title">
             <Trash2 size={18} />
             <div>
-              <h2>휴지통</h2>
+              <h2>복구</h2>
                 <p>영구 삭제되기 전에 삭제된 항목을 복구할 수 있습니다.</p>
             </div>
           </div>
@@ -896,68 +1259,6 @@ function AdminWorkspace({
           </div>
         </section>
 
-
-        <section className="panel">
-          <div className="panel-title">
-            <Database size={18} />
-            <div>
-              <h2>문서 그래프 스키마</h2>
-              <p>문서 유형별 스키마 프로필을 관리하고, 문서 그래프 분석에 사용할 엔티티와 관계를 확인합니다.</p>
-            </div>
-          </div>
-          <div className="schema-profile-list">
-            {(documentSchemaProfiles || []).map((profile) => {
-              const loadingKey = `schema-profile-${profile.schemaName}`;
-              return (
-                <article className="schema-profile-card" key={profile.schemaName}>
-                  <div className="result-heading">
-                    <strong>{profile.schemaName}</strong>
-                    <span>{profile.defaultProfile ? '기본' : profile.enabled ? '활성' : '비활성'}</span>
-                  </div>
-                  <small>{profile.description}</small>
-                  <div className="form-grid two">
-                    <label className="checkbox-row" htmlFor={`schema-enabled-${profile.schemaName}`}>
-                      <input
-                        id={`schema-enabled-${profile.schemaName}`}
-                        type="checkbox"
-                        checked={profile.enabled}
-                        disabled={loading(loadingKey) || profile.defaultProfile}
-                        onChange={(event) => updateSchemaProfile(profile, { enabled: event.target.checked })}
-                      />
-                      <span>활성화</span>
-                    </label>
-                    <label className="checkbox-row" htmlFor={`schema-default-${profile.schemaName}`}>
-                      <input
-                        id={`schema-default-${profile.schemaName}`}
-                        type="checkbox"
-                        checked={profile.defaultProfile}
-                        disabled={loading(loadingKey) || profile.defaultProfile || !profile.enabled}
-                        onChange={(event) => updateSchemaProfile(profile, { defaultProfile: event.target.checked })}
-                      />
-                      <span>기본 프로필</span>
-                    </label>
-                  </div>
-                  <label htmlFor={`schema-doc-types-${profile.schemaName}`}>문서 유형</label>
-                  <textarea
-                    id={`schema-doc-types-${profile.schemaName}`}
-                    rows={4}
-                    defaultValue={(profile.documentTypes || []).join('\n')}
-                    disabled={loading(loadingKey)}
-                    onBlur={(event) => updateSchemaProfile(profile, { documentTypes: parseProfileList(event.target.value) })}
-                  />
-                  <details>
-                    <summary>Entity / Relation 유형 보기</summary>
-                    <small>Entities: {(profile.entityTypes || []).join(', ') || '-'}</small>
-                    <small>Relations: {(profile.relationTypes || []).join(', ') || '-'}</small>
-                  </details>
-                </article>
-              );
-            })}
-            {!documentSchemaProfiles?.length && (
-              <p className="empty compact-empty">등록된 문서 그래프 스키마 프로필을 불러오지 못했습니다. 기본 스키마로 동작합니다.</p>
-            )}
-          </div>
-        </section>
 
         <section className="panel">
           <div className="panel-title">

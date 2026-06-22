@@ -8,6 +8,7 @@ import com.learnbot.dto.AdminTuningResponse;
 import com.learnbot.dto.AdminTuningMetricsResponse;
 import com.learnbot.dto.AdminTuningRecommendationResponse;
 import com.learnbot.dto.AdminTuningUpdateRequest;
+import com.learnbot.dto.DocumentSchemaProfileCreateRequest;
 import com.learnbot.dto.DocumentSchemaProfileResponse;
 import com.learnbot.dto.DocumentSchemaProfileUpdateRequest;
 import com.learnbot.dto.InviteUserRequest;
@@ -310,6 +311,12 @@ public class AdminController {
     List<DocumentSchemaProfileResponse> documentSchemaProfiles() {
         authService.requireMaster(currentUserProvider.currentUser());
         return documentSchemaProfileService.listProfiles();
+    }
+
+    @PostMapping("/document-graph/schema-profiles")
+    DocumentSchemaProfileResponse createDocumentSchemaProfile(@RequestBody DocumentSchemaProfileCreateRequest request) {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return documentSchemaProfileService.createProfile(request);
     }
 
     @PatchMapping("/document-graph/schema-profiles/{schemaName}")

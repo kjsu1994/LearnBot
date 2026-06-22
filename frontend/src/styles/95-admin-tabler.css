@@ -705,6 +705,215 @@
   font-weight: 800;
 }
 
+.admin-tabler-shell .schema-panel-title {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.admin-tabler-shell .schema-title-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.admin-tabler-shell .schema-operator-note {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(32, 107, 196, 0.10), transparent 38%),
+    linear-gradient(135deg, #eef5ff, #e8f0fa);
+  margin-bottom: 12px;
+}
+
+.admin-tabler-shell .schema-profile-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-tabler-shell .schema-editor-card {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(32, 107, 196, 0.08), transparent 42%),
+    linear-gradient(180deg, #f9fbfe, #f2f6fb);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.admin-tabler-shell .schema-editor-card .result-heading span {
+  background: var(--tblr-admin-primary-soft);
+  border: 1px solid #cfe2ff;
+  border-radius: 999px;
+  color: var(--tblr-admin-primary);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.admin-tabler-shell .schema-editor-card label {
+  color: var(--tblr-admin-text);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin: 4px 0 2px;
+}
+
+.admin-tabler-shell .schema-editor-card textarea {
+  background: #ffffff;
+  border-color: #c9d7e7;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05);
+  color: var(--tblr-admin-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.55;
+  min-height: 108px;
+  padding: 11px 12px;
+}
+
+.admin-tabler-shell .schema-editor-card textarea:focus {
+  background: #ffffff;
+  border-color: var(--tblr-admin-primary);
+  color: var(--tblr-admin-text);
+}
+
+.admin-tabler-shell .schema-editor-card textarea::placeholder {
+  color: #94a3b8;
+}
+
+.admin-tabler-shell .schema-detail-editor {
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(238, 245, 255, 0.86));
+  border: 1px solid #d4dfeb;
+  border-radius: 8px;
+  display: block;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.admin-tabler-shell .schema-detail-editor summary {
+  align-items: center;
+  color: var(--tblr-admin-text);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.admin-tabler-shell .schema-detail-editor summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-tabler-shell .schema-detail-editor summary::after {
+  background: var(--tblr-admin-primary-soft);
+  border: 1px solid #cfe2ff;
+  border-radius: 999px;
+  color: var(--tblr-admin-primary);
+  content: "펼치기";
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+}
+
+.admin-tabler-shell .schema-detail-editor[open] summary {
+  border-bottom: 1px solid #d4dfeb;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+}
+
+.admin-tabler-shell .schema-detail-editor[open] summary::after {
+  content: "접기";
+}
+
+.admin-tabler-shell .schema-detail-editor label + textarea {
+  margin-bottom: 10px;
+}
+
+.admin-tabler-shell .schema-fixed-default-note {
+  align-items: center;
+  background: rgba(238, 245, 255, 0.72);
+  border: 1px solid #d4dfeb;
+  border-radius: 8px;
+  color: var(--tblr-admin-muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 9px 12px;
+}
+
+.admin-tabler-shell .schema-editor-card .schema-detail-editor label {
+  background: transparent;
+  color: var(--tblr-admin-text);
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  margin: 12px 0 6px;
+}
+
+.admin-tabler-shell .schema-editor-card .schema-detail-editor textarea {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(32, 107, 196, 0.06), transparent 45%),
+    linear-gradient(180deg, #ffffff, #f4f8fd);
+  border: 1px solid #c9d7e7;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px rgba(15, 23, 42, 0.035);
+  color: #182433;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.65;
+  min-height: 132px;
+  padding: 12px 13px;
+  resize: vertical;
+  width: 100%;
+}
+
+.admin-tabler-shell .schema-editor-card .schema-detail-editor textarea:hover {
+  border-color: #b8c9dc;
+}
+
+.admin-tabler-shell .schema-editor-card .schema-detail-editor textarea:focus {
+  background: #ffffff;
+  border-color: var(--tblr-admin-primary);
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.04),
+    0 0 0 3px rgba(32, 107, 196, 0.14);
+  color: #182433;
+  outline: none;
+}
+
+.schema-help-content {
+  display: grid;
+  gap: 12px;
+}
+
+.schema-help-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.schema-help-grid article {
+  background: #ffffff;
+  border: 1px solid var(--tblr-admin-border, #dce3ea);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.schema-help-grid strong {
+  color: var(--tblr-admin-text, #182433);
+}
+
+.schema-help-grid small {
+  color: var(--tblr-admin-muted, #667085);
+}
+
 .admin-user-modal {
   border-radius: 8px;
 }
@@ -781,7 +990,8 @@
   }
 
   .admin-tabler-shell .tuning-metrics-section .panel-title,
-  .admin-tabler-shell .tuning-recommendation-card {
+  .admin-tabler-shell .tuning-recommendation-card,
+  .admin-tabler-shell .schema-panel-title {
     align-items: flex-start;
     display: flex;
     flex-direction: column;
@@ -792,6 +1002,11 @@
   }
 
   .admin-tabler-shell .tuning-range-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabler-shell .schema-profile-list,
+  .schema-help-grid {
     grid-template-columns: 1fr;
   }
 }
