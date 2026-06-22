@@ -153,6 +153,12 @@ public class SearchService {
         String normalized = normalize(safeQuery);
         List<String> values = new ArrayList<>();
         values.add(safeQuery);
+        if (containsAny(normalized, "\ucc28\ubcc4", "\uc608\ubc29", "\uac1c\uc120")) {
+            values.addAll(List.of(
+                    "\ucc28\ubcc4 \uc608\ubc29 \uac1c\uc120",
+                    "\uc784\uae08 \ubcf5\ub9ac\ud6c4\uc0dd \uad50\uc721\ud6c8\ub828 \uace0\ucda9\ucc98\ub9ac \ucc28\ubcc4 \uc608\ubc29"
+            ));
+        }
         if (containsAny(normalized, "요약", "개요", "정리", "전체", "핵심", "summary", "overview")) {
             values.addAll(List.of("문서 요약 주요 내용", "전체 구조 핵심 근거", "document summary overview main topics"));
         }

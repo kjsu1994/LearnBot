@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationSummary;
 import com.learnbot.dto.RagConversationTurn;
@@ -73,6 +74,39 @@ class RagConversationServiceTest {
         assertThat(context.contextual()).isTrue();
         assertThat(context.documentAnchors()).hasSize(1);
         assertThat(context.rewrittenQuestion()).contains("policy.pdf").contains("that document summary");
+    }
+
+    @Test
+    void previousAnswerExpansionExtractsOutlineAndRequiredEvidence() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID firstChunkId = UUID.randomUUID();
+        UUID secondChunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.DOCUMENT, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithDocumentEvidence(
+                """
+                        ## Access control [1]
+                        - Audit schedule [2]
+                        """,
+                firstChunkId,
+                secondChunkId
+        )));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.DOCUMENT,
+                null,
+                conversationId,
+                "more detail by item",
+                true
+        );
+
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.PREVIOUS_ANSWER_EXPANSION);
+        assertThat(context.contextual()).isTrue();
+        assertThat(context.rewrittenQuestion()).isEqualTo("more detail by item");
+        assertThat(context.previousAnswerItems()).hasSize(2);
+        assertThat(context.requiredDocumentChunkIds()).containsExactly(firstChunkId, secondChunkId);
     }
 
     @Test
@@ -202,8 +236,13 @@ class RagConversationServiceTest {
     }
 
     private RagConversationTurnContext turnWithDocumentEvidence() {
-        return new RagConversationTurnContext("What is the policy?", "It requires MFA [1].", objectMapper.valueToTree(List.of(Map.of(
-                "chunkId", UUID.randomUUID().toString(),
+        return turnWithDocumentEvidence("It requires MFA [1].", UUID.randomUUID());
+    }
+
+    private RagConversationTurnContext turnWithDocumentEvidence(String answer, UUID... chunkIds) {
+        List<Map<String, Object>> evidence = java.util.Arrays.stream(chunkIds)
+                .map(chunkId -> Map.<String, Object>of(
+                "chunkId", chunkId.toString(),
                 "documentId", UUID.randomUUID().toString(),
                 "title", "policy.pdf",
                 "sourceUri", "file://policy.pdf",
@@ -213,6 +252,8 @@ class RagConversationServiceTest {
                         "headingPath", "Security > Access",
                         "documentType", "policy"
                 )
-        ))));
+        ))
+                .toList();
+        return new RagConversationTurnContext("What is the policy?", answer, objectMapper.valueToTree(evidence));
     }
 }

@@ -3,7 +3,9 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
+import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.repository.SecurityRepository;
@@ -20,6 +22,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -380,6 +383,67 @@ class CodeRagServiceTest {
         assertThat(response.evidence().get(0).chunkId()).isEqualTo(pinnedChunkId);
         assertThat(response.evidence().get(0).metadata()).containsEntry("conversationPinned", true);
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("pinned"));
+    }
+
+    @Test
+    void previousAnswerExpansionKeepsRequiredCodeEvidenceWithoutNewSearch() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                null,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        UUID requiredChunkId = UUID.randomUUID();
+        CodeSearchResult required = resultWithId(
+                requiredChunkId,
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.20,
+                "private CodeAskResponse askPrioritized(...) { return fallbackAnswer(...); }"
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "more detail by item",
+                List.of(),
+                List.of(),
+                List.of(),
+                true,
+                ConversationIntent.PREVIOUS_ANSWER_EXPANSION,
+                List.of(new PreviousAnswerItem("Ask flow", "Ask flow [1]", List.of(1), List.of(requiredChunkId))),
+                List.of(),
+                List.of(requiredChunkId)
+        );
+
+        when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(required));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "more detail by item",
+                "overview",
+                4,
+                context
+        );
+
+        verify(searchService, never()).search(isNull(), anyString(), anyInt(), anyList(), isNull());
+        assertThat(response.evidence()).anySatisfy(evidence -> {
+            assertThat(evidence.chunkId()).isEqualTo(requiredChunkId);
+            assertThat(evidence.metadata()).containsEntry("conversationRequired", true);
+            assertThat(evidence.metadata()).containsEntry("previousAnswerItem", "Ask flow");
+        });
     }
 
     private static OllamaClient.ChatResult chat(String content) {

@@ -6,6 +6,7 @@ import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.DocumentChunkDetail;
 import com.learnbot.dto.DocumentConversationAnchor;
+import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.dto.SearchFilter;
@@ -161,7 +162,7 @@ public class RagService {
         String systemPrompt = systemPrompt(answerMode, questionType) + conversationSystemRule(conversationContext);
         String promptPrefix = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
                 + conversationFocus(conversationContext);
-        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations);
+        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations, conversationContext);
         citations = contextBundle.citations();
         String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
@@ -286,11 +287,18 @@ public class RagService {
         if (conversationContext == null || !conversationContext.contextual()) {
             return safe(originalQuestion);
         }
+        if (conversationContext.previousAnswerExpansion()) {
+            return safe(originalQuestion);
+        }
         String rewritten = safe(conversationContext.rewrittenQuestion()).trim();
         return rewritten.isBlank() ? safe(originalQuestion) : rewritten;
     }
 
     private String questionPrompt(String originalQuestion, String effectiveQuestion, RagConversationContext conversationContext) {
+        if (conversationContext != null && conversationContext.previousAnswerExpansion()) {
+            return "Original user question:\n" + originalQuestion
+                    + "\n\nThis is a request to expand the previous answer. Keep the previous answer outline and expand each item using only the current context.";
+        }
         if (conversationContext == null || !conversationContext.contextual() || safe(originalQuestion).equals(safe(effectiveQuestion))) {
             return "Question:\n" + originalQuestion;
         }
@@ -302,6 +310,13 @@ public class RagService {
     private String conversationSystemRule(RagConversationContext conversationContext) {
         if (conversationContext == null || !conversationContext.contextual()) {
             return "";
+        }
+        if (conversationContext.previousAnswerExpansion()) {
+            return "\nPrevious-answer expansion rules:"
+                    + "\nKeep the previous answer item structure. Do not invent a new conclusion."
+                    + "\nFor each item, explain concrete clauses, criteria, limits, exceptions, and gaps found in the current context."
+                    + "\nAttach at least one citation number like [1] to each item when evidence exists."
+                    + "\nIf an item lacks current context evidence, write \"\ucd94\uac00 \uadfc\uac70 \ubd80\uc871\" for that item.";
         }
         return "\nUse previous conversation only to resolve follow-up references."
                 + "\nUse retrieved and pinned document context as the source of truth."
@@ -329,10 +344,24 @@ public class RagService {
         if (turns.isBlank() && anchors.isBlank()) {
             return "";
         }
+        String previousOutline = previousAnswerOutline(conversationContext);
         return "\n\nConversation focus:\n"
                 + "Use this section only to resolve references such as 'that document', 'that condition', or 'the previous source'.\n"
+                + (previousOutline.isBlank() ? "" : "Previous answer outline:\n" + previousOutline + "\n")
                 + (turns.isBlank() ? "" : "Recent turns:\n" + turns + "\n")
                 + (anchors.isBlank() ? "" : "Previous document evidence anchors:\n" + anchors);
+    }
+
+    private String previousAnswerOutline(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.previousAnswerItems().isEmpty()) {
+            return "";
+        }
+        return conversationContext.previousAnswerItems().stream()
+                .limit(12)
+                .map(item -> "- " + safe(item.label())
+                        + (item.citationNumbers().isEmpty() ? "" : " / previous citations=" + item.citationNumbers())
+                        + (item.evidenceChunkIds().isEmpty() ? " / \ucd94\uac00 \uadfc\uac70 \ubd80\uc871" : " / requiredChunks=" + item.evidenceChunkIds()))
+                .collect(Collectors.joining("\n"));
     }
 
     private String conversationTurnSummary(RagConversationTurnContext turn) {
@@ -381,9 +410,12 @@ public class RagService {
         boolean profileEscalated = false;
         int searchLimit = documentSearchLimit(topK, effectiveProfile);
         int pinnedCandidateCount = collectPinnedConversationDocuments(question, filter, spaceIds, selectedSpaceId, conversationContext, merged);
+        boolean expansionFromPinnedEvidence = previousAnswerExpansion(conversationContext) && pinnedCandidateCount > 0;
 
-        searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
-        if (isOverviewQuestionType(questionType)) {
+        if (!expansionFromPinnedEvidence) {
+            searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
+        }
+        if (!expansionFromPinnedEvidence && isOverviewQuestionType(questionType)) {
             for (String query : overviewQueries(question, questionType, effectiveProfile)) {
                 searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
             }
@@ -416,6 +448,7 @@ public class RagService {
         if (!isCountQuestion(question)
                 && (!assessment.sufficient() || needsMoreOverviewEvidence(citations, questionType))
                 && speedProfile != DocumentSpeedProfile.FAST
+                && !expansionFromPinnedEvidence
                 && shouldAttemptRewrite(citations, assessment, questionType, effectiveProfile)
                 && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
@@ -487,28 +520,34 @@ public class RagService {
             RagConversationContext conversationContext,
             Map<UUID, SearchResult> merged
     ) {
-        if (conversationContext == null || conversationContext.documentAnchors() == null || conversationContext.documentAnchors().isEmpty()) {
+        if (conversationContext == null) {
             return 0;
         }
-        List<UUID> chunkIds = conversationContext.documentAnchors().stream()
+        Set<UUID> requiredIds = requiredDocumentChunkIds(conversationContext);
+        if (requiredIds.isEmpty() && (conversationContext.documentAnchors() == null || conversationContext.documentAnchors().isEmpty())) {
+            return 0;
+        }
+        Set<UUID> chunkIds = new java.util.LinkedHashSet<>(requiredIds);
+        (conversationContext.documentAnchors() == null ? List.<DocumentConversationAnchor>of() : conversationContext.documentAnchors()).stream()
                 .map(DocumentConversationAnchor::chunkId)
                 .filter(id -> id != null)
                 .distinct()
                 .limit(8)
-                .toList();
+                .forEach(chunkIds::add);
         if (chunkIds.isEmpty()) {
             return 0;
         }
         try {
-            List<SearchResult> pinned = documentRepository.findActiveChunksByIds(chunkIds, filter, spaceIds, selectedSpaceId);
+            List<SearchResult> pinned = documentRepository.findActiveChunksByIds(List.copyOf(chunkIds), filter, spaceIds, selectedSpaceId);
             int added = 0;
             boolean weakQuestionTerms = queryTerms(question).size() <= 2;
             for (SearchResult result : pinned) {
+                boolean required = requiredIds.contains(result.chunkId());
                 boolean relevant = isRelevantPinnedDocument(question, result);
-                if (!weakQuestionTerms && !relevant) {
+                if (!required && !previousAnswerExpansion(conversationContext) && !weakQuestionTerms && !relevant) {
                     continue;
                 }
-                mergeDocument(merged, markConversationPinned(result, added < 2 || relevant));
+                mergeDocument(merged, markConversationPinned(result, required || added < 2 || relevant, required, previousItemLabel(conversationContext, result.chunkId())));
                 added++;
             }
             return added;
@@ -535,10 +574,20 @@ public class RagService {
     }
 
     private SearchResult markConversationPinned(SearchResult result, boolean boost) {
+        return markConversationPinned(result, boost, false, "");
+    }
+
+    private SearchResult markConversationPinned(SearchResult result, boolean boost, boolean required, String previousItemLabel) {
         Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
         metadata.put("conversationPinned", true);
         metadata.put("evidenceRole", "conversation_pinned");
         metadata.put("evidenceRankReason", "Pinned from previous document conversation evidence");
+        if (required) {
+            metadata.put("conversationRequired", true);
+        }
+        if (previousItemLabel != null && !previousItemLabel.isBlank()) {
+            metadata.put("previousAnswerItem", previousItemLabel);
+        }
         return new SearchResult(
                 result.chunkId(),
                 result.documentId(),
@@ -649,6 +698,33 @@ public class RagService {
 
     private boolean isConversationPinned(SearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
+    }
+
+    private boolean isRequiredConversationPinned(SearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationRequired"));
+    }
+
+    private boolean previousAnswerExpansion(RagConversationContext conversationContext) {
+        return conversationContext != null && conversationContext.previousAnswerExpansion();
+    }
+
+    private Set<UUID> requiredDocumentChunkIds(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.requiredDocumentChunkIds() == null) {
+            return Set.of();
+        }
+        return new HashSet<>(conversationContext.requiredDocumentChunkIds());
+    }
+
+    private String previousItemLabel(RagConversationContext conversationContext, UUID chunkId) {
+        if (conversationContext == null || chunkId == null || conversationContext.previousAnswerItems() == null) {
+            return "";
+        }
+        return conversationContext.previousAnswerItems().stream()
+                .filter(item -> item.evidenceChunkIds().contains(chunkId))
+                .map(PreviousAnswerItem::label)
+                .filter(label -> !safe(label).isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     private void expandAdjacentDocumentChunks(
@@ -1032,24 +1108,50 @@ public class RagService {
 
     private List<SearchResult> preservePinnedCitation(List<SearchResult> ordered, List<SearchResult> selected, int limit) {
         if (ordered == null || selected == null || selected.stream().anyMatch(this::isConversationPinned)) {
-            return selected == null ? List.of() : selected;
+            return preserveRequiredCitations(ordered, selected == null ? List.of() : selected, limit);
         }
         Optional<SearchResult> pinned = ordered.stream().filter(this::isConversationPinned).findFirst();
         if (pinned.isEmpty() || selected.stream().anyMatch(result -> result.chunkId().equals(pinned.get().chunkId()))) {
-            return selected;
+            return preserveRequiredCitations(ordered, selected, limit);
         }
         List<SearchResult> adjusted = new ArrayList<>(selected);
         if (adjusted.size() < limit) {
             adjusted.add(pinned.get());
-            return adjusted;
+            return preserveRequiredCitations(ordered, adjusted, limit);
         }
         for (int index = adjusted.size() - 1; index >= 0; index--) {
             if (!isConversationPinned(adjusted.get(index))) {
                 adjusted.set(index, pinned.get());
-                return adjusted;
+                return preserveRequiredCitations(ordered, adjusted, limit);
             }
         }
-        return selected;
+        return preserveRequiredCitations(ordered, selected, limit);
+    }
+
+    private List<SearchResult> preserveRequiredCitations(List<SearchResult> ordered, List<SearchResult> selected, int limit) {
+        List<SearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
+        List<SearchResult> required = ordered.stream()
+                .filter(this::isRequiredConversationPinned)
+                .filter(result -> adjusted.stream().noneMatch(current -> current.chunkId().equals(result.chunkId())))
+                .toList();
+        for (SearchResult result : required) {
+            if (adjusted.size() < limit) {
+                adjusted.add(result);
+                continue;
+            }
+            boolean replaced = false;
+            for (int index = adjusted.size() - 1; index >= 0; index--) {
+                if (!isRequiredConversationPinned(adjusted.get(index))) {
+                    adjusted.set(index, result);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                break;
+            }
+        }
+        return adjusted;
     }
 
     private List<SearchResult> orderDocumentEvidence(String question, AnswerMode answerMode, List<SearchResult> results) {
@@ -1314,12 +1416,14 @@ public class RagService {
             DocumentSpeedProfile speedProfile,
             String systemPrompt,
             String promptPrefix,
-            List<SearchResult> results
+            List<SearchResult> results,
+            RagConversationContext conversationContext
     ) {
         List<SearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
         String context = buildContext(question, answerMode, questionType, speedProfile, selected);
         int budget = promptTokenBudget(speedProfile);
-        int minCitations = Math.min(selected.size(), minContextCitations(answerMode, questionType));
+        int requiredCount = (int) selected.stream().filter(this::isRequiredConversationPinned).count();
+        int minCitations = Math.min(selected.size(), Math.max(minContextCitations(answerMode, questionType), requiredCount));
         while (selected.size() > minCitations
                 && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
             removeBudgetCandidate(selected);
@@ -1330,7 +1434,13 @@ public class RagService {
 
     private void removeBudgetCandidate(List<SearchResult> selected) {
         for (int index = selected.size() - 1; index >= 0; index--) {
-            if (!isConversationPinned(selected.get(index))) {
+            if (!isConversationPinned(selected.get(index)) && !isRequiredConversationPinned(selected.get(index))) {
+                selected.remove(index);
+                return;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isRequiredConversationPinned(selected.get(index))) {
                 selected.remove(index);
                 return;
             }
@@ -2548,6 +2658,8 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "evidenceRole");
         copyMetadata(result.metadata(), metadata, "evidenceRankReason");
         copyMetadata(result.metadata(), metadata, "conversationPinned");
+        copyMetadata(result.metadata(), metadata, "conversationRequired");
+        copyMetadata(result.metadata(), metadata, "previousAnswerItem");
         copyMetadata(result.metadata(), metadata, "adjacentExpanded");
         copyMetadata(result.metadata(), metadata, "adjacentDistance");
         copyMetadata(result.metadata(), metadata, "contextRelatedExpanded");

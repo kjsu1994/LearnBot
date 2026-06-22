@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
+import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.DocumentConversationAnchor;
+import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationDetail;
 import com.learnbot.dto.RagConversationSummary;
@@ -16,10 +18,14 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class RagConversationService {
@@ -28,6 +34,8 @@ public class RagConversationService {
 
     private static final int RECENT_TURN_LIMIT = 5;
     private static final int MAX_REWRITE_CHARS = 520;
+    private static final Pattern CITATION_PATTERN = Pattern.compile("\\[(\\d+)]");
+    private static final Pattern OUTLINE_PATTERN = Pattern.compile("^\\s*(?:#{1,6}\\s+|[-*+]\\s+|\\d+[.)]\\s+)(.+?)\\s*$");
 
     private final RagConversationRepository repository;
     private final ObjectMapper objectMapper;
@@ -69,15 +77,28 @@ public class RagConversationService {
                 .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
         validateConversationScope(conversation, spaceId, normalizedDomain, repositoryId);
         List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
-        boolean contextual = looksContextual(normalizedDomain, question) && recentTurns != null && !recentTurns.isEmpty();
+        boolean hasRecentTurns = recentTurns != null && !recentTurns.isEmpty();
+        ConversationIntent intent = classifyConversationIntent(question, hasRecentTurns);
+        boolean contextual = intent != ConversationIntent.NONE
+                || (looksContextual(normalizedDomain, question) && hasRecentTurns);
+        List<PreviousAnswerItem> previousItems = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+                ? previousAnswerItems(recentTurns.get(0))
+                : List.of();
+        List<UUID> requiredChunkIds = requiredChunkIds(previousItems);
         if (CODE.equals(normalizedDomain)) {
             List<CodeConversationAnchor> anchors = contextual ? codeAnchors(recentTurns) : List.of();
-            String rewritten = contextual ? rewriteCodeQuestion(question, recentTurns, anchors) : clean(question);
-            return new RagConversationContext(conversation.id(), rewritten, recentTurns, anchors, List.of(), contextual);
+            String rewritten = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+                    ? clean(question)
+                    : contextual ? rewriteCodeQuestion(question, recentTurns, anchors) : clean(question);
+            return new RagConversationContext(conversation.id(), rewritten, recentTurns, anchors, List.of(), contextual,
+                    intent, previousItems, List.of(), requiredChunkIds);
         }
         List<DocumentConversationAnchor> anchors = contextual ? documentAnchors(recentTurns) : List.of();
-        String rewritten = contextual ? rewriteDocumentQuestion(question, recentTurns, anchors) : clean(question);
-        return new RagConversationContext(conversation.id(), rewritten, recentTurns, List.of(), anchors, contextual);
+        String rewritten = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+                ? clean(question)
+                : contextual ? rewriteDocumentQuestion(question, recentTurns, anchors) : clean(question);
+        return new RagConversationContext(conversation.id(), rewritten, recentTurns, List.of(), anchors, contextual,
+                intent, previousItems, requiredChunkIds, List.of());
     }
 
     public AskResponse saveDocumentTurn(
@@ -178,16 +199,42 @@ public class RagConversationService {
             return false;
         }
         boolean common = containsAny(normalized,
-                "그 ", "그거", "그것", "이 ", "이거", "이것", "저 ", "저거", "해당", "위 ", "앞서", "방금", "이전", "같은", "계속",
+                "\uadf8 ", "\uadf8\uac70", "\uadf8\uac83", "\uc774 ", "\uc774\uac70", "\uc774\uac83",
+                "\uc800 ", "\uc800\uac70", "\ud574\ub2f9", "\uc704 ", "\uc55e\uc11c", "\ubc29\uae08",
+                "\uc774\uc804", "\uac19\uc740", "\uacc4\uc18d",
                 "this", "that", "above", "previous", "same", "continue");
         if (CODE.equals(domain)) {
             return common || containsAny(normalized,
-                    "그 파일", "그 메서드", "그 함수", "이 파일", "이 메서드", "이 함수",
-                    "해당 파일", "해당 메서드", "해당 함수", "same file", "same method");
+                    "\uadf8 \ud30c\uc77c", "\uadf8 \uba54\uc11c\ub4dc", "\uadf8 \ud568\uc218",
+                    "\uc774 \ud30c\uc77c", "\uc774 \uba54\uc11c\ub4dc", "\uc774 \ud568\uc218",
+                    "\ud574\ub2f9 \ud30c\uc77c", "\ud574\ub2f9 \uba54\uc11c\ub4dc", "\ud574\ub2f9 \ud568\uc218",
+                    "same file", "same method");
         }
         return common || containsAny(normalized,
-                "그 문서", "이 문서", "해당 문서", "그 내용", "이 내용", "해당 내용",
-                "그 조항", "이 조항", "해당 조항", "그 페이지", "이 페이지", "해당 페이지");
+                "\uadf8 \ubb38\uc11c", "\uc774 \ubb38\uc11c", "\ud574\ub2f9 \ubb38\uc11c",
+                "\uadf8 \ub0b4\uc6a9", "\uc774 \ub0b4\uc6a9", "\ud574\ub2f9 \ub0b4\uc6a9",
+                "\uadf8 \uc870\ud56d", "\uc774 \uc870\ud56d", "\ud574\ub2f9 \uc870\ud56d",
+                "\uadf8 \ud398\uc774\uc9c0", "\uc774 \ud398\uc774\uc9c0", "\ud574\ub2f9 \ud398\uc774\uc9c0");
+    }
+
+    private ConversationIntent classifyConversationIntent(String question, boolean hasRecentTurns) {
+        if (!hasRecentTurns) {
+            return ConversationIntent.NONE;
+        }
+        String normalized = clean(question).toLowerCase();
+        if (normalized.isBlank()) {
+            return ConversationIntent.NONE;
+        }
+        if (containsAny(normalized,
+                "\ub354 \uc790\uc138\ud788", "\uc880 \ub354 \uc790\uc138\ud788", "\uc790\uc138\ud788",
+                "\ud56d\ubaa9\ubcc4", "\uac01 \ud56d\ubaa9", "\uac01 \uadfc\uac70",
+                "\ud575\uc2ec\uadfc\uac70", "\ud575\uc2ec \uadfc\uac70", "\uadfc\uac70\ub97c",
+                "\uc704 \ub0b4\uc6a9", "\uc704 \ub2f5\ubcc0", "\ubc29\uae08 \ub2f5\ubcc0",
+                "\uc774\uc804 \ub2f5\ubcc0", "\ud655\uc7a5",
+                "more detail", "details", "expand", "elaborate", "by item", "by evidence", "per item")) {
+            return ConversationIntent.PREVIOUS_ANSWER_EXPANSION;
+        }
+        return ConversationIntent.NONE;
     }
 
     private void validateConversationScope(RagConversationSummary conversation, UUID spaceId, String domain, UUID repositoryId) {
@@ -206,6 +253,97 @@ public class RagConversationService {
         if (parentTurnId != null && !repository.turnBelongsToConversation(conversationId, parentTurnId)) {
             throw new IllegalArgumentException("RAG conversation parent turn does not match the conversation.");
         }
+    }
+
+    private List<PreviousAnswerItem> previousAnswerItems(RagConversationTurnContext turn) {
+        if (turn == null || clean(turn.answer()).isBlank()) {
+            return List.of();
+        }
+        Map<Integer, UUID> evidenceByCitation = evidenceByCitation(turn.evidence());
+        List<PreviousAnswerItem> items = extractOutlineItems(turn.answer(), evidenceByCitation);
+        if (!items.isEmpty()) {
+            return items;
+        }
+        List<Integer> citations = citationNumbers(turn.answer());
+        List<UUID> chunkIds = chunkIdsForCitations(citations, evidenceByCitation);
+        if (chunkIds.isEmpty()) {
+            chunkIds = evidenceByCitation.values().stream().limit(5).toList();
+        }
+        return List.of(new PreviousAnswerItem("Previous answer", compact(turn.answer(), 220), citations, chunkIds));
+    }
+
+    private List<PreviousAnswerItem> extractOutlineItems(String answer, Map<Integer, UUID> evidenceByCitation) {
+        List<PreviousAnswerItem> items = new ArrayList<>();
+        for (String line : answer.split("\\R")) {
+            Matcher matcher = OUTLINE_PATTERN.matcher(line);
+            if (!matcher.matches()) {
+                continue;
+            }
+            String text = matcher.group(1).trim();
+            if (text.isBlank()) {
+                continue;
+            }
+            List<Integer> citations = citationNumbers(text);
+            List<UUID> chunkIds = chunkIdsForCitations(citations, evidenceByCitation);
+            items.add(new PreviousAnswerItem(stripCitations(text), text, citations, chunkIds));
+            if (items.size() >= 12) {
+                break;
+            }
+        }
+        return items;
+    }
+
+    private List<Integer> citationNumbers(String value) {
+        Set<Integer> numbers = new LinkedHashSet<>();
+        Matcher matcher = CITATION_PATTERN.matcher(clean(value));
+        while (matcher.find()) {
+            try {
+                numbers.add(Integer.parseInt(matcher.group(1)));
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed citation numbers.
+            }
+        }
+        return List.copyOf(numbers);
+    }
+
+    private Map<Integer, UUID> evidenceByCitation(JsonNode evidence) {
+        Map<Integer, UUID> mapping = new LinkedHashMap<>();
+        if (evidence == null || !evidence.isArray()) {
+            return mapping;
+        }
+        int index = 1;
+        for (JsonNode item : evidence) {
+            UUID chunkId = uuid(item.path("chunkId").asText(""));
+            if (chunkId != null) {
+                mapping.put(index, chunkId);
+            }
+            index++;
+        }
+        return mapping;
+    }
+
+    private List<UUID> chunkIdsForCitations(List<Integer> citations, Map<Integer, UUID> evidenceByCitation) {
+        if (citations == null || citations.isEmpty()) {
+            return List.of();
+        }
+        return citations.stream()
+                .map(evidenceByCitation::get)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private List<UUID> requiredChunkIds(List<PreviousAnswerItem> items) {
+        return items.stream()
+                .flatMap(item -> item.evidenceChunkIds().stream())
+                .distinct()
+                .limit(12)
+                .toList();
+    }
+
+    private String stripCitations(String value) {
+        String stripped = CITATION_PATTERN.matcher(clean(value)).replaceAll("").trim();
+        return stripped.length() <= 120 ? stripped : stripped.substring(0, 120).trim() + "...";
     }
 
     private List<DocumentConversationAnchor> documentAnchors(List<RagConversationTurnContext> recentTurns) {
@@ -297,6 +435,10 @@ public class RagConversationService {
         metadata.put("codeAnchorCount", context.codeAnchors() == null ? 0 : context.codeAnchors().size());
         metadata.put("documentAnchorCount", context.documentAnchors() == null ? 0 : context.documentAnchors().size());
         metadata.put("contextual", context.contextual());
+        metadata.put("conversationIntent", context.conversationIntent().name());
+        metadata.put("previousAnswerItemCount", context.previousAnswerItems().size());
+        metadata.put("requiredDocumentChunkCount", context.requiredDocumentChunkIds().size());
+        metadata.put("requiredCodeChunkCount", context.requiredCodeChunkIds().size());
         metadata.put("rewritten", context.contextual() && !clean(context.rewrittenQuestion()).isBlank());
         return objectMapper.valueToTree(metadata);
     }

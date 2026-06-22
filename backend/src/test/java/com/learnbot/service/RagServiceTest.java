@@ -2,8 +2,10 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.DocumentConversationAnchor;
 import com.learnbot.dto.DocumentChunkDetail;
+import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
@@ -447,6 +449,62 @@ class RagServiceTest {
             assertThat(evidence.metadata()).containsEntry("conversationPinned", true);
         });
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("pinned"));
+    }
+
+    @Test
+    void previousAnswerExpansionUsesRequiredPinnedEvidenceBeforeNewSearch() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setDocumentAdjacentExpansionEnabled(false);
+        properties.getDocument().getGraph().setEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        UUID spaceId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        UUID requiredChunkId = UUID.randomUUID();
+        SearchResult required = searchResult(
+                documentId,
+                requiredChunkId,
+                2,
+                "policy.pdf",
+                "application/pdf",
+                "The policy requires quarterly access reviews and exception approval."
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "more detail by item",
+                List.of(),
+                List.of(),
+                List.of(new DocumentConversationAnchor(requiredChunkId, documentId, "policy.pdf", "file://policy.pdf", 2, null, "Access", "Security > Access", "policy")),
+                true,
+                ConversationIntent.PREVIOUS_ANSWER_EXPANSION,
+                List.of(new PreviousAnswerItem("Access control", "Access control [1]", List.of(1), List.of(requiredChunkId))),
+                List.of(requiredChunkId),
+                List.of()
+        );
+
+        when(documentRepository.findActiveChunksByIds(any(), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(required));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        AskResponse response = service.askConversational(
+                "more detail by item",
+                context,
+                null,
+                "qa",
+                "BALANCED",
+                List.of(spaceId),
+                null
+        );
+
+        verify(searchService, never()).searchDetailed(anyString(), any(), anyInt(), any(), any(), anyString());
+        assertThat(response.evidence()).anySatisfy(evidence -> {
+            assertThat(evidence.chunkId()).isEqualTo(requiredChunkId);
+            assertThat(evidence.metadata()).containsEntry("conversationRequired", true);
+            assertThat(evidence.metadata()).containsEntry("previousAnswerItem", "Access control");
+        });
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {

@@ -6,6 +6,7 @@ import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.repository.CodeRepository;
@@ -262,11 +263,18 @@ public class CodeRagService {
         if (conversationContext == null || !conversationContext.contextual()) {
             return safe(originalQuestion, "");
         }
+        if (conversationContext.previousAnswerExpansion()) {
+            return safe(originalQuestion, "");
+        }
         String rewritten = safe(conversationContext.rewrittenQuestion(), "");
         return rewritten.isBlank() ? safe(originalQuestion, "") : rewritten;
     }
 
     private String questionPrompt(String originalQuestion, String effectiveQuestion, RagConversationContext conversationContext) {
+        if (conversationContext != null && conversationContext.previousAnswerExpansion()) {
+            return "Original user question:\n" + originalQuestion
+                    + "\n\nThis is a request to expand the previous answer. Keep the previous answer outline and expand each item using only the current source-code context.";
+        }
         if (conversationContext == null || !conversationContext.contextual() || safe(effectiveQuestion, "").equals(safe(originalQuestion, ""))) {
             return "Question:\n" + originalQuestion;
         }
@@ -316,11 +324,14 @@ public class CodeRagService {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
-        collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        boolean expansionFromPinnedEvidence = previousAnswerExpansion(conversationContext) && pinnedCandidateCount > 0;
+        if (!expansionFromPinnedEvidence) {
+            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        }
         for (String query : conversationAnchorQueries(question, conversationContext)) {
             collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
         }
-        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
+        if (!expansionFromPinnedEvidence && (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW)) {
             for (String query : codeOverviewQueries(question, questionMode)) {
                 collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
             }
@@ -343,7 +354,7 @@ public class CodeRagService {
         );
         int iteration = 1;
 
-        if (!assessment.sufficient() && pipelineService.maxIterations() > 1) {
+        if (!assessment.sufficient() && !expansionFromPinnedEvidence && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
                     question,
                     RagPipelineService.Domain.CODE,
@@ -374,27 +385,33 @@ public class CodeRagService {
             RagConversationContext conversationContext,
             Map<UUID, CodeSearchResult> merged
     ) {
-        if (codeRepository == null || conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+        if (codeRepository == null || conversationContext == null) {
             return 0;
         }
-        List<UUID> chunkIds = conversationContext.codeAnchors().stream()
+        Set<UUID> requiredIds = requiredCodeChunkIds(conversationContext);
+        if (requiredIds.isEmpty() && (conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty())) {
+            return 0;
+        }
+        Set<UUID> chunkIds = new java.util.LinkedHashSet<>(requiredIds);
+        (conversationContext.codeAnchors() == null ? List.<CodeConversationAnchor>of() : conversationContext.codeAnchors()).stream()
                 .map(CodeConversationAnchor::chunkId)
                 .filter(id -> id != null)
                 .distinct()
                 .limit(8)
-                .toList();
+                .forEach(chunkIds::add);
         if (chunkIds.isEmpty()) {
             return 0;
         }
         try {
-            List<CodeSearchResult> pinned = codeRepository.findActiveChunksByIds(repositoryId, chunkIds, spaceIds, selectedSpaceId);
+            List<CodeSearchResult> pinned = codeRepository.findActiveChunksByIds(repositoryId, List.copyOf(chunkIds), spaceIds, selectedSpaceId);
             int added = 0;
             boolean weakQuestionTerms = primaryQuestionTerms(effectiveQuestion).size() <= 2;
             for (CodeSearchResult result : pinned) {
-                if (!weakQuestionTerms && !isRelevantPinnedEvidence(effectiveQuestion, result)) {
+                boolean required = requiredIds.contains(result.chunkId());
+                if (!required && !previousAnswerExpansion(conversationContext) && !weakQuestionTerms && !isRelevantPinnedEvidence(effectiveQuestion, result)) {
                     continue;
                 }
-                merge(merged, markConversationPinned(result, added < 2 || isRelevantPinnedEvidence(effectiveQuestion, result)));
+                merge(merged, markConversationPinned(result, required || added < 2 || isRelevantPinnedEvidence(effectiveQuestion, result), required, previousItemLabel(conversationContext, result.chunkId())));
                 added++;
             }
             return added;
@@ -419,11 +436,21 @@ public class CodeRagService {
     }
 
     private CodeSearchResult markConversationPinned(CodeSearchResult result, boolean boost) {
+        return markConversationPinned(result, boost, false, "");
+    }
+
+    private CodeSearchResult markConversationPinned(CodeSearchResult result, boolean boost, boolean required, String previousItemLabel) {
         Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
         metadata.put("conversationPinned", true);
         metadata.put("conversationAnchor", true);
         metadata.put("evidenceRole", "conversation_pinned");
         metadata.put("evidenceRankReason", "Pinned from previous code conversation evidence");
+        if (required) {
+            metadata.put("conversationRequired", true);
+        }
+        if (previousItemLabel != null && !previousItemLabel.isBlank()) {
+            metadata.put("previousAnswerItem", previousItemLabel);
+        }
         return new CodeSearchResult(
                 result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
                 result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
@@ -437,9 +464,10 @@ public class CodeRagService {
             return List.of();
         }
         List<String> queries = new ArrayList<>();
+        boolean expansion = previousAnswerExpansion(conversationContext);
         for (CodeConversationAnchor anchor : conversationContext.codeAnchors()) {
             String query = String.join(" ",
-                    safe(question, ""),
+                    expansion ? "" : safe(question, ""),
                     safe(anchor.filePath(), ""),
                     safe(anchor.symbolName(), ""),
                     safe(anchor.className(), ""),
@@ -472,10 +500,26 @@ public class CodeRagService {
                         + nullable(" / method=", anchor.methodName())
                         + (anchor.lineStart() > 0 ? " / lines=" + anchor.lineStart() + "-" + Math.max(anchor.lineStart(), anchor.lineEnd()) : ""))
                 .collect(Collectors.joining("\n"));
+        String previousOutline = previousAnswerOutline(conversationContext);
         return "\n\nConversation focus:\n"
-                + "Use the previous conversation only to resolve follow-up references. Ignore it if it conflicts with the retrieved source-code context.\n"
+                + (conversationContext.previousAnswerExpansion()
+                ? "Previous-answer expansion mode: keep the previous answer item structure, expand each item only from current source-code context, cite every item, and mark insufficient items as \"\ucd94\uac00 \uadfc\uac70 \ubd80\uc871\".\n"
+                : "Use the previous conversation only to resolve follow-up references. Ignore it if it conflicts with the retrieved source-code context.\n")
+                + (previousOutline.isBlank() ? "" : "Previous answer outline:\n" + previousOutline + "\n")
                 + (recentTurns.isBlank() ? "" : "Recent turns:\n" + recentTurns + "\n")
                 + (anchors.isBlank() ? "" : "Previous code evidence anchors:\n" + anchors);
+    }
+
+    private String previousAnswerOutline(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.previousAnswerItems().isEmpty()) {
+            return "";
+        }
+        return conversationContext.previousAnswerItems().stream()
+                .limit(12)
+                .map(item -> "- " + safe(item.label(), "")
+                        + (item.citationNumbers().isEmpty() ? "" : " / previous citations=" + item.citationNumbers())
+                        + (item.evidenceChunkIds().isEmpty() ? " / \ucd94\uac00 \uadfc\uac70 \ubd80\uc871" : " / requiredChunks=" + item.evidenceChunkIds()))
+                .collect(Collectors.joining("\n"));
     }
 
     private String conversationTurnSummary(RagConversationTurnContext turn) {
@@ -592,24 +636,50 @@ public class CodeRagService {
 
     private List<CodeSearchResult> preservePinnedEvidence(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, int limit) {
         if (ranked == null || selected == null || selected.stream().anyMatch(this::isConversationPinned)) {
-            return selected == null ? List.of() : selected;
+            return preserveRequiredEvidence(ranked, selected == null ? List.of() : selected, limit);
         }
         java.util.Optional<CodeSearchResult> pinned = ranked.stream().filter(this::isConversationPinned).findFirst();
         if (pinned.isEmpty() || selected.stream().anyMatch(result -> result.chunkId().equals(pinned.get().chunkId()))) {
-            return selected;
+            return preserveRequiredEvidence(ranked, selected, limit);
         }
         List<CodeSearchResult> adjusted = new ArrayList<>(selected);
         if (adjusted.size() < limit) {
             adjusted.add(pinned.get());
-            return adjusted;
+            return preserveRequiredEvidence(ranked, adjusted, limit);
         }
         for (int index = adjusted.size() - 1; index >= 0; index--) {
             if (!isConversationPinned(adjusted.get(index))) {
                 adjusted.set(index, pinned.get());
-                return adjusted;
+                return preserveRequiredEvidence(ranked, adjusted, limit);
             }
         }
-        return selected;
+        return preserveRequiredEvidence(ranked, selected, limit);
+    }
+
+    private List<CodeSearchResult> preserveRequiredEvidence(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, int limit) {
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
+        List<CodeSearchResult> required = ranked.stream()
+                .filter(this::isRequiredConversationPinned)
+                .filter(result -> adjusted.stream().noneMatch(current -> current.chunkId().equals(result.chunkId())))
+                .toList();
+        for (CodeSearchResult result : required) {
+            if (adjusted.size() < limit) {
+                adjusted.add(result);
+                continue;
+            }
+            boolean replaced = false;
+            for (int index = adjusted.size() - 1; index >= 0; index--) {
+                if (!isRequiredConversationPinned(adjusted.get(index))) {
+                    adjusted.set(index, result);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                break;
+            }
+        }
+        return adjusted;
     }
 
     private List<CodeSearchResult> diverseByCategory(List<CodeSearchResult> ranked, int limit) {
@@ -698,7 +768,8 @@ public class CodeRagService {
         List<CodeSearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
         String context = buildContext(question, questionMode, selected);
         int budget = promptTokenBudget();
-        int minResults = Math.min(selected.size(), isConversationPinned(selected) ? 1 : Math.min(2, selected.size()));
+        int requiredCount = (int) selected.stream().filter(this::isRequiredConversationPinned).count();
+        int minResults = Math.min(selected.size(), Math.max(requiredCount, isConversationPinned(selected) ? 1 : Math.min(2, selected.size())));
         while (selected.size() > minResults
                 && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
             removeBudgetCandidate(selected);
@@ -713,7 +784,13 @@ public class CodeRagService {
 
     private void removeBudgetCandidate(List<CodeSearchResult> selected) {
         for (int index = selected.size() - 1; index >= 0; index--) {
-            if (!isConversationPinned(selected.get(index))) {
+            if (!isConversationPinned(selected.get(index)) && !isRequiredConversationPinned(selected.get(index))) {
+                selected.remove(index);
+                return;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isRequiredConversationPinned(selected.get(index))) {
                 selected.remove(index);
                 return;
             }
@@ -1378,6 +1455,33 @@ public class CodeRagService {
 
     private boolean isConversationPinned(CodeSearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
+    }
+
+    private boolean isRequiredConversationPinned(CodeSearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationRequired"));
+    }
+
+    private boolean previousAnswerExpansion(RagConversationContext conversationContext) {
+        return conversationContext != null && conversationContext.previousAnswerExpansion();
+    }
+
+    private Set<UUID> requiredCodeChunkIds(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.requiredCodeChunkIds() == null) {
+            return Set.of();
+        }
+        return new HashSet<>(conversationContext.requiredCodeChunkIds());
+    }
+
+    private String previousItemLabel(RagConversationContext conversationContext, UUID chunkId) {
+        if (conversationContext == null || chunkId == null || conversationContext.previousAnswerItems() == null) {
+            return "";
+        }
+        return conversationContext.previousAnswerItems().stream()
+                .filter(item -> item.evidenceChunkIds().contains(chunkId))
+                .map(PreviousAnswerItem::label)
+                .filter(label -> !safe(label, "").isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     private List<String> conversationDiagnostics(
