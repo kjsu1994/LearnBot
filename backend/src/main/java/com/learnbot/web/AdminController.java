@@ -137,7 +137,7 @@ public class AdminController {
     List<SpaceSummary> spaces() {
         AppUser user = currentUserProvider.currentUser();
         authService.requireAdmin(user);
-        return authService.listSpaces(user);
+        return authService.listAllSpaces(user);
     }
 
     @PostMapping("/spaces")
@@ -165,7 +165,6 @@ public class AdminController {
     ResponseEntity<Resource> downloadExport(@PathVariable UUID spaceId, @PathVariable String fileName) throws IOException {
         AppUser user = currentUserProvider.currentUser();
         authService.requireAdmin(user);
-        authService.requireSpace(user, spaceId);
         Resource resource = spaceTransferService.exportFile(fileName);
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(fileName, StandardCharsets.UTF_8)

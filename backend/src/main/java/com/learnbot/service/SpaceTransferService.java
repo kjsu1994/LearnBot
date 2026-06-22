@@ -65,7 +65,6 @@ public class SpaceTransferService {
 
     public SpaceExportResponse exportSpace(AppUser actor, UUID spaceId) {
         authService.requireAdmin(actor);
-        authService.requireSpace(actor, spaceId);
 
         SpaceInfo space = findSpace(spaceId);
         SpaceTransferCounts counts = countExportable(spaceId);
@@ -131,7 +130,6 @@ public class SpaceTransferService {
     @Transactional
     public SpaceImportResponse importSpace(AppUser actor, UUID spaceId, MultipartFile file) {
         authService.requireAdmin(actor);
-        authService.requireSpace(actor, spaceId);
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Import ZIP file is required.");
         }

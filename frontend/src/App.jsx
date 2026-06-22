@@ -16,6 +16,7 @@ export default function App() {
   const [token, setToken] = useState(readStoredToken);
   const [user, setUser] = useState(null);
   const [spaces, setSpaces] = useState([]);
+  const [adminSpaces, setAdminSpaces] = useState([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
   const [routePath, setRoutePath] = useState(() => normalizeRoute(window.location.pathname));
@@ -91,6 +92,7 @@ export default function App() {
     initialPassword: '',
     role: 'USER',
     spaceRole: 'MEMBER',
+    spaceId: '',
   });
   const [spaceForm, setSpaceForm] = useState({ name: '', description: '' });
 
@@ -289,6 +291,7 @@ export default function App() {
     setToken('');
     setUser(null);
     setSpaces([]);
+    setAdminSpaces([]);
     setSelectedSpaceId('');
     resetDocumentState();
     setRepositories([]);
@@ -672,15 +675,17 @@ export default function App() {
 
   async function refreshAdmin() {
     const trashQuery = selectedSpaceId ? `?spaceId=${encodeURIComponent(selectedSpaceId)}` : '';
-    const [users, logs, settings, schemaProfiles, retentionPreview, trash] = await Promise.all([
+    const [users, logs, settings, schemaProfiles, retentionPreview, trash, allSpaces] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/audit-logs?limit=50'),
       request('/api/admin/settings'),
       request('/api/admin/document-graph/schema-profiles').catch(() => []),
       request('/api/admin/storage/retention/preview').catch(() => null),
       request(`/api/admin/trash${trashQuery}`).catch(() => []),
+      request('/api/admin/spaces').catch(() => []),
     ]);
     setAdminUsers(users || []);
+    setAdminSpaces(allSpaces || []);
     setAuditLogs(logs || []);
     setDocumentSchemaProfiles(schemaProfiles || []);
     setStorageRetention(retentionPreview);
@@ -738,10 +743,10 @@ export default function App() {
         method: 'POST',
         json: {
           ...inviteForm,
-          spaceId: activeSpaceId,
+          spaceId: inviteForm.spaceId || activeSpaceId,
         },
       });
-      setInviteForm({ loginId: '', displayName: '', initialPassword: '', role: 'USER', spaceRole: 'MEMBER' });
+      setInviteForm({ loginId: '', displayName: '', initialPassword: '', role: 'USER', spaceRole: 'MEMBER', spaceId: '' });
       await refreshAdmin();
     });
   }
@@ -1123,6 +1128,7 @@ export default function App() {
             storageRetention={storageRetention}
             adminTrash={adminTrash}
             spaces={spaces}
+            adminSpaces={adminSpaces}
             selectedSpaceId={activeSpaceId}
             auditLogs={auditLogs}
             inviteForm={inviteForm}

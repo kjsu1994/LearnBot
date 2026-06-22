@@ -104,7 +104,7 @@ public class AuthService {
 
     public AppUser inviteUser(AppUser actor, String loginId, String displayName, String initialPassword, String role, UUID spaceId, String spaceRole) {
         requireAdmin(actor);
-        UUID resolvedSpaceId = resolveSpace(actor, spaceId);
+        UUID resolvedSpaceId = resolveAdminSpace(spaceId);
         String cleanRole = normalizeUserRole(role);
         String cleanLoginId = cleanLoginId(loginId);
         AppUser user = securityRepository.createUser(
@@ -239,7 +239,6 @@ public class AuthService {
 
     public void addSpaceMember(AppUser actor, UUID spaceId, UUID userId, String role) {
         requireAdmin(actor);
-        requireSpace(actor, spaceId);
         activeUser(userId);
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
@@ -249,11 +248,7 @@ public class AuthService {
 
     public void updateUserSpaceRole(AppUser actor, UUID userId, UUID spaceId, String role) {
         requireAdmin(actor);
-        requireSpace(actor, spaceId);
         AppUser target = activeUser(userId);
-        if ("ADMIN".equals(target.role())) {
-            throw new IllegalArgumentException("관리자는 모든 공간에 접근하므로 공간별 권한을 변경할 수 없습니다.");
-        }
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         String cleanRole = normalizeSpaceRole(role);
@@ -277,19 +272,15 @@ public class AuthService {
 
     public void removeSpaceMember(AppUser actor, UUID spaceId, UUID userId) {
         requireAdmin(actor);
-        requireSpace(actor, spaceId);
         AppUser target = activeUser(userId);
-        if ("ADMIN".equals(target.role())) {
-            throw new IllegalArgumentException("관리자는 모든 공간에 접근하므로 공간별 권한을 제거할 수 없습니다.");
-        }
         securityRepository.findSpace(spaceId)
                 .orElseThrow(() -> new IllegalArgumentException("공간을 찾을 수 없습니다."));
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse(null);
         if (oldRole == null) {
             return;
         }
-        if (!target.isAdmin() && securityRepository.countSpaceMemberships(userId) <= 1) {
-            throw new IllegalArgumentException("일반 사용자의 마지막 공간 권한은 제거할 수 없습니다.");
+        if (securityRepository.countSpaceMemberships(userId) <= 1) {
+            throw new IllegalArgumentException("사용자의 마지막 공간 권한은 제거할 수 없습니다.");
         }
         securityRepository.removeSpaceMember(spaceId, userId);
         securityRepository.createAuditLog(
@@ -311,6 +302,11 @@ public class AuthService {
         return securityRepository.listSpacesForUser(user);
     }
 
+    public List<SpaceSummary> listAllSpaces(AppUser user) {
+        requireAdmin(user);
+        return securityRepository.listAllSpaces();
+    }
+
     public List<UUID> accessibleSpaceIds(AppUser user) {
         List<UUID> ids = securityRepository.accessibleSpaceIds(user);
         if (ids.isEmpty()) {
@@ -326,6 +322,13 @@ public class AuthService {
         }
         List<UUID> ids = accessibleSpaceIds(user);
         return ids.get(0);
+    }
+
+    private UUID resolveAdminSpace(UUID requestedSpaceId) {
+        UUID resolvedSpaceId = requestedSpaceId == null ? SecurityRepository.DEFAULT_SPACE_ID : requestedSpaceId;
+        securityRepository.findSpace(resolvedSpaceId)
+                .orElseThrow(() -> new IllegalArgumentException("Workspace was not found."));
+        return resolvedSpaceId;
     }
 
     public void requireSpace(AppUser user, UUID spaceId) {

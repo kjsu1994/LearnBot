@@ -121,20 +121,38 @@ class AuthServiceTest {
     }
 
     @Test
-    void preventsChangingSpaceRoleForAdminUser() {
+    void allowsChangingSpaceRoleForAdminUser() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();
         AppUser actor = user(actorId, "actor@example.com", "ADMIN");
         AppUser target = user(targetId, "admin@example.com", "ADMIN");
         when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
-        when(repository.canAccessSpace(actor, spaceId)).thenReturn(true);
+        when(repository.findSpace(spaceId)).thenReturn(Optional.of(new SpaceSummary(spaceId, "Space", "", "OWNER", OffsetDateTime.now())));
+        when(repository.findSpaceMemberRole(spaceId, targetId)).thenReturn(Optional.of("MEMBER"));
 
-        assertThatThrownBy(() -> service.updateUserSpaceRole(actor, targetId, spaceId, "MEMBER"))
+        service.updateUserSpaceRole(actor, targetId, spaceId, "OWNER");
+
+        verify(repository).addSpaceMember(spaceId, targetId, "OWNER");
+    }
+
+    @Test
+    void preventsRemovingLastSpaceFromAdminUser() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        AppUser actor = user(actorId, "actor@example.com", "ADMIN");
+        AppUser target = user(targetId, "admin@example.com", "ADMIN");
+        when(repository.findUserById(targetId)).thenReturn(Optional.of(target));
+        when(repository.findSpace(spaceId)).thenReturn(Optional.of(new SpaceSummary(spaceId, "Space", "", "OWNER", OffsetDateTime.now())));
+        when(repository.findSpaceMemberRole(spaceId, targetId)).thenReturn(Optional.of("OWNER"));
+        when(repository.countSpaceMemberships(targetId)).thenReturn(1);
+
+        assertThatThrownBy(() -> service.removeSpaceMember(actor, spaceId, targetId))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("공간");
 
-        verify(repository, never()).addSpaceMember(eq(spaceId), eq(targetId), anyString());
+        verify(repository, never()).removeSpaceMember(spaceId, targetId);
     }
 
     private AppUser user(UUID id, String email, String role) {

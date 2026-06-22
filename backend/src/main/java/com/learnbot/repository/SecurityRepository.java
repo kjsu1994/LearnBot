@@ -373,15 +373,6 @@ public class SecurityRepository {
     }
 
     public List<SpaceSummary> listSpacesForUser(AppUser user) {
-        if (user.isAdmin()) {
-            return jdbc.query("""
-                    SELECT s.id, s.name, s.description, COALESCE(sm.role, 'ADMIN') AS role, s.created_at
-                    FROM spaces s
-                    LEFT JOIN space_members sm ON sm.space_id = s.id AND sm.user_id = :userId
-                    WHERE s.deleted_at IS NULL
-                    ORDER BY s.created_at ASC
-                    """, new MapSqlParameterSource().addValue("userId", user.id()), this::mapSpace);
-        }
         return jdbc.query("""
                 SELECT s.id, s.name, s.description, sm.role, s.created_at
                 FROM space_members sm
@@ -392,33 +383,29 @@ public class SecurityRepository {
                 """, new MapSqlParameterSource().addValue("userId", user.id()), this::mapSpace);
     }
 
+    public List<SpaceSummary> listAllSpaces() {
+        return jdbc.query("""
+                SELECT s.id, s.name, s.description, 'ADMIN' AS role, s.created_at
+                FROM spaces s
+                WHERE s.deleted_at IS NULL
+                ORDER BY s.created_at ASC
+                """, new MapSqlParameterSource(), this::mapSpace);
+    }
+
     public List<UUID> accessibleSpaceIds(AppUser user) {
-        if (user.isAdmin()) {
-            return jdbc.query("""
-                    SELECT id
-                    FROM spaces
-                    WHERE deleted_at IS NULL
-                    ORDER BY created_at ASC
-                    """, new MapSqlParameterSource(), (rs, rowNum) -> rs.getObject("id", UUID.class));
-        }
         return jdbc.query("""
                 SELECT space_id
-                FROM space_members
-                WHERE user_id = :userId
+                FROM space_members sm
+                JOIN spaces s ON s.id = sm.space_id
+                WHERE sm.user_id = :userId
+                  AND s.deleted_at IS NULL
+                ORDER BY s.created_at ASC
                 """, new MapSqlParameterSource().addValue("userId", user.id()), (rs, rowNum) -> rs.getObject("space_id", UUID.class));
     }
 
     public boolean canAccessSpace(AppUser user, UUID spaceId) {
         if (spaceId == null) {
             return false;
-        }
-        if (user.isAdmin()) {
-            Integer count = jdbc.queryForObject("""
-                    SELECT COUNT(*)
-                    FROM spaces
-                    WHERE id = :spaceId AND deleted_at IS NULL
-                    """, new MapSqlParameterSource().addValue("spaceId", spaceId), Integer.class);
-            return count != null && count > 0;
         }
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*)

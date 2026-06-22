@@ -16,6 +16,7 @@ function AdminWorkspace({
   storageRetention,
   adminTrash = [],
   spaces,
+  adminSpaces = [],
   selectedSpaceId,
   auditLogs,
   inviteForm,
@@ -107,9 +108,6 @@ function AdminWorkspace({
   }
 
   function beginPermissionEdit(item) {
-    if (item.role === 'ADMIN') {
-      return;
-    }
     const draft = {};
     (item.spaces || []).forEach((space) => {
       draft[space.id] = space.role;
@@ -140,8 +138,13 @@ function AdminWorkspace({
   async function submitPermissionEdit(event) {
     event.preventDefault();
     if (!permissionsUser) return;
+    const assignedCount = manageableSpaces.filter((space) => permissionDraft[space.id]).length;
+    if (assignedCount === 0) {
+      setModalError('최소 1개 공간 권한은 유지해야 합니다.');
+      return;
+    }
     const currentRoles = new Map((permissionsUser.spaces || []).map((space) => [space.id, space.role]));
-    const operations = spaces
+    const operations = manageableSpaces
       .map((space) => {
         const currentRole = currentRoles.get(space.id) || '';
         const nextRole = permissionDraft[space.id] || '';
@@ -240,7 +243,10 @@ function AdminWorkspace({
     if (result) closeSpaceImport();
   }
 
-  const transferSpaceName = spaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
+  const manageableSpaces = adminSpaces.length ? adminSpaces : spaces;
+  const inviteSpaceId = inviteForm.spaceId || selectedSpaceId || manageableSpaces[0]?.id || '';
+  const inviteSpace = manageableSpaces.find((space) => space.id === inviteSpaceId);
+  const transferSpaceName = manageableSpaces.find((space) => space.id === spaceTransferResult?.spaceId)?.name || '';
   const allowedDomains = adminSettings?.allowedDomains || [];
   const allowedDomainPreview = allowedDomains.slice(0, 6);
   const retentionAreas = storageRetention?.areas || [];
@@ -250,7 +256,7 @@ function AdminWorkspace({
   const retentionCandidateCount = storageRetention?.totalCandidates ?? 0;
   const adminSummary = [
     { label: '사용자', value: users.length, hint: `${activeUsers} active`, icon: <IconUsersGroup size={20} /> },
-    { label: '공간', value: spaces.length, hint: selectedSpaceId ? 'selected scope' : 'global scope', icon: <IconDatabase size={20} /> },
+    { label: '공간', value: manageableSpaces.length, hint: selectedSpaceId ? 'selected scope' : 'global scope', icon: <IconDatabase size={20} /> },
     { label: '허용 도메인', value: allowedDomains.length, hint: adminSettings?.respectRobotsTxt ?? true ? 'robots on' : 'robots off', icon: <IconWorld size={20} /> },
     { label: 'Retention 후보', value: retentionCandidateCount, hint: formatFileSize(storageRetention?.totalEstimatedBytes), icon: <IconActivity size={20} /> },
   ];
@@ -679,12 +685,24 @@ function AdminWorkspace({
               </div>
             </div>
           </div>
+          <div className="stack">
+            <label htmlFor="invite-space">초대 공간</label>
+            <select
+              id="invite-space"
+              value={inviteSpaceId}
+              onChange={(event) => setInviteForm((current) => ({ ...current, spaceId: event.target.value }))}
+            >
+              {manageableSpaces.map((space) => (
+                <option key={space.id} value={space.id}>{space.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="detail-box compact-box">
-            <strong>{spaces.find((space) => space.id === selectedSpaceId)?.name || '선택된 공간'}</strong>
+            <strong>{inviteSpace?.name || '선택된 공간'}</strong>
             <small>초대 사용자는 이 공간의 자료만 접근합니다.</small>
           </div>
           <div className="action-row">
-            <button disabled={!inviteForm.loginId || !inviteForm.displayName || !inviteForm.initialPassword || loading('user-invite')}>
+            <button disabled={!inviteForm.loginId || !inviteForm.displayName || !inviteForm.initialPassword || !inviteSpaceId || loading('user-invite')}>
               {loading('user-invite') ? <Loader2 className="spin" size={16} /> : <UserPlus size={16} />}
               초대
             </button>
@@ -729,7 +747,7 @@ function AdminWorkspace({
                 <div className="document-main">
                   <strong>{formatBrandText(item.displayName)}</strong>
                   <small>{item.loginId || item.email}</small>
-                  <small>{item.role === 'ADMIN' ? '전체 공간 접근' : `${item.spaces?.length || 0}개 공간 권한`}</small>
+                  <small>{item.spaces?.length || 0}개 공간 권한</small>
                 </div>
                 <div className="document-meta">
                   <StatusBadge status={item.status} />
@@ -747,8 +765,8 @@ function AdminWorkspace({
                     {loading(`user-password-${item.id}`) ? <Loader2 className="spin" size={15} /> : <LockKeyhole size={15} />}
                   </IconButton>
                   <IconButton
-                    title={item.role === 'ADMIN' ? 'ADMIN 계정은 모든 공간에 접근합니다.' : '공간 권한 관리'}
-                    disabled={item.role === 'ADMIN' || loading(`user-spaces-${item.id}`)}
+                    title="공간 권한 관리"
+                    disabled={loading(`user-spaces-${item.id}`)}
                     onClick={() => beginPermissionEdit(item)}
                   >
                     {loading(`user-spaces-${item.id}`) ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
@@ -772,7 +790,7 @@ function AdminWorkspace({
             <Database size={18} />
             <div>
               <h2>공간 관리</h2>
-              <p>{spaces.length}개 공간</p>
+              <p>{manageableSpaces.length}개 공간</p>
             </div>
           </div>
           {spaceTransferResult?.type === 'export' && (
@@ -801,7 +819,7 @@ function AdminWorkspace({
             </div>
           )}
           <div className="document-list">
-            {spaces.map((space) => (
+            {manageableSpaces.map((space) => (
               <article className="document-row space-admin-row" key={space.id}>
                 {editingSpaceId === space.id ? (
                   <form className="space-edit-form" onSubmit={(event) => submitSpaceEdit(event, space.id)}>
@@ -979,14 +997,15 @@ function AdminWorkspace({
       {permissionsUser && (
         <AdminUserModal title="공간 권한 관리" subtitle={permissionsUser.loginId || permissionsUser.email} icon={<ShieldCheck size={18} />} onClose={closeUserModals}>
           <form className="admin-modal-form" onSubmit={submitPermissionEdit}>
+            {modalError && <div className="failure-line"><AlertTriangle size={14} />{modalError}</div>}
             {permissionsUser.role === 'ADMIN' && (
               <div className="detail-box compact-box">
                 <strong>시스템 관리자</strong>
-                <small>ADMIN 계정은 모든 공간에 접근할 수 있습니다. 아래 멤버십은 공간별 표시 권한으로 관리됩니다.</small>
+                <small>ADMIN 계정도 선택된 공간에만 접근합니다. 최소 1개 공간 권한은 유지해야 합니다.</small>
               </div>
             )}
             <div className="permission-grid">
-              {spaces.map((space) => (
+              {manageableSpaces.map((space) => (
                 <label className="permission-row" key={space.id}>
                   <span>
                     <strong>{space.name}</strong>

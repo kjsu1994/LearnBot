@@ -3245,6 +3245,57 @@ body > .admin-modal-portal-backdrop .allowed-domain-modal .code-modal-title p {
   color: rgba(255, 255, 255, 0.48);
 }
 
+body > .admin-modal-portal-backdrop .admin-user-modal-body {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 34%),
+    rgba(10, 10, 11, 0.96);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .detail-box,
+body > .admin-modal-portal-backdrop .admin-user-modal .permission-row {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    rgba(10, 10, 11, 0.72);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .permission-row strong,
+body > .admin-modal-portal-backdrop .admin-user-modal .detail-box strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .permission-row small,
+body > .admin-modal-portal-backdrop .admin-user-modal .detail-box small,
+body > .admin-modal-portal-backdrop .admin-user-modal .field-help {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal select,
+body > .admin-modal-portal-backdrop .admin-user-modal input {
+  background: rgba(10, 10, 11, 0.78);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal select:focus,
+body > .admin-modal-portal-backdrop .admin-user-modal input:focus {
+  border-color: rgba(139, 92, 246, 0.48);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.16);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal select option {
+  background: #0a0a0b;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body > .admin-modal-portal-backdrop .admin-user-modal .failure-line {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
+  color: rgba(254, 202, 202, 0.92);
+}
+
 body > .admin-modal-portal-backdrop .allowed-domain-modal-body {
   background:
     radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 34%),
