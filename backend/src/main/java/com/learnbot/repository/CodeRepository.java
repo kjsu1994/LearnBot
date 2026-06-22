@@ -1097,6 +1097,47 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<CodeSearchResult> findActiveChunksByIds(UUID repositoryId, List<UUID> chunkIds, List<UUID> spaceIds, UUID selectedSpaceId) {
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       0.35 AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE c.active
+                  AND c.id IN (:chunkIds)
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.file_path, c.line_start
+                """, new MapSqlParameterSource()
+                .addValue("chunkIds", chunkIds)
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("repositoryId", repositoryId), this::mapSearchResult);
+    }
+
     public List<CodeSearchResult> keywordSearch(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)

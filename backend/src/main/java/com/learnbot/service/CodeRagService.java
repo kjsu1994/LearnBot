@@ -7,6 +7,8 @@ import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationTurnContext;
+import com.learnbot.repository.CodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,8 +30,10 @@ public class CodeRagService {
     private static final int OVERVIEW_CONTEXT_CHARS = 620;
     private static final int DEFAULT_CONTEXT_CHARS = 1200;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
+    private static final double CONVERSATION_PINNED_BOOST = 0.18;
 
     private final CodeSearchService searchService;
+    private final CodeRepository codeRepository;
     private final CodeReferenceService referenceService;
     private final CommitInsightService commitInsightService;
     private final OllamaClient ollamaClient;
@@ -41,6 +45,7 @@ public class CodeRagService {
     @Autowired
     public CodeRagService(
             CodeSearchService searchService,
+            CodeRepository codeRepository,
             CodeReferenceService referenceService,
             CommitInsightService commitInsightService,
             OllamaClient ollamaClient,
@@ -50,6 +55,7 @@ public class CodeRagService {
             RagMetricsService ragMetricsService
     ) {
         this.searchService = searchService;
+        this.codeRepository = codeRepository;
         this.referenceService = referenceService;
         this.commitInsightService = commitInsightService;
         this.ollamaClient = ollamaClient;
@@ -68,7 +74,7 @@ public class CodeRagService {
             RagPipelineService pipelineService,
             CodeEvidenceRanker evidenceRanker
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, evidenceRanker, null);
+        this(searchService, null, referenceService, commitInsightService, ollamaClient, properties, pipelineService, evidenceRanker, null);
     }
 
     public CodeRagService(
@@ -79,7 +85,7 @@ public class CodeRagService {
             LearnBotProperties properties,
             RagPipelineService pipelineService
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, pipelineService, new CodeEvidenceRanker(properties), null);
+        this(searchService, null, referenceService, commitInsightService, ollamaClient, properties, pipelineService, new CodeEvidenceRanker(properties), null);
     }
 
     CodeRagService(
@@ -89,7 +95,7 @@ public class CodeRagService {
             OllamaClient ollamaClient,
             LearnBotProperties properties
     ) {
-        this(searchService, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties), new CodeEvidenceRanker(properties), null);
+        this(searchService, null, referenceService, commitInsightService, ollamaClient, properties, new RagPipelineService(ollamaClient, properties), new CodeEvidenceRanker(properties), null);
     }
 
     CodeRagService(
@@ -131,10 +137,12 @@ public class CodeRagService {
 
     private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
         long askStarted = System.nanoTime();
-        CodeQuestionMode questionMode = classifyCodeQuestion(question, mode);
+        String originalQuestion = safe(question, "");
+        String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
+        CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, mode);
         int safeLimit = safeLimit(questionMode, limit);
         long retrievalStarted = System.nanoTime();
-        CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit, conversationContext);
+        CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, effectiveQuestion, questionMode, safeLimit, conversationContext);
         long retrievalMs = elapsedMs(retrievalStarted);
         List<CodeSearchResult> results = retrieval.results();
         if (results.isEmpty()) {
@@ -148,7 +156,7 @@ public class CodeRagService {
             );
         }
 
-        List<CodeSearchResult> answerResults = answerContextResults(questionMode, question, results);
+        List<CodeSearchResult> answerResults = answerContextResults(questionMode, effectiveQuestion, results);
         String systemPrompt = """
                 You are LearnBot Code, a private source-code RAG assistant.
                 Answer in Korean using only the provided source-code context.
@@ -170,9 +178,9 @@ public class CodeRagService {
                 Do not speculate beyond the provided evidence.
                 """ + "\n" + questionMode.instruction();
 
-        String userPrompt = "Question:\n" + question
+        String userPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
                 + conversationFocus(conversationContext)
-                + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
+                + "\n\nSource-code context:\n" + buildContext(effectiveQuestion, questionMode, answerResults);
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -204,14 +212,14 @@ public class CodeRagService {
                 }
             }
         } catch (RuntimeException ex) {
-            answer = fallbackAnswer(questionMode, question, answerResults);
+            answer = fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerDoneReason = null;
             llmUnavailable = true;
         }
         if (qualityFailureReason(answer, answerResults.size(), answerDoneReason) != null) {
             answer = questionMode == CodeQuestionMode.OVERVIEW
                     ? overviewFallbackAnswer(answerResults)
-                    : fallbackAnswer(questionMode, question, answerResults);
+                    : fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerRewritten = true;
         }
         recordMetrics(
@@ -232,8 +240,31 @@ public class CodeRagService {
                 answer,
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
-                diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval)
+                conversationDiagnostics(
+                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval),
+                        originalQuestion,
+                        effectiveQuestion,
+                        conversationContext,
+                        retrieval
+                )
         );
+    }
+
+    private String effectiveQuestion(String originalQuestion, RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return safe(originalQuestion, "");
+        }
+        String rewritten = safe(conversationContext.rewrittenQuestion(), "");
+        return rewritten.isBlank() ? safe(originalQuestion, "") : rewritten;
+    }
+
+    private String questionPrompt(String originalQuestion, String effectiveQuestion, RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual() || safe(effectiveQuestion, "").equals(safe(originalQuestion, ""))) {
+            return "Question:\n" + originalQuestion;
+        }
+        return "Original user question:\n" + originalQuestion
+                + "\n\nConversation-aware search question:\n" + effectiveQuestion
+                + "\n\nAnswer the original user question. Use the conversation-aware question only to resolve references.";
     }
 
     private int safeLimit(CodeQuestionMode questionMode, Integer limit) {
@@ -275,6 +306,7 @@ public class CodeRagService {
             RagConversationContext conversationContext
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
         for (String query : conversationAnchorQueries(question, conversationContext)) {
@@ -322,7 +354,74 @@ public class CodeRagService {
             );
         }
 
-        return new CodeRetrieval(results, assessment, queryPlan, iteration, merged.size());
+        int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
+        return new CodeRetrieval(results, assessment, queryPlan, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private int collectPinnedConversationEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String effectiveQuestion,
+            RagConversationContext conversationContext,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        if (codeRepository == null || conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+            return 0;
+        }
+        List<UUID> chunkIds = conversationContext.codeAnchors().stream()
+                .map(CodeConversationAnchor::chunkId)
+                .filter(id -> id != null)
+                .distinct()
+                .limit(8)
+                .toList();
+        if (chunkIds.isEmpty()) {
+            return 0;
+        }
+        try {
+            List<CodeSearchResult> pinned = codeRepository.findActiveChunksByIds(repositoryId, chunkIds, spaceIds, selectedSpaceId);
+            int added = 0;
+            boolean weakQuestionTerms = primaryQuestionTerms(effectiveQuestion).size() <= 2;
+            for (CodeSearchResult result : pinned) {
+                if (!weakQuestionTerms && !isRelevantPinnedEvidence(effectiveQuestion, result)) {
+                    continue;
+                }
+                merge(merged, markConversationPinned(result, added < 2 || isRelevantPinnedEvidence(effectiveQuestion, result)));
+                added++;
+            }
+            return added;
+        } catch (RuntimeException ignored) {
+            return 0;
+        }
+    }
+
+    private boolean isRelevantPinnedEvidence(String question, CodeSearchResult result) {
+        List<String> terms = primaryQuestionTerms(question);
+        if (terms.isEmpty()) {
+            return true;
+        }
+        String target = normalizeCodeText(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.content(), "")
+        ));
+        return terms.stream().anyMatch(target::contains);
+    }
+
+    private CodeSearchResult markConversationPinned(CodeSearchResult result, boolean boost) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("conversationPinned", true);
+        metadata.put("conversationAnchor", true);
+        metadata.put("evidenceRole", "conversation_pinned");
+        metadata.put("evidenceRankReason", "Pinned from previous code conversation evidence");
+        return new CodeSearchResult(
+                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
+                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
+                result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
+                result.content(), boost ? result.score() + CONVERSATION_PINNED_BOOST : result.score(), Map.copyOf(metadata)
+        );
     }
 
     private List<String> conversationAnchorQueries(String question, RagConversationContext conversationContext) {
@@ -349,10 +448,15 @@ public class CodeRagService {
     }
 
     private String conversationFocus(RagConversationContext conversationContext) {
-        if (conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+        if (conversationContext == null || !conversationContext.contextual()) {
             return "";
         }
-        String anchors = conversationContext.codeAnchors().stream()
+        String recentTurns = conversationContext.recentTurns() == null ? "" : conversationContext.recentTurns().stream()
+                .limit(3)
+                .map(this::conversationTurnSummary)
+                .filter(summary -> !summary.isBlank())
+                .collect(Collectors.joining("\n"));
+        String anchors = conversationContext.codeAnchors() == null ? "" : conversationContext.codeAnchors().stream()
                 .limit(5)
                 .map(anchor -> "- " + safe(anchor.filePath(), "unknown")
                         + nullable(" / symbol=", anchor.symbolName())
@@ -361,8 +465,36 @@ public class CodeRagService {
                         + (anchor.lineStart() > 0 ? " / lines=" + anchor.lineStart() + "-" + Math.max(anchor.lineStart(), anchor.lineEnd()) : ""))
                 .collect(Collectors.joining("\n"));
         return "\n\nConversation focus:\n"
-                + "Use these previous code evidence anchors only to resolve follow-up references. Ignore them if they are not relevant to the current question.\n"
-                + anchors;
+                + "Use the previous conversation only to resolve follow-up references. Ignore it if it conflicts with the retrieved source-code context.\n"
+                + (recentTurns.isBlank() ? "" : "Recent turns:\n" + recentTurns + "\n")
+                + (anchors.isBlank() ? "" : "Previous code evidence anchors:\n" + anchors);
+    }
+
+    private String conversationTurnSummary(RagConversationTurnContext turn) {
+        if (turn == null) {
+            return "";
+        }
+        return "- Q: " + trimInline(turn.question())
+                + "\n  A: " + trimInline(turn.answer())
+                + "\n  Evidence: " + conversationEvidenceSummary(turn.evidence());
+    }
+
+    private String conversationEvidenceSummary(com.fasterxml.jackson.databind.JsonNode evidence) {
+        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
+            return "none";
+        }
+        List<String> values = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode item : evidence) {
+            if (values.size() >= 3) {
+                break;
+            }
+            String filePath = item.path("filePath").asText("");
+            String symbol = item.path("methodName").asText(item.path("symbolName").asText(""));
+            if (!filePath.isBlank()) {
+                values.add(filePath + (symbol == null || symbol.isBlank() ? "" : "#" + symbol));
+            }
+        }
+        return values.isEmpty() ? "none" : String.join("; ", values);
     }
 
     private void collectEvidenceForQuery(
@@ -1081,7 +1213,18 @@ public class CodeRagService {
 
     private void merge(Map<UUID, CodeSearchResult> merged, CodeSearchResult result) {
         CodeSearchResult current = merged.get(result.chunkId());
-        if (current == null || result.score() > current.score()) {
+        if (current == null) {
+            merged.put(result.chunkId(), result);
+            return;
+        }
+        if (isConversationPinned(current) && !isConversationPinned(result)) {
+            return;
+        }
+        if (isConversationPinned(result) && !isConversationPinned(current)) {
+            merged.put(result.chunkId(), result);
+            return;
+        }
+        if (result.score() > current.score()) {
             merged.put(result.chunkId(), result);
         }
     }
@@ -1153,6 +1296,34 @@ public class CodeRagService {
                 + (evidenceRanker.debug() && isGraphExpanded(result) ? nullable(" reason=", reason == null ? null : String.valueOf(reason)) : "");
     }
 
+    private boolean isConversationPinned(CodeSearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
+    }
+
+    private List<String> conversationDiagnostics(
+            List<String> diagnostics,
+            String originalQuestion,
+            String effectiveQuestion,
+            RagConversationContext conversationContext,
+            CodeRetrieval retrieval
+    ) {
+        List<String> notes = new ArrayList<>(diagnostics == null ? List.of() : diagnostics);
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return notes;
+        }
+        notes.add("대화 컨텍스트를 사용했습니다. 이전 코드 근거 "
+                + (conversationContext.codeAnchors() == null ? 0 : conversationContext.codeAnchors().size())
+                + "개 중 pinned 후보 " + retrieval.pinnedCandidateCount()
+                + "개, 최종 답변 근거 " + retrieval.pinnedUsedCount() + "개를 반영했습니다.");
+        if (!safe(originalQuestion, "").equals(safe(effectiveQuestion, ""))) {
+            notes.add("후속 질문 검색용 독립 질문을 생성했습니다: " + trimInline(effectiveQuestion));
+        }
+        if (retrieval.pinnedCandidateCount() == 0 && conversationContext.codeAnchors() != null && !conversationContext.codeAnchors().isEmpty()) {
+            notes.add("이전 코드 근거를 직접 조회하지 못해 일반 코드 검색으로 폴백했습니다.");
+        }
+        return notes;
+    }
+
     private boolean isGraphExpanded(CodeSearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("graphExpanded"));
     }
@@ -1215,7 +1386,9 @@ public class CodeRagService {
             RagPipelineService.EvidenceAssessment assessment,
             RagPipelineService.QueryPlan queryPlan,
             int iteration,
-            int candidateCount
+            int candidateCount,
+            int pinnedCandidateCount,
+            int pinnedUsedCount
     ) {
     }
 

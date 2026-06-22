@@ -130,7 +130,8 @@ public class CodeEvidenceRanker {
         double structure = structureEvidenceScore(mode, result);
         double legacy = Math.max(0, legacyRelevance(question, mode, result) - result.score()) * 0.20;
         double flow = mode == CodeRagService.CodeQuestionMode.CALL_FLOW ? Math.max(0, 0.025 * (5 - flowRank(result))) : 0;
-        double total = base + text + graph + intent + structure + legacy + flow;
+        double conversation = isConversationPinned(result) ? 0.18 : 0;
+        double total = base + text + graph + intent + structure + legacy + flow + conversation;
         Map<String, Object> parts = new LinkedHashMap<>();
         parts.put("baseSearch", round(base));
         parts.put("textMatch", round(text));
@@ -140,6 +141,9 @@ public class CodeEvidenceRanker {
         parts.put("legacyRerank", round(legacy));
         if (flow > 0) {
             parts.put("flowOrder", round(flow));
+        }
+        if (conversation > 0) {
+            parts.put("conversationPinned", round(conversation));
         }
         return withMetadata(result, total, parts, reason(mode, result, graph, intent, structure, flow));
     }
@@ -331,6 +335,10 @@ public class CodeEvidenceRanker {
 
     private boolean isGraphExpanded(CodeSearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("graphExpanded"));
+    }
+
+    private boolean isConversationPinned(CodeSearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
     }
 
     private List<String> primaryQuestionTerms(String question) {

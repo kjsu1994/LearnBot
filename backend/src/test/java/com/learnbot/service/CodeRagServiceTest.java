@@ -2,7 +2,10 @@ package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
+import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.RagConversationContext;
+import com.learnbot.repository.CodeRepository;
 import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
 
@@ -309,13 +312,87 @@ class CodeRagServiceTest {
         assertThat(response.evidence().get(0).filePath()).contains("AuthService");
     }
 
+    @Test
+    void conversationalAskPinsPreviousEvidenceChunks() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                null,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        UUID pinnedChunkId = UUID.randomUUID();
+        CodeSearchResult pinned = resultWithId(
+                pinnedChunkId,
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askConversational",
+                0.25,
+                "public CodeAskResponse askConversational(...) { return askPrioritized(...); }"
+        );
+        CodeSearchResult generic = result(
+                "backend/src/main/java/com/learnbot/service/OtherService.java",
+                "method",
+                "call",
+                0.40
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "CodeRagService askConversational call flow",
+                List.of(),
+                List.of(new CodeConversationAnchor(
+                        pinnedChunkId,
+                        pinned.filePath(),
+                        pinned.symbolName(),
+                        pinned.className(),
+                        pinned.methodName(),
+                        pinned.lineStart(),
+                        pinned.lineEnd()
+                )),
+                true
+        );
+
+        when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(pinned));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(generic));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "그 호출 흐름도 알려줘",
+                "flow",
+                4,
+                context
+        );
+
+        assertThat(response.evidence()).isNotEmpty();
+        assertThat(response.evidence().get(0).chunkId()).isEqualTo(pinnedChunkId);
+        assertThat(response.evidence().get(0).metadata()).containsEntry("conversationPinned", true);
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("pinned"));
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
+        return resultWithId(UUID.randomUUID(), filePath, chunkType, methodName, score, content);
+    }
+
+    private CodeSearchResult resultWithId(UUID chunkId, String filePath, String chunkType, String methodName, double score, String content) {
         return new CodeSearchResult(
-                UUID.randomUUID(),
+                chunkId,
                 UUID.randomUUID(),
                 UUID.randomUUID(),
                 "LearnBot",
