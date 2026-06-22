@@ -6,6 +6,14 @@ import java.util.UUID;
 public record RagConversationContext(
         UUID conversationId,
         String rewrittenQuestion,
-        List<RagConversationTurnContext> recentTurns
+        List<RagConversationTurnContext> recentTurns,
+        List<CodeConversationAnchor> codeAnchors
 ) {
+    public RagConversationContext(
+            UUID conversationId,
+            String rewrittenQuestion,
+            List<RagConversationTurnContext> recentTurns
+    ) {
+        this(conversationId, rewrittenQuestion, recentTurns, List.of());
+    }
 }

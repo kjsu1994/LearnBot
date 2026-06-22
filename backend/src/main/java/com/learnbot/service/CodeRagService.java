@@ -3,8 +3,10 @@ package com.learnbot.service;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AdminTuningMetricSample;
 import com.learnbot.dto.CodeAskResponse;
+import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.RagConversationContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -109,18 +111,30 @@ public class CodeRagService {
         }
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit);
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
     }
 
-    private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
+    public CodeAskResponse askConversational(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
+        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
+            return commitInsightService.answer(repositoryId, question);
+        }
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
         long askStarted = System.nanoTime();
         CodeQuestionMode questionMode = classifyCodeQuestion(question, mode);
         int safeLimit = safeLimit(questionMode, limit);
         long retrievalStarted = System.nanoTime();
-        CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit);
+        CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, question, questionMode, safeLimit, conversationContext);
         long retrievalMs = elapsedMs(retrievalStarted);
         List<CodeSearchResult> results = retrieval.results();
         if (results.isEmpty()) {
@@ -156,7 +170,9 @@ public class CodeRagService {
                 Do not speculate beyond the provided evidence.
                 """ + "\n" + questionMode.instruction();
 
-        String userPrompt = "Question:\n" + question + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
+        String userPrompt = "Question:\n" + question
+                + conversationFocus(conversationContext)
+                + "\n\nSource-code context:\n" + buildContext(question, questionMode, answerResults);
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -255,11 +271,15 @@ public class CodeRagService {
             List<UUID> spaceIds,
             String question,
             CodeQuestionMode questionMode,
-            int limit
+            int limit,
+            RagConversationContext conversationContext
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        for (String query : conversationAnchorQueries(question, conversationContext)) {
+            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+        }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
             for (String query : codeOverviewQueries(question, questionMode)) {
                 collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
@@ -274,7 +294,9 @@ public class CodeRagService {
         );
         RagPipelineService.QueryPlan queryPlan = new RagPipelineService.QueryPlan(
                 RagPipelineService.Domain.CODE,
-                List.of(question),
+                conversationAnchorQueries(question, conversationContext).isEmpty()
+                        ? List.of(question)
+                        : java.util.stream.Stream.concat(java.util.stream.Stream.of(question), conversationAnchorQueries(question, conversationContext).stream()).toList(),
                 false,
                 false,
                 "initial search"
@@ -301,6 +323,46 @@ public class CodeRagService {
         }
 
         return new CodeRetrieval(results, assessment, queryPlan, iteration, merged.size());
+    }
+
+    private List<String> conversationAnchorQueries(String question, RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+            return List.of();
+        }
+        List<String> queries = new ArrayList<>();
+        for (CodeConversationAnchor anchor : conversationContext.codeAnchors()) {
+            String query = String.join(" ",
+                    safe(question, ""),
+                    safe(anchor.filePath(), ""),
+                    safe(anchor.symbolName(), ""),
+                    safe(anchor.className(), ""),
+                    safe(anchor.methodName(), "")
+            ).trim();
+            if (!query.isBlank() && !queries.contains(query)) {
+                queries.add(query);
+            }
+            if (queries.size() >= 6) {
+                break;
+            }
+        }
+        return queries;
+    }
+
+    private String conversationFocus(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+            return "";
+        }
+        String anchors = conversationContext.codeAnchors().stream()
+                .limit(5)
+                .map(anchor -> "- " + safe(anchor.filePath(), "unknown")
+                        + nullable(" / symbol=", anchor.symbolName())
+                        + nullable(" / class=", anchor.className())
+                        + nullable(" / method=", anchor.methodName())
+                        + (anchor.lineStart() > 0 ? " / lines=" + anchor.lineStart() + "-" + Math.max(anchor.lineStart(), anchor.lineEnd()) : ""))
+                .collect(Collectors.joining("\n"));
+        return "\n\nConversation focus:\n"
+                + "Use these previous code evidence anchors only to resolve follow-up references. Ignore them if they are not relevant to the current question.\n"
+                + anchors;
     }
 
     private void collectEvidenceForQuery(

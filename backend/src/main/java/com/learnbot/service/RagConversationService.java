@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.CodeAskResponse;
+import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationDetail;
 import com.learnbot.dto.RagConversationSummary;
@@ -13,6 +14,7 @@ import com.learnbot.repository.RagConversationRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -63,6 +65,11 @@ public class RagConversationService {
                 : repository.findSummary(user.id(), conversationId)
                         .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
         List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
+        if (CODE.equals(normalizeDomain(domain))) {
+            List<CodeConversationAnchor> anchors = looksContextual(question) ? codeAnchors(recentTurns) : List.of();
+            String summary = anchors.isEmpty() ? clean(question) : "이전 코드 근거 " + anchors.size() + "개를 참고함";
+            return new RagConversationContext(conversation.id(), summary, recentTurns, anchors);
+        }
         return new RagConversationContext(conversation.id(), rewriteQuestion(domain, question, recentTurns), recentTurns);
     }
 
@@ -174,6 +181,58 @@ public class RagConversationService {
         return compact(builder.toString(), 520);
     }
 
+    private List<CodeConversationAnchor> codeAnchors(List<RagConversationTurnContext> recentTurns) {
+        if (recentTurns == null || recentTurns.isEmpty()) {
+            return List.of();
+        }
+        List<CodeConversationAnchor> anchors = new ArrayList<>();
+        for (RagConversationTurnContext turn : recentTurns) {
+            JsonNode evidence = turn.evidence();
+            if (evidence == null || !evidence.isArray()) {
+                continue;
+            }
+            for (JsonNode item : evidence) {
+                String filePath = item.path("filePath").asText("");
+                if (filePath.isBlank()) {
+                    continue;
+                }
+                CodeConversationAnchor anchor = new CodeConversationAnchor(
+                        uuid(item.path("chunkId").asText("")),
+                        filePath,
+                        item.path("symbolName").asText(""),
+                        item.path("className").asText(""),
+                        item.path("methodName").asText(""),
+                        item.path("lineStart").asInt(0),
+                        item.path("lineEnd").asInt(0)
+                );
+                if (anchors.stream().noneMatch(existing -> sameAnchor(existing, anchor))) {
+                    anchors.add(anchor);
+                }
+                if (anchors.size() >= 8) {
+                    return anchors;
+                }
+            }
+        }
+        return anchors;
+    }
+
+    private boolean sameAnchor(CodeConversationAnchor left, CodeConversationAnchor right) {
+        if (left.chunkId() != null && right.chunkId() != null) {
+            return left.chunkId().equals(right.chunkId());
+        }
+        return clean(left.filePath()).equals(clean(right.filePath()))
+                && clean(left.symbolName()).equals(clean(right.symbolName()))
+                && clean(left.methodName()).equals(clean(right.methodName()));
+    }
+
+    private UUID uuid(String value) {
+        try {
+            return value == null || value.isBlank() ? null : UUID.fromString(value);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
     private void appendPart(StringBuilder builder, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -187,6 +246,7 @@ public class RagConversationService {
     private JsonNode metadata(RagConversationContext context) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("recentTurnCount", context.recentTurns() == null ? 0 : context.recentTurns().size());
+        metadata.put("codeAnchorCount", context.codeAnchors() == null ? 0 : context.codeAnchors().size());
         metadata.put("rewritten", !clean(context.rewrittenQuestion()).isBlank());
         return objectMapper.valueToTree(metadata);
     }

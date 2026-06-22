@@ -228,7 +228,7 @@ public class CodeController {
                 request.question(),
                 true
         );
-        CodeAskResponse response = ragService.ask(request.repositoryId(), selectedSpaceId, accessibleSpaceIds, context.rewrittenQuestion(), request.mode(), request.limit());
+        CodeAskResponse response = ragService.askConversational(request.repositoryId(), selectedSpaceId, accessibleSpaceIds, request.question(), request.mode(), request.limit(), context);
         return conversationService.saveCodeTurn(context, request.parentTurnId(), request.question(), response);
     }
 
