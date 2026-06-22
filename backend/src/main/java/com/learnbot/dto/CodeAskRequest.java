@@ -9,6 +9,9 @@ public record CodeAskRequest(
         UUID spaceId,
         @NotBlank String question,
         String mode,
-        Integer limit
+        Integer limit,
+        UUID conversationId,
+        UUID parentTurnId,
+        Boolean conversational
 ) {
 }

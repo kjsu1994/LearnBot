@@ -1,0 +1,217 @@
+package com.learnbot.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.CodeAskResponse;
+import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationDetail;
+import com.learnbot.dto.RagConversationSummary;
+import com.learnbot.dto.RagConversationTurn;
+import com.learnbot.dto.RagConversationTurnContext;
+import com.learnbot.repository.RagConversationRepository;
+import org.springframework.stereotype.Service;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@Service
+public class RagConversationService {
+    public static final String DOCUMENT = "DOCUMENT";
+    public static final String CODE = "CODE";
+
+    private static final int RECENT_TURN_LIMIT = 5;
+    private static final int MAX_REWRITE_CHARS = 1800;
+
+    private final RagConversationRepository repository;
+    private final ObjectMapper objectMapper;
+
+    public RagConversationService(RagConversationRepository repository, ObjectMapper objectMapper) {
+        this.repository = repository;
+        this.objectMapper = objectMapper;
+    }
+
+    public List<RagConversationSummary> list(AppUser user, UUID spaceId, String domain) {
+        return repository.list(user.id(), spaceId, normalizeDomain(domain), 40);
+    }
+
+    public RagConversationDetail detail(AppUser user, UUID conversationId) {
+        return repository.findDetail(user.id(), conversationId)
+                .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
+    }
+
+    public void delete(AppUser user, UUID conversationId) {
+        repository.softDelete(user.id(), conversationId);
+    }
+
+    public RagConversationContext prepare(
+            AppUser user,
+            UUID spaceId,
+            String domain,
+            UUID repositoryId,
+            UUID conversationId,
+            String question,
+            boolean conversational
+    ) {
+        if (!conversational && conversationId == null) {
+            return new RagConversationContext(null, clean(question), List.of());
+        }
+        RagConversationSummary conversation = conversationId == null
+                ? repository.create(user.id(), spaceId, normalizeDomain(domain), repositoryId, title(question))
+                : repository.findSummary(user.id(), conversationId)
+                        .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
+        List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
+        return new RagConversationContext(conversation.id(), rewriteQuestion(domain, question, recentTurns), recentTurns);
+    }
+
+    public AskResponse saveDocumentTurn(
+            RagConversationContext context,
+            UUID parentTurnId,
+            String originalQuestion,
+            AskResponse response
+    ) {
+        if (context == null || context.conversationId() == null || response == null) {
+            return response;
+        }
+        RagConversationTurn turn = repository.addTurn(
+                context.conversationId(),
+                parentTurnId,
+                clean(originalQuestion),
+                context.rewrittenQuestion(),
+                response.mode(),
+                response.answer(),
+                response.confidence(),
+                objectMapper.valueToTree(response.citations()),
+                objectMapper.valueToTree(response.evidence()),
+                objectMapper.valueToTree(response.diagnostics()),
+                metadata(context)
+        );
+        return response.withConversation(context.conversationId(), turn.id(), context.rewrittenQuestion());
+    }
+
+    public CodeAskResponse saveCodeTurn(
+            RagConversationContext context,
+            UUID parentTurnId,
+            String originalQuestion,
+            CodeAskResponse response
+    ) {
+        if (context == null || context.conversationId() == null || response == null) {
+            return response;
+        }
+        RagConversationTurn turn = repository.addTurn(
+                context.conversationId(),
+                parentTurnId,
+                clean(originalQuestion),
+                context.rewrittenQuestion(),
+                response.mode(),
+                response.answer(),
+                response.confidence(),
+                objectMapper.createArrayNode(),
+                objectMapper.valueToTree(response.evidence()),
+                objectMapper.valueToTree(response.diagnostics()),
+                metadata(context)
+        );
+        return response.withConversation(context.conversationId(), turn.id(), context.rewrittenQuestion());
+    }
+
+    private String rewriteQuestion(String domain, String question, List<RagConversationTurnContext> recentTurns) {
+        String cleanQuestion = clean(question);
+        if (recentTurns == null || recentTurns.isEmpty() || !looksContextual(cleanQuestion)) {
+            return cleanQuestion;
+        }
+        StringBuilder builder = new StringBuilder(cleanQuestion);
+        builder.append("\n\nPrevious conversation context for ").append(normalizeDomain(domain)).append(" RAG:\n");
+        for (int i = 0; i < Math.min(recentTurns.size(), RECENT_TURN_LIMIT); i++) {
+            RagConversationTurnContext turn = recentTurns.get(i);
+            builder.append("- Q: ").append(compact(turn.question(), 180)).append("\n");
+            builder.append("  A: ").append(compact(turn.answer(), 260)).append("\n");
+            String evidence = evidenceSummary(turn.evidence(), normalizeDomain(domain));
+            if (!evidence.isBlank()) {
+                builder.append("  Evidence: ").append(evidence).append("\n");
+            }
+        }
+        String rewritten = builder.toString().trim();
+        return rewritten.length() <= MAX_REWRITE_CHARS ? rewritten : rewritten.substring(0, MAX_REWRITE_CHARS);
+    }
+
+    private boolean looksContextual(String question) {
+        String normalized = clean(question).toLowerCase();
+        return normalized.length() <= 80
+                || normalized.contains("이 ")
+                || normalized.contains("그 ")
+                || normalized.contains("위 ")
+                || normalized.contains("방금")
+                || normalized.contains("앞")
+                || normalized.contains("근거")
+                || normalized.contains("출처")
+                || normalized.contains("this")
+                || normalized.contains("that")
+                || normalized.contains("above")
+                || normalized.contains("previous");
+    }
+
+    private String evidenceSummary(JsonNode evidence, String domain) {
+        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        int count = 0;
+        for (JsonNode item : evidence) {
+            if (count >= 4) {
+                break;
+            }
+            if (CODE.equals(domain)) {
+                appendPart(builder, item.path("filePath").asText(""));
+                appendPart(builder, item.path("symbolName").asText(""));
+            } else {
+                appendPart(builder, item.path("title").asText(""));
+                appendPart(builder, item.path("chunkId").asText(""));
+            }
+            count++;
+        }
+        return compact(builder.toString(), 520);
+    }
+
+    private void appendPart(StringBuilder builder, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append("; ");
+        }
+        builder.append(value.trim());
+    }
+
+    private JsonNode metadata(RagConversationContext context) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("recentTurnCount", context.recentTurns() == null ? 0 : context.recentTurns().size());
+        metadata.put("rewritten", !clean(context.rewrittenQuestion()).isBlank());
+        return objectMapper.valueToTree(metadata);
+    }
+
+    private String normalizeDomain(String domain) {
+        if (CODE.equalsIgnoreCase(domain)) {
+            return CODE;
+        }
+        return DOCUMENT;
+    }
+
+    private String title(String question) {
+        String clean = clean(question);
+        if (clean.isBlank()) {
+            return "새 RAG 대화";
+        }
+        return compact(clean, 60);
+    }
+
+    private String compact(String value, int maxChars) {
+        String clean = clean(value).replaceAll("\\s+", " ");
+        return clean.length() <= maxChars ? clean : clean.substring(0, maxChars).trim() + "...";
+    }
+
+    private String clean(String value) {
+        return value == null ? "" : value.trim();
+    }
+}

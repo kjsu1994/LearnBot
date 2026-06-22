@@ -20,6 +20,7 @@ import com.learnbot.service.AuthService;
 import com.learnbot.service.CodeFileBrowserService;
 import com.learnbot.service.CodeIndexingService;
 import com.learnbot.service.CodeRagService;
+import com.learnbot.service.RagConversationService;
 import com.learnbot.service.CodeReferenceService;
 import com.learnbot.service.CodeRepositoryRecord;
 import com.learnbot.service.CodeSearchService;
@@ -46,6 +47,7 @@ public class CodeController {
     private final CodeFileBrowserService fileBrowserService;
     private final CodeSearchService searchService;
     private final CodeRagService ragService;
+    private final RagConversationService conversationService;
     private final CodeReferenceService referenceService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
@@ -55,6 +57,7 @@ public class CodeController {
             CodeFileBrowserService fileBrowserService,
             CodeSearchService searchService,
             CodeRagService ragService,
+            RagConversationService conversationService,
             CodeReferenceService referenceService,
             AuthService authService,
             CurrentUserProvider currentUserProvider
@@ -63,6 +66,7 @@ public class CodeController {
         this.fileBrowserService = fileBrowserService;
         this.searchService = searchService;
         this.ragService = ragService;
+        this.conversationService = conversationService;
         this.referenceService = referenceService;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
@@ -204,10 +208,28 @@ public class CodeController {
     CodeAskResponse ask(@Valid @RequestBody CodeAskRequest request) {
         var user = currentUserProvider.currentUser();
         UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        var accessibleSpaceIds = authService.accessibleSpaceIds(user);
+        if (selectedSpaceId == null && !accessibleSpaceIds.isEmpty()) {
+            selectedSpaceId = accessibleSpaceIds.get(0);
+        }
         if (request.repositoryId() != null) {
             authService.requireSpace(user, repositorySpace(request.repositoryId()));
         }
-        return ragService.ask(request.repositoryId(), selectedSpaceId, authService.accessibleSpaceIds(user), request.question(), request.mode(), request.limit());
+        boolean conversational = Boolean.TRUE.equals(request.conversational()) || request.conversationId() != null;
+        if (!conversational) {
+            return ragService.ask(request.repositoryId(), selectedSpaceId, accessibleSpaceIds, request.question(), request.mode(), request.limit());
+        }
+        var context = conversationService.prepare(
+                user,
+                selectedSpaceId,
+                RagConversationService.CODE,
+                request.repositoryId(),
+                request.conversationId(),
+                request.question(),
+                true
+        );
+        CodeAskResponse response = ragService.ask(request.repositoryId(), selectedSpaceId, accessibleSpaceIds, context.rewrittenQuestion(), request.mode(), request.limit());
+        return conversationService.saveCodeTurn(context, request.parentTurnId(), request.question(), response);
     }
 
     private UUID repositorySpace(UUID repositoryId) {

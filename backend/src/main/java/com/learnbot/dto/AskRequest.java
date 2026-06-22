@@ -9,6 +9,9 @@ public record AskRequest(
         SearchFilter filter,
         String mode,
         String speedProfile,
-        UUID spaceId
+        UUID spaceId,
+        UUID conversationId,
+        UUID parentTurnId,
+        Boolean conversational
 ) {
 }

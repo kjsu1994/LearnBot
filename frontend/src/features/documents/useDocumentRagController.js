@@ -31,6 +31,9 @@ export function useDocumentRagController({
   const [searchResults, setSearchResults] = useState([]);
   const [answer, setAnswer] = useState(null);
   const [answerSavedId, setAnswerSavedId] = useState('');
+  const [documentConversations, setDocumentConversations] = useState([]);
+  const [documentConversationId, setDocumentConversationId] = useState('');
+  const [documentConversationTurns, setDocumentConversationTurns] = useState([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [documentDetail, setDocumentDetail] = useState(null);
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
@@ -72,6 +75,9 @@ export function useDocumentRagController({
     setFiles([]);
     setFileBatchResult(null);
     setAnswerSavedId('');
+    setDocumentConversations([]);
+    setDocumentConversationId('');
+    setDocumentConversationTurns([]);
     setSelectedDocumentId('');
     setDocumentDetail(null);
     setDocumentPreviewOpen(false);
@@ -158,13 +164,82 @@ export function useDocumentRagController({
   async function ask(event) {
     event.preventDefault();
     await run('ask', async () => {
+      const parentTurnId = documentConversationTurns.at(-1)?.id || null;
       const data = await request('/api/rag/ask', {
         method: 'POST',
-        json: { question, mode: answerMode, speedProfile: documentSpeedProfile, spaceId: activeSpaceId },
+        json: {
+          question,
+          mode: answerMode,
+          speedProfile: documentSpeedProfile,
+          spaceId: activeSpaceId,
+          conversationId: documentConversationId || null,
+          parentTurnId,
+          conversational: true,
+        },
       });
       setAnswer(data);
       setAnswerSavedId('');
+      if (data?.conversationId) {
+        setDocumentConversationId(data.conversationId);
+        setDocumentConversationTurns((current) => [
+          ...current,
+          {
+            id: data.turnId,
+            conversationId: data.conversationId,
+            parentTurnId,
+            question,
+            rewrittenQuestion: data.rewrittenQuestion,
+            mode: data.mode,
+            answer: data.answer,
+            confidence: data.confidence,
+            citations: data.citations || [],
+            evidence: data.evidence || [],
+            diagnostics: data.diagnostics || [],
+          },
+        ]);
+        await refreshDocumentConversations();
+      }
     });
+  }
+
+  async function refreshDocumentConversations() {
+    if (!activeSpaceId) return;
+    const data = await request(`/api/rag/conversations?domain=DOCUMENT&spaceId=${encodeURIComponent(activeSpaceId)}`);
+    setDocumentConversations(data || []);
+  }
+
+  async function loadDocumentConversation(conversationId) {
+    if (!conversationId) return;
+    await run(`document-conversation-${conversationId}`, async () => {
+      const detail = await request(`/api/rag/conversations/${conversationId}`);
+      const turns = detail?.turns || [];
+      setDocumentConversationId(conversationId);
+      setDocumentConversationTurns(turns);
+      const lastTurn = turns.at(-1);
+      if (lastTurn) {
+        setQuestion(lastTurn.question || '');
+        setAnswer({
+          mode: lastTurn.mode,
+          answer: lastTurn.answer,
+          citations: lastTurn.citations || [],
+          evidence: lastTurn.evidence || [],
+          confidence: lastTurn.confidence,
+          diagnostics: lastTurn.diagnostics || [],
+          conversationId,
+          turnId: lastTurn.id,
+          rewrittenQuestion: lastTurn.rewrittenQuestion,
+        });
+        setAnswerSavedId('');
+      }
+    });
+  }
+
+  function startNewDocumentConversation() {
+    setDocumentConversationId('');
+    setDocumentConversationTurns([]);
+    setAnswer(null);
+    setAnswerSavedId('');
+    setQuestion('');
   }
 
   async function saveAnswer() {
@@ -318,6 +393,12 @@ export function useDocumentRagController({
     setDocumentSpeedProfile,
     searchResults,
     answer,
+    documentConversations,
+    documentConversationId,
+    documentConversationTurns,
+    refreshDocumentConversations,
+    loadDocumentConversation,
+    startNewDocumentConversation,
     setAnswerSavedId,
     answerSavedId,
     selectedDocumentId,

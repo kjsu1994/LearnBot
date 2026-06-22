@@ -35,6 +35,9 @@ export function useCodeRagController({
   const [codeMode, setCodeMode] = useState('overview');
   const [codeAnswer, setCodeAnswer] = useState(null);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
+  const [codeConversations, setCodeConversations] = useState([]);
+  const [codeConversationId, setCodeConversationId] = useState('');
+  const [codeConversationTurns, setCodeConversationTurns] = useState([]);
   const [codeSearchQuery, setCodeSearchQuery] = useState('');
   const [codeSearchResults, setCodeSearchResults] = useState([]);
   const [referenceSymbol, setReferenceSymbol] = useState('');
@@ -76,6 +79,9 @@ export function useCodeRagController({
     setHighlightRange(null);
     setCodeModalOpen(false);
     setCodeAnswerSavedId('');
+    setCodeConversations([]);
+    setCodeConversationId('');
+    setCodeConversationTurns([]);
   }
 
   function spacePath(path) {
@@ -242,6 +248,7 @@ export function useCodeRagController({
   async function askCode(event) {
     event.preventDefault();
     await run('code-ask', async () => {
+      const parentTurnId = codeConversationTurns.at(-1)?.id || null;
       const data = await request('/api/code/ask', {
         method: 'POST',
         json: {
@@ -250,11 +257,72 @@ export function useCodeRagController({
           question: codeQuestion,
           mode: codeMode,
           limit: codeMode === 'overview' ? 16 : 10,
+          conversationId: codeConversationId || null,
+          parentTurnId,
+          conversational: true,
         },
       });
       setCodeAnswer(data);
       setCodeAnswerSavedId('');
+      if (data?.conversationId) {
+        setCodeConversationId(data.conversationId);
+        setCodeConversationTurns((current) => [
+          ...current,
+          {
+            id: data.turnId,
+            conversationId: data.conversationId,
+            parentTurnId,
+            question: codeQuestion,
+            rewrittenQuestion: data.rewrittenQuestion,
+            mode: data.mode,
+            answer: data.answer,
+            confidence: data.confidence,
+            evidence: data.evidence || [],
+            diagnostics: data.diagnostics || [],
+          },
+        ]);
+        await refreshCodeConversations();
+      }
     });
+  }
+
+  async function refreshCodeConversations() {
+    if (!activeSpaceId) return;
+    const data = await request(`/api/rag/conversations?domain=CODE&spaceId=${encodeURIComponent(activeSpaceId)}`);
+    setCodeConversations(data || []);
+  }
+
+  async function loadCodeConversation(conversationId) {
+    if (!conversationId) return;
+    await run(`code-conversation-${conversationId}`, async () => {
+      const detail = await request(`/api/rag/conversations/${conversationId}`);
+      const turns = detail?.turns || [];
+      setCodeConversationId(conversationId);
+      setCodeConversationTurns(turns);
+      const lastTurn = turns.at(-1);
+      if (lastTurn) {
+        setCodeQuestion(lastTurn.question || '');
+        setCodeAnswer({
+          mode: lastTurn.mode,
+          answer: lastTurn.answer,
+          evidence: lastTurn.evidence || [],
+          confidence: lastTurn.confidence,
+          diagnostics: lastTurn.diagnostics || [],
+          conversationId,
+          turnId: lastTurn.id,
+          rewrittenQuestion: lastTurn.rewrittenQuestion,
+        });
+        setCodeAnswerSavedId('');
+      }
+    });
+  }
+
+  function startNewCodeConversation() {
+    setCodeConversationId('');
+    setCodeConversationTurns([]);
+    setCodeAnswer(null);
+    setCodeAnswerSavedId('');
+    setCodeQuestion('');
   }
 
   async function loadJobDiagnostics(repositoryId, jobId) {
@@ -344,6 +412,12 @@ export function useCodeRagController({
     codeMode,
     setCodeMode,
     codeAnswer,
+    codeConversations,
+    codeConversationId,
+    codeConversationTurns,
+    refreshCodeConversations,
+    loadCodeConversation,
+    startNewCodeConversation,
     codeAnswerSavedId,
     setCodeAnswerSavedId,
     codeSearchQuery,

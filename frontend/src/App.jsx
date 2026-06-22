@@ -74,8 +74,15 @@ export default function App() {
     setSavedAnswerQuery,
     savedAnswerType,
     setSavedAnswerType,
+    ragConversations,
+    selectedRagConversation,
+    ragConversationType,
+    setRagConversationType,
     refreshSavedAnswers,
     loadSavedAnswer,
+    refreshRagConversations,
+    loadRagConversation,
+    deleteRagConversation,
     updateSavedAnswerTitle,
     deleteSavedAnswer,
     resetState: resetSavedState,
@@ -121,6 +128,12 @@ export default function App() {
     setDocumentSpeedProfile,
     searchResults,
     answer,
+    documentConversations,
+    documentConversationId,
+    documentConversationTurns,
+    refreshDocumentConversations,
+    loadDocumentConversation,
+    startNewDocumentConversation,
     setAnswerSavedId,
     answerSavedId,
     selectedDocumentId,
@@ -183,6 +196,12 @@ export default function App() {
     codeMode,
     setCodeMode,
     codeAnswer,
+    codeConversations,
+    codeConversationId,
+    codeConversationTurns,
+    refreshCodeConversations,
+    loadCodeConversation,
+    startNewCodeConversation,
     codeAnswerSavedId,
     setCodeAnswerSavedId,
     codeSearchQuery,
@@ -244,6 +263,8 @@ export default function App() {
     refreshDocuments();
     refreshDocumentJobs();
     refreshRepositories();
+    refreshDocumentConversations();
+    refreshCodeConversations();
   }, [user?.id, activeSpaceId]);
 
 
@@ -257,8 +278,9 @@ export default function App() {
   useEffect(() => {
     if (activeView === 'saved' && user && activeSpaceId) {
       refreshSavedAnswers();
+      refreshRagConversations();
     }
-  }, [activeView, user?.id, activeSpaceId, savedAnswerType]);
+  }, [activeView, user?.id, activeSpaceId, savedAnswerType, ragConversationType]);
 
   const indexedCount = useMemo(
     () => documents.filter((doc) => ['SEARCHABLE', 'READY', 'PARTIAL', 'INDEXED'].includes(doc.sourceStatus)).length,
@@ -791,6 +813,17 @@ export default function App() {
     setCodeAnswerSavedId((current) => (current === savedAnswerId ? '' : current));
   }
 
+  async function continueRagConversation(conversation) {
+    if (!conversation?.id) return;
+    if (conversation.domain === 'CODE') {
+      await loadCodeConversation(conversation.id);
+      navigateTo(routePaths.code);
+      return;
+    }
+    await loadDocumentConversation(conversation.id);
+    navigateTo(routePaths.docs);
+  }
+
   const runningDocumentJobs = documentJobs.filter((job) => job.status === 'RUNNING');
   const documentProgressMessage = runningDocumentJobs.length
     ? `현재 ${runningDocumentJobs.length}개 인덱싱 작업이 진행 중입니다.`
@@ -877,6 +910,12 @@ export default function App() {
             codeMode={codeMode}
             setCodeMode={setCodeMode}
             codeAnswer={codeAnswer}
+            codeConversations={codeConversations}
+            codeConversationId={codeConversationId}
+            codeConversationTurns={codeConversationTurns}
+            refreshCodeConversations={refreshCodeConversations}
+            loadCodeConversation={loadCodeConversation}
+            startNewCodeConversation={startNewCodeConversation}
             answerSavedId={codeAnswerSavedId}
             saveAnswer={saveCodeAnswer}
             codeSearchQuery={codeSearchQuery}
@@ -958,6 +997,12 @@ export default function App() {
             setQuestion={setQuestion}
             ask={ask}
             answer={answer}
+            documentConversations={documentConversations}
+            documentConversationId={documentConversationId}
+            documentConversationTurns={documentConversationTurns}
+            refreshDocumentConversations={refreshDocumentConversations}
+            loadDocumentConversation={loadDocumentConversation}
+            startNewDocumentConversation={startNewDocumentConversation}
             answerSavedId={answerSavedId}
             saveAnswer={saveAnswer}
             query={query}
@@ -977,8 +1022,16 @@ export default function App() {
             setSavedAnswerQuery={setSavedAnswerQuery}
             savedAnswerType={savedAnswerType}
             setSavedAnswerType={setSavedAnswerType}
+            ragConversations={ragConversations}
+            selectedRagConversation={selectedRagConversation}
+            ragConversationType={ragConversationType}
+            setRagConversationType={setRagConversationType}
             refreshSavedAnswers={refreshSavedAnswers}
             loadSavedAnswer={loadSavedAnswer}
+            refreshRagConversations={refreshRagConversations}
+            loadRagConversation={loadRagConversation}
+            deleteRagConversation={deleteRagConversation}
+            continueRagConversation={continueRagConversation}
             updateSavedAnswerTitle={updateSavedAnswerTitle}
             deleteSavedAnswer={deleteSavedAnswer}
             loading={loading}

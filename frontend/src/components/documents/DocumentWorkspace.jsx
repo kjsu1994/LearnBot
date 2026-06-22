@@ -47,7 +47,16 @@ function DocumentWorkspace(props) {
                 <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
               </>
             )}
-            guide={null}
+            guide={(
+              <ConversationInlineActions
+                activeConversationId={props.documentConversationId || ''}
+                turnCount={(props.documentConversationTurns || []).length}
+                loading={props.loading}
+                loadingKey="document-conversations"
+                onRefresh={props.refreshDocumentConversations}
+                onNew={props.startNewDocumentConversation}
+              />
+            )}
             value={props.question}
             setValue={props.setQuestion}
             onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
@@ -79,6 +88,9 @@ function DocumentWorkspace(props) {
                 </div>
               </div>
               <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 紐⑤뱶</small>
+              {props.answer.rewrittenQuestion && props.answer.rewrittenQuestion !== props.question && (
+                <small className="answer-mode">이전 문서 근거를 참고해 후속 질문으로 처리했습니다.</small>
+              )}
               <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
               <div className="answer-body">
                 <MarkdownAnswer text={props.answer.answer} />
@@ -127,6 +139,27 @@ function DocumentWorkspace(props) {
     </section>
   );
 }
+
+function ConversationInlineActions({
+  activeConversationId = '',
+  turnCount = 0,
+  loading = () => false,
+  loadingKey = 'conversations',
+  onRefresh = () => {},
+  onNew = () => {},
+}) {
+  return (
+    <div className="rag-conversation-inline-actions">
+      <button className="ghost-button compact-action" type="button" onClick={onNew}>+ 새 대화</button>
+      <button className="ghost-button compact-action" type="button" disabled={loading(loadingKey)} onClick={onRefresh}>
+        {loading(loadingKey) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+        새로고침
+      </button>
+      {activeConversationId && <span>현재 {turnCount}턴</span>}
+    </div>
+  );
+}
+
 function DocumentSourcePanel(props) {
   const {
     webUrl = '',

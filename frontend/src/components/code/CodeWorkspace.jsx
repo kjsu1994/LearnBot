@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
@@ -95,6 +95,12 @@ function CodeWorkspace(props) {
     codeMode = 'overview',
     setCodeMode = () => {},
     codeAnswer,
+    codeConversations = [],
+    codeConversationId = '',
+    codeConversationTurns = [],
+    refreshCodeConversations = () => {},
+    loadCodeConversation = () => {},
+    startNewCodeConversation = () => {},
     codeSearchQuery = '',
     setCodeSearchQuery = () => {},
     codeSearchResults = [],
@@ -118,7 +124,7 @@ function CodeWorkspace(props) {
         <div>
           <Badge variant="secondary">Code RAG</Badge>
           <h1>코드 어시스턴트</h1>
-          <p>저장소의 실제 파일, 심볼, 참조 위치를 근거로 코드 질문에 답합니다.</p>
+          <p>저장소의 실제 파일, 라인, 참조 위치를 근거로 코드 질문에 답합니다.</p>
         </div>
         <div className="workspace-product-metrics" aria-label="코드 RAG 상태 요약">
           <span><strong>{repositories.length}</strong> repositories</span>
@@ -129,8 +135,7 @@ function CodeWorkspace(props) {
       {showSourceManagement && <CodeSourceManagementPanel {...props} />}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
-        <form className="panel ask-panel rag-command-panel" onSubmit={askCode}>
-          <RagAskComposer
+        <form className="panel ask-panel rag-command-panel" onSubmit={askCode}><RagAskComposer
             title="코드에게 질문하기"
             description="파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 분석합니다."
             icon={<MessageSquare size={18} />}
@@ -140,7 +145,16 @@ function CodeWorkspace(props) {
                 <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
               </>
             )}
-            guide={null}
+            guide={(
+              <ConversationInlineActions
+                activeConversationId={codeConversationId}
+                turnCount={codeConversationTurns.length}
+                loading={loading}
+                loadingKey="code-conversations"
+                onRefresh={refreshCodeConversations}
+                onNew={startNewCodeConversation}
+              />
+            )}
             value={codeQuestion}
             setValue={setCodeQuestion}
             onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
@@ -151,7 +165,7 @@ function CodeWorkspace(props) {
             templates={[
               { label: '구조 요약', prompt: '선택한 저장소의 주요 구조와 진입점을 근거와 함께 요약해줘.' },
               { label: '오류 원인', prompt: '이 오류가 발생할 수 있는 코드 경로와 수정 후보를 근거와 함께 알려줘.' },
-              { label: '참조 추적', prompt: '이 기능이 호출되는 위치와 영향 범위를 파일/라인 근거와 함께 추적해줘.' },
+              { label: '참조 추적', prompt: '이 기능을 호출하는 위치와 영향 범위를 파일/라인 근거와 함께 추적해줘.' },
               { label: '변경 영향', prompt: '이 코드를 변경하면 영향을 받을 수 있는 모듈과 테스트 포인트를 알려줘.' },
             ]}
             footer={selectedRepository && (
@@ -165,7 +179,7 @@ function CodeWorkspace(props) {
             <MessageSquare size={18} />
             <div>
               <h2>코드에게 질문하기</h2>
-              <p>파일, 클래스, 메서드, UI 이벤트 이름을 실제 코드 근거와 함께 분석합니다.</p>
+              <p>파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 분석합니다.</p>
             </div>
           </div>
           <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
@@ -196,15 +210,18 @@ function CodeWorkspace(props) {
                   <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
                 </div>
                 <div className="answer-actions">
-                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || loading('save-code-answer')} onClick={props.saveAnswer}>
+                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? "저장됨" : "답변 저장"} disabled={props.answerSavedId || loading('save-code-answer')} onClick={props.saveAnswer}>
                     {loading('save-code-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
                   </button>
-                  <button className="icon-button answer-expand-button" type="button" title="전체 화면으로 보기" onClick={() => setAnswerModalOpen(true)}>
+                  <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
                     <Maximize2 size={15} />
                   </button>
                 </div>
               </div>
               <AnswerStatus confidence={codeAnswer.confidence} diagnostics={codeAnswer.diagnostics} />
+              {codeAnswer.rewrittenQuestion && codeAnswer.rewrittenQuestion !== codeQuestion && (
+                <small className="answer-mode">이전 코드 근거를 참고해 후속 질문으로 처리했습니다.</small>
+              )}
               <div className="answer-body">
                 <MarkdownAnswer text={codeAnswer.answer} />
               </div>
@@ -246,7 +263,7 @@ function CodeWorkspace(props) {
             <Search size={18} />
             <div>
               <h2>정의와 참조</h2>
-              <p>메서드, 클래스, 컨트롤 이름으로 정의와 사용 위치를 확인합니다.</p>
+              <p>메서드, 클래스, 컴포넌트 이름으로 정의와 사용 위치를 확인합니다.</p>
             </div>
           </div>
           <div className="inline-control">
@@ -269,6 +286,26 @@ function CodeWorkspace(props) {
         )}
       </div>
     </section>
+  );
+}
+
+function ConversationInlineActions({
+  activeConversationId = '',
+  turnCount = 0,
+  loading = () => false,
+  loadingKey = 'conversations',
+  onRefresh = () => {},
+  onNew = () => {},
+}) {
+  return (
+    <div className="rag-conversation-inline-actions">
+      <button className="ghost-button compact-action" type="button" onClick={onNew}>+ 새 대화</button>
+      <button className="ghost-button compact-action" type="button" disabled={loading(loadingKey)} onClick={onRefresh}>
+        {loading(loadingKey) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+        새로고침
+      </button>
+      {activeConversationId && <span>현재 {turnCount}턴</span>}
+    </div>
   );
 }
 function CodeSourceManagementPanel(props) {
@@ -342,7 +379,7 @@ function CodeSourceManagementPanel(props) {
               </div>
               <label className="checkbox-row" htmlFor="store-token">
                 <input id="store-token" type="checkbox" checked={repoForm.storeToken} onChange={(event) => setRepoForm((current) => ({ ...current, storeToken: event.target.checked }))} />
-                <span>토큰을 암호화해 저장하고 다음 인덱싱에 재사용</span>
+                <span>토큰을 암호화해 저장하고 다음 인덱싱에 사용</span>
               </label>
             </>
           )}
@@ -357,7 +394,7 @@ function CodeSourceManagementPanel(props) {
           <div className="panel-title">
             <FileArchive size={18} />
             <div>
-              <h2>ZIP 코드 스냅샷 업로드</h2>
+            <h2>ZIP 코드 업로드</h2>
               <p>압축 파일을 업로드하면 코드 RAG 저장소로 등록하고 바로 인덱싱합니다.</p>
             </div>
           </div>
@@ -451,7 +488,7 @@ function CodeSourceManagementPanel(props) {
       {selectedRepository?.sourceType === 'ZIP' && (
         <section className="panel compact-auth-panel">
           <form className="stack" onSubmit={(event) => replaceZipRepository(selectedRepository.id, event)}>
-            <label htmlFor="replace-zip-file">새 ZIP 스냅샷</label>
+            <label htmlFor="replace-zip-file">새 ZIP 파일</label>
             <input id="replace-zip-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={(event) => setZipReplaceFile(event.target.files?.[0] || null)} />
             <div className="action-row">
               <button disabled={!zipReplaceFile || loading(`repo-zip-replace-${selectedRepository.id}`)}>
@@ -551,8 +588,8 @@ function JobDiagnosticList({ diagnostics }) {
           <strong>{diagnostic.stage} · {diagnostic.status}</strong>
           <small>{diagnostic.mode || diagnostic.analyzer} · {diagnostic.durationMillis}ms</small>
           <span>
-            파일 {diagnostic.analyzedFiles}/{diagnostic.attemptedFiles} · 관계 {diagnostic.resolvedRelations}개
-            {diagnostic.unresolvedRelations > 0 ? ` · 미해결 ${diagnostic.unresolvedRelations}개` : ''}
+            files {diagnostic.analyzedFiles}/{diagnostic.attemptedFiles} · relations {diagnostic.resolvedRelations}
+            {diagnostic.unresolvedRelations > 0 ? ` · unresolved ${diagnostic.unresolvedRelations}` : ''}
           </span>
           {diagnostic.metadata?.failedProjects > 0 && (
             <span>C# project parse failures: {diagnostic.metadata.failedProjects}</span>
@@ -597,12 +634,12 @@ function EnrichmentStatusLine({ job }) {
 
 function enrichmentStatusText(status) {
   const labels = {
-    PENDING: '품질 보강 대기',
-    RUNNING: '품질 보강 중',
-    RETRYING: '품질 보강 재시도 예정',
-    SUCCEEDED: '품질 보강 완료',
-    FAILED: '품질 보강 실패',
-    SKIPPED: '품질 보강 생략',
+    PENDING: '대기',
+    RUNNING: '실행 중',
+    RETRYING: '재시도 예정',
+    SUCCEEDED: '완료',
+    FAILED: '실패',
+    SKIPPED: '건너뜀',
     NOT_STARTED: '',
   };
   return labels[status] ?? status ?? '';
@@ -910,3 +947,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
 }
 
 export { CodeSourceManagementPanel, CodeWorkspace };
+
+
+
+
