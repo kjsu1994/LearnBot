@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { MessageSquare, X } from 'lucide-react';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 
@@ -11,8 +12,8 @@ function AnswerModal({ title = '답변', subtitle = '', answer = '', className =
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  return (
-    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+  const modal = (
+    <div className="code-modal-backdrop answer-modal-portal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
       <section className={`code-modal answer-modal ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby="answer-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
@@ -36,6 +37,9 @@ function AnswerModal({ title = '답변', subtitle = '', answer = '', className =
       </section>
     </div>
   );
+
+  if (typeof document === 'undefined') return modal;
+  return createPortal(modal, document.body);
 }
 
 export { AnswerModal };

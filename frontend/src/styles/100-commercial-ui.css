@@ -2632,6 +2632,14 @@
   color: rgba(255, 255, 255, 0.9);
 }
 
+.workspace-shell-v3.shell-sidebar-collapsed {
+  background:
+    radial-gradient(circle at 78% 8%, rgba(124, 58, 237, 0.16), transparent 34%),
+    radial-gradient(circle at 28% 84%, rgba(79, 70, 229, 0.12), transparent 32%),
+    radial-gradient(circle at 58% 44%, rgba(217, 70, 239, 0.08), transparent 36%),
+    linear-gradient(180deg, #050506 0%, #0a0a0b 48%, #070708 100%);
+}
+
 .workspace-shell-v3 .content {
   background:
     radial-gradient(circle at 22% 10%, rgba(255, 255, 255, 0.04), transparent 28%),
@@ -3305,6 +3313,69 @@ body > .admin-modal-portal-backdrop .allowed-domain-footer .ghost-button {
 body > .admin-modal-portal-backdrop .allowed-domain-footer button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+body > .answer-modal-portal-backdrop {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 2147483000 !important;
+}
+
+body > .answer-modal-portal-backdrop .answer-modal {
+  background: rgba(10, 10, 11, 0.96);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 32px 120px rgba(0, 0, 0, 0.58);
+  color: rgba(255, 255, 255, 0.86);
+  position: relative;
+  z-index: 2147483001 !important;
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-header,
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-tabs {
+  background: rgba(255, 255, 255, 0.035);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-title h2,
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-tabs .active-tab,
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer,
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer h3,
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer h4 {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-title p,
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-tabs span,
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer p,
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer li {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .code-modal-tabs .active-tab {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal-body {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.08), transparent 34%),
+    rgba(10, 10, 11, 0.96);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .markdown-answer code {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: rgba(216, 180, 254, 0.94);
+}
+
+body > .answer-modal-portal-backdrop .answer-modal .markdown-code {
+  background: rgba(3, 7, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .workspace-shell-v3 .code-modal-backdrop:has(.allowed-domain-modal) {
