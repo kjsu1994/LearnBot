@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
+import com.learnbot.dto.DocumentConversationAnchor;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationDetail;
 import com.learnbot.dto.RagConversationSummary;
@@ -25,8 +26,7 @@ public class RagConversationService {
     public static final String CODE = "CODE";
 
     private static final int RECENT_TURN_LIMIT = 5;
-    private static final int REWRITE_TURN_LIMIT = 3;
-    private static final int MAX_REWRITE_CHARS = 1800;
+    private static final int MAX_REWRITE_CHARS = 520;
 
     private final RagConversationRepository repository;
     private final ObjectMapper objectMapper;
@@ -59,7 +59,7 @@ public class RagConversationService {
             boolean conversational
     ) {
         if (!conversational && conversationId == null) {
-            return new RagConversationContext(null, clean(question), List.of(), List.of(), false);
+            return new RagConversationContext(null, clean(question), List.of());
         }
         String normalizedDomain = normalizeDomain(domain);
         RagConversationSummary conversation = conversationId == null
@@ -67,13 +67,15 @@ public class RagConversationService {
                 : repository.findSummary(user.id(), conversationId)
                 .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
         List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
-        boolean contextual = looksContextual(question) && recentTurns != null && !recentTurns.isEmpty();
+        boolean contextual = looksContextual(normalizedDomain, question) && recentTurns != null && !recentTurns.isEmpty();
         if (CODE.equals(normalizedDomain)) {
             List<CodeConversationAnchor> anchors = contextual ? codeAnchors(recentTurns) : List.of();
             String rewritten = contextual ? rewriteCodeQuestion(question, recentTurns, anchors) : clean(question);
-            return new RagConversationContext(conversation.id(), rewritten, recentTurns, anchors, contextual);
+            return new RagConversationContext(conversation.id(), rewritten, recentTurns, anchors, List.of(), contextual);
         }
-        return new RagConversationContext(conversation.id(), rewriteDocumentQuestion(domain, question, recentTurns), recentTurns, List.of(), contextual);
+        List<DocumentConversationAnchor> anchors = contextual ? documentAnchors(recentTurns) : List.of();
+        String rewritten = contextual ? rewriteDocumentQuestion(question, recentTurns, anchors) : clean(question);
+        return new RagConversationContext(conversation.id(), rewritten, recentTurns, List.of(), anchors, contextual);
     }
 
     public AskResponse saveDocumentTurn(
@@ -126,23 +128,23 @@ public class RagConversationService {
         return response.withConversation(context.conversationId(), turn.id(), context.rewrittenQuestion());
     }
 
-    private String rewriteDocumentQuestion(String domain, String question, List<RagConversationTurnContext> recentTurns) {
+    private String rewriteDocumentQuestion(
+            String question,
+            List<RagConversationTurnContext> recentTurns,
+            List<DocumentConversationAnchor> anchors
+    ) {
         String cleanQuestion = clean(question);
-        if (recentTurns == null || recentTurns.isEmpty() || !looksContextual(cleanQuestion)) {
-            return cleanQuestion;
+        if (anchors == null || anchors.isEmpty()) {
+            return limitRewrite(cleanQuestion + " " + compact(recentTurns.get(0).question(), 120));
         }
-        StringBuilder builder = new StringBuilder(cleanQuestion);
-        builder.append("\n\nPrevious conversation context for ").append(normalizeDomain(domain)).append(" RAG:\n");
-        for (int i = 0; i < Math.min(recentTurns.size(), REWRITE_TURN_LIMIT); i++) {
-            RagConversationTurnContext turn = recentTurns.get(i);
-            builder.append("- Q: ").append(compact(turn.question(), 180)).append("\n");
-            builder.append("  A: ").append(compact(turn.answer(), 260)).append("\n");
-            String evidence = evidenceSummary(turn.evidence(), normalizeDomain(domain));
-            if (!evidence.isBlank()) {
-                builder.append("  Evidence: ").append(evidence).append("\n");
-            }
-        }
-        return limitRewrite(builder.toString());
+        DocumentConversationAnchor anchor = anchors.get(0);
+        String location = firstNonBlank(anchor.sectionTitle(), anchor.headingPath(), pageLabel(anchor.pageNumber()), anchor.title());
+        String rewritten = String.join(" ",
+                clean(anchor.title()),
+                clean(location),
+                cleanQuestion
+        ).trim();
+        return limitRewrite(rewritten.isBlank() ? cleanQuestion : rewritten);
     }
 
     private String rewriteCodeQuestion(
@@ -154,68 +156,74 @@ public class RagConversationService {
         if (recentTurns == null || recentTurns.isEmpty()) {
             return cleanQuestion;
         }
-        StringBuilder builder = new StringBuilder();
-        builder.append("사용자 질문: ").append(cleanQuestion).append('\n');
-        builder.append("이전 대화 주제: ");
-        if (anchors == null || anchors.isEmpty()) {
-            builder.append(compact(recentTurns.get(0).question(), 180));
-        } else {
-            builder.append(anchors.stream()
-                    .limit(6)
-                    .map(this::anchorLabel)
-                    .filter(label -> !label.isBlank())
-                    .distinct()
-                    .reduce((left, right) -> left + ", " + right)
-                    .orElse(compact(recentTurns.get(0).question(), 180)));
-        }
-        builder.append('\n');
-        builder.append("독립 질문: ");
-        builder.append(cleanQuestion);
-        if (anchors != null && !anchors.isEmpty()) {
-            builder.append(" (관련 코드: ");
-            builder.append(anchors.stream()
-                    .limit(4)
-                    .map(this::anchorLabel)
-                    .filter(label -> !label.isBlank())
-                    .distinct()
-                    .reduce((left, right) -> left + ", " + right)
-                    .orElse(""));
-            builder.append(')');
-        }
-        return limitRewrite(builder.toString());
+        String topic = anchors == null || anchors.isEmpty()
+                ? compact(recentTurns.get(0).question(), 180)
+                : anchors.stream()
+                .limit(4)
+                .map(this::codeAnchorLabel)
+                .filter(label -> !label.isBlank())
+                .distinct()
+                .reduce((left, right) -> left + ", " + right)
+                .orElse(compact(recentTurns.get(0).question(), 180));
+        return limitRewrite(topic + " " + cleanQuestion);
     }
 
-    private boolean looksContextual(String question) {
+    private boolean looksContextual(String domain, String question) {
         String normalized = clean(question).toLowerCase();
         if (normalized.isBlank()) {
             return false;
         }
-        return containsAny(normalized,
-                "이거", "그거", "저거", "위", "앞", "방금", "이전", "아까", "그 파일", "그 메서드", "그 함수",
-                "이 파일", "이 메서드", "이 함수", "이어", "계속", "흐름", "호출", "영향", "근거", "출처",
-                "this", "that", "above", "previous", "continue", "same file", "same method");
+        boolean common = containsAny(normalized,
+                "이거", "그거", "저거", "위", "앞", "방금", "이전", "아까",
+                "이어", "계속", "근거", "출처", "예외", "조건",
+                "this", "that", "above", "previous", "continue");
+        if (CODE.equals(domain)) {
+            return common || containsAny(normalized,
+                    "그 파일", "그 메서드", "그 함수", "이 파일", "이 메서드", "이 함수", "흐름", "호출", "영향",
+                    "same file", "same method");
+        }
+        return common || containsAny(normalized,
+                "이 문서", "그 문서", "위 내용", "앞 내용", "그 조항", "그 표", "그 페이지",
+                "해당 문서", "해당 조항", "페이지", "표", "조항", "요약");
     }
 
-    private String evidenceSummary(JsonNode evidence, String domain) {
-        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
-            return "";
+    private List<DocumentConversationAnchor> documentAnchors(List<RagConversationTurnContext> recentTurns) {
+        if (recentTurns == null || recentTurns.isEmpty()) {
+            return List.of();
         }
-        StringBuilder builder = new StringBuilder();
-        int count = 0;
-        for (JsonNode item : evidence) {
-            if (count >= 4) {
-                break;
+        List<DocumentConversationAnchor> anchors = new ArrayList<>();
+        for (RagConversationTurnContext turn : recentTurns) {
+            JsonNode evidence = turn.evidence();
+            if (evidence == null || !evidence.isArray()) {
+                continue;
             }
-            if (CODE.equals(domain)) {
-                appendPart(builder, item.path("filePath").asText(""));
-                appendPart(builder, item.path("symbolName").asText(""));
-            } else {
-                appendPart(builder, item.path("title").asText(""));
-                appendPart(builder, item.path("chunkId").asText(""));
+            for (JsonNode item : evidence) {
+                UUID chunkId = uuid(item.path("chunkId").asText(""));
+                UUID documentId = uuid(item.path("documentId").asText(""));
+                if (chunkId == null || documentId == null) {
+                    continue;
+                }
+                JsonNode metadata = item.path("metadata");
+                DocumentConversationAnchor anchor = new DocumentConversationAnchor(
+                        chunkId,
+                        documentId,
+                        item.path("title").asText(""),
+                        item.path("sourceUri").asText(""),
+                        item.path("chunkIndex").asInt(0),
+                        metadata.has("pageNumber") ? metadata.path("pageNumber").asInt() : null,
+                        metadata.path("sectionTitle").asText(""),
+                        metadata.path("headingPath").asText(""),
+                        metadata.path("documentType").asText("")
+                );
+                if (anchors.stream().noneMatch(existing -> existing.chunkId().equals(anchor.chunkId()))) {
+                    anchors.add(anchor);
+                }
+                if (anchors.size() >= 8) {
+                    return anchors;
+                }
             }
-            count++;
         }
-        return compact(builder.toString(), 520);
+        return anchors;
     }
 
     private List<CodeConversationAnchor> codeAnchors(List<RagConversationTurnContext> recentTurns) {
@@ -242,7 +250,7 @@ public class RagConversationService {
                         item.path("lineStart").asInt(0),
                         item.path("lineEnd").asInt(0)
                 );
-                if (anchors.stream().noneMatch(existing -> sameAnchor(existing, anchor))) {
+                if (anchors.stream().noneMatch(existing -> sameCodeAnchor(existing, anchor))) {
                     anchors.add(anchor);
                 }
                 if (anchors.size() >= 8) {
@@ -253,7 +261,7 @@ public class RagConversationService {
         return anchors;
     }
 
-    private boolean sameAnchor(CodeConversationAnchor left, CodeConversationAnchor right) {
+    private boolean sameCodeAnchor(CodeConversationAnchor left, CodeConversationAnchor right) {
         if (left.chunkId() != null && right.chunkId() != null) {
             return left.chunkId().equals(right.chunkId());
         }
@@ -262,16 +270,35 @@ public class RagConversationService {
                 && clean(left.methodName()).equals(clean(right.methodName()));
     }
 
-    private String anchorLabel(CodeConversationAnchor anchor) {
+    private JsonNode metadata(RagConversationContext context) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("recentTurnCount", context.recentTurns() == null ? 0 : context.recentTurns().size());
+        metadata.put("codeAnchorCount", context.codeAnchors() == null ? 0 : context.codeAnchors().size());
+        metadata.put("documentAnchorCount", context.documentAnchors() == null ? 0 : context.documentAnchors().size());
+        metadata.put("contextual", context.contextual());
+        metadata.put("rewritten", context.contextual() && !clean(context.rewrittenQuestion()).isBlank());
+        return objectMapper.valueToTree(metadata);
+    }
+
+    private String codeAnchorLabel(CodeConversationAnchor anchor) {
         if (anchor == null) {
             return "";
         }
-        String symbol = !clean(anchor.methodName()).isBlank()
-                ? anchor.methodName()
-                : !clean(anchor.className()).isBlank()
-                ? anchor.className()
-                : anchor.symbolName();
+        String symbol = firstNonBlank(anchor.methodName(), anchor.className(), anchor.symbolName());
         return clean(anchor.filePath()) + (clean(symbol).isBlank() ? "" : "#" + symbol);
+    }
+
+    private String pageLabel(Integer pageNumber) {
+        return pageNumber == null || pageNumber <= 0 ? "" : pageNumber + "페이지";
+    }
+
+    private String normalizeDomain(String domain) {
+        return CODE.equalsIgnoreCase(domain) ? CODE : DOCUMENT;
+    }
+
+    private String title(String question) {
+        String clean = clean(question);
+        return clean.isBlank() ? "새 RAG 대화" : compact(clean, 60);
     }
 
     private UUID uuid(String value) {
@@ -282,42 +309,17 @@ public class RagConversationService {
         }
     }
 
-    private void appendPart(StringBuilder builder, String value) {
-        if (value == null || value.isBlank()) {
-            return;
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
         }
-        if (!builder.isEmpty()) {
-            builder.append("; ");
-        }
-        builder.append(value.trim());
-    }
-
-    private JsonNode metadata(RagConversationContext context) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("recentTurnCount", context.recentTurns() == null ? 0 : context.recentTurns().size());
-        metadata.put("codeAnchorCount", context.codeAnchors() == null ? 0 : context.codeAnchors().size());
-        metadata.put("contextual", context.contextual());
-        metadata.put("rewritten", context.contextual() && !clean(context.rewrittenQuestion()).isBlank());
-        return objectMapper.valueToTree(metadata);
-    }
-
-    private String normalizeDomain(String domain) {
-        if (CODE.equalsIgnoreCase(domain)) {
-            return CODE;
-        }
-        return DOCUMENT;
-    }
-
-    private String title(String question) {
-        String clean = clean(question);
-        if (clean.isBlank()) {
-            return "새 RAG 대화";
-        }
-        return compact(clean, 60);
+        return "";
     }
 
     private String limitRewrite(String value) {
-        String rewritten = clean(value);
+        String rewritten = clean(value).replaceAll("\\s+", " ");
         return rewritten.length() <= MAX_REWRITE_CHARS ? rewritten : rewritten.substring(0, MAX_REWRITE_CHARS);
     }
 

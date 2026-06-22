@@ -161,7 +161,7 @@ function CodeWorkspace(props) {
             placeholder={activeCodeModeGuide.placeholder}
             loading={loading('code-ask')}
             disabled={!codeQuestion.trim()}
-            submitLabel="코드 질문"
+            submitLabel={codeConversationId ? '추가 질문' : '코드 질문'}
             templates={[
               { label: '구조 요약', prompt: '선택한 저장소의 주요 구조와 진입점을 근거와 함께 요약해줘.' },
               { label: '오류 원인', prompt: '이 오류가 발생할 수 있는 코드 경로와 수정 후보를 근거와 함께 알려줘.' },
@@ -187,7 +187,7 @@ function CodeWorkspace(props) {
           <div className="code-question-toolbar">
             <button className="code-ask-button" disabled={!codeQuestion || loading('code-ask')}>
               {loading('code-ask') ? <Loader2 className="spin" size={15} /> : <MessageSquare size={15} />}
-              코드 질문
+              {codeConversationId ? '추가 질문' : '코드 질문'}
             </button>
           </div>
           <textarea

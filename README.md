@@ -123,6 +123,16 @@ The UI also provides:
 - source file browsing with line highlights
 - symbol reference lookup for method, class, control, and event names
 
+### Conversational Code RAG
+
+Code questions support conversation-aware follow-ups. A follow-up question keeps the user's original question for the final answer, but uses a separate effective search question for classification, retrieval, query expansion, and evidence ranking.
+
+When a code conversation has previous turns, LearnBot extracts code anchors from prior evidence, including chunk id, file path, class, symbol, method, and line range. Those chunks are reloaded from PostgreSQL as pinned evidence before normal hybrid search runs. Pinned evidence receives a small ranking boost, but it is ignored when it is not relevant to the current question. If pinned evidence is missing, deleted, inaccessible, or unrelated, the request falls back to the normal code RAG search path.
+
+The prompt includes recent Q/A summaries and previous code anchors in a separate conversation section. This section is used only to resolve references such as "that method" or "the previous file"; cited facts must still come from the current source-code context.
+
+Diagnostics include conversation-specific notes such as whether conversation context was used, how many anchors were found, and how many pinned chunks were included in the final evidence.
+
 ### Code Graph RAG
 
 Code indexing builds a versioned graph in PostgreSQL alongside chunks and embeddings. Neo4j is not required. Java source is analyzed with JavaParser Symbol Solver, while C# source is analyzed with a Roslyn semantic analyzer included in the backend image.
@@ -250,6 +260,38 @@ POST /api/document-indexing/jobs/{jobId}/retry-enrichment
 POST /api/document-indexing/jobs/{jobId}/retry-graph
 ```
 
+## Conversational Document RAG
+
+Document questions also support conversation-aware follow-ups. Conversational document RAG keeps three concepts separate:
+
+- `originalQuestion`: the exact text typed by the user.
+- `effectiveQuestion`: a short standalone search question generated from the follow-up and the previous document evidence.
+- conversation focus: recent Q/A summaries and prior document evidence anchors included in the prompt as a separate section.
+
+Previous document evidence is not appended to the search query as raw chat history. Instead, LearnBot extracts document anchors from prior answer evidence, including chunk id, document id, title, source URI, chunk index, page number, section title, heading path, and document type. The referenced chunks are reloaded from PostgreSQL and merged as pinned context before normal document retrieval. Pinned context is filtered for relevance and receives a small boost; if it cannot be loaded or is unrelated, the request falls back to normal document retrieval.
+
+The final answer still cites only evidence chunks present in the current response context. Previous answers are used only to resolve follow-up references such as "that document", "that condition", or "the previous source".
+
+Document conversation turns are stored in the RAG conversation tables. They keep the user question, generated effective question, answer, citations, evidence, diagnostics, and metadata. Conversation retention follows the existing RAG conversation retention policy.
+
+### Document RAG streaming
+
+The backend exposes an SSE-compatible endpoint:
+
+```text
+POST /api/rag/ask/stream
+Accept: text/event-stream
+```
+
+Current streaming behavior is fallback-compatible. The endpoint emits structured SSE events, but it does not yet stream model tokens from Ollama:
+
+- `metadata`: request mode and whether the request is conversational.
+- `citation`: final evidence list.
+- `done`: final `AskResponse`.
+- `error`: failure details.
+
+If true token streaming is added to the Ollama client later, this endpoint can emit `token` events without changing the non-streaming `/api/rag/ask` contract.
+
 ## API
 
 - `POST /api/sources/web` with `{ "url": "https://example.com/docs", "recursive": true, "maxDepth": 2, "maxPages": 30 }`
@@ -264,6 +306,11 @@ POST /api/document-indexing/jobs/{jobId}/retry-graph
 - `DELETE /api/documents/{documentId}`
 - `POST /api/search` with `{ "query": "..." }`
 - `POST /api/rag/ask` with `{ "question": "...", "mode": "qa" }`
+- `POST /api/rag/ask/stream` with `{ "question": "...", "mode": "qa", "conversational": true }`, returns `text/event-stream`
+- `GET /api/rag/conversations?domain=DOCUMENT`
+- `GET /api/rag/conversations?domain=CODE`
+- `GET /api/rag/conversations/{conversationId}`
+- `DELETE /api/rag/conversations/{conversationId}`
 - `POST /api/code/repositories` with `{ "gitUrl": "https://host/project.git", "branch": "main", "authType": "NONE" }`
 - `POST /api/code/repositories/{repositoryId}/index`
 - `DELETE /api/code/repositories/{repositoryId}`
@@ -277,3 +324,5 @@ POST /api/document-indexing/jobs/{jobId}/retry-graph
 - `POST /api/code/ask` with `{ "repositoryId": "...", "question": "...", "mode": "locate" }`
 
 RAG answer responses include `confidence` and `diagnostics` fields so the UI can show when a response was generated by fallback logic or has weak evidence. The frontend renders natural-language RAG answers as Markdown, including headings, lists, inline code, and fenced code blocks.
+
+Conversational RAG responses can also include `conversationId`, `turnId`, and `rewrittenQuestion`. For conversational requests, `rewrittenQuestion` is the effective standalone search question, not raw chat history.

@@ -7,10 +7,12 @@ import com.learnbot.service.RagService;
 import com.learnbot.service.AuthService;
 import com.learnbot.security.CurrentUserProvider;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/rag")
@@ -48,7 +50,58 @@ public class RagController {
                 request.question(),
                 true
         );
-        AskResponse response = ragService.ask(context.rewrittenQuestion(), request.filter(), request.mode(), request.speedProfile(), accessibleSpaceIds, selectedSpaceId);
+        AskResponse response = ragService.askConversational(request.question(), context, request.filter(), request.mode(), request.speedProfile(), accessibleSpaceIds, selectedSpaceId);
         return conversationService.saveDocumentTurn(context, request.parentTurnId(), request.question(), response);
+    }
+
+    @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    SseEmitter askStream(@Valid @RequestBody AskRequest request) {
+        SseEmitter emitter = new SseEmitter(0L);
+        var user = currentUserProvider.currentUser();
+        var selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        var accessibleSpaceIds = authService.accessibleSpaceIds(user);
+        if (selectedSpaceId == null && !accessibleSpaceIds.isEmpty()) {
+            selectedSpaceId = accessibleSpaceIds.get(0);
+        }
+        UUIDHolder selected = new UUIDHolder(selectedSpaceId);
+        new Thread(() -> {
+            try {
+                boolean conversational = Boolean.TRUE.equals(request.conversational()) || request.conversationId() != null;
+                emitter.send(SseEmitter.event().name("metadata").data(java.util.Map.of(
+                        "conversational", conversational,
+                        "mode", request.mode() == null ? "qa" : request.mode()
+                )));
+                AskResponse response;
+                if (!conversational) {
+                    response = ragService.ask(request.question(), request.filter(), request.mode(), request.speedProfile(), accessibleSpaceIds, selected.value());
+                } else {
+                    var context = conversationService.prepare(
+                            user,
+                            selected.value(),
+                            RagConversationService.DOCUMENT,
+                            null,
+                            request.conversationId(),
+                            request.question(),
+                            true
+                    );
+                    response = ragService.askConversational(request.question(), context, request.filter(), request.mode(), request.speedProfile(), accessibleSpaceIds, selected.value());
+                    response = conversationService.saveDocumentTurn(context, request.parentTurnId(), request.question(), response);
+                }
+                emitter.send(SseEmitter.event().name("citation").data(response.evidence()));
+                emitter.send(SseEmitter.event().name("done").data(response));
+                emitter.complete();
+            } catch (Exception ex) {
+                try {
+                    emitter.send(SseEmitter.event().name("error").data(java.util.Map.of("message", ex.getMessage() == null ? "Document RAG stream failed." : ex.getMessage())));
+                } catch (Exception ignored) {
+                    // Ignore SSE error reporting failures.
+                }
+                emitter.completeWithError(ex);
+            }
+        }, "document-rag-sse").start();
+        return emitter;
+    }
+
+    private record UUIDHolder(java.util.UUID value) {
     }
 }

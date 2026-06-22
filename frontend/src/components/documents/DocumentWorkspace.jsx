@@ -63,7 +63,7 @@ function DocumentWorkspace(props) {
             placeholder={activeAnswerModeGuide.placeholder}
             loading={props.loading('ask')}
             disabled={!props.question.trim()}
-            submitLabel="답변 생성"
+            submitLabel={props.documentConversationId ? '추가 질문' : '답변 생성'}
             templates={[
               { label: '요약', prompt: '이 문서들의 핵심 내용을 출처와 함께 요약해줘.' },
               { label: '절차', prompt: '관련 절차를 단계별로 정리하고 각 단계의 근거를 알려줘.' },

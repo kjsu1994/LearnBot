@@ -5,6 +5,9 @@ import com.learnbot.dto.AdminTuningMetricSample;
 import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
 import com.learnbot.dto.DocumentChunkDetail;
+import com.learnbot.dto.DocumentConversationAnchor;
+import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
@@ -37,6 +40,7 @@ public class RagService {
     private static final int FALLBACK_RESULT_LIMIT = 4;
     private static final int FALLBACK_EXCERPT_CHARS = 260;
     private static final int FALLBACK_POINT_CHARS = 220;
+    private static final double CONVERSATION_PINNED_BOOST = 0.18;
     private static final List<String> HEADER_WORDS = List.of(
             "연번", "직종", "이름", "성명", "직원명", "사원명", "본부", "직급", "성별", "비고", "대상자녀수", "name"
     );
@@ -98,23 +102,34 @@ public class RagService {
     public AskResponse ask(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(question, filter, mode, speedProfile, spaceIds, selectedSpaceId);
+            return askPrioritized(question, null, filter, mode, speedProfile, spaceIds, selectedSpaceId);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
     }
 
-    private AskResponse askPrioritized(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
+    public AskResponse askConversational(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(question, conversationContext, filter, mode, speedProfile, spaceIds, selectedSpaceId);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private AskResponse askPrioritized(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         long askStarted = System.nanoTime();
+        String originalQuestion = safe(question);
+        String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
         AnswerMode answerMode = AnswerMode.from(mode);
         DocumentSpeedProfile requestedSpeedProfile = DocumentSpeedProfile.from(
                 speedProfile,
                 properties.getRag().getPipeline().getDefaultDocumentSpeedProfile()
         );
-        DocumentQuestionType questionType = classifyDocumentQuestion(question, answerMode);
-        int topK = retrievalLimit(question, answerMode, questionType, requestedSpeedProfile);
+        DocumentQuestionType questionType = classifyDocumentQuestion(effectiveQuestion, answerMode);
+        int topK = retrievalLimit(effectiveQuestion, answerMode, questionType, requestedSpeedProfile);
         long retrievalStarted = System.nanoTime();
-        DocumentRetrieval retrieval = retrieveDocuments(question, filter, answerMode, questionType, requestedSpeedProfile, topK, spaceIds, selectedSpaceId);
+        DocumentRetrieval retrieval = retrieveDocuments(effectiveQuestion, filter, answerMode, questionType, requestedSpeedProfile, topK, spaceIds, selectedSpaceId, conversationContext);
         long retrievalMs = elapsedMs(retrievalStarted);
         List<SearchResult> citations = retrieval.citations();
         if (citations.isEmpty()) {
@@ -128,7 +143,7 @@ public class RagService {
                     List.of("검색된 문서 근거가 없어 추측 답변 생성을 중단했습니다.")
             );
         }
-        Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(question, citations);
+        Optional<ComputedAnswer> computedAnswer = maybeAnswerSpreadsheetCount(effectiveQuestion, citations);
         if (computedAnswer.isPresent()) {
             ComputedAnswer computed = computedAnswer.get();
             recordMetrics("document", answerMode.value(), requestedSpeedProfile.name(), retrieval, retrievalMs, 0, 0, computed.citations().size(), 0, 0, 0, false, false, elapsedMs(askStarted));
@@ -143,13 +158,15 @@ public class RagService {
         }
 
         long contextStarted = System.nanoTime();
-        String systemPrompt = systemPrompt(answerMode, questionType);
-        ContextBundle contextBundle = buildBudgetedContext(question, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, citations);
+        String systemPrompt = systemPrompt(answerMode, questionType) + conversationSystemRule(conversationContext);
+        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, citations);
         citations = contextBundle.citations();
         String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
 
-        String userPrompt = "Question:\n" + question + "\n\nContext:\n" + context;
+        String userPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
+                + conversationFocus(conversationContext)
+                + "\n\nContext:\n" + context;
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -169,8 +186,9 @@ public class RagService {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
                 List<SearchResult> retryCitations = compactRepairCitations(citations, answerMode, questionType, retrieval.effectiveProfile());
-                String retryContext = buildContext(question, answerMode, questionType, DocumentSpeedProfile.FAST, retryCitations);
-                String retryPrompt = "Question:\n" + question + "\n\nCompact context:\n" + retryContext
+                String retryContext = buildContext(effectiveQuestion, answerMode, questionType, DocumentSpeedProfile.FAST, retryCitations);
+                String retryPrompt = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
+                        + "\n\nCompact context:\n" + retryContext
                         + "\n\nPrevious answer failed validation because: " + qualityReason + "."
                         + "\nAnswer briefly in Korean and attach evidence numbers like [1] to every factual claim.";
                 long retryStarted = System.nanoTime();
@@ -188,7 +206,7 @@ public class RagService {
         } catch (RuntimeException ex) {
             log.warn("RAG LLM call failed mode={} citations={} question={}",
                     answerMode.value(), citations.size(), abbreviate(question), ex);
-            answer = fallbackAnswer(answerMode, question, citations);
+            answer = fallbackAnswer(answerMode, originalQuestion, citations);
             answerDoneReason = null;
             llmUnavailable = true;
         }
@@ -201,7 +219,7 @@ public class RagService {
                     safe(answer).length(),
                     containsCitation(answer),
                     abbreviate(question));
-            answer = fallbackAnswer(answerMode, question, citations);
+            answer = fallbackAnswer(answerMode, originalQuestion, citations);
             answerRewritten = true;
         }
         AnswerTiming timing = new AnswerTiming(
@@ -254,8 +272,96 @@ public class RagService {
                 citations,
                 buildEvidence(citations),
                 confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
-                diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType, timing)
+                conversationDiagnostics(
+                        diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType, timing),
+                        originalQuestion,
+                        effectiveQuestion,
+                        conversationContext,
+                        retrieval
+                )
         );
+    }
+
+    private String effectiveQuestion(String originalQuestion, RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return safe(originalQuestion);
+        }
+        String rewritten = safe(conversationContext.rewrittenQuestion()).trim();
+        return rewritten.isBlank() ? safe(originalQuestion) : rewritten;
+    }
+
+    private String questionPrompt(String originalQuestion, String effectiveQuestion, RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual() || safe(originalQuestion).equals(safe(effectiveQuestion))) {
+            return "Question:\n" + originalQuestion;
+        }
+        return "Original user question:\n" + originalQuestion
+                + "\n\nConversation-aware search question:\n" + effectiveQuestion
+                + "\n\nAnswer the original user question. Use the conversation-aware question only to resolve follow-up references.";
+    }
+
+    private String conversationSystemRule(RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return "";
+        }
+        return "\nUse previous conversation only to resolve follow-up references."
+                + "\nUse retrieved and pinned document context as the source of truth."
+                + "\nDo not cite previous answers directly unless their cited chunks are present in the current context."
+                + "\nIf the follow-up is unrelated, ignore previous conversation context.";
+    }
+
+    private String conversationFocus(RagConversationContext conversationContext) {
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return "";
+        }
+        String turns = conversationContext.recentTurns() == null ? "" : conversationContext.recentTurns().stream()
+                .limit(3)
+                .map(this::conversationTurnSummary)
+                .filter(summary -> !summary.isBlank())
+                .collect(Collectors.joining("\n"));
+        String anchors = conversationContext.documentAnchors() == null ? "" : conversationContext.documentAnchors().stream()
+                .limit(5)
+                .map(anchor -> "- " + safe(anchor.title())
+                        + nullable(" / page=", anchor.pageNumber() == null ? null : String.valueOf(anchor.pageNumber()))
+                        + nullable(" / section=", anchor.sectionTitle())
+                        + nullable(" / heading=", anchor.headingPath())
+                        + " / chunk=" + anchor.chunkIndex())
+                .collect(Collectors.joining("\n"));
+        if (turns.isBlank() && anchors.isBlank()) {
+            return "";
+        }
+        return "\n\nConversation focus:\n"
+                + "Use this section only to resolve references such as 'that document', 'that condition', or 'the previous source'.\n"
+                + (turns.isBlank() ? "" : "Recent turns:\n" + turns + "\n")
+                + (anchors.isBlank() ? "" : "Previous document evidence anchors:\n" + anchors);
+    }
+
+    private String conversationTurnSummary(RagConversationTurnContext turn) {
+        if (turn == null) {
+            return "";
+        }
+        return "- Q: " + abbreviate(turn.question())
+                + "\n  A: " + abbreviate(turn.answer())
+                + "\n  Evidence: " + conversationEvidenceSummary(turn.evidence());
+    }
+
+    private String conversationEvidenceSummary(com.fasterxml.jackson.databind.JsonNode evidence) {
+        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
+            return "none";
+        }
+        List<String> values = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode item : evidence) {
+            if (values.size() >= 3) {
+                break;
+            }
+            String title = item.path("title").asText("");
+            String chunk = item.path("chunkIndex").asText("");
+            com.fasterxml.jackson.databind.JsonNode metadata = item.path("metadata");
+            String page = metadata.path("pageNumber").asText("");
+            if (!title.isBlank()) {
+                values.add(title + (page.isBlank() ? "" : " p." + page) + (chunk.isBlank() ? "" : " chunk " + chunk));
+            }
+        }
+        return values.isEmpty() ? "none" : String.join("; ", values);
     }
 
     private DocumentRetrieval retrieveDocuments(
@@ -266,7 +372,8 @@ public class RagService {
             DocumentSpeedProfile speedProfile,
             int topK,
             List<UUID> spaceIds,
-            UUID selectedSpaceId
+            UUID selectedSpaceId,
+            RagConversationContext conversationContext
     ) {
         Map<UUID, SearchResult> merged = new LinkedHashMap<>();
         List<String> queriesUsed = new ArrayList<>();
@@ -274,6 +381,7 @@ public class RagService {
         DocumentSpeedProfile effectiveProfile = speedProfile == null ? DocumentSpeedProfile.BALANCED : speedProfile;
         boolean profileEscalated = false;
         int searchLimit = documentSearchLimit(topK, effectiveProfile);
+        int pinnedCandidateCount = collectPinnedConversationDocuments(question, filter, spaceIds, selectedSpaceId, conversationContext, merged);
 
         searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
         if (isOverviewQuestionType(questionType)) {
@@ -368,7 +476,82 @@ public class RagService {
                 queryPlan.rewriteFailed(),
                 String.format(java.util.Locale.ROOT, "%.2f", assessment.coverage()),
                 abbreviate(question));
-        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated, timing.snapshot());
+        int pinnedUsedCount = (int) citations.stream().filter(this::isConversationPinned).count();
+        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated, timing.snapshot(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private int collectPinnedConversationDocuments(
+            String question,
+            SearchFilter filter,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId,
+            RagConversationContext conversationContext,
+            Map<UUID, SearchResult> merged
+    ) {
+        if (conversationContext == null || conversationContext.documentAnchors() == null || conversationContext.documentAnchors().isEmpty()) {
+            return 0;
+        }
+        List<UUID> chunkIds = conversationContext.documentAnchors().stream()
+                .map(DocumentConversationAnchor::chunkId)
+                .filter(id -> id != null)
+                .distinct()
+                .limit(8)
+                .toList();
+        if (chunkIds.isEmpty()) {
+            return 0;
+        }
+        try {
+            List<SearchResult> pinned = documentRepository.findActiveChunksByIds(chunkIds, filter, spaceIds, selectedSpaceId);
+            int added = 0;
+            boolean weakQuestionTerms = queryTerms(question).size() <= 2;
+            for (SearchResult result : pinned) {
+                boolean relevant = isRelevantPinnedDocument(question, result);
+                if (!weakQuestionTerms && !relevant) {
+                    continue;
+                }
+                mergeDocument(merged, markConversationPinned(result, added < 2 || relevant));
+                added++;
+            }
+            return added;
+        } catch (RuntimeException ex) {
+            log.debug("Document conversation pinned evidence skipped reason={}", ex.getMessage());
+            return 0;
+        }
+    }
+
+    private boolean isRelevantPinnedDocument(String question, SearchResult result) {
+        List<String> terms = queryTerms(question);
+        if (terms.isEmpty()) {
+            return true;
+        }
+        String target = normalizeForSearch(String.join(" ",
+                safe(result.title()),
+                safe(result.sourceUri()),
+                safe(metadataString(result, "sectionTitle")),
+                safe(metadataString(result, "headingPath")),
+                safe(metadataString(result, "documentType")),
+                safe(result.content())
+        ));
+        return terms.stream().anyMatch(target::contains);
+    }
+
+    private SearchResult markConversationPinned(SearchResult result, boolean boost) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("conversationPinned", true);
+        metadata.put("evidenceRole", "conversation_pinned");
+        metadata.put("evidenceRankReason", "Pinned from previous document conversation evidence");
+        return new SearchResult(
+                result.chunkId(),
+                result.documentId(),
+                result.title(),
+                result.sourceUri(),
+                result.sourceType(),
+                result.contentType(),
+                result.chunkIndex(),
+                result.content(),
+                Map.copyOf(metadata),
+                boost ? result.score() + CONVERSATION_PINNED_BOOST : result.score()
+        );
     }
 
     private void searchAndMergeDocuments(
@@ -449,9 +632,24 @@ public class RagService {
 
     private void mergeDocument(Map<UUID, SearchResult> merged, SearchResult result) {
         SearchResult current = merged.get(result.chunkId());
-        if (current == null || result.score() > current.score()) {
+        if (current == null) {
+            merged.put(result.chunkId(), result);
+            return;
+        }
+        if (isConversationPinned(current) && !isConversationPinned(result)) {
+            return;
+        }
+        if (isConversationPinned(result) && !isConversationPinned(current)) {
+            merged.put(result.chunkId(), result);
+            return;
+        }
+        if (result.score() > current.score()) {
             merged.put(result.chunkId(), result);
         }
+    }
+
+    private boolean isConversationPinned(SearchResult result) {
+        return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
     }
 
     private void expandAdjacentDocumentChunks(
@@ -2120,6 +2318,32 @@ public class RagService {
         return notes;
     }
 
+    private List<String> conversationDiagnostics(
+            List<String> diagnostics,
+            String originalQuestion,
+            String effectiveQuestion,
+            RagConversationContext conversationContext,
+            DocumentRetrieval retrieval
+    ) {
+        List<String> notes = new ArrayList<>(diagnostics == null ? List.of() : diagnostics);
+        if (conversationContext == null || !conversationContext.contextual()) {
+            return notes;
+        }
+        notes.add("Document conversation context was used: anchors="
+                + (conversationContext.documentAnchors() == null ? 0 : conversationContext.documentAnchors().size())
+                + ", pinnedCandidates=" + retrieval.pinnedCandidateCount()
+                + ", pinnedCitations=" + retrieval.pinnedUsedCount() + ".");
+        if (!safe(originalQuestion).equals(safe(effectiveQuestion))) {
+            notes.add("Conversation-aware document search question: " + abbreviate(effectiveQuestion));
+        }
+        if (retrieval.pinnedCandidateCount() == 0
+                && conversationContext.documentAnchors() != null
+                && !conversationContext.documentAnchors().isEmpty()) {
+            notes.add("Previous document evidence could not be pinned, so normal document search fallback was used.");
+        }
+        return notes;
+    }
+
     private long elapsedMs(long startedNanos) {
         return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
@@ -2291,6 +2515,7 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "evidenceScore");
         copyMetadata(result.metadata(), metadata, "evidenceRole");
         copyMetadata(result.metadata(), metadata, "evidenceRankReason");
+        copyMetadata(result.metadata(), metadata, "conversationPinned");
         copyMetadata(result.metadata(), metadata, "adjacentExpanded");
         copyMetadata(result.metadata(), metadata, "adjacentDistance");
         copyMetadata(result.metadata(), metadata, "contextRelatedExpanded");
@@ -2338,6 +2563,10 @@ public class RagService {
         return value == null ? "" : value;
     }
 
+    private String nullable(String prefix, String value) {
+        return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
     private record ComputedAnswer(String answer, List<SearchResult> citations) {
     }
 
@@ -2351,7 +2580,9 @@ public class RagService {
             DocumentSpeedProfile requestedProfile,
             DocumentSpeedProfile effectiveProfile,
             boolean profileEscalated,
-            RetrievalTiming timing
+            RetrievalTiming timing,
+            int pinnedCandidateCount,
+            int pinnedUsedCount
     ) {
     }
 

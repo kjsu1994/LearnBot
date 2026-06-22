@@ -1095,6 +1095,44 @@ public class DocumentRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<SearchResult> findActiveChunksByIds(List<UUID> chunkIds, SearchFilter filter, List<UUID> spaceIds, UUID selectedSpaceId) {
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("chunkIds", chunkIds)
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("sourceType", cleanUpper(filter == null ? null : filter.sourceType()))
+                .addValue("contentType", clean(filter == null ? null : filter.contentType()));
+
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       d.id AS document_id,
+                       d.title,
+                       d.source_uri,
+                       s.type AS source_type,
+                       d.content_type,
+                       c.chunk_index,
+                       c.content,
+                       c.metadata::text AS metadata,
+                       0.36 AS score
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                JOIN data_sources s ON s.id = d.source_id
+                WHERE s.deleted_at IS NULL
+                  AND c.id IN (:chunkIds)
+                  AND s.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR s.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:sourceType AS varchar) IS NULL OR s.type = CAST(:sourceType AS varchar))
+                  AND (CAST(:contentType AS varchar) IS NULL OR d.content_type = CAST(:contentType AS varchar))
+                ORDER BY d.title, c.chunk_index
+                """, params, this::mapSearchResult);
+    }
+
     public List<SearchResult> adjacentChunks(
             UUID documentId,
             int centerChunkIndex,
