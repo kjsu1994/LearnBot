@@ -39,7 +39,7 @@ function DocumentWorkspace(props) {
         <form className="panel ask-panel rag-command-panel" onSubmit={props.ask}>
           <RagAskComposer
             title="문서에게 질문하기"
-            description="현재 선택된 공간의 문서 전체에서 원문 근거를 찾아 답변합니다."
+            description="새로운 문서/주제로 질문하려면 새 대화를 시작하세요."
             icon={<MessageSquare size={18} />}
             controls={(
               <>

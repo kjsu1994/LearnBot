@@ -459,7 +459,75 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void conversationalAutoModeInheritsPreviousModeWhenQuestionHasNoModeKeyword() {
+    void conversationalAutoModeDoesNotInheritBroadPreviousModeWhenQuestionHasNoModeKeyword() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                null,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        UUID pinnedChunkId = UUID.randomUUID();
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.72
+        );
+        CodeSearchResult pinned = resultWithId(
+                pinnedChunkId,
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.25,
+                "private CodeAskResponse askPrioritized(...) { return fallbackAnswer(...); }"
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "more detail",
+                List.of(new RagConversationTurnContext("What is affected?", "Impact answer [1]", "impact", new ObjectMapper().createArrayNode())),
+                List.of(new CodeConversationAnchor(
+                        pinnedChunkId,
+                        pinned.filePath(),
+                        pinned.symbolName(),
+                        pinned.className(),
+                        pinned.methodName(),
+                        pinned.lineStart(),
+                        pinned.lineEnd()
+                )),
+                List.of(),
+                true
+        );
+
+        when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(pinned));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "more detail",
+                "",
+                null,
+                context
+        );
+
+        assertThat(response.mode()).isEqualTo("method");
+    }
+
+    @Test
+    void conversationalAutoModeInheritsNarrowPreviousModeWhenQuestionHasNoModeKeyword() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -473,7 +541,7 @@ class CodeRagServiceTest {
         RagConversationContext context = new RagConversationContext(
                 UUID.randomUUID(),
                 "more detail",
-                List.of(new RagConversationTurnContext("What is affected?", "Impact answer [1]", "impact", new ObjectMapper().createArrayNode())),
+                List.of(new RagConversationTurnContext("Explain this method", "Method answer [1]", "method", new ObjectMapper().createArrayNode())),
                 List.of(),
                 List.of(),
                 true
@@ -493,7 +561,113 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("impact");
+        assertThat(response.mode()).isEqualTo("method");
+    }
+
+    @Test
+    void conversationalAutoModeUsesLocateOnlyWhenLocationKeywordIsExplicit() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.72
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "line",
+                List.of(new RagConversationTurnContext("Explain this method", "Method answer [1]", "overview", new ObjectMapper().createArrayNode())),
+                List.of(),
+                List.of(),
+                true
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "line?",
+                "",
+                null,
+                context
+        );
+
+        assertThat(response.mode()).isEqualTo("locate");
+    }
+
+    @Test
+    void conversationalAutoFallbackForClassAnchorAvoidsLocateWithoutLocationKeyword() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                null,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        UUID pinnedChunkId = UUID.randomUUID();
+        CodeSearchResult pinned = resultWithId(
+                pinnedChunkId,
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "class",
+                "",
+                0.25,
+                "public class CodeRagService { }"
+        );
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "class",
+                "",
+                0.72
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "why",
+                List.of(new RagConversationTurnContext("Overview", "Overview answer [1]", "overview", new ObjectMapper().createArrayNode())),
+                List.of(new CodeConversationAnchor(
+                        pinnedChunkId,
+                        pinned.filePath(),
+                        pinned.symbolName(),
+                        pinned.className(),
+                        "",
+                        pinned.lineStart(),
+                        pinned.lineEnd()
+                )),
+                List.of(),
+                true
+        );
+
+        when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(pinned));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "why?",
+                "",
+                null,
+                context
+        );
+
+        assertThat(response.mode()).isEqualTo("overview");
     }
 
     @Test

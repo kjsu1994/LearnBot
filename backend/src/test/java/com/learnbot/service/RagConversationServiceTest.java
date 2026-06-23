@@ -136,6 +136,29 @@ class RagConversationServiceTest {
     }
 
     @Test
+    void shortCodeFollowupCueUsesPreviousCodeAnchors() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithCodeEvidence(chunkId)));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "flow?",
+                true
+        );
+
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.REFERENCE_FOLLOWUP);
+        assertThat(context.contextual()).isTrue();
+        assertThat(context.codeAnchors()).extracting(CodeConversationAnchor::chunkId).containsExactly(chunkId);
+    }
+
+    @Test
     void previousAnswerExpansionRequiresExplicitPreviousAnswerExpansionSignal() {
         UUID spaceId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
@@ -186,6 +209,29 @@ class RagConversationServiceTest {
                 null,
                 conversationId,
                 "login",
+                true
+        );
+
+        assertThat(context.contextual()).isFalse();
+        assertThat(context.codeAnchors()).isEmpty();
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.NONE);
+    }
+
+    @Test
+    void shortBareFeatureKeywordDoesNotBecomeContextualFollowup() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithCodeEvidence(chunkId)));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "\ub85c\uadf8\uc778",
                 true
         );
 

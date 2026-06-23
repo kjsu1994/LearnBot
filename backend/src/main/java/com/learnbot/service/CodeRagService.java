@@ -307,8 +307,11 @@ public class CodeRagService {
         if (containsAny(normalized, "flow", "workflow", "sequence", "request flow", "call flow", "흐름", "과정", "절차", "순서", "호출")) {
             return CodeQuestionMode.CALL_FLOW;
         }
-        if (containsAny(normalized, "impact", "영향", "변경 영향")) {
+        if (containsAny(normalized, "impact", "effect", "affected", "test", "fix", "bug", "problem", "영향", "변경 영향", "테스트", "수정", "문제", "버그")) {
             return CodeQuestionMode.IMPACT;
+        }
+        if (containsAny(normalized, "locate", "where", "file", "line", "path", "위치", "어디", "파일", "라인", "경로")) {
+            return CodeQuestionMode.LOCATE;
         }
         if (containsAny(normalized, "architecture", "structure", "overview", "module", "component", "아키텍처", "구조", "개요", "구성", "전체")) {
             return CodeQuestionMode.OVERVIEW;
@@ -318,7 +321,7 @@ public class CodeRagService {
             if (previousMode != null) {
                 return previousMode;
             }
-            return CodeQuestionMode.OVERVIEW;
+            return conversationAnchorFallbackMode(conversationContext);
         }
         return requested;
     }
@@ -335,8 +338,24 @@ public class CodeRagService {
                         .filter(candidate -> candidate.value().equalsIgnoreCase(mode))
                         .findFirst()
                         .stream())
+                .filter(this::canInheritAutoMode)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private CodeQuestionMode conversationAnchorFallbackMode(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.codeAnchors() == null || conversationContext.codeAnchors().isEmpty()) {
+            return CodeQuestionMode.OVERVIEW;
+        }
+        boolean hasMethodAnchor = conversationContext.codeAnchors().stream()
+                .anyMatch(anchor -> anchor.methodName() != null && !anchor.methodName().isBlank());
+        return hasMethodAnchor ? CodeQuestionMode.EXPLAIN_METHOD : CodeQuestionMode.OVERVIEW;
+    }
+
+    private boolean canInheritAutoMode(CodeQuestionMode mode) {
+        return mode == CodeQuestionMode.LOCATE
+                || mode == CodeQuestionMode.EXPLAIN_METHOD
+                || mode == CodeQuestionMode.UI_EVENT;
     }
 
     private CodeRetrieval retrieveCodeEvidence(

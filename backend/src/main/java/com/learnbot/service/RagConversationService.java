@@ -247,7 +247,32 @@ public class RagConversationService {
         return normalized.length() <= 80
                 && terms <= 12
                 && !looksStandaloneCodeTarget(question)
+                && !looksBareFeatureKeyword(question)
+                && looksCodeFollowupCue(normalized)
                 && !containsAny(normalized, "\uc0c8 \ub300\ud654", "\ub2e4\ub978 \uc8fc\uc81c", "new topic", "unrelated");
+    }
+
+    private boolean looksCodeFollowupCue(String normalized) {
+        return containsAny(normalized,
+                "\uc774\uac74", "\uc774\uac83", "\uadf8\uac74", "\uadf8\uac83", "\uc5ec\uae30", "\ud574\ub2f9",
+                "\uac19\uc740", "\ubc29\uae08", "\uc774\uc804", "\uc65c", "\uc5b4\ub5bb\uac8c", "\ud750\ub984",
+                "\uc601\ud5a5", "\uc704\uce58", "\ub77c\uc778", "\ud14c\uc2a4\ud2b8", "\uc218\uc815", "\ubb38\uc81c",
+                "\ud638\ucd9c", "\uadfc\uac70",
+                "why", "how", "same", "this", "that", "flow", "impact", "line", "test", "call", "evidence");
+    }
+
+    private boolean looksBareFeatureKeyword(String question) {
+        String normalized = clean(question).toLowerCase();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        int terms = normalized.split("\\s+").length;
+        if (terms > 3) {
+            return false;
+        }
+        return !looksReferenceFollowup(question)
+                && !looksCodeFollowupCue(normalized)
+                && normalized.matches("[\\p{IsHangul}a-z0-9_\\-\\s]+");
     }
 
     private boolean looksStandaloneCodeTarget(String question) {
