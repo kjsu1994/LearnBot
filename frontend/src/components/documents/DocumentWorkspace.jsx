@@ -680,6 +680,8 @@ function DocumentDetailPanel({ detail, loading }) {
   const auditSummary = summarizeCrawlAudits(audits);
   const filteredAudits = filterCrawlAudits(audits, auditFilter);
   const visibleAudits = showAllAudits ? filteredAudits : filteredAudits.slice(0, 8);
+  const uploadFilename = detail.storedObject?.originalFilename || '';
+  const showUploadFilename = shouldShowUploadFilename(uploadFilename, detail.summary);
 
   return (
     <section className="panel detail-panel">
@@ -703,10 +705,12 @@ function DocumentDetailPanel({ detail, loading }) {
           <dt>상태</dt>
           <dd>{getStatusLabel(detail.summary.sourceStatus)}</dd>
         </div>
-        <div>
-          <dt>업로드</dt>
-          <dd>{detail.storedObject?.originalFilename || '-'}</dd>
-        </div>
+        {showUploadFilename && (
+          <div>
+            <dt>업로드</dt>
+            <dd>{uploadFilename}</dd>
+          </div>
+        )}
       </dl>
       {audits.length > 0 && (
         <div className="results audit-list">
@@ -761,6 +765,27 @@ function DocumentDetailPanel({ detail, loading }) {
       )}
     </section>
   );
+}
+
+function shouldShowUploadFilename(filename = '', summary = {}) {
+  const normalizedFilename = normalizeDocumentFilename(filename);
+  if (!normalizedFilename) return false;
+  const title = normalizeDocumentFilename(summary.title);
+  const source = normalizeDocumentFilename(summary.sourceUri);
+  return normalizedFilename !== title && normalizedFilename !== source;
+}
+
+function normalizeDocumentFilename(value = '') {
+  const cleaned = String(value || '').trim();
+  if (!cleaned) return '';
+  const withoutFileScheme = cleaned.replace(/^file:\/\//i, '');
+  const segments = withoutFileScheme.split(/[\\/]/);
+  const filename = segments[segments.length - 1] || withoutFileScheme;
+  try {
+    return decodeURIComponent(filename).trim().toLowerCase();
+  } catch {
+    return filename.trim().toLowerCase();
+  }
 }
 
 function AuditSummaryItem({ label, value, tone = '' }) {

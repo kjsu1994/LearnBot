@@ -68,6 +68,7 @@ function AdminWorkspace({
   restoreTrashItem,
   testAdminLlmSettings,
   testAdminTuningLlmSettings,
+  updateAdminTuningReranker,
   refreshAdminTuningMetrics,
   resetAdminTuningMetrics,
   refreshAdmin,
@@ -340,6 +341,10 @@ function AdminWorkspace({
     if (result && typeof result === 'object') {
       setTuningTestResult(result);
     }
+  }
+
+  async function toggleReranker(enabled) {
+    await updateAdminTuningReranker?.(enabled);
   }
 
   function parseProfileList(value) {
@@ -836,6 +841,8 @@ function AdminWorkspace({
     }, {});
     const metricsSummary = adminTuningMetrics?.summary || {};
     const ollamaStatus = adminTuningMetrics?.ollama || {};
+    const rerankerStatus = adminTuningMetrics?.reranker || {};
+    const rerankerEnabled = Boolean(rerankerStatus.enabled);
     const hasMetrics = Number(metricsSummary.requestCount || 0) > 0;
     const metricValue = (value, suffix = 'ms') => (hasMetrics ? `${value || 0}${suffix}` : '수집 대기');
     const metricHint = (value, suffix = 'ms', label = '') => (hasMetrics ? `${label}${value || 0}${suffix}` : '질문 실행 후 표시');
@@ -930,6 +937,38 @@ function AdminWorkspace({
                   <span>{card.hint}</span>
                 </article>
               ))}
+            </div>
+            <div className="tuning-recommendation-card reranker-control-card">
+              <div>
+                <span className="tuning-recommendation-kicker">문서 reranker</span>
+                <strong>{rerankerEnabled ? '켜짐' : '꺼짐'} · {rerankerStatus.serviceStatus || '상태 확인 대기'}</strong>
+                <small>
+                  {rerankerStatus.modelLoaded ? '모델 로드됨' : '모델 미로드'}
+                  {' · '}
+                  idle unload {rerankerStatus.idleUnloadSeconds ?? 300}s
+                  {rerankerStatus.cudaReservedBytes ? ` · reserved ${Math.round(Number(rerankerStatus.cudaReservedBytes) / 1024 / 1024)}MB` : ''}
+                </small>
+              </div>
+              <div className="tuning-metrics-actions">
+                <button
+                  className={rerankerEnabled ? 'ghost-button compact-action active' : 'ghost-button compact-action'}
+                  disabled={loading('admin-tuning-reranker')}
+                  type="button"
+                  onClick={() => toggleReranker(!rerankerEnabled)}
+                >
+                  {loading('admin-tuning-reranker') ? <Loader2 className="spin" size={14} /> : <Bot size={14} />}
+                  {rerankerEnabled ? '끄기' : '켜기'}
+                </button>
+                <button
+                  className="ghost-button compact-action"
+                  disabled={!rerankerEnabled || loading('admin-tuning-reranker') || loading('admin-tuning-metrics')}
+                  type="button"
+                  onClick={refreshAdminTuningMetrics}
+                >
+                  <RefreshCw size={14} />
+                  상태 확인
+                </button>
+              </div>
             </div>
             <div className="tuning-recommendation-card">
               <div>

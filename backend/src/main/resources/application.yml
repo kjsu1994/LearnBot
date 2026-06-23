@@ -84,9 +84,11 @@ learnbot:
       reranker:
         enabled: ${LEARNBOT_RERANKER_ENABLED:false}
         base-url: ${LEARNBOT_RERANKER_BASE_URL:http://localhost:8081}
+        warmup-on-startup: ${LEARNBOT_RERANKER_WARMUP_ON_STARTUP:false}
         top-n: ${LEARNBOT_RERANKER_TOP_N:20}
         timeout-seconds: ${LEARNBOT_RERANKER_TIMEOUT_SECONDS:8}
         failure-backoff-seconds: ${LEARNBOT_RERANKER_FAILURE_BACKOFF_SECONDS:60}
+        idle-unload-seconds: ${LEARNBOT_RERANKER_IDLE_UNLOAD_SECONDS:300}
     document-context:
       enabled: ${LEARNBOT_DOCUMENT_CONTEXT_ENABLED:true}
       llm-summary-enabled: ${LEARNBOT_DOCUMENT_CONTEXT_LLM_SUMMARY_ENABLED:true}

@@ -6,6 +6,8 @@ import com.learnbot.dto.AdminSettingsResponse;
 import com.learnbot.dto.AdminSettingsUpdateRequest;
 import com.learnbot.dto.AdminTuningResponse;
 import com.learnbot.dto.AdminTuningMetricsResponse;
+import com.learnbot.dto.AdminTuningRerankerStatus;
+import com.learnbot.dto.AdminTuningRerankerUpdateRequest;
 import com.learnbot.dto.AdminTuningRecommendationResponse;
 import com.learnbot.dto.AdminTuningUpdateRequest;
 import com.learnbot.dto.DocumentSchemaProfileCreateRequest;
@@ -34,6 +36,7 @@ import com.learnbot.service.AppUser;
 import com.learnbot.service.AuditService;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.DocumentSchemaProfileService;
+import com.learnbot.service.DocumentReranker;
 import com.learnbot.service.RuntimeTuningService;
 import com.learnbot.service.RagMetricsService;
 import com.learnbot.service.SpaceTransferService;
@@ -71,6 +74,7 @@ public class AdminController {
     private final AdminSettingsService adminSettingsService;
     private final RuntimeTuningService runtimeTuningService;
     private final RagMetricsService ragMetricsService;
+    private final DocumentReranker documentReranker;
     private final DocumentSchemaProfileService documentSchemaProfileService;
     private final CurrentUserProvider currentUserProvider;
     private final SpaceTransferService spaceTransferService;
@@ -83,6 +87,7 @@ public class AdminController {
             AdminSettingsService adminSettingsService,
             RuntimeTuningService runtimeTuningService,
             RagMetricsService ragMetricsService,
+            DocumentReranker documentReranker,
             DocumentSchemaProfileService documentSchemaProfileService,
             CurrentUserProvider currentUserProvider,
             SpaceTransferService spaceTransferService,
@@ -94,6 +99,7 @@ public class AdminController {
         this.adminSettingsService = adminSettingsService;
         this.runtimeTuningService = runtimeTuningService;
         this.ragMetricsService = ragMetricsService;
+        this.documentReranker = documentReranker;
         this.documentSchemaProfileService = documentSchemaProfileService;
         this.currentUserProvider = currentUserProvider;
         this.spaceTransferService = spaceTransferService;
@@ -292,6 +298,29 @@ public class AdminController {
     AdminTuningMetricsResponse tuningMetrics() {
         authService.requireMaster(currentUserProvider.currentUser());
         return ragMetricsService.current();
+    }
+
+    @GetMapping("/tuning/reranker")
+    AdminTuningRerankerStatus tuningReranker() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return documentReranker.status();
+    }
+
+    @PatchMapping("/tuning/reranker")
+    AdminTuningRerankerStatus updateTuningReranker(@RequestBody AdminTuningRerankerUpdateRequest request) {
+        AppUser user = currentUserProvider.currentUser();
+        authService.requireMaster(user);
+        if (request == null || request.enabled() == null) {
+            throw new IllegalArgumentException("Reranker enabled value is required.");
+        }
+        runtimeTuningService.updateRerankerEnabled(user, request.enabled());
+        return request.enabled() ? documentReranker.status() : documentReranker.unload();
+    }
+
+    @PostMapping("/tuning/reranker/unload")
+    AdminTuningRerankerStatus unloadTuningReranker() {
+        authService.requireMaster(currentUserProvider.currentUser());
+        return documentReranker.unload();
     }
 
     @PostMapping("/tuning/metrics/reset")

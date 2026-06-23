@@ -666,30 +666,29 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
     setExpanded(false);
   }, [evidenceKey]);
   if (!evidence.length) return <p className="empty compact-empty">{'\uD45C\uC2DC\uD560 \uCF54\uB4DC \uADFC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>;
-  const visibleEvidence = expanded ? evidence : evidence.slice(0, evidencePreviewLimit);
-  const hiddenCount = Math.max(evidence.length - visibleEvidence.length, 0);
+  const groupedEvidence = groupCodeEvidence(evidence);
+  const visibleEvidence = expanded ? groupedEvidence : groupedEvidence.slice(0, evidencePreviewLimit);
+  const hiddenCount = Math.max(groupedEvidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
         <strong>{'\uCF54\uB4DC \uADFC\uAC70'}</strong>
-        <small>{visibleEvidence.length}/{evidence.length}{'\uAC1C \uD45C\uC2DC'}</small>
+        <small>{visibleEvidence.length}/{groupedEvidence.length}{'\uAC1C \uD30C\uC77C \uD45C\uC2DC'}</small>
       </div>
       <div className="evidence-list">
-        {visibleEvidence.map((item) => {
-          const isCommitDiff = item.metadata?.kind === 'commit_diff';
+        {visibleEvidence.map((group) => {
+          const item = group.primary;
           const canOpen = Boolean(item.repositoryId && item.fileId);
-          const range = item.lineStart > 0
-            ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
-            : null;
-          const metaText = isCommitDiff
-            ? `${item.metadata?.changeType || item.chunkType} \u00B7 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`
-            : `${item.lineStart}-${item.lineEnd} \u00B7 ${item.chunkType}`;
+          const primaryRange = codeEvidenceRange(item);
+          const metaText = group.items.length > 1
+            ? `${group.items.length}\uAC1C \uADFC\uAC70 \u00B7 ${group.locationSummary}`
+            : codeEvidenceMetaText(item);
           return (
-            <article className="evidence-card code-evidence" key={`${item.citationNumber}-${item.chunkId || item.filePath || 'commit'}`}>
+            <article className="evidence-card code-evidence" key={group.evidenceKey}>
               <div className="result-heading">
-                <strong title={item.filePath}>[{item.citationNumber}] {item.filePath}</strong>
+                <strong title={item.filePath}>[{group.citationNumbers.join(', ')}] {item.filePath}</strong>
                 {canOpen && (
-                  <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, range)}>
+                  <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, primaryRange)}>
                     <Eye size={14} />
                     {'\uC5F4\uAE30'}
                   </button>
@@ -697,19 +696,92 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
               </div>
               <small>{metaText}</small>
               <p>{item.preview}</p>
+              {group.items.length > 1 && (
+                <div className="code-evidence-locations">
+                  {group.items.map((part) => {
+                    const partRange = codeEvidenceRange(part);
+                    return (
+                      <button
+                        className="ghost-button compact-action"
+                        disabled={!part.repositoryId || !part.fileId}
+                        key={`${part.citationNumber}-${part.chunkId || part.lineStart || part.metadata?.changeType || 'part'}`}
+                        type="button"
+                        onClick={() => onOpenEvidence?.(part.repositoryId, part.fileId, partRange)}
+                      >
+                        [{part.citationNumber}] {codeEvidenceMetaText(part)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </article>
           );
         })}
       </div>
-      {evidence.length > evidencePreviewLimit && (
+      {groupedEvidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '\uD575\uC2EC \uADFC\uAC70\uB9CC \uBCF4\uAE30' : `\uC804\uCCB4 \uADFC\uAC70 ${evidence.length}\uAC1C \uBCF4\uAE30`}
+          {expanded ? '\uD575\uC2EC \uADFC\uAC70\uB9CC \uBCF4\uAE30' : `\uC804\uCCB4 \uADFC\uAC70 \uD30C\uC77C ${groupedEvidence.length}\uAC1C \uBCF4\uAE30`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
     </div>
   );
+}
+
+function groupCodeEvidence(evidence = []) {
+  const grouped = new Map();
+  evidence.forEach((item, index) => {
+    const key = codeEvidenceGroupKey(item, index);
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, {
+        evidenceKey: key,
+        primary: item,
+        items: [item],
+        citationNumbers: [item.citationNumber],
+        locationSummary: codeEvidenceLocationSummary([item]),
+      });
+      return;
+    }
+    current.items.push(item);
+    if (!current.citationNumbers.includes(item.citationNumber)) {
+      current.citationNumbers.push(item.citationNumber);
+    }
+    if (Number(item.score || 0) > Number(current.primary.score || 0)) {
+      current.primary = item;
+    }
+    current.locationSummary = codeEvidenceLocationSummary(current.items);
+  });
+  return Array.from(grouped.values());
+}
+
+function codeEvidenceGroupKey(item = {}, index = 0) {
+  if (item.repositoryId && item.fileId) return `${item.repositoryId}:${item.fileId}`;
+  if (item.repositoryName || item.filePath) return `${item.repositoryName || ''}:${item.filePath || ''}`;
+  return item.chunkId || `code-evidence-${index}`;
+}
+
+function codeEvidenceRange(item = {}) {
+  return item.lineStart > 0
+    ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
+    : null;
+}
+
+function codeEvidenceMetaText(item = {}) {
+  const isCommitDiff = item.metadata?.kind === 'commit_diff';
+  if (isCommitDiff) {
+    return `${item.metadata?.changeType || item.chunkType} \u00B7 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`;
+  }
+  const location = item.lineStart > 0 ? `${item.lineStart}-${item.lineEnd || item.lineStart}` : 'lines -';
+  return `${location} \u00B7 ${item.chunkType || 'code'}`;
+}
+
+function codeEvidenceLocationSummary(items = []) {
+  const values = items
+    .map((item) => item.lineStart > 0 ? `${item.lineStart}-${item.lineEnd || item.lineStart}` : item.metadata?.changeType || item.chunkType)
+    .filter(Boolean);
+  return values.slice(0, 4).join(', ') + (values.length > 4 ? ` +${values.length - 4}` : '');
 }
 
 function CodeSearchResults({ results = [], onOpenEvidence }) {

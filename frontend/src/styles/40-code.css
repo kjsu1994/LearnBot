@@ -3,6 +3,19 @@
   font-size: 12px;
 }
 
+.code-evidence-locations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.code-evidence-locations .compact-action {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .detail-panel {
   align-self: start;
 }

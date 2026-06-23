@@ -8,6 +8,7 @@ public record AdminTuningMetricsResponse(
         int windowSize,
         AdminTuningMetricsSummary summary,
         AdminTuningOllamaStatus ollama,
+        AdminTuningRerankerStatus reranker,
         List<AdminTuningMetricSample> recent
 ) {
 }

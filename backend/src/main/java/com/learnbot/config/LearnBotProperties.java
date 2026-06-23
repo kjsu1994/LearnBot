@@ -778,6 +778,7 @@ public class LearnBotProperties {
 
             public static class Reranker {
                 private boolean enabled = false;
+                private boolean warmupOnStartup = false;
 
                 @NotBlank
                 private String baseUrl = "http://localhost:8081";
@@ -791,12 +792,23 @@ public class LearnBotProperties {
                 @Min(1)
                 private int failureBackoffSeconds = 60;
 
+                @Min(0)
+                private int idleUnloadSeconds = 300;
+
                 public boolean isEnabled() {
                     return enabled;
                 }
 
                 public void setEnabled(boolean enabled) {
                     this.enabled = enabled;
+                }
+
+                public boolean isWarmupOnStartup() {
+                    return warmupOnStartup;
+                }
+
+                public void setWarmupOnStartup(boolean warmupOnStartup) {
+                    this.warmupOnStartup = warmupOnStartup;
                 }
 
                 public String getBaseUrl() {
@@ -829,6 +841,14 @@ public class LearnBotProperties {
 
                 public void setFailureBackoffSeconds(int failureBackoffSeconds) {
                     this.failureBackoffSeconds = failureBackoffSeconds;
+                }
+
+                public int getIdleUnloadSeconds() {
+                    return idleUnloadSeconds;
+                }
+
+                public void setIdleUnloadSeconds(int idleUnloadSeconds) {
+                    this.idleUnloadSeconds = idleUnloadSeconds;
                 }
             }
         }

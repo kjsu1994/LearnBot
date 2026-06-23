@@ -30,6 +30,7 @@ public class RuntimeTuningService {
     public static final String LLM_MAX_OUTPUT_TOKENS = "LLM_MAX_OUTPUT_TOKENS";
     public static final String OLLAMA_MAX_LOADED_MODELS = "OLLAMA_MAX_LOADED_MODELS";
     public static final String OLLAMA_NUM_PARALLEL = "OLLAMA_NUM_PARALLEL";
+    public static final String RERANKER_ENABLED = "LEARNBOT_RERANKER_ENABLED";
 
     private final AppSettingsRepository settingsRepository;
     private final LearnBotProperties properties;
@@ -152,6 +153,25 @@ public class RuntimeTuningService {
 
     public int ollamaNumParallel() {
         return value(OLLAMA_NUM_PARALLEL);
+    }
+
+    public boolean rerankerEnabled() {
+        return settingsRepository.findValue(settingKey(RERANKER_ENABLED))
+                .map(raw -> Boolean.parseBoolean(raw.trim()))
+                .orElse(properties.getRag().getPipeline().getReranker().isEnabled());
+    }
+
+    public void updateRerankerEnabled(AppUser actor, boolean enabled) {
+        settingsRepository.upsertValue(settingKey(RERANKER_ENABLED), Boolean.toString(enabled), actor.id());
+        auditService.log(
+                actor,
+                "ADMIN_RERANKER_UPDATE",
+                "TUNING",
+                "global",
+                null,
+                "Document reranker runtime setting was updated.",
+                Map.of("enabled", enabled)
+        );
     }
 
     private int value(String key) {

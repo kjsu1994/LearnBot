@@ -4,6 +4,7 @@ import com.learnbot.dto.AdminTuningMetricSample;
 import com.learnbot.dto.AdminTuningMetricsResponse;
 import com.learnbot.dto.AdminTuningMetricsSummary;
 import com.learnbot.dto.AdminTuningOllamaStatus;
+import com.learnbot.dto.AdminTuningRerankerStatus;
 import com.learnbot.dto.AdminTuningRecommendationChange;
 import com.learnbot.dto.AdminTuningRecommendationResponse;
 import org.slf4j.Logger;
@@ -26,15 +27,18 @@ public class RagMetricsService {
     private final RuntimeTuningService runtimeTuningService;
     private final AdminSettingsService adminSettingsService;
     private final OllamaClient ollamaClient;
+    private final DocumentReranker documentReranker;
 
     public RagMetricsService(
             RuntimeTuningService runtimeTuningService,
             AdminSettingsService adminSettingsService,
-            OllamaClient ollamaClient
+            OllamaClient ollamaClient,
+            DocumentReranker documentReranker
     ) {
         this.runtimeTuningService = runtimeTuningService;
         this.adminSettingsService = adminSettingsService;
         this.ollamaClient = ollamaClient;
+        this.documentReranker = documentReranker;
     }
 
     public void record(AdminTuningMetricSample sample) {
@@ -60,6 +64,7 @@ public class RagMetricsService {
                 WINDOW_SIZE,
                 summary(snapshot),
                 ollamaStatus(),
+                rerankerStatus(),
                 snapshot
         );
     }
@@ -228,6 +233,10 @@ public class RagMetricsService {
                 gpuMode(),
                 List.of()
         );
+    }
+
+    private AdminTuningRerankerStatus rerankerStatus() {
+        return documentReranker == null ? null : documentReranker.status();
     }
 
     private String gpuMode() {

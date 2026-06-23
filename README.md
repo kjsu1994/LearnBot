@@ -53,11 +53,21 @@ Open:
 - MinIO API: http://localhost:19000
 - MinIO Console: http://localhost:19001
 
-Check whether Ollama is using GPU while a model is loaded:
+Check whether Ollama and the optional reranker are using GPU memory while models are loaded:
 
 ```bash
 docker compose exec ollama ollama ps
+curl http://127.0.0.1:18081/ready
+curl -X POST http://127.0.0.1:18081/unload
 nvidia-smi
+```
+
+The GPU Compose overlay keeps the reranker disabled by default. Enable it only when reranking quality is worth the extra VRAM use:
+
+```bash
+LEARNBOT_RERANKER_ENABLED=true
+LEARNBOT_RERANKER_WARMUP_ON_STARTUP=false
+LEARNBOT_RERANKER_IDLE_UNLOAD_SECONDS=300
 ```
 
 The Compose file uses the same production-style layout as the existing stack:

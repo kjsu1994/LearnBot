@@ -581,6 +581,16 @@ export default function App() {
     });
   }
 
+  async function updateAdminTuningReranker(enabled) {
+    return await run('admin-tuning-reranker', async () => {
+      await request('/api/admin/tuning/reranker', {
+        method: 'PATCH',
+        json: { enabled },
+      });
+      return await refreshAdminTuningMetrics();
+    });
+  }
+
   async function resetAdminTuningMetrics() {
     return await run('admin-tuning-metrics-reset', async () => {
       const metrics = await request('/api/admin/tuning/metrics/reset', { method: 'POST' }).catch(() => null);
@@ -1079,6 +1089,7 @@ export default function App() {
             restoreTrashItem={restoreTrashItem}
             testAdminLlmSettings={testAdminLlmSettings}
             testAdminTuningLlmSettings={testAdminTuningLlmSettings}
+            updateAdminTuningReranker={updateAdminTuningReranker}
             refreshAdminTuningMetrics={refreshAdminTuningMetrics}
             resetAdminTuningMetrics={resetAdminTuningMetrics}
             refreshAdmin={refreshAdmin}
