@@ -1,7 +1,8 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
+import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { RagAskComposer } from '../common/RagAskComposer.jsx';
@@ -12,7 +13,9 @@ import { DataTable } from '../ui/data-table.jsx';
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
+  const answerStreamAnchorRef = useRef(null);
   const showSourceManagement = props.showSourceManagement !== false;
+  useStreamingAutoScroll(answerStreamAnchorRef, props.answer?.streaming, props.answer?.answer);
 
   return (
     <section className="workspace-grid workspace-product document-workspace-product">
@@ -79,7 +82,12 @@ function DocumentWorkspace(props) {
                   <strong>답변</strong>
                 </div>
                 <div className="answer-actions">
-                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.loading('save-answer')} onClick={props.saveAnswer}>
+                  {props.answer.streaming && (
+                    <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={props.cancelAsk}>
+                      <X size={15} />
+                    </button>
+                  )}
+                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.answer.streaming || props.loading('save-answer')} onClick={props.saveAnswer}>
                     {props.loading('save-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
                   </button>
                   <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
@@ -93,7 +101,8 @@ function DocumentWorkspace(props) {
               )}
               <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
               <div className="answer-body">
-                <MarkdownAnswer text={props.answer.answer} />
+                <MarkdownAnswer text={props.answer.answer} streaming={props.answer.streaming} />
+                <span className="stream-scroll-anchor" ref={answerStreamAnchorRef} aria-hidden="true" />
               </div>
               <EvidenceList evidence={props.answer.evidence} onOpenEvidence={props.openDocumentPreview} />
             </div>

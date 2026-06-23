@@ -286,21 +286,37 @@ Document conversation turns are stored in the RAG conversation tables. They keep
 
 ### Document RAG streaming
 
-The backend exposes an SSE-compatible endpoint:
+The backend exposes SSE-compatible endpoints:
 
 ```text
 POST /api/rag/ask/stream
+POST /api/code/ask/stream
 Accept: text/event-stream
 ```
 
-Current streaming behavior is fallback-compatible. The endpoint emits structured SSE events, but it does not yet stream model tokens from Ollama:
+Retrieval, context assembly, citation selection, and conversation preparation stay on the existing synchronous path. Only the Ollama chat call is streamed. The endpoint emits structured SSE events:
 
 - `metadata`: request mode and whether the request is conversational.
-- `citation`: final evidence list.
+- `evidence`: retrieved evidence available before the answer finishes.
+- `delta`: buffered model text, emitted in small batches instead of per-token.
+- `replace`: server-side fallback or answer repair replaced the visible text.
 - `done`: final `AskResponse`.
 - `error`: failure details.
 
-If true token streaming is added to the Ollama client later, this endpoint can emit `token` events without changing the non-streaming `/api/rag/ask` contract.
+Streaming cleanup is tied to Reactor `Flux`/`Mono.doFinally`. `CANCEL`, `ON_COMPLETE`, and `ON_ERROR` all release the stream permit; the implementation does not rely on `SseEmitter.onCompletion`, `onTimeout`, or `onError` for permit cleanup.
+
+Streaming failure rules:
+
+- If Ollama fails before the first `delta`, the server may fall back to the next candidate model or the frontend may fall back to the non-streaming `/ask` endpoint.
+- If Ollama fails after the first `delta`, the stream emits an `error` event and no conversation turn is saved.
+- Partial answers are visible while streaming but are not saveable and are not persisted as conversation turns.
+- Client abort through `AbortController` must cancel the backend stream, dispose the Ollama subscription, release the permit, and avoid saving a conversation turn.
+
+Regression tests for this area should include mid-stream failure and client abort:
+
+- first-delta-before-failure: `error` event, partial answer not saved, permit returned.
+- failure-before-first-delta: candidate model fallback or non-streaming JSON fallback, permit returned.
+- client abort: browser `AbortController` cancellation, backend Flux cancel, Ollama stream subscription disposal, permit returned, no conversation turn saved.
 
 ## API
 

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { fetchBlob, fetchJson } from './lib/api.js';
+import { fetchBlob, fetchJson, fetchSse } from './lib/api.js';
 import { defaultSpaceId } from './config/constants.js';
 import { clearStoredToken, readStoredToken, storeSessionToken } from './lib/session.js';
 import { AdminWorkspace } from './components/admin/AdminWorkspace.jsx';
@@ -149,6 +149,7 @@ export default function App() {
     ingestFile,
     search,
     ask,
+    cancelAsk,
     saveAnswer,
     loadDocumentJobDiagnostics,
     retryDocumentJobStage,
@@ -160,6 +161,7 @@ export default function App() {
   } = useDocumentRagController({
     activeSpaceId,
     request,
+    streamRequest,
     requestBlob,
     run,
     savedSummary,
@@ -225,6 +227,7 @@ export default function App() {
     clearFailedJobs,
     openCodeFile,
     askCode,
+    cancelCodeAsk,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,
@@ -232,6 +235,7 @@ export default function App() {
   } = useCodeRagController({
     activeSpaceId,
     request,
+    streamRequest,
     run,
     savedSummary,
     setSavedAnswers,
@@ -460,6 +464,48 @@ export default function App() {
     } finally {
       finishBusy('login');
       setBootstrapping(false);
+    }
+  }
+
+  async function streamRequest(path, options = {}) {
+    const fallbackToken = LEGACY_AUTH_FALLBACK_ENABLED ? readStoredToken() : '';
+    try {
+      return await fetchSse(path, options);
+    } catch (err) {
+      const isAuthEndpoint = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/refresh');
+      if (err.name === 'AbortError') {
+        throw err;
+      }
+      if (err.status !== 401 || isAuthEndpoint) {
+        if (err.status === 401) {
+          clearSession();
+        }
+        throw err;
+      }
+      if (LEGACY_AUTH_FALLBACK_ENABLED) {
+        if (fallbackToken) {
+          try {
+            return await fetchSse(path, {
+              ...options,
+              headers: buildAuthHeaders(options.headers, fallbackToken),
+            });
+          } catch (fallbackErr) {
+            if (fallbackErr.status === 401) {
+              clearStoredToken();
+              clearSession();
+            }
+            throw fallbackErr;
+          }
+        }
+        clearSession();
+        throw err;
+      }
+      const refreshedToken = await refreshAccessToken();
+      if (refreshedToken) {
+        return await fetchSse(path, options);
+      }
+      clearSession();
+      throw err;
     }
   }
 
@@ -950,6 +996,7 @@ export default function App() {
             searchCodeFiles={searchCodeFiles}
             openCodeFile={openCodeFile}
             askCode={askCode}
+            cancelCodeAsk={cancelCodeAsk}
             searchCode={searchCode}
             findReferences={findReferences}
             loading={loading}
@@ -1006,6 +1053,7 @@ export default function App() {
             question={question}
             setQuestion={setQuestion}
             ask={ask}
+            cancelAsk={cancelAsk}
             answer={answer}
             documentConversations={documentConversations}
             documentConversationId={documentConversationId}

@@ -1,8 +1,9 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { escapeHtml, highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
+import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
 import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { RagAskComposer } from '../common/RagAskComposer.jsx';
@@ -117,6 +118,8 @@ function CodeWorkspace(props) {
   } = props;
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
+  const answerStreamAnchorRef = useRef(null);
+  useStreamingAutoScroll(answerStreamAnchorRef, codeAnswer?.streaming, codeAnswer?.answer);
 
   return (
     <section className="workspace-grid code-grid workspace-product code-workspace-product">
@@ -210,7 +213,12 @@ function CodeWorkspace(props) {
                   <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
                 </div>
                 <div className="answer-actions">
-                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? "저장됨" : "답변 저장"} disabled={props.answerSavedId || loading('save-code-answer')} onClick={props.saveAnswer}>
+                  {codeAnswer.streaming && (
+                    <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={props.cancelCodeAsk}>
+                      <X size={15} />
+                    </button>
+                  )}
+                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? "저장됨" : "답변 저장"} disabled={props.answerSavedId || codeAnswer.streaming || loading('save-code-answer')} onClick={props.saveAnswer}>
                     {loading('save-code-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
                   </button>
                   <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
@@ -223,7 +231,8 @@ function CodeWorkspace(props) {
                 <small className="answer-mode">이전 코드 근거를 참고해 후속 질문으로 처리했습니다.</small>
               )}
               <div className="answer-body">
-                <MarkdownAnswer text={codeAnswer.answer} />
+                <MarkdownAnswer text={codeAnswer.answer} streaming={codeAnswer.streaming} />
+                <span className="stream-scroll-anchor" ref={answerStreamAnchorRef} aria-hidden="true" />
               </div>
               <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
             </div>
@@ -680,6 +689,8 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
           const item = group.primary;
           const canOpen = Boolean(item.repositoryId && item.fileId);
           const primaryRange = codeEvidenceRange(item);
+          const groupRanges = codeEvidenceRanges(group.items);
+          const openRanges = groupRanges.length ? groupRanges : primaryRange;
           const metaText = group.items.length > 1
             ? `${group.items.length}\uAC1C \uADFC\uAC70 \u00B7 ${group.locationSummary}`
             : codeEvidenceMetaText(item);
@@ -688,7 +699,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
               <div className="result-heading">
                 <strong title={item.filePath}>[{group.citationNumbers.join(', ')}] {item.filePath}</strong>
                 {canOpen && (
-                  <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, primaryRange)}>
+                  <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, openRanges)}>
                     <Eye size={14} />
                     {'\uC5F4\uAE30'}
                   </button>
@@ -766,6 +777,20 @@ function codeEvidenceRange(item = {}) {
   return item.lineStart > 0
     ? { start: item.lineStart, end: item.lineEnd || item.lineStart }
     : null;
+}
+
+function codeEvidenceRanges(items = []) {
+  const seen = new Set();
+  return items
+    .map(codeEvidenceRange)
+    .filter(Boolean)
+    .filter((range) => {
+      const key = `${range.start}-${range.end}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => left.start - right.start || left.end - right.end);
 }
 
 function codeEvidenceMetaText(item = {}) {
@@ -870,6 +895,8 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
 function CodeFileModal({ detail, highlightRange, loading, onClose }) {
   const highlightedLineRef = useRef(null);
   const lines = detail?.content ? detail.content.split(/\r?\n/) : [];
+  const highlightRanges = normalizeHighlightRanges(highlightRange);
+  const firstHighlightRange = highlightRanges[0] || null;
   const fileName = detail?.filePath?.split(/[\\/]/).pop() || 'code';
   const language = detail?.language || 'code';
   const syntaxLanguage = highlightLanguage(detail?.filePath, language);
@@ -888,12 +915,12 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
   }, [onClose]);
 
   useEffect(() => {
-    if (loading || !highlightRange?.start || !highlightedLineRef.current) return undefined;
+    if (loading || !firstHighlightRange?.start || !highlightedLineRef.current) return undefined;
     const timer = window.setTimeout(() => {
       highlightedLineRef.current?.scrollIntoView({ block: 'center' });
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [detail?.id, highlightRange?.start, highlightRange?.end, loading]);
+  }, [detail?.id, firstHighlightRange?.start, firstHighlightRange?.end, loading]);
 
   return (
     <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
@@ -914,7 +941,7 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
         <div className="code-modal-tabs" aria-hidden="true">
           <span className="active-tab">{fileName}</span>
           <span>{language}</span>
-          {highlightRange && <span>lines {highlightRange.start}-{highlightRange.end}</span>}
+          {highlightRanges.length > 0 && <span>{highlightRangeLabel(highlightRanges)}</span>}
         </div>
 
         <div className="code-modal-body">
@@ -937,12 +964,12 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
               <code>
                 {lines.map((line, index) => {
                   const lineNumber = index + 1;
-                  const highlighted = highlightRange && lineNumber >= highlightRange.start && lineNumber <= highlightRange.end;
+                  const highlighted = isLineHighlighted(lineNumber, highlightRanges);
                   return (
                     <div
                       className={highlighted ? 'ide-code-line highlighted-line' : 'ide-code-line'}
                       key={lineNumber}
-                      ref={lineNumber === highlightRange?.start ? highlightedLineRef : null}
+                      ref={lineNumber === firstHighlightRange?.start ? highlightedLineRef : null}
                     >
                       <span className="ide-line-number">{lineNumber}</span>
                       <span className="ide-line-content">{renderedLines[index] || SPACE_PLACEHOLDER}</span>
@@ -992,6 +1019,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
     );
   }
   const lines = detail.content.split(/\r?\n/);
+  const highlightRanges = normalizeHighlightRanges(highlightRange);
   return (
     <section className="panel">
       <div className="panel-title">
@@ -1005,7 +1033,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <code>
           {lines.map((line, index) => {
             const lineNumber = index + 1;
-            const highlighted = highlightRange && lineNumber >= highlightRange.start && lineNumber <= highlightRange.end;
+            const highlighted = isLineHighlighted(lineNumber, highlightRanges);
             return (
               <div className={highlighted ? 'highlighted-line' : ''} key={lineNumber}>
                 <span>{lineNumber}</span>{line || ' '}
@@ -1016,6 +1044,27 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
       </pre>
     </section>
   );
+}
+
+function normalizeHighlightRanges(highlightRange) {
+  const ranges = Array.isArray(highlightRange) ? highlightRange : highlightRange ? [highlightRange] : [];
+  return ranges
+    .map((range) => ({
+      start: Number(range?.start || 0),
+      end: Number(range?.end || range?.start || 0),
+    }))
+    .filter((range) => range.start > 0 && range.end >= range.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function isLineHighlighted(lineNumber, ranges = []) {
+  return ranges.some((range) => lineNumber >= range.start && lineNumber <= range.end);
+}
+
+function highlightRangeLabel(ranges = []) {
+  if (!ranges.length) return '';
+  if (ranges.length === 1) return `lines ${ranges[0].start}-${ranges[0].end}`;
+  return `${ranges.length} ranges · ${ranges.slice(0, 3).map((range) => `${range.start}-${range.end}`).join(', ')}${ranges.length > 3 ? ` +${ranges.length - 3}` : ''}`;
 }
 
 export { CodeSourceManagementPanel, CodeWorkspace };

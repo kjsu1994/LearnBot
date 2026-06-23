@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -118,7 +119,7 @@ public class CodeRagService {
         }
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null);
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
@@ -130,13 +131,47 @@ public class CodeRagService {
         }
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext);
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
     }
 
-    private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
+    public CodeAskResponse askStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, CodeAnswerStreamSink streamSink) {
+        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
+            CodeAskResponse response = commitInsightService.answer(repositoryId, question);
+            if (streamSink != null) {
+                streamSink.onReplace(response.answer(), "commit_insight");
+                streamSink.onEvidence(response.evidence());
+            }
+            return response;
+        }
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, streamSink);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    public CodeAskResponse askConversationalStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext, CodeAnswerStreamSink streamSink) {
+        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
+            CodeAskResponse response = commitInsightService.answer(repositoryId, question);
+            if (streamSink != null) {
+                streamSink.onReplace(response.answer(), "commit_insight");
+                streamSink.onEvidence(response.evidence());
+            }
+            return response;
+        }
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, streamSink);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private CodeAskResponse askPrioritized(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext, CodeAnswerStreamSink streamSink) {
         long askStarted = System.nanoTime();
         String originalQuestion = safe(question, "");
         String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
@@ -190,6 +225,9 @@ public class CodeRagService {
         List<CodeSearchResult> answerResults = contextBundle.results();
         String userPrompt = promptPrefix + "\n\nSource-code context:\n" + contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
+        if (streamSink != null) {
+            streamSink.onEvidence(buildEvidence(answerResults));
+        }
         String answer;
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
@@ -197,9 +235,12 @@ public class CodeRagService {
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
         long llmMs = 0;
+        StringBuilder streamedAnswer = new StringBuilder();
         try {
             long llmStarted = System.nanoTime();
-            OllamaClient.ChatResult chatResult = ollamaClient.chatResult(systemPrompt, userPrompt);
+            OllamaClient.ChatResult chatResult = streamSink == null
+                    ? ollamaClient.chatResult(systemPrompt, userPrompt)
+                    : stream(systemPrompt, userPrompt, streamSink, streamedAnswer);
             llmMs += elapsedMs(llmStarted);
             finalChatResult = chatResult;
             answer = chatResult.content();
@@ -218,18 +259,30 @@ public class CodeRagService {
                     answerDoneReason = retryResult.doneReason();
                     finalChatResult = retryResult;
                     answerRetried = true;
+                    if (streamSink != null) {
+                        streamSink.onReplace(answer, "answer_repair");
+                    }
                 }
             }
         } catch (RuntimeException ex) {
+            if (streamSink != null && streamedAnswer.length() > 0) {
+                throw ex;
+            }
             answer = fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerDoneReason = null;
             llmUnavailable = true;
+            if (streamSink != null) {
+                streamSink.onReplace(answer, "llm_unavailable_fallback");
+            }
         }
         if (qualityFailureReason(answer, answerResults.size(), answerDoneReason) != null) {
             answer = questionMode == CodeQuestionMode.OVERVIEW
                     ? overviewFallbackAnswer(answerResults)
                     : fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerRewritten = true;
+            if (streamSink != null) {
+                streamSink.onReplace(answer, "quality_fallback");
+            }
         }
         recordMetrics(
                 questionMode.value(),
@@ -799,6 +852,41 @@ public class CodeRagService {
                             + "\n" + codeExcerpt(question, result, maxChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+    }
+
+    private OllamaClient.ChatResult stream(String systemPrompt, String userPrompt, CodeAnswerStreamSink streamSink, StringBuilder streamedAnswer) {
+        AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
+        ollamaClient.streamChat(systemPrompt, userPrompt, null)
+                .bufferTimeout(256, java.time.Duration.ofMillis(35))
+                .filter(batch -> !batch.isEmpty())
+                .doOnNext(batch -> {
+                    StringBuilder next = new StringBuilder();
+                    for (OllamaClient.ChatStreamDelta delta : batch) {
+                        if (delta.done()) {
+                            finalDelta.set(delta);
+                        }
+                        if (!delta.content().isEmpty()) {
+                            streamedAnswer.append(delta.content());
+                            next.append(delta.content());
+                        }
+                    }
+                    if (!next.isEmpty()) {
+                        streamSink.onDelta(next.toString());
+                    }
+                })
+                .blockLast();
+        OllamaClient.ChatStreamDelta done = finalDelta.get();
+        return new OllamaClient.ChatResult(
+                streamedAnswer.toString().trim(),
+                done == null ? null : done.doneReason(),
+                done == null || done.done(),
+                done == null ? 0 : done.promptEvalCount(),
+                done == null ? 0 : done.evalCount(),
+                done == null ? "" : done.baseUrl(),
+                done == null ? "" : done.model(),
+                done == null ? "primary" : done.role(),
+                done != null && done.fallbackUsed()
+        );
     }
 
     private CodeContextBundle buildBudgetedContext(
@@ -1606,6 +1694,14 @@ public class CodeRagService {
         } catch (RuntimeException ignored) {
             // Metrics must never block code answers.
         }
+    }
+
+    public interface CodeAnswerStreamSink {
+        void onEvidence(List<CodeEvidence> evidence);
+
+        void onDelta(String text);
+
+        void onReplace(String answer, String reason);
     }
 
     private record CodeRetrieval(

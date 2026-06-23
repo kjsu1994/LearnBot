@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function useCodeRagController({
   activeSpaceId,
   request,
+  streamRequest,
   run,
   savedSummary,
   setSavedAnswers,
@@ -42,6 +43,7 @@ export function useCodeRagController({
   const [codeSearchResults, setCodeSearchResults] = useState([]);
   const [referenceSymbol, setReferenceSymbol] = useState('');
   const [referenceResult, setReferenceResult] = useState(null);
+  const askAbortRef = useRef(null);
 
   const selectedRepository = repositories.find((repo) => repo.id === selectedRepositoryId);
 
@@ -139,7 +141,7 @@ export function useCodeRagController({
       const tokenRequired = targetRepository?.authType === 'TOKEN' && !targetRepository?.credentialStored;
       if (tokenRequired && !indexCredential.token) {
         setSelectedRepositoryId(repositoryId);
-        throw new Error('입력한 계정으로 저장소를 인덱싱하려면 Git 자격 증명을 입력하세요.');
+        throw new Error('?낅젰??怨꾩젙?쇰줈 ??μ냼瑜??몃뜳?깊븯?ㅻ㈃ Git ?먭꺽 利앸챸???낅젰?섏꽭??');
       }
       await request(`/api/code/repositories/${repositoryId}/index`, {
         method: 'POST',
@@ -206,7 +208,7 @@ export function useCodeRagController({
   }
 
   async function deleteRepository(repositoryId, name) {
-    if (!window.confirm(`'${name}' 저장소를 삭제하시겠습니까?`)) return;
+    if (!window.confirm(`'${name}' ??μ냼瑜???젣?섏떆寃좎뒿?덇퉴?`)) return;
     await run(`repo-delete-${repositoryId}`, async () => {
       await request(`/api/code/repositories/${repositoryId}`, { method: 'DELETE' });
       setRepositories((current) => current.filter((repo) => repo.id !== repositoryId));
@@ -254,19 +256,75 @@ export function useCodeRagController({
       const effectiveRepositoryId = followup
         ? codeAnswer?.repositoryId || selectedRepositoryId || null
         : selectedRepositoryId || null;
-      const data = await request('/api/code/ask', {
-        method: 'POST',
-        json: {
-          repositoryId: effectiveRepositoryId,
-          spaceId: activeSpaceId,
-          question: codeQuestion,
-          mode: effectiveMode,
-          limit: followup ? null : codeMode === 'overview' ? 16 : 10,
-          conversationId: codeConversationId || null,
-          parentTurnId,
-          conversational: true,
-        },
+      const payload = {
+        repositoryId: effectiveRepositoryId,
+        spaceId: activeSpaceId,
+        question: codeQuestion,
+        mode: effectiveMode,
+        limit: followup ? null : codeMode === 'overview' ? 16 : 10,
+        conversationId: codeConversationId || null,
+        parentTurnId,
+        conversational: true,
+      };
+      let data = null;
+      let sawStream = false;
+      const controller = new AbortController();
+      askAbortRef.current = controller;
+      setCodeAnswer({
+        mode: effectiveMode || codeMode,
+        answer: '',
+        evidence: [],
+        confidence: '',
+        diagnostics: ['답변을 생성하는 중입니다.'],
+        repositoryId: effectiveRepositoryId,
+        streaming: true,
       });
+      try {
+        await streamRequest('/api/code/ask/stream', {
+          method: 'POST',
+          json: payload,
+          signal: controller.signal,
+          onEvent: ({ event: eventName, data: eventData }) => {
+            if (eventName === 'delta') {
+              sawStream = true;
+              const text = eventData?.text || '';
+              setCodeAnswer((current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, repositoryId: effectiveRepositoryId, streaming: true }));
+            } else if (eventName === 'evidence') {
+              setCodeAnswer((current) => ({ ...(current || {}), evidence: eventData?.evidence || [], repositoryId: effectiveRepositoryId }));
+            } else if (eventName === 'replace') {
+              sawStream = true;
+              setCodeAnswer((current) => ({ ...(current || {}), answer: eventData?.answer || '', repositoryId: effectiveRepositoryId, streaming: true }));
+            } else if (eventName === 'done') {
+              data = eventData;
+            } else if (eventName === 'error') {
+              const error = new Error(eventData?.message || '코드 RAG 스트리밍에 실패했습니다.');
+              error.code = eventData?.code || '';
+              throw error;
+            }
+          },
+        });
+        if (!data) {
+          if (!sawStream) {
+            data = await request('/api/code/ask', { method: 'POST', json: payload });
+          } else {
+            throw new Error('코드 RAG 스트림이 최종 응답 없이 종료되었습니다.');
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setCodeAnswer((current) => ({ ...(current || {}), streaming: false, aborted: true, diagnostics: ['사용자가 답변 생성을 중단했습니다.'] }));
+          return;
+        }
+        if (!sawStream && err.code !== 'STREAM_LIMIT_EXCEEDED') {
+          data = await request('/api/code/ask', { method: 'POST', json: payload });
+        } else {
+          throw err;
+        }
+      } finally {
+        if (askAbortRef.current === controller) {
+          askAbortRef.current = null;
+        }
+      }
       setCodeAnswer(data ? { ...data, repositoryId: effectiveRepositoryId } : data);
       setCodeAnswerSavedId('');
       if (data?.conversationId) {
@@ -289,6 +347,10 @@ export function useCodeRagController({
         await refreshCodeConversations();
       }
     });
+  }
+
+  function cancelCodeAsk() {
+    askAbortRef.current?.abort();
   }
 
   async function refreshCodeConversations() {
@@ -451,6 +513,7 @@ export function useCodeRagController({
     clearFailedJobs,
     openCodeFile,
     askCode,
+    cancelCodeAsk,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,

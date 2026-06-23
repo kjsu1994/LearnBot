@@ -2,6 +2,8 @@ package com.learnbot.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -9,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
 
 import java.util.LinkedHashMap;
 import java.time.Duration;
@@ -26,6 +29,7 @@ public class OllamaClient {
     private final LearnBotProperties properties;
     private final AdminSettingsService adminSettingsService;
     private final RuntimeTuningService runtimeTuningService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicInteger primaryRequests = new AtomicInteger(0);
     private final AtomicInteger embeddingRequests = new AtomicInteger(0);
 
@@ -147,23 +151,9 @@ public class OllamaClient {
     }
 
     private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout) {
-        Map<String, Object> options = new LinkedHashMap<>();
-        options.put("temperature", properties.getOllama().getTemperature());
-        options.put("num_ctx", effectiveContextWindow());
-        int requestedMaxOutputTokens = maxOutputTokens == null ? effectiveMaxOutputTokens() : maxOutputTokens;
-        if (requestedMaxOutputTokens > 0) {
-            options.put("num_predict", requestedMaxOutputTokens);
-        }
+        Map<String, Object> body = chatRequestBody(settings, systemPrompt, userPrompt, false, maxOutputTokens);
+        Map<String, Object> options = optionMap(maxOutputTokens);
         String keepAlive = keepAliveFor(settings.role());
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", settings.model());
-        body.put("stream", false);
-        body.put("messages", List.of(
-                Map.of("role", "system", "content", systemPrompt),
-                Map.of("role", "user", "content", userPrompt)
-        ));
-        body.put("options", options);
-        putIfConfigured(body, "keep_alive", keepAlive);
 
         var responseMono = webClientBuilder.clone()
                 .baseUrl(settings.baseUrl())
@@ -207,6 +197,127 @@ public class OllamaClient {
                 result.evalCount(),
                 result.doneReason());
         return result;
+    }
+
+    public Flux<ChatStreamDelta> streamChat(String systemPrompt, String userPrompt, Integer maxOutputTokens) {
+        return streamChat(systemPrompt, userPrompt, ChatRole.PRIMARY, maxOutputTokens);
+    }
+
+    public Flux<ChatStreamDelta> streamChat(String systemPrompt, String userPrompt, ChatRole role, Integer maxOutputTokens) {
+        List<AdminSettingsService.LlmSettings> candidates = candidates(role);
+        return streamChatCandidate(candidates, 0, systemPrompt, userPrompt, maxOutputTokens);
+    }
+
+    private Flux<ChatStreamDelta> streamChatCandidate(
+            List<AdminSettingsService.LlmSettings> candidates,
+            int index,
+            String systemPrompt,
+            String userPrompt,
+            Integer maxOutputTokens
+    ) {
+        if (index >= candidates.size()) {
+            return Flux.error(new IllegalArgumentException("Ollama chat stream failed."));
+        }
+        AdminSettingsService.LlmSettings settings = candidates.get(index);
+        AtomicInteger emitted = new AtomicInteger(0);
+        Map<String, Object> options = optionMap(maxOutputTokens);
+        String keepAlive = keepAliveFor(settings.role());
+        return webClientBuilder.clone()
+                .baseUrl(settings.baseUrl())
+                .build()
+                .post()
+                .uri("/api/chat")
+                .bodyValue(chatRequestBody(settings, systemPrompt, userPrompt, true, maxOutputTokens))
+                .retrieve()
+                .bodyToFlux(String.class)
+                .flatMapIterable(this::splitJsonLines)
+                .map(line -> toStreamDelta(line, settings, index > 0))
+                .doOnNext(delta -> {
+                    if (!delta.content().isEmpty()) {
+                        emitted.incrementAndGet();
+                    }
+                    if (delta.done()) {
+                        log.info("Ollama chat stream completed role={} model={} baseUrl={} keepAlive={} numCtx={} promptTokens={} outputTokens={} doneReason={}",
+                                delta.role(),
+                                delta.model(),
+                                delta.baseUrl(),
+                                keepAlive == null || keepAlive.isBlank() ? "daemon-default" : keepAlive,
+                                options.get("num_ctx"),
+                                delta.promptEvalCount(),
+                                delta.evalCount(),
+                                delta.doneReason());
+                    }
+                })
+                .onErrorResume(ex -> {
+                    if (emitted.get() == 0 && index < candidates.size() - 1) {
+                        AdminSettingsService.LlmSettings next = candidates.get(index + 1);
+                        log.warn("Ollama chat stream failed before first token. Falling back failedRole={} failedBaseUrl={} failedModel={} nextRole={} nextBaseUrl={} nextModel={} reason={}",
+                                settings.role(),
+                                settings.baseUrl(),
+                                settings.model(),
+                                next.role(),
+                                next.baseUrl(),
+                                next.model(),
+                                ex.getClass().getSimpleName());
+                        return streamChatCandidate(candidates, index + 1, systemPrompt, userPrompt, maxOutputTokens);
+                    }
+                    return Flux.error(ex);
+                });
+    }
+
+    private Map<String, Object> chatRequestBody(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean stream, Integer maxOutputTokens) {
+        Map<String, Object> options = optionMap(maxOutputTokens);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", settings.model());
+        body.put("stream", stream);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userPrompt)
+        ));
+        body.put("options", options);
+        putIfConfigured(body, "keep_alive", keepAliveFor(settings.role()));
+        return body;
+    }
+
+    private Map<String, Object> optionMap(Integer maxOutputTokens) {
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("temperature", properties.getOllama().getTemperature());
+        options.put("num_ctx", effectiveContextWindow());
+        int requestedMaxOutputTokens = maxOutputTokens == null ? effectiveMaxOutputTokens() : maxOutputTokens;
+        if (requestedMaxOutputTokens > 0) {
+            options.put("num_predict", requestedMaxOutputTokens);
+        }
+        return options;
+    }
+
+    private List<String> splitJsonLines(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return value.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .toList();
+    }
+
+    private ChatStreamDelta toStreamDelta(String line, AdminSettingsService.LlmSettings settings, boolean fallbackUsed) {
+        try {
+            ChatResponse response = objectMapper.readValue(line, ChatResponse.class);
+            String content = response.message() == null || response.message().content() == null ? "" : response.message().content();
+            return new ChatStreamDelta(
+                    content,
+                    response.doneReason(),
+                    Boolean.TRUE.equals(response.done()),
+                    response.promptEvalCount() == null ? 0 : response.promptEvalCount(),
+                    response.evalCount() == null ? 0 : response.evalCount(),
+                    settings.baseUrl(),
+                    settings.model(),
+                    settings.role(),
+                    fallbackUsed
+            );
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("Invalid Ollama stream chunk.", ex);
+        }
     }
 
     private int effectiveContextWindow() {
@@ -276,6 +387,19 @@ public class OllamaClient {
         public boolean stoppedByLength() {
             return "length".equalsIgnoreCase(doneReason);
         }
+    }
+
+    public record ChatStreamDelta(
+            String content,
+            String doneReason,
+            boolean done,
+            int promptEvalCount,
+            int evalCount,
+            String baseUrl,
+            String model,
+            String role,
+            boolean fallbackUsed
+    ) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

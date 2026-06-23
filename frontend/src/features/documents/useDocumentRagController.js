@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function useDocumentRagController({
   activeSpaceId,
   request,
+  streamRequest,
   requestBlob,
   run,
   savedSummary,
@@ -40,6 +41,7 @@ export function useDocumentRagController({
   const [documentPreview, setDocumentPreview] = useState(null);
   const [documentPreviewBlobUrl, setDocumentPreviewBlobUrl] = useState('');
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
+  const askAbortRef = useRef(null);
 
   useEffect(() => {
     const runningJobs = documentJobs.filter((job) => job.status === 'RUNNING');
@@ -165,18 +167,74 @@ export function useDocumentRagController({
     event.preventDefault();
     await run('ask', async () => {
       const parentTurnId = documentConversationTurns.at(-1)?.id || null;
-      const data = await request('/api/rag/ask', {
-        method: 'POST',
-        json: {
-          question,
-          mode: answerMode,
-          speedProfile: documentSpeedProfile,
-          spaceId: activeSpaceId,
-          conversationId: documentConversationId || null,
-          parentTurnId,
-          conversational: true,
-        },
+      const payload = {
+        question,
+        mode: answerMode,
+        speedProfile: documentSpeedProfile,
+        spaceId: activeSpaceId,
+        conversationId: documentConversationId || null,
+        parentTurnId,
+        conversational: true,
+      };
+      let data = null;
+      let sawStream = false;
+      const controller = new AbortController();
+      askAbortRef.current = controller;
+      setAnswer({
+        mode: answerMode,
+        answer: '',
+        citations: [],
+        evidence: [],
+        confidence: '',
+        diagnostics: ['답변을 생성하는 중입니다.'],
+        streaming: true,
       });
+      try {
+        await streamRequest('/api/rag/ask/stream', {
+          method: 'POST',
+          json: payload,
+          signal: controller.signal,
+          onEvent: ({ event: eventName, data: eventData }) => {
+            if (eventName === 'delta') {
+              sawStream = true;
+              const text = eventData?.text || '';
+              setAnswer((current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, streaming: true }));
+            } else if (eventName === 'evidence') {
+              setAnswer((current) => ({ ...(current || {}), citations: eventData?.citations || [], evidence: eventData?.evidence || [] }));
+            } else if (eventName === 'replace') {
+              sawStream = true;
+              setAnswer((current) => ({ ...(current || {}), answer: eventData?.answer || '', streaming: true }));
+            } else if (eventName === 'done') {
+              data = eventData;
+            } else if (eventName === 'error') {
+              const error = new Error(eventData?.message || '문서 RAG 스트리밍에 실패했습니다.');
+              error.code = eventData?.code || '';
+              throw error;
+            }
+          },
+        });
+        if (!data) {
+          if (!sawStream) {
+            data = await request('/api/rag/ask', { method: 'POST', json: payload });
+          } else {
+            throw new Error('문서 RAG 스트림이 최종 응답 없이 종료되었습니다.');
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setAnswer((current) => ({ ...(current || {}), streaming: false, aborted: true, diagnostics: ['사용자가 답변 생성을 중단했습니다.'] }));
+          return;
+        }
+        if (!sawStream && err.code !== 'STREAM_LIMIT_EXCEEDED') {
+          data = await request('/api/rag/ask', { method: 'POST', json: payload });
+        } else {
+          throw err;
+        }
+      } finally {
+        if (askAbortRef.current === controller) {
+          askAbortRef.current = null;
+        }
+      }
       setAnswer(data);
       setAnswerSavedId('');
       if (data?.conversationId) {
@@ -200,6 +258,10 @@ export function useDocumentRagController({
         await refreshDocumentConversations();
       }
     });
+  }
+
+  function cancelAsk() {
+    askAbortRef.current?.abort();
   }
 
   async function refreshDocumentConversations() {
@@ -281,7 +343,7 @@ export function useDocumentRagController({
   }
 
   async function deleteDocument(documentId, title) {
-    if (!window.confirm(`'${title}' 문서를 삭제할까요? 삭제된 문서는 휴지통에서 복구할 수 있습니다.`)) return;
+    if (!window.confirm(`'${title}' 臾몄꽌瑜???젣?좉퉴?? ??젣??臾몄꽌???댁??듭뿉??蹂듦뎄?????덉뒿?덈떎.`)) return;
     await run(`delete-${documentId}`, async () => {
       await request(`/api/documents/${documentId}`, { method: 'DELETE' });
       await refreshDocuments();
@@ -414,6 +476,7 @@ export function useDocumentRagController({
     ingestFile,
     search,
     ask,
+    cancelAsk,
     saveAnswer,
     loadDocumentJobDiagnostics,
     retryDocumentJobStage,

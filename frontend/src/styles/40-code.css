@@ -240,6 +240,52 @@
   padding: 1px 5px;
 }
 
+.markdown-table-wrap {
+  border: 1px solid #dbe5e8;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.markdown-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 100%;
+}
+
+.markdown-table th,
+.markdown-table td {
+  border-bottom: 1px solid #e5ecef;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-table th {
+  background: #f3f8f6;
+  color: #18352f;
+  font-weight: 800;
+}
+
+.markdown-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.streaming-cursor {
+  background: #13715f;
+  border-radius: 2px;
+  display: inline-block;
+  height: 1.15em;
+  margin-left: 2px;
+  width: 7px;
+  animation: stream-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes stream-cursor-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
 .markdown-code {
   background: #111820;
   border-radius: 8px;

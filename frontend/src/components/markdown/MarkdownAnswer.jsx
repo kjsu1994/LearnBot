@@ -1,10 +1,11 @@
 import { Fragment } from 'react';
 
-function MarkdownAnswer({ text = '' }) {
+function MarkdownAnswer({ text = '', streaming = false }) {
   const blocks = parseMarkdownBlocks(text);
   return (
-    <div className="markdown-answer">
+    <div className={streaming ? 'markdown-answer markdown-answer-streaming' : 'markdown-answer'}>
       {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+      {streaming && <span className="streaming-cursor" aria-hidden="true" />}
     </div>
   );
 }
@@ -53,6 +54,17 @@ function parseMarkdownBlocks(text = '') {
       blocks.push({ type: 'ol', items });
       continue;
     }
+    if (isMarkdownTableStart(lines, index)) {
+      const rows = [splitTableRow(lines[index])];
+      index += 2;
+      while (index < lines.length && isTableRow(lines[index])) {
+        rows.push(splitTableRow(lines[index]));
+        index++;
+      }
+      index--;
+      blocks.push({ type: 'table', rows });
+      continue;
+    }
 
     const paragraph = [line.trim()];
     while (index + 1 < lines.length
@@ -60,7 +72,8 @@ function parseMarkdownBlocks(text = '') {
       && !lines[index + 1].trim().startsWith('```')
       && !/^(#{1,4})\s+/.test(lines[index + 1])
       && !/^\s*[-*]\s+/.test(lines[index + 1])
-      && !/^\s*\d+\.\s+/.test(lines[index + 1])) {
+      && !/^\s*\d+\.\s+/.test(lines[index + 1])
+      && !isMarkdownTableStart(lines, index + 1)) {
       paragraph.push(lines[index + 1].trim());
       index++;
     }
@@ -96,7 +109,46 @@ function renderMarkdownBlock(block, index) {
       </ol>
     );
   }
+  if (block.type === 'table') {
+    const [head = [], ...body] = block.rows;
+    return (
+      <div className="markdown-table-wrap" key={index}>
+        <table className="markdown-table">
+          <thead>
+            <tr>{head.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `th-${index}-${cellIndex}`)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {body.map((row, rowIndex) => (
+              <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `td-${index}-${rowIndex}-${cellIndex}`)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   return <p key={index}>{renderInlineMarkdown(block.text, `p-${index}`)}</p>;
+}
+
+function isMarkdownTableStart(lines, index) {
+  return isTableRow(lines[index]) && isTableSeparator(lines[index + 1] || '');
+}
+
+function isTableRow(line = '') {
+  return line.includes('|') && splitTableRow(line).length > 1;
+}
+
+function isTableSeparator(line = '') {
+  const cells = splitTableRow(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitTableRow(line = '') {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
 }
 
 function renderInlineMarkdown(text = '', keyPrefix = 'md') {

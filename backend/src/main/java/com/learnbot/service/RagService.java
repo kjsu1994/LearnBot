@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -103,7 +104,7 @@ public class RagService {
     public AskResponse ask(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(question, null, filter, mode, speedProfile, spaceIds, selectedSpaceId);
+            return askPrioritized(question, null, filter, mode, speedProfile, spaceIds, selectedSpaceId, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
@@ -112,13 +113,31 @@ public class RagService {
     public AskResponse askConversational(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
         ollamaClient.beginPrimaryRequest();
         try {
-            return askPrioritized(question, conversationContext, filter, mode, speedProfile, spaceIds, selectedSpaceId);
+            return askPrioritized(question, conversationContext, filter, mode, speedProfile, spaceIds, selectedSpaceId, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
         }
     }
 
-    private AskResponse askPrioritized(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId) {
+    public AskResponse askStreaming(String question, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId, AnswerStreamSink streamSink) {
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(question, null, filter, mode, speedProfile, spaceIds, selectedSpaceId, streamSink);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    public AskResponse askConversationalStreaming(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId, AnswerStreamSink streamSink) {
+        ollamaClient.beginPrimaryRequest();
+        try {
+            return askPrioritized(question, conversationContext, filter, mode, speedProfile, spaceIds, selectedSpaceId, streamSink);
+        } finally {
+            ollamaClient.finishPrimaryRequest();
+        }
+    }
+
+    private AskResponse askPrioritized(String question, RagConversationContext conversationContext, SearchFilter filter, String mode, String speedProfile, List<UUID> spaceIds, UUID selectedSpaceId, AnswerStreamSink streamSink) {
         long askStarted = System.nanoTime();
         String originalQuestion = safe(question);
         String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
@@ -166,6 +185,9 @@ public class RagService {
         citations = contextBundle.citations();
         String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
+        if (streamSink != null) {
+            streamSink.onEvidence(citations, buildEvidence(citations));
+        }
 
         String userPrompt = promptPrefix + "\n\nContext:\n" + context;
         String answer;
@@ -175,9 +197,12 @@ public class RagService {
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
         long llmMs = 0;
+        StringBuilder streamedAnswer = new StringBuilder();
         try {
             long llmStarted = System.nanoTime();
-            OllamaClient.ChatResult chatResult = chatWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()));
+            OllamaClient.ChatResult chatResult = streamSink == null
+                    ? chatWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()))
+                    : streamWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()), streamSink, streamedAnswer);
             llmMs += elapsedMs(llmStarted);
             finalChatResult = chatResult;
             answer = chatResult.content();
@@ -202,14 +227,24 @@ public class RagService {
                     finalChatResult = retryResult;
                     citations = retryCitations;
                     answerRetried = true;
+                    if (streamSink != null) {
+                        streamSink.onReplace(answer, "answer_repair");
+                        streamSink.onEvidence(citations, buildEvidence(citations));
+                    }
                 }
             }
         } catch (RuntimeException ex) {
+            if (streamSink != null && streamedAnswer.length() > 0) {
+                throw ex;
+            }
             log.warn("RAG LLM call failed mode={} citations={} question={}",
                     answerMode.value(), citations.size(), abbreviate(question), ex);
             answer = fallbackAnswer(answerMode, originalQuestion, citations);
             answerDoneReason = null;
             llmUnavailable = true;
+            if (streamSink != null) {
+                streamSink.onReplace(answer, "llm_unavailable_fallback");
+            }
         }
         String lowQualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
         if (lowQualityReason != null) {
@@ -222,6 +257,9 @@ public class RagService {
                     abbreviate(question));
             answer = fallbackAnswer(answerMode, originalQuestion, citations);
             answerRewritten = true;
+            if (streamSink != null) {
+                streamSink.onReplace(answer, "quality_fallback");
+            }
         }
         AnswerTiming timing = new AnswerTiming(
                 retrievalMs,
@@ -676,6 +714,41 @@ public class RagService {
     private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
         OllamaClient.ChatResult result = ollamaClient.chatResult(systemPrompt, userPrompt, maxOutputTokens);
         return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
+    }
+
+    private OllamaClient.ChatResult streamWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens, AnswerStreamSink streamSink, StringBuilder streamedAnswer) {
+        AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
+        ollamaClient.streamChat(systemPrompt, userPrompt, maxOutputTokens)
+                .bufferTimeout(256, java.time.Duration.ofMillis(35))
+                .filter(batch -> !batch.isEmpty())
+                .doOnNext(batch -> {
+                    StringBuilder next = new StringBuilder();
+                    for (OllamaClient.ChatStreamDelta delta : batch) {
+                        if (delta.done()) {
+                            finalDelta.set(delta);
+                        }
+                        if (!delta.content().isEmpty()) {
+                            streamedAnswer.append(delta.content());
+                            next.append(delta.content());
+                        }
+                    }
+                    if (!next.isEmpty()) {
+                        streamSink.onDelta(next.toString());
+                    }
+                })
+                .blockLast();
+        OllamaClient.ChatStreamDelta done = finalDelta.get();
+        return new OllamaClient.ChatResult(
+                streamedAnswer.toString().trim(),
+                done == null ? null : done.doneReason(),
+                done == null || done.done(),
+                done == null ? 0 : done.promptEvalCount(),
+                done == null ? 0 : done.evalCount(),
+                done == null ? "" : done.baseUrl(),
+                done == null ? "" : done.model(),
+                done == null ? "primary" : done.role(),
+                done != null && done.fallbackUsed()
+        );
     }
 
     private void mergeDocument(Map<UUID, SearchResult> merged, SearchResult result) {
@@ -2852,6 +2925,14 @@ public class RagService {
 
     private String nullable(String prefix, String value) {
         return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
+    public interface AnswerStreamSink {
+        void onEvidence(List<SearchResult> citations, List<AnswerEvidence> evidence);
+
+        void onDelta(String text);
+
+        void onReplace(String answer, String reason);
     }
 
     private record ComputedAnswer(String answer, List<SearchResult> citations) {
