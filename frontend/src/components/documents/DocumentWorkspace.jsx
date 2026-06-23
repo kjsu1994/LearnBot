@@ -427,7 +427,7 @@ function DocumentDiagnosticList({ diagnostics = [], job, retryStage, retryLoadin
         const retryable = diagnostic.status === 'FAILED'
           && (diagnostic.stage === 'DOCUMENT_LLM_ENRICHMENT' || diagnostic.stage === 'DOCUMENT_GRAPH_REBUILD');
         return (
-          <div className="failure-item" key={diagnostic.id}>
+          <div className={`failure-item diagnostic-item diagnostic-${String(diagnostic.status || '').toLowerCase()}`} key={diagnostic.id}>
             <strong>{documentStageLabel(diagnostic.stage)} · {diagnostic.status}</strong>
             <small>{diagnostic.mode || diagnostic.analyzer} · {diagnostic.durationMillis}ms</small>
             <span>

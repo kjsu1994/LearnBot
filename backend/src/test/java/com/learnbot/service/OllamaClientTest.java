@@ -4,12 +4,22 @@ import com.learnbot.config.LearnBotProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.http.codec.HttpMessageWriter;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,12 +62,17 @@ class OllamaClientTest {
     @Test
     void auxiliaryChatSkipsPrimaryModel() {
         LearnBotProperties properties = new LearnBotProperties();
+        properties.getOllama().setAuxiliaryKeepAlive("0s");
         AdminSettingsService adminSettingsService = mock(AdminSettingsService.class);
         when(adminSettingsService.auxiliaryLlmSettings()).thenReturn(new AdminSettingsService.LlmSettings("http://auxiliary:11434", "qwen-small:test", true, "auxiliary"));
 
         AtomicInteger calls = new AtomicInteger();
+        AtomicReference<String> body = new AtomicReference<>();
         ExchangeFunction exchange = request -> {
             calls.incrementAndGet();
+            MockClientHttpRequest capture = new MockClientHttpRequest(request.method(), URI.create("http://auxiliary:11434/api/chat"));
+            request.body().insert(capture, bodyInserterContext()).block();
+            body.set(capture.getBodyAsString().block());
             return Mono.just(ClientResponse.create(HttpStatus.OK)
                     .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                     .body("""
@@ -73,6 +88,7 @@ class OllamaClientTest {
         assertThat(result.role()).isEqualTo("auxiliary");
         assertThat(result.fallbackUsed()).isFalse();
         assertThat(calls).hasValue(1);
+        assertThat(body.get()).contains("\"keep_alive\":\"0s\"");
     }
 
     @Test
@@ -93,5 +109,24 @@ class OllamaClientTest {
                 .isInstanceOf(RuntimeException.class);
 
         assertThat(calls).hasValue(2);
+    }
+
+    private BodyInserter.Context bodyInserterContext() {
+        return new BodyInserter.Context() {
+            @Override
+            public List<HttpMessageWriter<?>> messageWriters() {
+                return ExchangeStrategies.withDefaults().messageWriters();
+            }
+
+            @Override
+            public Optional<ServerHttpRequest> serverRequest() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Map<String, Object> hints() {
+                return Map.of();
+            }
+        };
     }
 }

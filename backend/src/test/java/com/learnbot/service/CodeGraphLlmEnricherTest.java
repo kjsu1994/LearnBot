@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -22,13 +24,14 @@ class CodeGraphLlmEnricherTest {
         OllamaClient ollama = mock(OllamaClient.class);
         UUID chunkId = UUID.randomUUID();
         CodeGraph graph = graph(chunkId);
-        when(ollama.chat(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY))).thenReturn("""
+        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(512), any(Duration.class)))
+                .thenReturn(chat("""
                 {"relations":[
                   {"sourceKey":"method:a","targetKey":"method:b","type":"CALLS"},
                   {"sourceKey":"method:a","targetKey":"method:unknown","type":"CALLS"},
                   {"sourceKey":"method:a","targetKey":"method:b","type":"DELETES"}
                 ]}
-                """);
+                """));
         CodeGraphLlmEnricher enricher = new CodeGraphLlmEnricher(properties, ollama, new ObjectMapper());
 
         CodeGraph enriched = enricher.enrich(graph, List.of(chunk(chunkId)));
@@ -47,7 +50,7 @@ class CodeGraphLlmEnricherTest {
         OllamaClient ollama = mock(OllamaClient.class);
         UUID chunkId = UUID.randomUUID();
         CodeGraph graph = graph(chunkId);
-        when(ollama.chat(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY)))
+        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(512), any(Duration.class)))
                 .thenThrow(new IllegalStateException("offline"));
         CodeGraphLlmEnricher enricher = new CodeGraphLlmEnricher(properties, ollama, new ObjectMapper());
 
@@ -74,5 +77,9 @@ class CodeGraphLlmEnricherTest {
                 chunkId, UUID.randomUUID(), UUID.randomUUID(), "repo", "A.java", "method", "a", "A", "a",
                 "sample", null, null, 0, 1, 3, "void a() { b(); }", 0, Map.of("language", "java")
         );
+    }
+
+    private OllamaClient.ChatResult chat(String content) {
+        return new OllamaClient.ChatResult(content, "stop", true, 10, 20, "http://ollama", "test", "AUXILIARY", false);
     }
 }

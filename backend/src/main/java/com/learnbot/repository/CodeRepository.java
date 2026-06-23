@@ -535,6 +535,22 @@ public class CodeRepository {
         return updated > 0;
     }
 
+    public boolean deferGraphEnrichmentJob(UUID id, String workerId, int delaySeconds, String message) {
+        int updated = jdbc.update("""
+                UPDATE code_graph_enrichment_jobs
+                SET status = 'PENDING', error_message = :message,
+                    attempts = GREATEST(attempts - 1, 0),
+                    next_attempt_at = now() + (:delaySeconds * interval '1 second'),
+                    lease_owner = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NULL
+                WHERE id = :id
+                  AND lease_owner = :workerId
+                """, new MapSqlParameterSource().addValue("id", id).addValue("workerId", workerId)
+                .addValue("delaySeconds", Math.max(1, delaySeconds)).addValue("message", trimMessage(message)));
+        return updated > 0;
+    }
+
     public boolean heartbeatGraphEnrichmentJob(UUID id, String workerId) {
         int leaseSeconds = Math.max(1, properties.getCode().getGraph().getEnrichmentLeaseSeconds());
         int updated = jdbc.update("""

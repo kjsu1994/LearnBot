@@ -50,12 +50,13 @@ public class OllamaClient {
     public List<List<Double>> embed(List<String> inputs) {
         embeddingRequests.incrementAndGet();
         try {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", properties.getOllama().getEmbeddingModel());
+            body.put("input", inputs);
+            putIfConfigured(body, "keep_alive", properties.getOllama().getEmbeddingKeepAlive());
             EmbedResponse response = webClient.post()
                     .uri("/api/embed")
-                    .bodyValue(Map.of(
-                            "model", properties.getOllama().getEmbeddingModel(),
-                            "input", inputs
-                    ))
+                    .bodyValue(body)
                     .retrieve()
                     .bodyToMono(EmbedResponse.class)
                     .block();
@@ -153,21 +154,23 @@ public class OllamaClient {
         if (requestedMaxOutputTokens > 0) {
             options.put("num_predict", requestedMaxOutputTokens);
         }
+        String keepAlive = keepAliveFor(settings.role());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", settings.model());
+        body.put("stream", false);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userPrompt)
+        ));
+        body.put("options", options);
+        putIfConfigured(body, "keep_alive", keepAlive);
 
         var responseMono = webClientBuilder.clone()
                 .baseUrl(settings.baseUrl())
                 .build()
                 .post()
                 .uri("/api/chat")
-                .bodyValue(Map.of(
-                        "model", settings.model(),
-                        "stream", false,
-                        "messages", List.of(
-                                Map.of("role", "system", "content", systemPrompt),
-                                Map.of("role", "user", "content", userPrompt)
-                        ),
-                        "options", options
-                ))
+                .bodyValue(body)
                 .retrieve()
                 .bodyToMono(ChatResponse.class);
         ChatResponse response = timeout == null ? responseMono.block() : responseMono.block(timeout);
@@ -194,6 +197,15 @@ public class OllamaClient {
                     result.evalCount(),
                     result.content().length());
         }
+        log.info("Ollama chat completed role={} model={} baseUrl={} keepAlive={} numCtx={} promptTokens={} outputTokens={} doneReason={}",
+                result.role(),
+                result.model(),
+                result.baseUrl(),
+                keepAlive == null || keepAlive.isBlank() ? "daemon-default" : keepAlive,
+                options.get("num_ctx"),
+                result.promptEvalCount(),
+                result.evalCount(),
+                result.doneReason());
         return result;
     }
 
@@ -205,15 +217,29 @@ public class OllamaClient {
         return runtimeTuningService == null ? properties.getOllama().getMaxOutputTokens() : runtimeTuningService.llmMaxOutputTokens();
     }
 
+    private String keepAliveFor(String role) {
+        if ("auxiliary".equalsIgnoreCase(role)) {
+            return properties.getOllama().getAuxiliaryKeepAlive();
+        }
+        return properties.getOllama().getPrimaryKeepAlive();
+    }
+
+    private void putIfConfigured(Map<String, Object> body, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            body.put(key, value.trim());
+        }
+    }
+
     private List<Double> embedLegacy(String input) {
         LegacyEmbedResponse response;
         try {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", properties.getOllama().getEmbeddingModel());
+            body.put("prompt", input);
+            putIfConfigured(body, "keep_alive", properties.getOllama().getEmbeddingKeepAlive());
             response = webClient.post()
                     .uri("/api/embeddings")
-                    .bodyValue(Map.of(
-                            "model", properties.getOllama().getEmbeddingModel(),
-                            "prompt", input
-                    ))
+                    .bodyValue(body)
                     .retrieve()
                     .bodyToMono(LegacyEmbedResponse.class)
                     .block();

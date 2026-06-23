@@ -2,6 +2,7 @@ package com.learnbot.service;
 
 import com.learnbot.repository.CodeRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -17,11 +18,18 @@ public class CodeGraphEnrichmentWorker {
 
     private final CodeRepository repository;
     private final CodeGraphLlmEnricher enricher;
+    private final OllamaClient ollamaClient;
     private final String workerId = "code-graph-enrichment-" + UUID.randomUUID();
 
     public CodeGraphEnrichmentWorker(CodeRepository repository, CodeGraphLlmEnricher enricher) {
+        this(repository, enricher, null);
+    }
+
+    @Autowired
+    public CodeGraphEnrichmentWorker(CodeRepository repository, CodeGraphLlmEnricher enricher, OllamaClient ollamaClient) {
         this.repository = repository;
         this.enricher = enricher;
+        this.ollamaClient = ollamaClient;
     }
 
     @PostConstruct
@@ -44,6 +52,10 @@ public class CodeGraphEnrichmentWorker {
                 repository.addAnalysisDiagnostics(job.repositoryId(), job.indexVersion(), List.of(skipped));
                 repository.updateJobEnrichment(job.indexVersion(), "SKIPPED", skipped.message());
                 finish(job, "SKIPPED", skipped.message());
+                return;
+            }
+            if (shouldDeferForPrimaryRequest()) {
+                defer(job);
                 return;
             }
             repository.updateJobEnrichment(job.indexVersion(), "RUNNING", "코드 LLM 관계 보강을 진행 중입니다.");
@@ -108,5 +120,21 @@ public class CodeGraphEnrichmentWorker {
             log.warn("code_graph_enrichment repositoryId={} indexVersion={} status=LEASE_LOST finalStatus={}",
                     job.repositoryId(), job.indexVersion(), status);
         }
+    }
+
+    private boolean shouldDeferForPrimaryRequest() {
+        return ollamaClient != null && ollamaClient.hasPrimaryRequestInFlight();
+    }
+
+    private void defer(CodeGraphEnrichmentJob job) {
+        String message = "User RAG request is active; code graph LLM enrichment was deferred.";
+        if (repository.deferGraphEnrichmentJob(job.id(), workerId, 30, message)) {
+            repository.updateJobEnrichment(job.indexVersion(), "PENDING", message);
+            log.info("code_graph_enrichment repositoryId={} indexVersion={} status=DEFERRED reason=PRIMARY_REQUEST_IN_FLIGHT",
+                    job.repositoryId(), job.indexVersion());
+            return;
+        }
+        log.warn("code_graph_enrichment repositoryId={} indexVersion={} status=LEASE_LOST finalStatus=DEFERRED",
+                job.repositoryId(), job.indexVersion());
     }
 }

@@ -428,6 +428,10 @@ public class LearnBotProperties {
         @Min(0)
         private int maxOutputTokens = 0;
 
+        private String primaryKeepAlive = "60s";
+        private String auxiliaryKeepAlive = "0s";
+        private String embeddingKeepAlive = "30s";
+
         public String getBaseUrl() {
             return baseUrl;
         }
@@ -490,6 +494,30 @@ public class LearnBotProperties {
 
         public void setMaxOutputTokens(int maxOutputTokens) {
             this.maxOutputTokens = maxOutputTokens;
+        }
+
+        public String getPrimaryKeepAlive() {
+            return primaryKeepAlive;
+        }
+
+        public void setPrimaryKeepAlive(String primaryKeepAlive) {
+            this.primaryKeepAlive = primaryKeepAlive;
+        }
+
+        public String getAuxiliaryKeepAlive() {
+            return auxiliaryKeepAlive;
+        }
+
+        public void setAuxiliaryKeepAlive(String auxiliaryKeepAlive) {
+            this.auxiliaryKeepAlive = auxiliaryKeepAlive;
+        }
+
+        public String getEmbeddingKeepAlive() {
+            return embeddingKeepAlive;
+        }
+
+        public void setEmbeddingKeepAlive(String embeddingKeepAlive) {
+            this.embeddingKeepAlive = embeddingKeepAlive;
         }
     }
 

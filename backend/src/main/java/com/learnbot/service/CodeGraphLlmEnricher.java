@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.time.Duration;
 
 @Component
 public class CodeGraphLlmEnricher {
@@ -81,12 +82,14 @@ public class CodeGraphLlmEnricher {
             ));
         }
         try {
-            String response = ollamaClient.chat(
+            String response = ollamaClient.chatResult(
                     "Classify unresolved source-code graph candidates. Return JSON only as {\"relations\":[{\"sourceKey\":\"...\",\"targetKey\":\"...\",\"type\":\"CALLS|INJECTS|USES_ENTITY\"}]}. "
                             + "Use only supplied keys. Omit uncertain relations.",
                     objectMapper.writeValueAsString(input),
-                    OllamaClient.ChatRole.AUXILIARY
-            );
+                    OllamaClient.ChatRole.AUXILIARY,
+                    512,
+                    Duration.ofSeconds(20)
+            ).content();
             LlmOutput output = objectMapper.readValue(jsonObject(response), LlmOutput.class);
             CodeGraph enriched = mergeValidated(graph, candidates, output);
             int added = Math.max(0, enriched.edges().size() - graph.edges().size());

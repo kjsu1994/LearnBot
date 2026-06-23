@@ -8,10 +8,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,5 +62,24 @@ class CodeGraphEnrichmentWorkerTest {
         new CodeGraphEnrichmentWorker(repository, enricher).processNext();
 
         verify(repository).finishGraphEnrichmentJob(eq(job.id()), anyString(), eq("SKIPPED"), eq("Index is no longer active."));
+    }
+
+    @Test
+    void defersWhenUserRagRequestIsActive() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeGraphLlmEnricher enricher = mock(CodeGraphLlmEnricher.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeGraphEnrichmentJob job = new CodeGraphEnrichmentJob(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "RUNNING", 1, "worker");
+        String message = "User RAG request is active; code graph LLM enrichment was deferred.";
+        when(repository.claimGraphEnrichmentJob(anyString())).thenReturn(Optional.of(job));
+        when(repository.isActiveIndex(job.repositoryId(), job.indexVersion())).thenReturn(true);
+        when(ollamaClient.hasPrimaryRequestInFlight()).thenReturn(true);
+        when(repository.deferGraphEnrichmentJob(eq(job.id()), anyString(), eq(30), eq(message))).thenReturn(true);
+
+        new CodeGraphEnrichmentWorker(repository, enricher, ollamaClient).processNext();
+
+        verify(repository).deferGraphEnrichmentJob(eq(job.id()), anyString(), eq(30), eq(message));
+        verify(repository).updateJobEnrichment(job.indexVersion(), "PENDING", message);
+        verify(enricher, never()).enrichWithDiagnostics(any(), anyList());
     }
 }
