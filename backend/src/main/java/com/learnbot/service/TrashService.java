@@ -234,6 +234,14 @@ public class TrashService {
                   AND status = 'DELETED'
                   AND deleted_at IS NOT NULL
                   AND deleted_at >= :cutoff
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM app_users active_user
+                      WHERE active_user.id <> app_users.id
+                        AND lower(active_user.email) = lower(app_users.email)
+                        AND active_user.status <> 'DELETED'
+                        AND active_user.deleted_at IS NULL
+                  )
                 """, restoreParams(id, cutoff));
     }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
@@ -922,8 +923,8 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
     return () => window.clearTimeout(timer);
   }, [detail?.id, firstHighlightRange?.start, firstHighlightRange?.end, loading]);
 
-  return (
-    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+  const modal = (
+    <div className="code-modal-backdrop source-modal-portal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
       <section className="code-modal" role="dialog" aria-modal="true" aria-labelledby="code-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
@@ -989,6 +990,9 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
       </section>
     </div>
   );
+
+  if (typeof document === 'undefined') return modal;
+  return createPortal(modal, document.body);
 }
 
 function CodeFileViewer({ detail, highlightRange, loading }) {

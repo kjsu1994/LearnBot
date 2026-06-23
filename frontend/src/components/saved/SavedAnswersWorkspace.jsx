@@ -1,6 +1,7 @@
-import { Bookmark, Code2, Database, Edit3, Loader2, MessageSquare, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { Bookmark, Code2, Database, Edit3, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { formatDate, getAnswerModeLabel, getCodeModeLabel } from '../../lib/formatters.js';
+import { AnswerModal } from '../common/AnswerModal.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { DataTable } from '../ui/data-table.jsx';
@@ -214,6 +215,8 @@ function SavedAnswerDetail({
   deleteSavedAnswer,
   loading,
 }) {
+  const [answerModalOpen, setAnswerModalOpen] = useState(false);
+
   if (!selectedSavedAnswer) {
     return (
       <section className="panel muted-panel library-empty-panel">
@@ -249,8 +252,23 @@ function SavedAnswerDetail({
         <p>{selectedSavedAnswer.question}</p>
       </div>
       <div className="answer saved-answer-body">
+        <div className="saved-answer-body-toolbar">
+          <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
+            <Maximize2 size={15} />
+          </button>
+        </div>
         <MarkdownAnswer text={selectedSavedAnswer.answer} />
       </div>
+      {answerModalOpen && (
+        <AnswerModal
+          title={selectedSavedAnswer.title || '저장된 답변'}
+          subtitle={`${typeLabel(selectedSavedAnswer.answerType)} · ${modeLabel(selectedSavedAnswer)}`}
+          answer={selectedSavedAnswer.answer}
+          className="saved-answer-modal"
+          bodyClassName="saved-answer-modal-body"
+          onClose={() => setAnswerModalOpen(false)}
+        />
+      )}
       <SavedEvidence evidence={selectedSavedAnswer.evidence || []} />
       {Array.isArray(selectedSavedAnswer.diagnostics) && selectedSavedAnswer.diagnostics.length > 0 && (
         <div className="detail-box">
@@ -271,6 +289,8 @@ function SavedAnswerDetail({
 }
 
 function ConversationDetail({ selectedRagConversation, deleteRagConversation = () => {}, continueRagConversation = () => {}, loading }) {
+  const [expandedTurn, setExpandedTurn] = useState(null);
+
   if (!selectedRagConversation) {
     return (
       <section className="panel muted-panel library-empty-panel">
@@ -287,6 +307,9 @@ function ConversationDetail({ selectedRagConversation, deleteRagConversation = (
 
   const conversation = selectedRagConversation.conversation;
   const turns = selectedRagConversation.turns || [];
+  const expandedTurnTitle = expandedTurn
+    ? `${conversation?.title || 'Saved conversation'} · ${expandedTurn.index + 1}`
+    : 'Saved conversation answer';
 
   return (
     <section className="panel saved-answer-detail library-detail-panel conversation-history-panel">
@@ -325,6 +348,16 @@ function ConversationDetail({ selectedRagConversation, deleteRagConversation = (
             <div className="conversation-message assistant-message">
               <strong>답변</strong>
               <div className="saved-answer-body conversation-answer-body">
+                <div className="saved-answer-body-toolbar">
+                  <button
+                    className="icon-button answer-expand-button"
+                    type="button"
+                    title="크게 보기"
+                    onClick={() => setExpandedTurn({ ...turn, index })}
+                  >
+                    <Maximize2 size={15} />
+                  </button>
+                </div>
                 <MarkdownAnswer text={turn.answer} />
               </div>
             </div>
@@ -333,6 +366,16 @@ function ConversationDetail({ selectedRagConversation, deleteRagConversation = (
         ))}
         {!turns.length && <p className="empty compact-empty">표시할 대화 히스토리가 없습니다.</p>}
       </div>
+      {expandedTurn && (
+        <AnswerModal
+          title={expandedTurnTitle}
+          subtitle={`${typeLabel(conversation?.domain)} · ${formatDate(expandedTurn.createdAt)}`}
+          answer={expandedTurn.answer}
+          className="saved-answer-modal"
+          bodyClassName="saved-answer-modal-body"
+          onClose={() => setExpandedTurn(null)}
+        />
+      )}
       <div className="action-row">
         <button className="ghost-button" type="button" onClick={() => continueRagConversation(conversation)}>
           <MessageSquare size={16} />

@@ -63,6 +63,7 @@ public class SecurityRepository {
                 FROM app_users
                 WHERE lower(email) = lower(:email)
                   AND status = 'ACTIVE'
+                  AND deleted_at IS NULL
                 """, new MapSqlParameterSource().addValue("email", email), (rs, rowNum) -> rs.getString("password_hash"));
         return hashes.stream().findFirst();
     }
@@ -72,6 +73,8 @@ public class SecurityRepository {
                 SELECT id, email, display_name, role, status
                 FROM app_users
                 WHERE lower(email) = lower(:email)
+                  AND status <> 'DELETED'
+                  AND deleted_at IS NULL
                 """, new MapSqlParameterSource().addValue("email", email), this::mapUser);
         return users.stream().findFirst();
     }

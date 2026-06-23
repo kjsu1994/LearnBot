@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
@@ -994,8 +995,8 @@ function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  return (
-    <div className="code-modal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
+  const modal = (
+    <div className="code-modal-backdrop source-modal-portal-backdrop" role="presentation" onMouseDown={() => onClose?.()}>
       <section className="code-modal document-preview-modal" role="dialog" aria-modal="true" aria-labelledby="document-preview-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="code-modal-header">
           <div className="code-modal-title">
@@ -1043,6 +1044,9 @@ function DocumentPreviewModal({ preview, blobUrl, loading, onClose }) {
       </section>
     </div>
   );
+
+  if (typeof document === 'undefined') return modal;
+  return createPortal(modal, document.body);
 }
 
 function DocumentPreviewContent({ preview, blobUrl }) {
