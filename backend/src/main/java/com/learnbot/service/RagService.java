@@ -415,7 +415,7 @@ public class RagService {
         if (!expansionFromPinnedEvidence) {
             searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
         }
-        if (!expansionFromPinnedEvidence && isOverviewQuestionType(questionType)) {
+        if (!expansionFromPinnedEvidence && usesAuxiliaryDocumentQueries(questionType)) {
             for (String query : overviewQueries(question, questionType, effectiveProfile)) {
                 searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
             }
@@ -476,7 +476,7 @@ public class RagService {
                 }
             }
             iteration = 2;
-            if (isOverviewQuestionType(questionType)) {
+            if (usesAuxiliaryDocumentQueries(questionType)) {
                 for (String query : overviewQueries(question, questionType, effectiveProfile)) {
                     searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
                 }
@@ -744,10 +744,10 @@ public class RagService {
             return;
         }
         int baseRadius = Math.max(0, properties.getRag().getPipeline().getDocumentAdjacentChunkRadius());
-        int radius = isOverviewQuestionType(questionType) || answerMode == AnswerMode.SUMMARY ? Math.max(baseRadius, 2) : baseRadius;
+        int radius = adjacentRadius(answerMode, questionType, baseRadius);
         if (speedProfile == DocumentSpeedProfile.FAST) {
             radius = Math.min(radius, Math.max(1, baseRadius));
-        } else if (speedProfile == DocumentSpeedProfile.DEEP && isOverviewQuestionType(questionType)) {
+        } else if (speedProfile == DocumentSpeedProfile.DEEP && usesAdjacentDetail(questionType)) {
             radius = Math.max(radius, 2);
         }
         if (radius <= 0) {
@@ -845,7 +845,7 @@ public class RagService {
             UUID selectedSpaceId,
             Map<UUID, SearchResult> merged
     ) {
-        if (!isOverviewQuestionType(questionType)
+        if (!usesMixedContextChunks(questionType)
                 || merged.isEmpty()
                 || spaceIds == null
                 || spaceIds.isEmpty()) {
@@ -897,6 +897,29 @@ public class RagService {
         } catch (RuntimeException ex) {
             log.warn("RAG context-related expansion failed question={}", abbreviate(question), ex);
         }
+    }
+
+    private int adjacentRadius(AnswerMode answerMode, DocumentQuestionType questionType, int baseRadius) {
+        if (questionType == DocumentQuestionType.LOCATION || questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return Math.min(Math.max(baseRadius, 1), 1);
+        }
+        if (usesAdjacentDetail(questionType) || answerMode == AnswerMode.SUMMARY) {
+            return Math.max(baseRadius, 2);
+        }
+        return baseRadius;
+    }
+
+    private boolean usesAdjacentDetail(DocumentQuestionType questionType) {
+        return isOverviewQuestionType(questionType)
+                || questionType == DocumentQuestionType.CLAUSE_EXPLANATION
+                || questionType == DocumentQuestionType.COMPARISON
+                || questionType == DocumentQuestionType.PROCEDURE;
+    }
+
+    private boolean isStructuredDetailQuestionType(DocumentQuestionType questionType) {
+        return questionType == DocumentQuestionType.CLAUSE_EXPLANATION
+                || questionType == DocumentQuestionType.COMPARISON
+                || questionType == DocumentQuestionType.PROCEDURE;
     }
 
     private boolean hasContextRoutingMetadata(Map<String, Object> metadata) {
@@ -1017,6 +1040,18 @@ public class RagService {
         if (isCountQuestion(question) || answerMode == AnswerMode.TABLE) {
             return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 8 : 12);
         }
+        if (questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 8 : 12);
+        }
+        if (questionType == DocumentQuestionType.LOCATION) {
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 5 : 7);
+        }
+        if (questionType == DocumentQuestionType.COMPARISON || questionType == DocumentQuestionType.PROCEDURE) {
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 8 : 12);
+        }
+        if (questionType == DocumentQuestionType.CLAUSE_EXPLANATION) {
+            return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 8 : 10);
+        }
         if (answerMode == AnswerMode.SUMMARY) {
             return Math.max(configured, speedProfile == DocumentSpeedProfile.FAST ? 7 : 10);
         }
@@ -1075,15 +1110,15 @@ public class RagService {
             return List.of();
         }
         int limit = switch (answerMode) {
-            case SUMMARY, TABLE -> Math.min(results.size(), pipelineService.documentContextLimit(12));
+            case SUMMARY, TABLE -> Math.min(results.size(), Math.max(1, pipelineService.documentContextLimit(12)));
             case QUOTE -> Math.min(results.size(), 6);
-            default -> Math.min(results.size(), pipelineService.documentContextLimit(Math.max(8, properties.getRag().getTopK())));
+            default -> Math.min(results.size(), Math.max(1, pipelineService.documentContextLimit(Math.max(8, properties.getRag().getTopK()))));
         };
         List<SearchResult> ordered = orderDocumentEvidence(question, answerMode, results);
         if (isOverviewQuestionType(questionType)) {
             return preservePinnedCitation(ordered, selectOverviewCitations(ordered, limit, speedProfile), limit);
         }
-        if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
+        if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question) || questionType == DocumentQuestionType.COUNT_OR_TABLE) {
             List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
             if (!originals.isEmpty()) {
                 return preservePinnedCitation(ordered, originals, limit);
@@ -1376,6 +1411,8 @@ public class RagService {
                 score += 0.22;
             } else if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question)) {
                 score -= 0.80;
+            } else if (asksForOverviewAndDetail(question)) {
+                score += contextType.endsWith("_summary") || contextType.endsWith("_structure") ? 0.16 : 0.04;
             } else {
                 score -= 0.08;
             }
@@ -1452,6 +1489,9 @@ public class RagService {
         if (isOverviewQuestionType(questionType)) {
             return 4;
         }
+        if (questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return 3;
+        }
         return answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE ? 3 : 2;
     }
 
@@ -1495,6 +1535,28 @@ public class RagService {
     }
 
     private int contextLimit(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        if (questionType == DocumentQuestionType.LOCATION) {
+            return switch (speedProfile) {
+                case FAST -> 4;
+                case DEEP -> 7;
+                default -> 6;
+            };
+        }
+        if (questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return switch (speedProfile) {
+                case FAST -> pipelineService.documentContextLimit(6);
+                case DEEP -> pipelineService.documentContextLimit(12);
+                default -> pipelineService.documentContextLimit(8);
+            };
+        }
+        if (isStructuredDetailQuestionType(questionType)) {
+            int baseline = pipelineService.documentContextLimit(questionType == DocumentQuestionType.COMPARISON ? 10 : 9);
+            return switch (speedProfile) {
+                case FAST -> Math.min(baseline, 7);
+                case DEEP -> Math.max(baseline, 12);
+                default -> baseline;
+            };
+        }
         if (isOverviewQuestionType(questionType)) {
             int baseline = pipelineService.documentContextLimit(Math.max(8,
                     properties.getRag().getOverview().getMinContextChunks()
@@ -1519,12 +1581,23 @@ public class RagService {
     }
 
     private int contextExcerptChars(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
-        int baseline = answerMode == AnswerMode.TABLE
-                ? TABLE_CONTEXT_EXCERPT_CHARS
-                : isOverviewQuestionType(questionType) ? 900 : GENERAL_CONTEXT_EXCERPT_CHARS;
+        int baseline;
+        if (questionType == DocumentQuestionType.LOCATION) {
+            baseline = 650;
+        } else if (questionType == DocumentQuestionType.COUNT_OR_TABLE || answerMode == AnswerMode.TABLE) {
+            baseline = TABLE_CONTEXT_EXCERPT_CHARS;
+        } else if (questionType == DocumentQuestionType.CLAUSE_EXPLANATION || questionType == DocumentQuestionType.PROCEDURE) {
+            baseline = 1100;
+        } else if (questionType == DocumentQuestionType.COMPARISON) {
+            baseline = 1000;
+        } else if (isOverviewQuestionType(questionType)) {
+            baseline = 1200;
+        } else {
+            baseline = GENERAL_CONTEXT_EXCERPT_CHARS;
+        }
         return switch (speedProfile) {
-            case FAST -> Math.min(baseline, answerMode == AnswerMode.TABLE ? 700 : 520);
-            case DEEP -> Math.max(baseline, isOverviewQuestionType(questionType) ? 1000 : 820);
+            case FAST -> Math.min(baseline, questionType == DocumentQuestionType.LOCATION ? 520 : answerMode == AnswerMode.TABLE ? 700 : 760);
+            case DEEP -> Math.max(baseline, isOverviewQuestionType(questionType) || isStructuredDetailQuestionType(questionType) ? 1400 : 1000);
             default -> baseline;
         };
     }
@@ -1539,6 +1612,7 @@ public class RagService {
                 - 가능하면 "요약", "핵심 근거", "문서별 차이", "한계" 섹션을 사용하세요.
                 """
                 : "";
+        String documentStructuredInstruction = documentStructuredInstruction(questionType);
         return """
                 당신은 LearnBot의 사내 문서 RAG 답변 도우미입니다.
 
@@ -1557,7 +1631,34 @@ public class RagService {
                 - 요약/개요 질문: "요약", "주요 근거", "문서별 차이", "한계"
                 - 표/수치 질문: "결과", "계산 근거", "한계"
                 - 원문 인용 질문: 짧은 인용과 그 의미를 함께 설명
-                """ + "\n" + overviewInstruction + "\n" + answerMode.instruction();
+                """ + "\n" + overviewInstruction + "\n" + documentStructuredInstruction + "\n" + answerMode.instruction();
+    }
+
+    private String documentStructuredInstruction(DocumentQuestionType questionType) {
+        if (isStructuredDetailQuestionType(questionType)) {
+            return """
+                    규정/조항형 답변 추가 규칙:
+                    - 가능하면 "결론", "적용대상", "조건", "예외/제한", "절차/판단기준", "근거", "불확실한 부분" 순서로 답하세요.
+                    - 조건, 예외, 제한, 적용대상이 Context에 있으면 반드시 분리해서 쓰세요.
+                    - Context에 없는 조건이나 예외는 만들지 말고 "근거에서 확인되지 않음"이라고 쓰세요.
+                    - 비교 질문은 항목별 공통점과 차이점을 분리하고, 각 항목마다 근거 번호를 붙이세요.
+                    """;
+        }
+        if (questionType == DocumentQuestionType.LOCATION) {
+            return """
+                    위치/찾기 답변 추가 규칙:
+                    - 먼저 문서명, 조항/섹션, 페이지, chunk 정보를 짧게 제시하세요.
+                    - 위치 근거가 불확실하면 가장 가까운 후보와 한계를 분리해서 쓰세요.
+                    """;
+        }
+        if (questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return """
+                    표/엑셀/건수 답변 추가 규칙:
+                    - 행, 열, sheet, tableId, 계산 기준을 근거와 함께 밝히세요.
+                    - 전체 표를 확인하지 못했으면 부분 집계임을 명시하세요.
+                    """;
+        }
+        return "";
     }
     private String fallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
         if (results.isEmpty()) {
@@ -2176,6 +2277,18 @@ public class RagService {
                 || normalized.contains("count")
                 || normalized.contains("total");
     }
+
+    private boolean asksForOverviewAndDetail(String question) {
+        String normalized = normalizeForSearch(question);
+        boolean overviewIntent = containsAny(normalized,
+                "overview", "summary", "summarize", "main", "key",
+                "개요", "요약", "정리", "전체", "주요", "핵심");
+        boolean detailIntent = containsAny(normalized,
+                "condition", "exception", "limit", "scope", "clause", "criteria", "detail",
+                "조건", "예외", "제한", "범위", "조항", "기준", "세부", "상세", "적용대상");
+        return overviewIntent && detailIntent;
+    }
+
     private boolean isSpreadsheet(SearchResult result) {
         String contentType = safe(result.contentType()).toLowerCase();
         String title = safe(result.title()).toLowerCase();
@@ -2202,6 +2315,22 @@ public class RagService {
         }
         String normalized = normalizeForSearch(question);
         String compact = safe(question).replaceAll("\\s+", "").toLowerCase();
+        if (answerMode == AnswerMode.TABLE || isCountQuestion(question)
+                || containsAny(normalized, "table", "row", "column", "sheet", "excel", "count", "표", "테이블", "행", "열", "시트", "엑셀", "건수", "몇 명", "몇명", "개수")) {
+            return DocumentQuestionType.COUNT_OR_TABLE;
+        }
+        if (containsAny(normalized, "where", "location", "page", "section", "which article", "위치", "어디", "몇 조", "몇조", "몇 페이지", "페이지", "조항 위치", "섹션")) {
+            return DocumentQuestionType.LOCATION;
+        }
+        if (containsAny(normalized, "compare", "comparison", "difference", "versus", " vs ", "비교", "차이", "각각", "대비", "공통점", "차이점")) {
+            return DocumentQuestionType.COMPARISON;
+        }
+        if (containsAny(normalized, "procedure", "step", "how to", "approval", "apply", "절차", "단계", "방법", "처리", "신청", "승인")) {
+            return DocumentQuestionType.PROCEDURE;
+        }
+        if (containsAny(normalized, "clause", "article", "criteria", "condition", "exception", "limit", "scope", "applies", "조항", "규정", "기준", "적용", "대상", "조건", "예외", "제한", "범위")) {
+            return DocumentQuestionType.CLAUSE_EXPLANATION;
+        }
         if (containsAny(normalized, "architecture", "아키텍처", "구성", "구조", "전체 구조", "컴포넌트", "모듈")) {
             return DocumentQuestionType.ARCHITECTURE;
         }
@@ -2219,7 +2348,18 @@ public class RagService {
         return DocumentQuestionType.GENERAL;
     }
     private boolean isOverviewQuestionType(DocumentQuestionType questionType) {
-        return questionType != null && questionType != DocumentQuestionType.GENERAL;
+        return questionType == DocumentQuestionType.OVERVIEW
+                || questionType == DocumentQuestionType.STRUCTURE
+                || questionType == DocumentQuestionType.PROCESS_FLOW
+                || questionType == DocumentQuestionType.ARCHITECTURE;
+    }
+
+    private boolean usesMixedContextChunks(DocumentQuestionType questionType) {
+        return isOverviewQuestionType(questionType) || isStructuredDetailQuestionType(questionType);
+    }
+
+    private boolean usesAuxiliaryDocumentQueries(DocumentQuestionType questionType) {
+        return isOverviewQuestionType(questionType) || isStructuredDetailQuestionType(questionType);
     }
 
     private boolean needsMoreOverviewEvidence(List<SearchResult> results, DocumentQuestionType questionType) {
@@ -2237,6 +2377,9 @@ public class RagService {
         List<String> queries = switch (questionType) {
             case ARCHITECTURE -> List.of(base + " architecture structure components", "source structure document map overview", "문서 구조 구성 아키텍처 개요");
             case PROCESS_FLOW -> List.of(base + " process flow workflow steps", "source structure process sequence overview", "흐름 과정 절차 단계 구조");
+            case PROCEDURE -> List.of(base + " procedure process steps conditions exceptions", "절차 단계 조건 예외 제한 처리 기준");
+            case CLAUSE_EXPLANATION -> List.of(base + " clause policy criteria conditions exceptions scope", "조항 규정 기준 조건 예외 제한 적용대상");
+            case COMPARISON -> List.of(base + " compare difference conditions exceptions", "비교 차이 공통점 조건 예외 제한");
             case STRUCTURE -> List.of(base + " structure outline sections", "document structure source structure map", "구조 목차 섹션 구성 문서맵");
             case OVERVIEW -> List.of(base + " overview summary main topics", "source summary document summary representative documents", "개요 요약 주요 내용 전체 구조");
             default -> List.of();
@@ -2873,7 +3016,12 @@ public class RagService {
         OVERVIEW,
         STRUCTURE,
         PROCESS_FLOW,
-        ARCHITECTURE
+        ARCHITECTURE,
+        CLAUSE_EXPLANATION,
+        COMPARISON,
+        PROCEDURE,
+        COUNT_OR_TABLE,
+        LOCATION
     }
 
     private enum DocumentSpeedProfile {

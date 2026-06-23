@@ -251,10 +251,13 @@ export function useCodeRagController({
       const parentTurnId = codeConversationTurns.at(-1)?.id || null;
       const followup = Boolean(codeConversationId);
       const effectiveMode = followup ? '' : codeMode;
+      const effectiveRepositoryId = followup
+        ? codeAnswer?.repositoryId || selectedRepositoryId || null
+        : selectedRepositoryId || null;
       const data = await request('/api/code/ask', {
         method: 'POST',
         json: {
-          repositoryId: selectedRepositoryId || null,
+          repositoryId: effectiveRepositoryId,
           spaceId: activeSpaceId,
           question: codeQuestion,
           mode: effectiveMode,
@@ -264,7 +267,7 @@ export function useCodeRagController({
           conversational: true,
         },
       });
-      setCodeAnswer(data);
+      setCodeAnswer(data ? { ...data, repositoryId: effectiveRepositoryId } : data);
       setCodeAnswerSavedId('');
       if (data?.conversationId) {
         setCodeConversationId(data.conversationId);
@@ -299,6 +302,10 @@ export function useCodeRagController({
     await run(`code-conversation-${conversationId}`, async () => {
       const detail = await request(`/api/rag/conversations/${conversationId}`);
       const turns = detail?.turns || [];
+      const repositoryId = detail?.conversation?.repositoryId || '';
+      if (repositoryId) {
+        setSelectedRepositoryId(repositoryId);
+      }
       setCodeConversationId(conversationId);
       setCodeConversationTurns(turns);
       const lastTurn = turns.at(-1);
@@ -313,6 +320,7 @@ export function useCodeRagController({
           conversationId,
           turnId: lastTurn.id,
           rewrittenQuestion: lastTurn.rewrittenQuestion,
+          repositoryId,
         });
         setCodeAnswerSavedId('');
       }

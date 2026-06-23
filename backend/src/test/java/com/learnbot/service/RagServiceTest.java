@@ -187,6 +187,123 @@ class RagServiceTest {
     }
 
     @Test
+    void clauseExplanationQuestionUsesStructuredDocumentPromptInsteadOfLocationPrompt() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "이 규정의 적용대상과 조건, 예외를 설명해줘";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "복무규정.pdf",
+                "application/pdf",
+                "제10조 적용대상은 임직원이며, 조건은 사전 승인입니다. 예외는 긴급 상황입니다.");
+
+        when(searchService.searchDetailed(anyString(), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("결론: 적용대상은 임직원입니다. 조건과 예외는 근거에 따릅니다 [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
+        assertThat(systemCaptor.getValue()).contains("규정/조항형 답변 추가 규칙", "적용대상", "조건", "예외/제한");
+        assertThat(systemCaptor.getValue()).doesNotContain("위치/찾기 답변 추가 규칙");
+        assertThat(response.mode()).isEqualTo("qa");
+        assertThat(response.answer()).contains("[1]");
+    }
+
+    @Test
+    void locationQuestionUsesLocationPrompt() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "이 조항 위치와 페이지 알려줘";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 7,
+                "복무규정.pdf",
+                "application/pdf",
+                "제10조 적용대상은 임직원입니다.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("복무규정.pdf의 chunk 7에서 확인됩니다 [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
+        assertThat(systemCaptor.getValue()).contains("위치/찾기 답변 추가 규칙");
+        assertThat(systemCaptor.getValue()).doesNotContain("규정/조항형 답변 추가 규칙");
+        assertThat(response.answer()).contains("[1]");
+    }
+
+    @Test
+    void processFlowQuestionUsesOverviewPromptNotProcedurePrompt() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "전체 프로세스 흐름을 설명해줘";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 2,
+                "업무가이드.pdf",
+                "application/pdf",
+                "접수 이후 검토, 승인, 통보 순서로 업무가 흐릅니다.");
+
+        when(searchService.searchDetailed(anyString(), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("전체 흐름은 접수, 검토, 승인, 통보입니다 [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
+        assertThat(systemCaptor.getValue()).contains("개요/구조/흐름 질문 추가 규칙");
+        assertThat(systemCaptor.getValue()).doesNotContain("규정/조항형 답변 추가 규칙");
+        assertThat(response.answer()).contains("[1]");
+    }
+
+    @Test
+    void procedureQuestionUsesStructuredProcedurePrompt() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "승인 절차와 예외 조건을 알려줘";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 3,
+                "업무규정.pdf",
+                "application/pdf",
+                "승인 절차는 신청, 검토, 승인 순서이며 예외 조건은 긴급 처리입니다.");
+
+        when(searchService.searchDetailed(anyString(), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("승인 절차는 신청, 검토, 승인 순서이며 예외 조건은 긴급 처리입니다 [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
+        assertThat(systemCaptor.getValue()).contains("규정/조항형 답변 추가 규칙", "절차/판단기준");
+        assertThat(systemCaptor.getValue()).doesNotContain("위치/찾기 답변 추가 규칙");
+        assertThat(response.answer()).contains("[1]");
+    }
+
+    @Test
     void documentEvidenceRankingAddsMetadataAndPromotesDirectMatch() {
         SearchService searchService = mock(SearchService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -231,8 +348,8 @@ class RagServiceTest {
 
         when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), any(), isNull()))
                 .thenReturn(List.of(seed));
-        when(documentRepository.adjacentChunks(eq(documentId), eq(3), eq(1), isNull(SearchFilter.class), any(), isNull()))
-                .thenReturn(List.of(adjacent));
+        when(documentRepository.adjacentChunksBatch(any(), eq(1), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(new DocumentRepository.AdjacentChunkCandidate(adjacent, seed.chunkId(), 1, seed.score())));
         when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("The security policy requires access reviews and MFA [1][2]."));
 
         AskResponse response = service.ask(question, null, "qa", List.of(UUID.randomUUID()), null);
