@@ -113,7 +113,7 @@ public class RagConversationRepository {
 
     public List<RagConversationTurnContext> recentTurnContexts(UUID conversationId, int limit) {
         return jdbc.query("""
-                SELECT question, answer, evidence::text AS evidence
+                SELECT question, answer, mode, evidence::text AS evidence
                 FROM rag_conversation_turns
                 WHERE conversation_id = :conversationId
                 ORDER BY created_at DESC
@@ -123,6 +123,7 @@ public class RagConversationRepository {
                 .addValue("limit", Math.max(1, Math.min(limit, 8))), (rs, rowNum) -> new RagConversationTurnContext(
                 rs.getString("question"),
                 rs.getString("answer"),
+                rs.getString("mode"),
                 fromJson(rs.getString("evidence"))
         ));
     }

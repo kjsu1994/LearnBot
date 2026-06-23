@@ -79,26 +79,36 @@ public class RagConversationService {
         List<RagConversationTurnContext> recentTurns = repository.recentTurnContexts(conversation.id(), RECENT_TURN_LIMIT);
         boolean hasRecentTurns = recentTurns != null && !recentTurns.isEmpty();
         ConversationIntent intent = classifyConversationIntent(question, hasRecentTurns);
-        boolean contextual = intent != ConversationIntent.NONE
-                || (looksContextual(normalizedDomain, question) && hasRecentTurns);
-        List<PreviousAnswerItem> previousItems = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+        List<CodeConversationAnchor> codeAnchors = CODE.equals(normalizedDomain) && hasRecentTurns
+                ? codeAnchors(recentTurns)
+                : List.of();
+        boolean referenceFollowup = hasRecentTurns && (
+                looksContextual(normalizedDomain, question)
+                        || looksReferenceFollowup(question)
+                        || (CODE.equals(normalizedDomain) && !codeAnchors.isEmpty() && looksShortCodeFollowup(question))
+        );
+        boolean contextual = intent != ConversationIntent.NONE || referenceFollowup;
+        ConversationIntent effectiveIntent = intent == ConversationIntent.NONE && contextual
+                ? ConversationIntent.REFERENCE_FOLLOWUP
+                : intent;
+        List<PreviousAnswerItem> previousItems = effectiveIntent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
                 ? previousAnswerItems(recentTurns.get(0))
                 : List.of();
         List<UUID> requiredChunkIds = requiredChunkIds(previousItems);
         if (CODE.equals(normalizedDomain)) {
-            List<CodeConversationAnchor> anchors = contextual ? codeAnchors(recentTurns) : List.of();
-            String rewritten = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+            List<CodeConversationAnchor> anchors = contextual ? codeAnchors : List.of();
+            String rewritten = effectiveIntent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
                     ? clean(question)
                     : contextual ? rewriteCodeQuestion(question, recentTurns, anchors) : clean(question);
             return new RagConversationContext(conversation.id(), rewritten, recentTurns, anchors, List.of(), contextual,
-                    intent, previousItems, List.of(), requiredChunkIds);
+                    effectiveIntent, previousItems, List.of(), requiredChunkIds);
         }
         List<DocumentConversationAnchor> anchors = contextual ? documentAnchors(recentTurns) : List.of();
-        String rewritten = intent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
+        String rewritten = effectiveIntent == ConversationIntent.PREVIOUS_ANSWER_EXPANSION
                 ? clean(question)
                 : contextual ? rewriteDocumentQuestion(question, recentTurns, anchors) : clean(question);
         return new RagConversationContext(conversation.id(), rewritten, recentTurns, List.of(), anchors, contextual,
-                intent, previousItems, requiredChunkIds, List.of());
+                effectiveIntent, previousItems, requiredChunkIds, List.of());
     }
 
     public AskResponse saveDocumentTurn(
@@ -217,6 +227,40 @@ public class RagConversationService {
                 "\uadf8 \ud398\uc774\uc9c0", "\uc774 \ud398\uc774\uc9c0", "\ud574\ub2f9 \ud398\uc774\uc9c0");
     }
 
+    private boolean looksReferenceFollowup(String question) {
+        String normalized = clean(question).toLowerCase();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        return containsAny(normalized,
+                "\ub354 \uc790\uc138\ud788", "\uc880 \ub354 \uc790\uc138\ud788", "\uc790\uc138\ud788",
+                "\ub354 \uc124\uba85", "\ucd94\uac00 \uc124\uba85", "\uc65c ", "\uc5b4\ub5bb\uac8c",
+                "more detail", "details", "elaborate", "explain more", "why", "how");
+    }
+
+    private boolean looksShortCodeFollowup(String question) {
+        String normalized = clean(question).toLowerCase();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        int terms = normalized.split("\\s+").length;
+        return normalized.length() <= 80
+                && terms <= 12
+                && !looksStandaloneCodeTarget(question)
+                && !containsAny(normalized, "\uc0c8 \ub300\ud654", "\ub2e4\ub978 \uc8fc\uc81c", "new topic", "unrelated");
+    }
+
+    private boolean looksStandaloneCodeTarget(String question) {
+        String raw = clean(question);
+        if (raw.isBlank()) {
+            return false;
+        }
+        return raw.matches(".*[/\\\\].*")
+                || raw.matches("(?i).*\\b[\\w.-]+\\.(java|js|jsx|ts|tsx|cs|py|kt|go|rb|php|cpp|c|h)\\b.*")
+                || raw.matches(".*\\b[A-Z][A-Za-z0-9_]*(Controller|Service|Repository|Component|Page|View|Model|Dto|DTO)\\b.*")
+                || raw.matches(".*\\b[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(.*");
+    }
+
     private ConversationIntent classifyConversationIntent(String question, boolean hasRecentTurns) {
         if (!hasRecentTurns) {
             return ConversationIntent.NONE;
@@ -226,12 +270,11 @@ public class RagConversationService {
             return ConversationIntent.NONE;
         }
         if (containsAny(normalized,
-                "\ub354 \uc790\uc138\ud788", "\uc880 \ub354 \uc790\uc138\ud788", "\uc790\uc138\ud788",
                 "\ud56d\ubaa9\ubcc4", "\uac01 \ud56d\ubaa9", "\uac01 \uadfc\uac70",
                 "\ud575\uc2ec\uadfc\uac70", "\ud575\uc2ec \uadfc\uac70", "\uadfc\uac70\ub97c",
                 "\uc704 \ub0b4\uc6a9", "\uc704 \ub2f5\ubcc0", "\ubc29\uae08 \ub2f5\ubcc0",
                 "\uc774\uc804 \ub2f5\ubcc0", "\ud655\uc7a5",
-                "more detail", "details", "expand", "elaborate", "by item", "by evidence", "per item")) {
+                "expand", "previous answer", "by item", "by evidence", "per item")) {
             return ConversationIntent.PREVIOUS_ANSWER_EXPANSION;
         }
         return ConversationIntent.NONE;

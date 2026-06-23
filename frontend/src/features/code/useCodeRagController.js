@@ -249,14 +249,16 @@ export function useCodeRagController({
     event.preventDefault();
     await run('code-ask', async () => {
       const parentTurnId = codeConversationTurns.at(-1)?.id || null;
+      const followup = Boolean(codeConversationId);
+      const effectiveMode = followup ? '' : codeMode;
       const data = await request('/api/code/ask', {
         method: 'POST',
         json: {
           repositoryId: selectedRepositoryId || null,
           spaceId: activeSpaceId,
           question: codeQuestion,
-          mode: codeMode,
-          limit: codeMode === 'overview' ? 16 : 10,
+          mode: effectiveMode,
+          limit: followup ? null : codeMode === 'overview' ? 16 : 10,
           conversationId: codeConversationId || null,
           parentTurnId,
           conversational: true,

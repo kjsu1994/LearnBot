@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AnswerEvidence;
 import com.learnbot.dto.AskResponse;
+import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationSummary;
@@ -107,6 +108,113 @@ class RagConversationServiceTest {
         assertThat(context.rewrittenQuestion()).isEqualTo("more detail by item");
         assertThat(context.previousAnswerItems()).hasSize(2);
         assertThat(context.requiredDocumentChunkIds()).containsExactly(firstChunkId, secondChunkId);
+    }
+
+    @Test
+    void shortCodeFollowupUsesPreviousCodeAnchors() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithCodeEvidence(chunkId)));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "more detail",
+                true
+        );
+
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.REFERENCE_FOLLOWUP);
+        assertThat(context.contextual()).isTrue();
+        assertThat(context.codeAnchors()).extracting(CodeConversationAnchor::chunkId).containsExactly(chunkId);
+        assertThat(context.rewrittenQuestion()).contains("CodeRagService.java").contains("askConversational").contains("more detail");
+        assertThat(context.previousAnswerExpansion()).isFalse();
+    }
+
+    @Test
+    void previousAnswerExpansionRequiresExplicitPreviousAnswerExpansionSignal() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithCodeEvidence(chunkId)));
+
+        RagConversationContext detailContext = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "details",
+                true
+        );
+        RagConversationContext expansionContext = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "expand previous answer by item",
+                true
+        );
+
+        assertThat(detailContext.conversationIntent()).isEqualTo(ConversationIntent.REFERENCE_FOLLOWUP);
+        assertThat(detailContext.requiredCodeChunkIds()).isEmpty();
+        assertThat(expansionContext.conversationIntent()).isEqualTo(ConversationIntent.PREVIOUS_ANSWER_EXPANSION);
+        assertThat(expansionContext.requiredCodeChunkIds()).contains(chunkId);
+    }
+
+    @Test
+    void shortCodeQuestionWithoutPreviousAnchorsDoesNotBecomeContextualOnlyByConversationId() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(new RagConversationTurnContext(
+                "What does this repository do?",
+                "It explains the service.",
+                objectMapper.createArrayNode()
+        )));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "login",
+                true
+        );
+
+        assertThat(context.contextual()).isFalse();
+        assertThat(context.codeAnchors()).isEmpty();
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.NONE);
+    }
+
+    @Test
+    void shortCodeQuestionWithExplicitClassTargetDoesNotBecomeContextualFollowup() {
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        when(repository.findSummary(user.id(), conversationId)).thenReturn(Optional.of(summary(conversationId, spaceId, RagConversationService.CODE, null)));
+        when(repository.recentTurnContexts(conversationId, 5)).thenReturn(List.of(turnWithCodeEvidence(chunkId)));
+
+        RagConversationContext context = service.prepare(
+                user,
+                spaceId,
+                RagConversationService.CODE,
+                null,
+                conversationId,
+                "AuthController",
+                true
+        );
+
+        assertThat(context.contextual()).isFalse();
+        assertThat(context.codeAnchors()).isEmpty();
+        assertThat(context.conversationIntent()).isEqualTo(ConversationIntent.NONE);
     }
 
     @Test
@@ -255,5 +363,18 @@ class RagConversationServiceTest {
         ))
                 .toList();
         return new RagConversationTurnContext("What is the policy?", answer, objectMapper.valueToTree(evidence));
+    }
+
+    private RagConversationTurnContext turnWithCodeEvidence(UUID chunkId) {
+        List<Map<String, Object>> evidence = List.of(Map.of(
+                "chunkId", chunkId.toString(),
+                "filePath", "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "symbolName", "askConversational",
+                "className", "CodeRagService",
+                "methodName", "askConversational",
+                "lineStart", 120,
+                "lineEnd", 140
+        ));
+        return new RagConversationTurnContext("How does askConversational work?", "## Ask flow [1]\n- Uses prioritized RAG [1].", objectMapper.valueToTree(evidence));
     }
 }

@@ -1,5 +1,6 @@
 package com.learnbot.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
@@ -7,6 +8,7 @@ import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.PreviousAnswerItem;
 import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -386,7 +389,115 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void previousAnswerExpansionKeepsRequiredCodeEvidenceWithoutNewSearch() {
+    void conversationalAutoModeInfersFlowAndKeepsPinnedEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                null,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        UUID pinnedChunkId = UUID.randomUUID();
+        CodeSearchResult pinned = resultWithId(
+                pinnedChunkId,
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askConversational",
+                0.25,
+                "public CodeAskResponse askConversational(...) { return askPrioritized(...); }"
+        );
+        CodeSearchResult generic = result(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "method",
+                "ask",
+                0.40
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "CodeRagService askConversational call flow",
+                List.of(),
+                List.of(new CodeConversationAnchor(
+                        pinnedChunkId,
+                        pinned.filePath(),
+                        pinned.symbolName(),
+                        pinned.className(),
+                        pinned.methodName(),
+                        pinned.lineStart(),
+                        pinned.lineEnd()
+                )),
+                true
+        );
+
+        when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(pinned));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(generic));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "call flow",
+                "auto",
+                null,
+                context
+        );
+
+        assertThat(response.mode()).isEqualTo("flow");
+        assertThat(response.evidence()).isNotEmpty();
+        assertThat(response.evidence().get(0).chunkId()).isEqualTo(pinnedChunkId);
+        assertThat(response.evidence().get(0).metadata()).containsEntry("conversationPinned", true);
+    }
+
+    @Test
+    void conversationalAutoModeInheritsPreviousModeWhenQuestionHasNoModeKeyword() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.72
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "more detail",
+                List.of(new RagConversationTurnContext("What is affected?", "Impact answer [1]", "impact", new ObjectMapper().createArrayNode())),
+                List.of(),
+                List.of(),
+                true
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "more detail",
+                "",
+                null,
+                context
+        );
+
+        assertThat(response.mode()).isEqualTo("impact");
+    }
+
+    @Test
+    void previousAnswerExpansionKeepsRequiredCodeEvidenceAndStillSearches() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -412,6 +523,12 @@ class CodeRagServiceTest {
                 0.20,
                 "private CodeAskResponse askPrioritized(...) { return fallbackAnswer(...); }"
         );
+        CodeSearchResult searched = result(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "method",
+                "ask",
+                0.35
+        );
         RagConversationContext context = new RagConversationContext(
                 UUID.randomUUID(),
                 "more detail by item",
@@ -426,6 +543,8 @@ class CodeRagServiceTest {
         );
 
         when(codeRepository.findActiveChunksByIds(isNull(), anyList(), anyList(), isNull())).thenReturn(List.of(required));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(searched));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
 
         CodeAskResponse response = service.askConversational(
@@ -433,12 +552,13 @@ class CodeRagServiceTest {
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
                 "more detail by item",
-                "overview",
-                4,
+                "auto",
+                null,
                 context
         );
 
-        verify(searchService, never()).search(isNull(), anyString(), anyInt(), anyList(), isNull());
+        verify(searchService, atLeastOnce()).search(isNull(), anyString(), anyInt(), anyList(), isNull());
+        assertThat(response.mode()).isEqualTo("overview");
         assertThat(response.evidence()).anySatisfy(evidence -> {
             assertThat(evidence.chunkId()).isEqualTo(requiredChunkId);
             assertThat(evidence.metadata()).containsEntry("conversationRequired", true);

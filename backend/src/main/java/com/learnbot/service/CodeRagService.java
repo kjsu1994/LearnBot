@@ -140,7 +140,7 @@ public class CodeRagService {
         long askStarted = System.nanoTime();
         String originalQuestion = safe(question, "");
         String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
-        CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, mode);
+        CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, mode, conversationContext);
         int safeLimit = safeLimit(questionMode, limit);
         long retrievalStarted = System.nanoTime();
         CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, effectiveQuestion, questionMode, safeLimit, conversationContext);
@@ -290,12 +290,16 @@ public class CodeRagService {
         return limit == null ? defaultLimit : Math.max(1, Math.min(limit, 24));
     }
 
-    private CodeQuestionMode classifyCodeQuestion(String question, String mode) {
+    private CodeQuestionMode classifyCodeQuestion(String question, String mode, RagConversationContext conversationContext) {
         CodeQuestionMode requested = CodeQuestionMode.from(mode);
         if (!properties.getRag().getOverview().isEnabled()) {
             return requested;
         }
-        boolean explicitMode = mode != null && !mode.isBlank();
+        boolean autoMode = mode == null || mode.isBlank() || "auto".equalsIgnoreCase(mode.trim());
+        if (autoMode && previousAnswerExpansion(conversationContext)) {
+            return CodeQuestionMode.OVERVIEW;
+        }
+        boolean explicitMode = !autoMode;
         if (explicitMode && requested != CodeQuestionMode.OVERVIEW) {
             return requested;
         }
@@ -309,7 +313,30 @@ public class CodeRagService {
         if (containsAny(normalized, "architecture", "structure", "overview", "module", "component", "아키텍처", "구조", "개요", "구성", "전체")) {
             return CodeQuestionMode.OVERVIEW;
         }
+        if (autoMode && conversationContext != null && conversationContext.contextual()) {
+            CodeQuestionMode previousMode = previousTurnMode(conversationContext);
+            if (previousMode != null) {
+                return previousMode;
+            }
+            return CodeQuestionMode.OVERVIEW;
+        }
         return requested;
+    }
+
+    private CodeQuestionMode previousTurnMode(RagConversationContext conversationContext) {
+        if (conversationContext == null || conversationContext.recentTurns() == null) {
+            return null;
+        }
+        return conversationContext.recentTurns().stream()
+                .map(RagConversationTurnContext::mode)
+                .filter(mode -> mode != null && !mode.isBlank())
+                .map(String::trim)
+                .flatMap(mode -> java.util.Arrays.stream(CodeQuestionMode.values())
+                        .filter(candidate -> candidate.value().equalsIgnoreCase(mode))
+                        .findFirst()
+                        .stream())
+                .findFirst()
+                .orElse(null);
     }
 
     private CodeRetrieval retrieveCodeEvidence(
@@ -324,14 +351,11 @@ public class CodeRagService {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
-        boolean expansionFromPinnedEvidence = previousAnswerExpansion(conversationContext) && pinnedCandidateCount > 0;
-        if (!expansionFromPinnedEvidence) {
-            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
-        }
+        collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
         for (String query : conversationAnchorQueries(question, conversationContext)) {
             collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
         }
-        if (!expansionFromPinnedEvidence && (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW)) {
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
             for (String query : codeOverviewQueries(question, questionMode)) {
                 collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
             }
@@ -354,7 +378,7 @@ public class CodeRagService {
         );
         int iteration = 1;
 
-        if (!assessment.sufficient() && !expansionFromPinnedEvidence && pipelineService.maxIterations() > 1) {
+        if (!assessment.sufficient() && pipelineService.maxIterations() > 1) {
             queryPlan = pipelineService.buildQueryPlan(
                     question,
                     RagPipelineService.Domain.CODE,
