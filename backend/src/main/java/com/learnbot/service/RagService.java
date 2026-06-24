@@ -354,7 +354,7 @@ public class RagService {
                     + "\nKeep the previous answer item structure. Do not invent a new conclusion."
                     + "\nFor each item, explain concrete clauses, criteria, limits, exceptions, and gaps found in the current context."
                     + "\nAttach at least one citation number like [1] to each item when evidence exists."
-                    + "\nIf an item lacks current context evidence, write \"\ucd94\uac00 \uadfc\uac70 \ubd80\uc871\" for that item.";
+                    + "\nIf an item lacks current context evidence, write \"추가 근거 부족\" for that item.";
         }
         return "\nUse previous conversation only to resolve follow-up references."
                 + "\nUse retrieved and pinned document context as the source of truth."
@@ -375,6 +375,8 @@ public class RagService {
                 .limit(5)
                 .map(anchor -> "- " + safe(anchor.title())
                         + nullable(" / page=", anchor.pageNumber() == null ? null : String.valueOf(anchor.pageNumber()))
+                        + nullable(" / clause=", anchor.clauseNumber())
+                        + nullable(" / clauseLevel=", anchor.clauseLevel())
                         + nullable(" / section=", anchor.sectionTitle())
                         + nullable(" / heading=", anchor.headingPath())
                         + " / chunk=" + anchor.chunkIndex())
@@ -398,7 +400,7 @@ public class RagService {
                 .limit(12)
                 .map(item -> "- " + safe(item.label())
                         + (item.citationNumbers().isEmpty() ? "" : " / previous citations=" + item.citationNumbers())
-                        + (item.evidenceChunkIds().isEmpty() ? " / \ucd94\uac00 \uadfc\uac70 \ubd80\uc871" : " / requiredChunks=" + item.evidenceChunkIds()))
+                        + (item.evidenceChunkIds().isEmpty() ? " / 추가 근거 부족" : " / requiredChunks=" + item.evidenceChunkIds()))
                 .collect(Collectors.joining("\n"));
     }
 
@@ -1189,12 +1191,12 @@ public class RagService {
         };
         List<SearchResult> ordered = orderDocumentEvidence(question, answerMode, results);
         if (isOverviewQuestionType(questionType)) {
-            return preservePinnedCitation(ordered, selectOverviewCitations(ordered, limit, speedProfile), limit);
+            return annotateCitationMetadata(questionType, preservePinnedCitation(ordered, selectOverviewCitations(ordered, limit, speedProfile), limit));
         }
         if (answerMode == AnswerMode.QUOTE || answerMode == AnswerMode.TABLE || isCountQuestion(question) || questionType == DocumentQuestionType.COUNT_OR_TABLE) {
             List<SearchResult> originals = ordered.stream().filter(result -> !isDocumentContext(result)).limit(limit).toList();
             if (!originals.isEmpty()) {
-                return preservePinnedCitation(ordered, originals, limit);
+                return annotateCitationMetadata(questionType, preservePinnedCitation(ordered, originals, limit));
             }
         }
         List<SearchResult> selected = new ArrayList<>();
@@ -1211,7 +1213,26 @@ public class RagService {
                 break;
             }
         }
-        return preservePinnedCitation(ordered, selected, limit);
+        return annotateCitationMetadata(questionType, preservePinnedCitation(ordered, selected, limit));
+    }
+
+    private List<SearchResult> annotateCitationMetadata(DocumentQuestionType questionType, List<SearchResult> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return List.of();
+        }
+        return citations.stream()
+                .map(result -> {
+                    Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+                    metadata.put("questionType", questionType.name());
+                    if (!metadataString(result, "sectionTitle").isBlank() || !metadataString(result, "headingPath").isBlank()) {
+                        metadata.putIfAbsent("sectionMatched", true);
+                    }
+                    if (!metadataString(result, "clauseNumber").isBlank() || !metadataString(result, "clauseLevel").isBlank()) {
+                        metadata.putIfAbsent("structureMatched", true);
+                    }
+                    return withMetadata(result, metadata);
+                })
+                .toList();
     }
 
     private List<SearchResult> preservePinnedCitation(List<SearchResult> ordered, List<SearchResult> selected, int limit) {
@@ -1675,7 +1696,80 @@ public class RagService {
         };
     }
 
+    private String cleanSystemPrompt(AnswerMode answerMode, DocumentQuestionType questionType) {
+        String overviewInstruction = isOverviewQuestionType(questionType)
+                ? """
+                개요/구조/흐름 질문 추가 규칙:
+                - 먼저 전체 구조와 핵심 흐름을 요약하세요.
+                - 여러 문서를 종합할 때는 문서별 역할과 공통점/차이점을 분리하세요.
+                - 특정 문서 근거만 있는 주장은 그 한계를 명확히 적으세요.
+                - 가능하면 "요약", "핵심 근거", "문서별 차이", "한계" 섹션을 사용하세요.
+                """
+                : "";
+        return """
+                당신은 LearnBot의 사내 문서 RAG 답변 도우미입니다.
+
+                반드시 지켜야 할 규칙:
+                - 최종 답변은 한국어로 작성하세요.
+                - 제공된 Context 안의 정보만 사용하세요.
+                - 사실 주장에는 반드시 [1], [2] 같은 근거 번호를 붙이세요.
+                - 출처, 페이지, 조항, 파일명, 개수는 Context에 있는 경우에만 말하세요.
+                - 근거가 부족하면 부족한 부분과 추가 확인이 필요한 내용을 명확히 말하세요.
+                - 출처 목록만 나열하지 말고, 결론과 근거를 구조적으로 설명하세요.
+                - 사용자가 영어로 질문해도 답변은 한국어로 작성하세요.
+                - 고유명사, 제품명, API명, URL, 표 컬럼명은 원문 표기를 유지해도 됩니다.
+
+                권장 답변 구조:
+                - 일반 질문: "결론", "근거", "한계"
+                - 요약/개요 질문: "요약", "주요 근거", "문서별 차이", "한계"
+                - 표/건수 질문: "결과", "계산 기준", "표", "한계"
+                - 원문 인용 질문: "원문 인용", "의미", "출처"
+                """
+                + "\n" + overviewInstruction
+                + "\n" + cleanDocumentStructuredInstruction(questionType)
+                + "\n" + cleanAnswerModeInstruction(answerMode);
+    }
+
+    private String cleanDocumentStructuredInstruction(DocumentQuestionType questionType) {
+        if (isStructuredDetailQuestionType(questionType)) {
+            return """
+                    규정/조항 답변 추가 규칙:
+                    - 가능하면 "결론", "적용 대상", "조건", "예외·제한", "절차·판단 기준", "근거", "불확실한 부분" 순서로 답하세요.
+                    - 조건, 예외, 제한, 적용 대상이 Context에 있으면 반드시 분리해서 적으세요.
+                    - Context에 없는 조건이나 예외를 만들지 말고 "근거에서 확인되지 않음"이라고 적으세요.
+                    - 비교 질문은 항목별 공통점과 차이점을 분리하고, 각 항목마다 근거 번호를 붙이세요.
+                    """;
+        }
+        if (questionType == DocumentQuestionType.LOCATION) {
+            return """
+                    위치/찾기 답변 추가 규칙:
+                    - 먼저 문서명, 조항/섹션, 페이지, chunk 정보를 짧게 표시하세요.
+                    - 위치 근거가 불확실하면 가장 가까운 후보와 한계를 분리해서 적으세요.
+                    """;
+        }
+        if (questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return """
+                    표/집계 답변 추가 규칙:
+                    - 행, 열, sheet, tableId, 계산 기준과 근거를 함께 밝히세요.
+                    - 전체 표를 확인하지 못했으면 부분 집계임을 명시하세요.
+                    """;
+        }
+        return "";
+    }
+
+    private String cleanAnswerModeInstruction(AnswerMode answerMode) {
+        return switch (answerMode) {
+            case SUMMARY -> "검색된 문서를 한국어 Markdown bullet로 요약하세요. 관련 항목을 묶고 중요한 주장에는 근거 번호를 붙이세요.";
+            case TABLE -> "문서에서 표 형태로 정리할 수 있는 사실만 추출하세요. 가능하면 간결한 Markdown 표를 사용하고, 없는 행·열·개수는 만들지 마세요.";
+            case QUOTE -> "문서의 직접 인용을 우선 사용하세요. 각 인용은 Markdown blockquote로 쓰고, 바로 아래에 의미와 근거 번호를 붙이세요.";
+            default -> "질문에 직접 답하세요. 먼저 결론을 한국어로 적고, 필요한 경우 핵심 근거를 2~5개 bullet로 정리하세요.";
+        };
+    }
+
     private String systemPrompt(AnswerMode answerMode, DocumentQuestionType questionType) {
+        if (System.nanoTime() >= 0) {
+            return cleanSystemPrompt(answerMode, questionType);
+        }
         String overviewInstruction = isOverviewQuestionType(questionType)
                 ? """
                 개요/구조/흐름 질문 추가 규칙:
@@ -1708,6 +1802,9 @@ public class RagService {
     }
 
     private String documentStructuredInstruction(DocumentQuestionType questionType) {
+        if (System.nanoTime() >= 0) {
+            return cleanDocumentStructuredInstruction(questionType);
+        }
         if (isStructuredDetailQuestionType(questionType)) {
             return """
                     규정/조항형 답변 추가 규칙:
@@ -1733,7 +1830,131 @@ public class RagService {
         }
         return "";
     }
+
+    private String cleanFallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "근거가 부족해 답변을 생성할 수 없습니다.";
+        }
+        if (isCountQuestion(question)) {
+            String sources = IntStream.range(0, Math.min(results.size(), 3))
+                    .mapToObj(index -> {
+                        SearchResult result = results.get(index);
+                        return "- [" + (index + 1) + "] " + result.title() + " (chunk " + result.chunkIndex() + ")";
+                    })
+                    .collect(Collectors.joining("\n"));
+            return """
+                    ## 결과
+                    검색된 일부 근거만으로는 전체 건수를 확정할 수 없습니다.
+
+                    ## 계산 기준
+                    표/CSV처럼 행 단위로 해석 가능한 문서라면 문서 전체 chunk를 기준으로 서버가 집계합니다.
+
+                    ## 근거
+                    %s
+
+                    ## 한계
+                    검색 결과가 부분 근거일 수 있으므로 전체 표를 확인하지 못한 경우 부분 집계로 보아야 합니다.
+                    """.formatted(sources).strip();
+        }
+        return switch (answerMode) {
+            case SUMMARY -> cleanSummaryFallbackAnswer(question, results);
+            case TABLE -> cleanTableFallbackAnswer(question, results);
+            case QUOTE -> cleanQuoteFallbackAnswer(question, results);
+            default -> cleanStructuredFallbackAnswer(question, results);
+        };
+    }
+
+    private String cleanStructuredFallbackAnswer(String question, List<SearchResult> results) {
+        List<EvidencePoint> points = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT);
+        String conclusion = points.isEmpty()
+                ? "검색된 문서 근거만으로는 명확한 결론을 확정하기 어렵습니다."
+                : points.get(0).text() + " [" + points.get(0).citationIndex() + "]";
+        String evidence = points.stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return """
+                ## 결론
+                %s
+
+                ## 근거
+                %s
+
+                ## 관련 문서
+                %s
+
+                ## 한계
+                LLM 답변 생성에 실패했거나 품질 검증을 통과하지 못해, 검색된 문서 근거를 구조화해 반환했습니다.
+                """.formatted(
+                conclusion,
+                evidence.isBlank() ? "- 직접 인용 가능한 근거가 부족합니다." : evidence,
+                citedDocuments(results)
+        ).strip();
+    }
+
+    private String cleanSummaryFallbackAnswer(String question, List<SearchResult> results) {
+        String body = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT + 2).stream()
+                .map(point -> "- " + point.text() + " [" + point.citationIndex() + "]")
+                .collect(Collectors.joining("\n"));
+        return """
+                ## 요약
+                검색된 문서 근거를 기준으로 핵심 내용을 요약했습니다.
+
+                ## 주요 근거
+                %s
+
+                ## 관련 문서
+                %s
+
+                ## 한계
+                LLM 요약 생성이 실패했거나 품질 검증을 통과하지 못해, 추출 근거 중심의 요약으로 대체했습니다.
+                """.formatted(
+                body.isBlank() ? "- 요약 가능한 근거가 부족합니다." : body,
+                citedDocuments(results)
+        ).strip();
+    }
+
+    private String cleanTableFallbackAnswer(String question, List<SearchResult> results) {
+        String rows = uniqueFallbackPoints(question, results, FALLBACK_RESULT_LIMIT + 2).stream()
+                .map(point -> {
+                    SearchResult result = results.get(point.citationIndex() - 1);
+                    return "| [" + point.citationIndex() + "] | " + escapeTable(result.title())
+                            + " | " + escapeTable(point.text()) + " |";
+                })
+                .collect(Collectors.joining("\n"));
+        return """
+                ## 결과
+                표 형태로 추출 가능한 근거를 정리했습니다.
+
+                | 근거 | 문서 | 추출 내용 |
+                |---|---|---|
+                %s
+
+                ## 한계
+                검색된 근거에 없는 행, 열, 개수는 만들지 않았습니다.
+                """.formatted(rows).strip();
+    }
+
+    private String cleanQuoteFallbackAnswer(String question, List<SearchResult> results) {
+        String quotes = IntStream.range(0, Math.min(results.size(), FALLBACK_RESULT_LIMIT + 2))
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    return "> " + trimQuote(relevantExcerpt(question, result.content(), 180))
+                            + "\n\n- 출처: " + result.title() + " [" + (index + 1) + "]";
+                })
+                .collect(Collectors.joining("\n\n"));
+        return """
+                ## 원문 인용
+                %s
+
+                ## 한계
+                LLM 인용 답변 생성이 실패했거나 품질 검증을 통과하지 못해, 원문에 가까운 근거를 추출했습니다.
+                """.formatted(quotes).strip();
+    }
+
     private String fallbackAnswer(AnswerMode answerMode, String question, List<SearchResult> results) {
+        if (System.nanoTime() >= 0) {
+            return cleanFallbackAnswer(answerMode, question, results);
+        }
         if (results.isEmpty()) {
             return "근거가 부족해 답변할 수 없습니다.";
         }
@@ -2335,7 +2556,23 @@ public class RagService {
         return nameColumn == null ? "값이 있는 행" : nameColumn + "(이름)";
     }
 
+    private boolean isCountQuestionClean(String question) {
+        String normalized = normalizeForSearch(question);
+        String compact = safe(question).replaceAll("\\s+", "").toLowerCase();
+        return containsAny(normalized,
+                "count", "total", "row", "table", "sheet", "excel",
+                "총", "전체", "건수", "개수", "몇 명", "몇명", "몇 개", "몇개", "몇 건", "몇건",
+                "합계", "인원", "대상자", "행 수", "표")
+                || compact.contains("총몇")
+                || compact.contains("몇명이")
+                || compact.contains("몇개")
+                || compact.contains("몇건");
+    }
+
     private boolean isCountQuestion(String question) {
+        if (System.nanoTime() >= 0) {
+            return isCountQuestionClean(question);
+        }
         String normalized = safe(question).replaceAll("\\s+", "").toLowerCase();
         return normalized.contains("총몇")
                 || normalized.contains("몇명")
@@ -2351,7 +2588,21 @@ public class RagService {
                 || normalized.contains("total");
     }
 
+    private boolean asksForOverviewAndDetailClean(String question) {
+        String normalized = normalizeForSearch(question);
+        boolean overviewIntent = containsAny(normalized,
+                "overview", "summary", "summarize", "main", "key",
+                "개요", "요약", "정리", "전체", "주요", "핵심");
+        boolean detailIntent = containsAny(normalized,
+                "condition", "exception", "limit", "scope", "clause", "criteria", "detail",
+                "조건", "예외", "제한", "범위", "조항", "기준", "상세", "적용 대상", "적용대상");
+        return overviewIntent && detailIntent;
+    }
+
     private boolean asksForOverviewAndDetail(String question) {
+        if (System.nanoTime() >= 0) {
+            return asksForOverviewAndDetailClean(question);
+        }
         String normalized = normalizeForSearch(question);
         boolean overviewIntent = containsAny(normalized,
                 "overview", "summary", "summarize", "main", "key",
@@ -2373,13 +2624,73 @@ public class RagService {
                 || title.endsWith(".csv");
     }
 
+    private boolean isStructureQuestionClean(String question) {
+        String normalized = normalizeForSearch(question);
+        return containsAny(normalized,
+                "structure", "section", "page", "slide", "sheet", "table", "where", "outline",
+                "구조", "목차", "섹션", "페이지", "슬라이드", "시트", "표", "테이블",
+                "조항", "위치", "어디", "구성", "문서맵");
+    }
+
     private boolean isStructureQuestion(String question) {
+        if (System.nanoTime() >= 0) {
+            return isStructureQuestionClean(question);
+        }
         String normalized = normalizeForSearch(question);
         return containsAny(normalized,
                 "structure", "section", "page", "slide", "sheet", "table", "where",
                 "구조", "목차", "섹션", "페이지", "슬라이드", "시트", "표", "테이블", "조항", "위치", "어디");
     }
+    private DocumentQuestionType classifyDocumentQuestionClean(String question, AnswerMode answerMode) {
+        if (!properties.getRag().getOverview().isEnabled()) {
+            return DocumentQuestionType.GENERAL;
+        }
+        if (answerMode == AnswerMode.SUMMARY) {
+            return DocumentQuestionType.OVERVIEW;
+        }
+        String normalized = normalizeForSearch(question);
+        String compact = safe(question).replaceAll("\\s+", "").toLowerCase();
+        if (answerMode == AnswerMode.TABLE || isCountQuestionClean(question)
+                || containsAny(normalized, "table", "row", "column", "sheet", "excel", "표", "테이블", "행", "열", "시트", "집계", "건수", "개수")) {
+            return DocumentQuestionType.COUNT_OR_TABLE;
+        }
+        if (containsAny(normalized, "where", "location", "page", "section", "which article",
+                "위치", "어디", "몇 조", "몇조", "몇 항", "몇항", "몇 페이지", "몇페이지", "페이지", "조항 위치", "섹션 위치")) {
+            return DocumentQuestionType.LOCATION;
+        }
+        if (containsAny(normalized, "compare", "comparison", "difference", "versus", " vs ",
+                "비교", "차이", "각각", "대비", "공통점", "차이점")) {
+            return DocumentQuestionType.COMPARISON;
+        }
+        if (containsAny(normalized, "procedure", "step", "how to", "approval", "apply",
+                "절차", "단계", "방법", "처리", "신청", "승인", "판단 기준", "판단기준")) {
+            return DocumentQuestionType.PROCEDURE;
+        }
+        if (containsAny(normalized, "clause", "article", "criteria", "condition", "exception", "limit", "scope", "applies",
+                "조항", "규정", "기준", "적용", "적용 대상", "적용대상", "조건", "예외", "제한", "범위")) {
+            return DocumentQuestionType.CLAUSE_EXPLANATION;
+        }
+        if (containsAny(normalized, "architecture", "아키텍처", "구성", "구조", "전체 구조", "컴포넌트", "모듈")) {
+            return DocumentQuestionType.ARCHITECTURE;
+        }
+        if (containsAny(normalized, "flow", "process", "workflow", "sequence", "흐름", "과정", "순서", "프로세스")) {
+            return DocumentQuestionType.PROCESS_FLOW;
+        }
+        if (isStructureQuestionClean(question) || containsAny(normalized, "목차", "섹션", "어떻게 구성")) {
+            return DocumentQuestionType.STRUCTURE;
+        }
+        if (containsAny(normalized, "overview", "summary", "summarize", "개요", "요약", "정리", "전체", "주요", "핵심", "무엇")
+                || compact.contains("뭐하는")
+                || compact.contains("어떤문서")) {
+            return DocumentQuestionType.OVERVIEW;
+        }
+        return DocumentQuestionType.GENERAL;
+    }
+
     private DocumentQuestionType classifyDocumentQuestion(String question, AnswerMode answerMode) {
+        if (System.nanoTime() >= 0) {
+            return classifyDocumentQuestionClean(question, answerMode);
+        }
         if (!properties.getRag().getOverview().isEnabled()) {
             return DocumentQuestionType.GENERAL;
         }
@@ -2445,7 +2756,30 @@ public class RagService {
                 || originalCount < properties.getRag().getOverview().getMinOriginalChunks();
     }
 
+    private List<String> overviewQueriesClean(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        String base = safe(question).trim();
+        List<String> queries = switch (questionType) {
+            case ARCHITECTURE -> List.of(base + " architecture structure components", "문서 구조 구성 아키텍처 개요", "source structure document map overview");
+            case PROCESS_FLOW -> List.of(base + " process flow workflow steps", "흐름 과정 절차 단계 순서", "source structure process sequence overview");
+            case PROCEDURE -> List.of(base + " procedure process steps conditions exceptions", "절차 단계 조건 예외 제한 처리 기준");
+            case CLAUSE_EXPLANATION -> List.of(base + " clause policy criteria conditions exceptions scope", "조항 규정 기준 조건 예외 제한 적용 대상 범위");
+            case COMPARISON -> List.of(base + " compare difference conditions exceptions", "비교 차이 공통점 조건 예외 제한");
+            case STRUCTURE -> List.of(base + " structure outline sections", "문서 구조 목차 섹션 구성 문서맵", "document structure source structure map");
+            case OVERVIEW -> List.of(base + " overview summary main topics", "개요 요약 주요 내용 전체 구조", "source summary document summary representative documents");
+            default -> List.of();
+        };
+        int limit = switch (speedProfile) {
+            case FAST -> 1;
+            case DEEP -> 3;
+            default -> questionType == DocumentQuestionType.OVERVIEW ? 2 : 1;
+        };
+        return queries.stream().limit(limit).toList();
+    }
+
     private List<String> overviewQueries(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        if (System.nanoTime() >= 0) {
+            return overviewQueriesClean(question, questionType, speedProfile);
+        }
         String base = safe(question).trim();
         List<String> queries = switch (questionType) {
             case ARCHITECTURE -> List.of(base + " architecture structure components", "source structure document map overview", "문서 구조 구성 아키텍처 개요");
@@ -2559,7 +2893,52 @@ public class RagService {
         return answer != null && answer.matches("(?s).*\\[\\d+].*");
     }
 
+    private String cleanConfidence(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        if (results == null || results.isEmpty()) {
+            return "낮음";
+        }
+        double topScore = results.get(0).score();
+        long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+        long citationCount = results.stream().filter(result -> safe(result.content()).length() >= 80).count();
+        String baseConfidence;
+        if (topScore >= 0.65 && citationCount >= 3 && distinctDocuments <= 4) {
+            baseConfidence = "높음";
+        } else if (topScore >= 0.30 || citationCount >= 2) {
+            baseConfidence = "보통";
+        } else {
+            baseConfidence = "낮음";
+        }
+        if ((llmUnavailable || answerRewritten) && "높음".equals(baseConfidence)) {
+            return "보통";
+        }
+        return baseConfidence;
+    }
+
+    private String cleanConfidenceKorean(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        if (results == null || results.isEmpty()) {
+            return "낮음";
+        }
+        double topScore = results.get(0).score();
+        long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
+        long citationCount = results.stream().filter(result -> safe(result.content()).length() >= 80).count();
+        String baseConfidence;
+        if (topScore >= 0.65 && citationCount >= 3 && distinctDocuments <= 4) {
+            baseConfidence = "높음";
+        } else if (topScore >= 0.30 || citationCount >= 2) {
+            baseConfidence = "보통";
+        } else {
+            baseConfidence = "낮음";
+        }
+        if ((llmUnavailable || answerRewritten) && "높음".equals(baseConfidence)) {
+            return "보통";
+        }
+        return baseConfidence;
+    }
+
     private String confidence(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        if (System.nanoTime() >= 0) {
+            return cleanConfidenceKorean(results, llmUnavailable, answerRewritten);
+        }
         if (results == null || results.isEmpty()) {
             return "낮음";
         }
@@ -2586,6 +2965,13 @@ public class RagService {
             boolean answerRewritten,
             RagPipelineService.EvidenceAssessment assessment
     ) {
+        if (System.nanoTime() >= 0) {
+            String value = cleanConfidenceKorean(results, llmUnavailable, answerRewritten);
+            if (assessment != null && !assessment.sufficient() && "높음".equals(value)) {
+                return "보통";
+            }
+            return assessment != null && !assessment.sufficient() && "높음".equals(value) ? "보통" : value;
+        }
         String value = confidence(results, llmUnavailable, answerRewritten);
         if (assessment != null && !assessment.sufficient() && "높음".equals(value)) {
             return "보통";
@@ -2763,7 +3149,28 @@ public class RagService {
         return speedProfile == DocumentSpeedProfile.DEEP ? Math.min(768, base + 128) : base;
     }
 
+    private List<String> cleanDiagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        long distinctDocuments = results == null ? 0 : results.stream().map(SearchResult::documentId).distinct().count();
+        int resultCount = results == null ? 0 : results.size();
+        List<String> notes = new ArrayList<>();
+        notes.add("검색된 문서 근거 " + resultCount + "개를 "
+                + distinctDocuments + "개 문서에서 선별해 " + cleanModeLabel(answerMode) + " 후보로 사용했습니다.");
+        if (llmUnavailable) {
+            notes.add("LLM 호출에 실패해 검색 근거 기반 fallback 답변을 반환했습니다.");
+        }
+        if (answerRewritten) {
+            notes.add("LLM 답변이 너무 짧거나 citation이 부족해 검색 근거 기반 답변으로 대체했습니다.");
+        }
+        if ("낮음".equals(cleanConfidence(results, llmUnavailable, answerRewritten))) {
+            notes.add("직접적인 근거 수가 적어 답변을 후보 수준으로 검토해야 합니다.");
+        }
+        return notes;
+    }
+
     private List<String> diagnostics(AnswerMode answerMode, List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
+        if (System.nanoTime() >= 0) {
+            return cleanDiagnostics(answerMode, results, llmUnavailable, answerRewritten);
+        }
         long distinctDocuments = results.stream().map(SearchResult::documentId).distinct().count();
         List<String> notes = new ArrayList<>();
         notes.add("검색된 문서 근거 " + results.size() + "개를 " + distinctDocuments + "개 문서에서 선별해 " + getModeLabel(answerMode) + " 후보로 사용했습니다.");
@@ -2778,7 +3185,19 @@ public class RagService {
         }
         return notes;
     }
+    private String cleanModeLabel(AnswerMode answerMode) {
+        return switch (answerMode) {
+            case SUMMARY -> "요약";
+            case TABLE -> "표 추출";
+            case QUOTE -> "원문 인용";
+            default -> "질문 답변";
+        };
+    }
+
     private String getModeLabel(AnswerMode answerMode) {
+        if (System.nanoTime() >= 0) {
+            return cleanModeLabel(answerMode);
+        }
         return switch (answerMode) {
             case SUMMARY -> "요약";
             case TABLE -> "표/수치 추출";
@@ -2816,7 +3235,40 @@ public class RagService {
         return List.of(content.split("(?<=[.!?。！？])\\s+|(?<=다\\.)\\s+|(?<=요\\.)\\s+|(?<=함\\.)\\s+|(?<=음\\.)\\s+|(?<=니다\\.)\\s+"));
     }
 
+    private boolean isCleanStopWord(String token) {
+        return List.of(
+                "관련", "대해", "무엇", "뭐", "어떤", "어디", "있는", "없는", "설명", "알려줘", "보여줘",
+                "the", "and", "for", "with", "what", "where", "when", "how", "about", "please", "show", "tell"
+        ).contains(token);
+    }
+
+    private List<String> cleanQueryTerms(String question) {
+        String normalized = normalizeForSearch(question);
+        List<String> terms = new ArrayList<>();
+        for (String token : normalized.split("\\s+")) {
+            if (token.length() >= 2 && !isCleanStopWord(token)) {
+                terms.add(token);
+            }
+        }
+        if (containsAny(normalized, "차별", "예방", "개선")) {
+            terms.addAll(List.of("차별", "개선", "예방", "처우", "임금", "복리후생", "교육", "고충"));
+        }
+        if (containsAny(normalized, "근로자", "기간제", "단시간", "파견")) {
+            terms.addAll(List.of("기간제", "단시간", "파견", "근로자", "근로조건"));
+        }
+        if (containsAny(normalized, "조항", "규정", "조건", "예외", "제한", "범위")) {
+            terms.addAll(List.of("조항", "규정", "조건", "예외", "제한", "범위", "적용"));
+        }
+        if (containsAny(normalized, "구조", "목차", "섹션", "페이지", "위치")) {
+            terms.addAll(List.of("구조", "목차", "섹션", "페이지", "위치", "heading", "section"));
+        }
+        return terms.stream().map(this::normalizeForSearch).filter(term -> term.length() >= 2).distinct().toList();
+    }
+
     private List<String> queryTerms(String question) {
+        if (System.nanoTime() >= 0) {
+            return cleanQueryTerms(question);
+        }
         String normalized = normalizeForSearch(question);
         List<String> terms = new ArrayList<>();
         for (String token : normalized.split("\\s+")) {
@@ -2890,6 +3342,11 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "contextType");
         copyMetadata(result.metadata(), metadata, "sectionTitle");
         copyMetadata(result.metadata(), metadata, "headingPath");
+        copyMetadata(result.metadata(), metadata, "clauseNumber");
+        copyMetadata(result.metadata(), metadata, "clauseLevel");
+        copyMetadata(result.metadata(), metadata, "structureMatched");
+        copyMetadata(result.metadata(), metadata, "sectionMatched");
+        copyMetadata(result.metadata(), metadata, "questionType");
         copyMetadata(result.metadata(), metadata, "pageNumber");
         copyMetadata(result.metadata(), metadata, "tableId");
         copyMetadata(result.metadata(), metadata, "sourceUrl");

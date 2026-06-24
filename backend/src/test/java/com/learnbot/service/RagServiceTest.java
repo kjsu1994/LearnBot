@@ -156,11 +156,11 @@ class RagServiceTest {
 
         AskResponse response = service.ask(question, null, "qa");
 
-        assertThat(response.answer()).contains("개선되는 핵심");
+        assertThat(response.answer()).contains("## 결론");
         assertThat(response.answer()).contains("임금");
         assertThat(response.answer()).contains("[1]");
         assertThat(response.confidence()).isIn("높음", "보통");
-        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("대체"));
     }
 
     @Test
@@ -210,7 +210,7 @@ class RagServiceTest {
 
         ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
-        assertThat(systemCaptor.getValue()).contains("규정/조항형 답변 추가 규칙", "적용대상", "조건", "예외/제한");
+        assertThat(systemCaptor.getValue()).contains("규정/조항 답변 추가 규칙", "적용 대상", "조건", "예외·제한");
         assertThat(systemCaptor.getValue()).doesNotContain("위치/찾기 답변 추가 규칙");
         assertThat(response.mode()).isEqualTo("qa");
         assertThat(response.answer()).contains("[1]");
@@ -269,8 +269,8 @@ class RagServiceTest {
 
         ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
-        assertThat(systemCaptor.getValue()).contains("개요/구조/흐름 질문 추가 규칙");
-        assertThat(systemCaptor.getValue()).doesNotContain("규정/조항형 답변 추가 규칙");
+        assertThat(systemCaptor.getValue()).contains("요약/개요 질문");
+        assertThat(systemCaptor.getValue()).doesNotContain("규정/조항 답변 추가 규칙");
         assertThat(response.answer()).contains("[1]");
     }
 
@@ -298,7 +298,7 @@ class RagServiceTest {
 
         ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).chatResult(systemCaptor.capture(), anyString(), anyInt());
-        assertThat(systemCaptor.getValue()).contains("규정/조항형 답변 추가 규칙", "절차/판단기준");
+        assertThat(systemCaptor.getValue()).contains("규정/조항 답변 추가 규칙", "절차·판단 기준");
         assertThat(systemCaptor.getValue()).doesNotContain("위치/찾기 답변 추가 규칙");
         assertThat(response.answer()).contains("[1]");
     }

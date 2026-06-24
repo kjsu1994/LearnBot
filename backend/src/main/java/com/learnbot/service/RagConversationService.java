@@ -173,7 +173,7 @@ public class RagConversationService {
             return limitRewrite(cleanQuestion + " " + compact(recentTurns.get(0).question(), 120));
         }
         DocumentConversationAnchor anchor = anchors.get(0);
-        String location = firstNonBlank(anchor.sectionTitle(), anchor.headingPath(), pageLabel(anchor.pageNumber()), anchor.title());
+        String location = firstNonBlank(anchor.clauseNumber(), anchor.sectionTitle(), anchor.headingPath(), pageLabel(anchor.pageNumber()), anchor.title());
         String rewritten = String.join(" ",
                 clean(anchor.title()),
                 clean(location),
@@ -209,22 +209,22 @@ public class RagConversationService {
             return false;
         }
         boolean common = containsAny(normalized,
-                "\uadf8 ", "\uadf8\uac70", "\uadf8\uac83", "\uc774 ", "\uc774\uac70", "\uc774\uac83",
-                "\uc800 ", "\uc800\uac70", "\ud574\ub2f9", "\uc704 ", "\uc55e\uc11c", "\ubc29\uae08",
-                "\uc774\uc804", "\uac19\uc740", "\uacc4\uc18d",
+                "그 ", "그거", "그것", "이 ", "이거", "이것",
+                "저 ", "저거", "해당", "위 ", "앞서", "방금",
+                "이전", "같은", "계속",
                 "this", "that", "above", "previous", "same", "continue");
         if (CODE.equals(domain)) {
             return common || containsAny(normalized,
-                    "\uadf8 \ud30c\uc77c", "\uadf8 \uba54\uc11c\ub4dc", "\uadf8 \ud568\uc218",
-                    "\uc774 \ud30c\uc77c", "\uc774 \uba54\uc11c\ub4dc", "\uc774 \ud568\uc218",
-                    "\ud574\ub2f9 \ud30c\uc77c", "\ud574\ub2f9 \uba54\uc11c\ub4dc", "\ud574\ub2f9 \ud568\uc218",
+                    "그 파일", "그 메서드", "그 함수",
+                    "이 파일", "이 메서드", "이 함수",
+                    "해당 파일", "해당 메서드", "해당 함수",
                     "same file", "same method");
         }
         return common || containsAny(normalized,
-                "\uadf8 \ubb38\uc11c", "\uc774 \ubb38\uc11c", "\ud574\ub2f9 \ubb38\uc11c",
-                "\uadf8 \ub0b4\uc6a9", "\uc774 \ub0b4\uc6a9", "\ud574\ub2f9 \ub0b4\uc6a9",
-                "\uadf8 \uc870\ud56d", "\uc774 \uc870\ud56d", "\ud574\ub2f9 \uc870\ud56d",
-                "\uadf8 \ud398\uc774\uc9c0", "\uc774 \ud398\uc774\uc9c0", "\ud574\ub2f9 \ud398\uc774\uc9c0");
+                "그 문서", "이 문서", "해당 문서",
+                "그 내용", "이 내용", "해당 내용",
+                "그 조항", "이 조항", "해당 조항",
+                "그 페이지", "이 페이지", "해당 페이지");
     }
 
     private boolean looksReferenceFollowup(String question) {
@@ -233,8 +233,8 @@ public class RagConversationService {
             return false;
         }
         return containsAny(normalized,
-                "\ub354 \uc790\uc138\ud788", "\uc880 \ub354 \uc790\uc138\ud788", "\uc790\uc138\ud788",
-                "\ub354 \uc124\uba85", "\ucd94\uac00 \uc124\uba85", "\uc65c ", "\uc5b4\ub5bb\uac8c",
+                "더 자세히", "좀 더 자세히", "자세히",
+                "더 설명", "추가 설명", "왜 ", "어떻게",
                 "more detail", "details", "elaborate", "explain more", "why", "how");
     }
 
@@ -249,15 +249,15 @@ public class RagConversationService {
                 && !looksStandaloneCodeTarget(question)
                 && !looksBareFeatureKeyword(question)
                 && looksCodeFollowupCue(normalized)
-                && !containsAny(normalized, "\uc0c8 \ub300\ud654", "\ub2e4\ub978 \uc8fc\uc81c", "new topic", "unrelated");
+                && !containsAny(normalized, "새 대화", "다른 주제", "new topic", "unrelated");
     }
 
     private boolean looksCodeFollowupCue(String normalized) {
         return containsAny(normalized,
-                "\uc774\uac74", "\uc774\uac83", "\uadf8\uac74", "\uadf8\uac83", "\uc5ec\uae30", "\ud574\ub2f9",
-                "\uac19\uc740", "\ubc29\uae08", "\uc774\uc804", "\uc65c", "\uc5b4\ub5bb\uac8c", "\ud750\ub984",
-                "\uc601\ud5a5", "\uc704\uce58", "\ub77c\uc778", "\ud14c\uc2a4\ud2b8", "\uc218\uc815", "\ubb38\uc81c",
-                "\ud638\ucd9c", "\uadfc\uac70",
+                "이건", "이것", "그건", "그것", "여기", "해당",
+                "같은", "방금", "이전", "왜", "어떻게", "흐름",
+                "영향", "위치", "라인", "테스트", "수정", "문제",
+                "호출", "근거",
                 "why", "how", "same", "this", "that", "flow", "impact", "line", "test", "call", "evidence");
     }
 
@@ -295,10 +295,10 @@ public class RagConversationService {
             return ConversationIntent.NONE;
         }
         if (containsAny(normalized,
-                "\ud56d\ubaa9\ubcc4", "\uac01 \ud56d\ubaa9", "\uac01 \uadfc\uac70",
-                "\ud575\uc2ec\uadfc\uac70", "\ud575\uc2ec \uadfc\uac70", "\uadfc\uac70\ub97c",
-                "\uc704 \ub0b4\uc6a9", "\uc704 \ub2f5\ubcc0", "\ubc29\uae08 \ub2f5\ubcc0",
-                "\uc774\uc804 \ub2f5\ubcc0", "\ud655\uc7a5",
+                "항목별", "각 항목", "각 근거",
+                "핵심근거", "핵심 근거", "근거를",
+                "위 내용", "위 답변", "방금 답변",
+                "이전 답변", "확장",
                 "expand", "previous answer", "by item", "by evidence", "per item")) {
             return ConversationIntent.PREVIOUS_ANSWER_EXPANSION;
         }
@@ -440,7 +440,9 @@ public class RagConversationService {
                         metadata.has("pageNumber") ? metadata.path("pageNumber").asInt() : null,
                         metadata.path("sectionTitle").asText(""),
                         metadata.path("headingPath").asText(""),
-                        metadata.path("documentType").asText("")
+                        metadata.path("documentType").asText(""),
+                        metadata.path("clauseNumber").asText(""),
+                        metadata.path("clauseLevel").asText("")
                 );
                 if (anchors.stream().noneMatch(existing -> existing.chunkId().equals(anchor.chunkId()))) {
                     anchors.add(anchor);

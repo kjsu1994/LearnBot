@@ -59,6 +59,28 @@ class ChunkerTest {
     }
 
     @Test
+    void splitPdfExtractsKoreanClauseMetadata() {
+        Chunker chunker = new Chunker(new LearnBotProperties());
+        ExtractedDocument document = new ExtractedDocument(
+                "policy.pdf",
+                "file://policy.pdf",
+                "application/pdf",
+                "Page 1:\n제1조(목적) 이 규정은 서비스 이용 기준을 정한다.\n\nPage 2:\n제2항 예외는 관리자의 승인을 받아야 한다.",
+                Map.of("fileName", "policy.pdf")
+        );
+
+        List<Chunk> chunks = chunker.split(document);
+
+        assertThat(chunks).hasSize(2);
+        assertThat(chunks.get(0).metadata()).containsEntry("clauseNumber", "제1조");
+        assertThat(chunks.get(0).metadata()).containsEntry("clauseLevel", "article");
+        assertThat(chunks.get(0).metadata()).containsEntry("sectionTitle", "목적");
+        assertThat(chunks.get(0).metadata()).containsEntry("headingPath", "목적");
+        assertThat(chunks.get(1).metadata()).containsEntry("clauseNumber", "제2항");
+        assertThat(chunks.get(1).metadata()).containsEntry("clauseLevel", "paragraph");
+    }
+
+    @Test
     void splitSpreadsheetRepeatsHeaderAcrossRowGroups() {
         Chunker chunker = new Chunker(new LearnBotProperties());
         StringBuilder content = new StringBuilder("Row 1: C1=name | C2=role\n");

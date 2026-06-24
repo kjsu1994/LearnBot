@@ -21,6 +21,11 @@ public class Chunker {
     private static final Pattern SHEET_ROW = Pattern.compile("^Sheet\\s+(.+?)\\s+Row\\s+(\\d+):\\s*(.*)$");
     private static final Pattern CSV_ROW = Pattern.compile("^Row\\s+(\\d+):\\s*(.*)$");
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("^(#{1,6})\\s+(.+)$");
+    private static final Pattern CLAUSE_HEADING = Pattern.compile(
+            "(?m)^\\s*(제\\s*\\d+\\s*조(?:의\\s*\\d+)?(?:\\s*\\([^\\n)]{1,80}\\))?|제\\s*\\d+\\s*항|부칙|별표\\s*\\d*|\\d+[.)]\\s+[^\\n]{2,80}|[가-힣][.)]\\s+[^\\n]{2,80})(?:\\s+[^\\n]*)?\\s*$"
+    );
+    private static final Pattern ARTICLE_NUMBER = Pattern.compile("제\\s*\\d+\\s*조(?:의\\s*\\d+)?");
+    private static final Pattern PARAGRAPH_NUMBER = Pattern.compile("제\\s*\\d+\\s*항");
 
     private final LearnBotProperties properties;
 
@@ -138,6 +143,7 @@ public class Chunker {
                 Map<String, Object> metadata = baseMetadata("pdf_page", "page");
                 metadata.put("pageStart", page.page());
                 metadata.put("pageEnd", page.page());
+                enrichClauseMetadata(metadata, part);
                 addChunk(chunks, "Page " + page.page() + ":\n" + part, metadata);
             }
         }
@@ -390,6 +396,7 @@ public class Chunker {
             } else if ("table".equals(string(metadata.get("blockType")))) {
                 putIfNotBlank(metadata, "tableId", "table:rows");
             }
+            enrichClauseMetadata(metadata, chunk.content());
             Integer row = sameNumber(metadata.get("rowStart"), metadata.get("rowEnd"));
             if (row != null) {
                 metadata.putIfAbsent("rowNumber", row);
@@ -404,6 +411,66 @@ public class Chunker {
         if (!text.isBlank()) {
             metadata.putIfAbsent(key, text);
         }
+    }
+
+    private void enrichClauseMetadata(Map<String, Object> metadata, String content) {
+        if (metadata == null || "table".equals(string(metadata.get("blockType")))) {
+            return;
+        }
+        ClauseSignal signal = clauseSignal(content);
+        if (signal == null) {
+            return;
+        }
+        putIfNotBlank(metadata, "clauseNumber", signal.number());
+        putIfNotBlank(metadata, "clauseLevel", signal.level());
+        if (string(metadata.get("sectionTitle")).isBlank()) {
+            putIfNotBlank(metadata, "sectionTitle", signal.title());
+        }
+        if (string(metadata.get("headingPath")).isBlank()) {
+            putIfNotBlank(metadata, "headingPath", signal.title());
+        }
+    }
+
+    private ClauseSignal clauseSignal(String content) {
+        String text = normalizePreservingLines(content);
+        if (text.isBlank()) {
+            return null;
+        }
+        Matcher matcher = CLAUSE_HEADING.matcher(text);
+        if (!matcher.find()) {
+            return null;
+        }
+        String title = matcher.group(1).replaceAll("\\s+", " ").trim();
+        if (title.isBlank()) {
+            return null;
+        }
+        String number = firstMatch(ARTICLE_NUMBER, title);
+        String level = "section";
+        if (!number.isBlank()) {
+            level = "article";
+        } else {
+            number = firstMatch(PARAGRAPH_NUMBER, title);
+            if (!number.isBlank()) {
+                level = "paragraph";
+            } else if (title.startsWith("부칙")) {
+                number = "부칙";
+                level = "appendix";
+            } else if (title.startsWith("별표")) {
+                number = title.split("\\s+", 2)[0];
+                level = "appendix";
+            }
+        }
+        String displayTitle = title.replaceFirst("^\\s*" + ARTICLE_NUMBER.pattern() + "\\s*", "").trim();
+        displayTitle = displayTitle.replaceFirst("^\\(([^)]{1,80})\\).*$", "$1").trim();
+        if (displayTitle.isBlank()) {
+            displayTitle = title;
+        }
+        return new ClauseSignal(number, level, displayTitle);
+    }
+
+    private String firstMatch(Pattern pattern, String value) {
+        Matcher matcher = pattern.matcher(value);
+        return matcher.find() ? matcher.group().replaceAll("\\s+", "") : "";
     }
 
     private String lastHeading(String headingPath) {
@@ -595,5 +662,8 @@ public class Chunker {
     }
 
     private record PageBlock(int page, String text) {
+    }
+
+    private record ClauseSignal(String number, String level, String title) {
     }
 }

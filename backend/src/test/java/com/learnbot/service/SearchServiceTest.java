@@ -6,6 +6,7 @@ import com.learnbot.repository.DocumentRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +73,40 @@ class SearchServiceTest {
     }
 
     @Test
+    void boostsDirectClauseAndSectionMetadataMatches() {
+        DocumentRepository repository = mock(DocumentRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        SearchService service = new SearchService(repository, ollamaClient);
+        SearchResult generic = result(
+                "policy-overview.pdf",
+                "서비스 이용 정책의 일반적인 설명입니다.",
+                0.56
+        );
+        SearchResult clause = result(
+                "policy.pdf",
+                "예외 적용 시 관리자 승인을 받는다는 내용입니다.",
+                0.48,
+                Map.of(
+                        "clauseNumber", "제2조",
+                        "clauseLevel", "article",
+                        "sectionTitle", "예외",
+                        "headingPath", "정책 > 예외"
+                )
+        );
+
+        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1)));
+        when(repository.search(anyString(), anyList(), isNull(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(generic, clause));
+        when(repository.keywordSearch(anyString(), isNull(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of());
+
+        List<SearchResult> results = service.search("제2조 예외 조건은 어디에 있어?", null, 2, List.of(UUID.randomUUID()), null);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).metadata()).containsEntry("clauseNumber", "제2조");
+    }
+
+    @Test
     void cachesQueryEmbeddingUntilTtlExpires() {
         DocumentRepository repository = mock(DocumentRepository.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -94,6 +129,10 @@ class SearchServiceTest {
     }
 
     private SearchResult result(String title, String content, double score) {
+        return result(title, content, score, Map.of());
+    }
+
+    private SearchResult result(String title, String content, double score, Map<String, Object> metadata) {
         return new SearchResult(
                 UUID.randomUUID(),
                 UUID.randomUUID(),
@@ -103,6 +142,7 @@ class SearchServiceTest {
                 "application/pdf",
                 1,
                 content,
+                metadata,
                 score
         );
     }

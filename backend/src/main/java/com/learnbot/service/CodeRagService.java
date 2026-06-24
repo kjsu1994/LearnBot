@@ -599,7 +599,7 @@ public class CodeRagService {
         String previousOutline = previousAnswerOutline(conversationContext);
         return "\n\nConversation focus:\n"
                 + (conversationContext.previousAnswerExpansion()
-                ? "Previous-answer expansion mode: keep the previous answer item structure, expand each item only from current source-code context, cite every item, and mark insufficient items as \"\ucd94\uac00 \uadfc\uac70 \ubd80\uc871\".\n"
+                ? "Previous-answer expansion mode: keep the previous answer item structure, expand each item only from current source-code context, cite every item, and mark insufficient items as \"추가 근거 부족\".\n"
                 : "Use the previous conversation only to resolve follow-up references. Ignore it if it conflicts with the retrieved source-code context.\n")
                 + (previousOutline.isBlank() ? "" : "Previous answer outline:\n" + previousOutline + "\n")
                 + (recentTurns.isBlank() ? "" : "Recent turns:\n" + recentTurns + "\n")
@@ -614,7 +614,7 @@ public class CodeRagService {
                 .limit(12)
                 .map(item -> "- " + safe(item.label(), "")
                         + (item.citationNumbers().isEmpty() ? "" : " / previous citations=" + item.citationNumbers())
-                        + (item.evidenceChunkIds().isEmpty() ? " / \ucd94\uac00 \uadfc\uac70 \ubd80\uc871" : " / requiredChunks=" + item.evidenceChunkIds()))
+                        + (item.evidenceChunkIds().isEmpty() ? " / 추가 근거 부족" : " / requiredChunks=" + item.evidenceChunkIds()))
                 .collect(Collectors.joining("\n"));
     }
 

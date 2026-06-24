@@ -146,6 +146,9 @@ public class SearchService {
     }
 
     public List<String> expandedQueries(String query) {
+        if (System.nanoTime() >= 0) {
+            return cleanExpandedQueries(query);
+        }
         String safeQuery = safeQuery(query);
         if (safeQuery.isBlank()) {
             return List.of();
@@ -153,10 +156,10 @@ public class SearchService {
         String normalized = normalize(safeQuery);
         List<String> values = new ArrayList<>();
         values.add(safeQuery);
-        if (containsAny(normalized, "\ucc28\ubcc4", "\uc608\ubc29", "\uac1c\uc120")) {
+        if (containsAny(normalized, "차별", "예방", "개선")) {
             values.addAll(List.of(
-                    "\ucc28\ubcc4 \uc608\ubc29 \uac1c\uc120",
-                    "\uc784\uae08 \ubcf5\ub9ac\ud6c4\uc0dd \uad50\uc721\ud6c8\ub828 \uace0\ucda9\ucc98\ub9ac \ucc28\ubcc4 \uc608\ubc29"
+                    "차별 예방 개선",
+                    "임금 복리후생 교육훈련 고충처리 차별 예방"
             ));
         }
         if (containsAny(normalized, "요약", "개요", "정리", "전체", "핵심", "summary", "overview")) {
@@ -192,6 +195,45 @@ public class SearchService {
                 .limit(12)
                 .toList();
     }
+
+    private List<String> cleanExpandedQueries(String query) {
+        String safeQuery = safeQuery(query);
+        if (safeQuery.isBlank()) {
+            return List.of();
+        }
+        String normalized = normalize(safeQuery);
+        List<String> values = new ArrayList<>();
+        values.add(safeQuery);
+        if (containsAny(normalized, "차별", "예방", "개선")) {
+            values.addAll(List.of(
+                    "차별 예방 개선",
+                    "임금 복리후생 교육훈련 고충처리 차별 예방"
+            ));
+        }
+        if (containsAny(normalized, "요약", "개요", "정리", "전체", "핵심", "summary", "overview")) {
+            values.addAll(List.of("문서 요약 주요 내용", "전체 구조 핵심 근거", "document summary overview main topics"));
+        }
+        if (containsAny(normalized, "구조", "목차", "섹션", "페이지", "조항", "위치", "어디", "structure", "section", "page", "where")) {
+            values.addAll(List.of("문서 구조 목차 섹션 페이지 조항", "document structure section page heading"));
+        }
+        if (containsAny(normalized, "표", "테이블", "시트", "행", "열", "건수", "개수", "합계", "table", "sheet", "row", "count", "total")) {
+            values.addAll(List.of("표 테이블 시트 행 열 건수 합계", "table sheet row column count total"));
+        }
+        if (containsAny(normalized, "원문", "인용", "근거", "조항", "quote", "citation", "evidence")) {
+            values.addAll(List.of("원문 인용 근거 조항", "quote citation evidence clause"));
+        }
+        try {
+            values.addAll(domainProfileService.expandedQueries(safeQuery));
+        } catch (RuntimeException ignored) {
+            // Keep deterministic base expansions when profile lookup fails.
+        }
+        return values.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(12)
+                .toList();
+    }
     private double rerankBoost(String query, SearchResult result) {
         List<String> terms = queryTerms(query);
         if (terms.isEmpty()) {
@@ -201,6 +243,12 @@ public class SearchService {
         String title = normalize(result.title());
         String uri = normalize(result.sourceUri());
         String content = normalize(result.content());
+        String section = normalize(stringMetadata(result, "sectionTitle"));
+        String heading = normalize(stringMetadata(result, "headingPath"));
+        String clause = normalize(stringMetadata(result, "clauseNumber"));
+        String page = normalize(stringMetadata(result, "pageNumber"));
+        String table = normalize(stringMetadata(result, "tableId"));
+        String documentType = normalize(stringMetadata(result, "documentType"));
         double boost = 0;
         int matchedTerms = 0;
         for (String term : terms) {
@@ -217,11 +265,41 @@ public class SearchService {
                 boost += 0.08;
                 matched = true;
             }
+            if (!section.isBlank() && section.contains(term)) {
+                boost += 0.20;
+                matched = true;
+            }
+            if (!heading.isBlank() && heading.contains(term)) {
+                boost += 0.16;
+                matched = true;
+            }
+            if (!clause.isBlank() && clause.contains(term)) {
+                boost += 0.22;
+                matched = true;
+            }
+            if (!page.isBlank() && page.contains(term)) {
+                boost += 0.08;
+                matched = true;
+            }
+            if (!table.isBlank() && table.contains(term)) {
+                boost += 0.14;
+                matched = true;
+            }
+            if (!documentType.isBlank() && documentType.contains(term)) {
+                boost += 0.08;
+                matched = true;
+            }
             if (matched) {
                 matchedTerms++;
             }
         }
         boost += Math.min(0.35, matchedTerms * 0.05);
+        if (isClauseQuestion(query) && (!clause.isBlank() || !section.isBlank() || !heading.isBlank())) {
+            boost += 0.20;
+        }
+        if (isLocationQuestion(query) && (!page.isBlank() || !clause.isBlank() || !section.isBlank())) {
+            boost += 0.18;
+        }
         if (isSpreadsheetQuestion(query) && isSpreadsheet(result)) {
             boost += 0.35;
         }
@@ -265,6 +343,20 @@ public class SearchService {
                 .distinct()
                 .toList();
     }
+    private boolean isClauseQuestion(String query) {
+        String normalized = normalize(query);
+        return containsAny(normalized,
+                "clause", "article", "criteria", "condition", "exception", "limit", "scope",
+                "조항", "규정", "기준", "조건", "예외", "제한", "범위", "적용");
+    }
+
+    private boolean isLocationQuestion(String query) {
+        String normalized = normalize(query);
+        return containsAny(normalized,
+                "where", "location", "page", "section",
+                "위치", "어디", "몇 조", "몇조", "몇 항", "몇항", "페이지", "섹션");
+    }
+
     private boolean isSpreadsheetQuestion(String query) {
         String normalized = normalize(query);
         return normalized.contains("몇명")

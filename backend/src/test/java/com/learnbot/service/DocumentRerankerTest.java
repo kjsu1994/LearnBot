@@ -11,7 +11,9 @@ import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -128,6 +130,31 @@ class DocumentRerankerTest {
         assertThat(output.get(0).metadata()).containsEntry("rerankerUsed", true);
     }
 
+    @Test
+    void rerankTextIncludesDocumentStructureMetadata() throws Exception {
+        DocumentReranker reranker = new DocumentReranker(new LearnBotProperties(), webClient(new AtomicInteger(), ClientResponse.create(HttpStatus.OK).build()));
+        SearchResult candidate = result("policy.pdf", 0.7, Map.of(
+                "pageNumber", 3,
+                "clauseNumber", "제2조",
+                "clauseLevel", "article",
+                "sectionTitle", "예외",
+                "headingPath", "정책 > 예외",
+                "documentType", "policy"
+        ));
+        Method method = DocumentReranker.class.getDeclaredMethod("rerankText", SearchResult.class);
+        method.setAccessible(true);
+
+        String text = (String) method.invoke(reranker, candidate);
+
+        assertThat(text)
+                .contains("page=3")
+                .contains("clause=제2조")
+                .contains("clauseLevel=article")
+                .contains("section=예외")
+                .contains("heading=정책 > 예외")
+                .contains("documentType=policy");
+    }
+
     private WebClient.Builder webClient(AtomicInteger calls, ClientResponse response) {
         ExchangeFunction exchange = request -> {
             calls.incrementAndGet();
@@ -137,6 +164,10 @@ class DocumentRerankerTest {
     }
 
     private SearchResult result(String title, double score) {
+        return result(title, score, Map.of());
+    }
+
+    private SearchResult result(String title, double score, Map<String, Object> metadata) {
         return new SearchResult(
                 UUID.randomUUID(),
                 UUID.randomUUID(),
@@ -146,6 +177,7 @@ class DocumentRerankerTest {
                 "application/pdf",
                 1,
                 "content for " + title,
+                metadata,
                 score
         );
     }

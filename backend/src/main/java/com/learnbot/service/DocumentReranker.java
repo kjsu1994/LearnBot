@@ -277,6 +277,8 @@ public class DocumentReranker {
         addMetadata(metadata, "source", result.sourceUri());
         addMetadata(metadata, "contentType", result.contentType());
         addMetadata(metadata, "page", metadataString(result, "pageNumber"));
+        addMetadata(metadata, "clause", metadataString(result, "clauseNumber"));
+        addMetadata(metadata, "clauseLevel", metadataString(result, "clauseLevel"));
         addMetadata(metadata, "section", metadataString(result, "sectionTitle"));
         addMetadata(metadata, "heading", metadataString(result, "headingPath"));
         addMetadata(metadata, "table", metadataString(result, "tableId"));
