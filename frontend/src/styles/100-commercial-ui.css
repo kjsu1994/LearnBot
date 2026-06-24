@@ -4493,6 +4493,361 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   }
 }
 
+.rag-chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(117vh - 147px);
+  min-height: 1010px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.rag-chat-topbar {
+  background: rgba(9, 9, 11, 0.74);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+}
+
+.rag-chat-answer-summary {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.rag-chat-answer-summary span {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.rag-chat-topbar-answer-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.rag-chat-topbar-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.rag-chat-template-row {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.rag-chat-topbar-actions {
+  flex: 0 0 auto;
+}
+
+.rag-chat-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  scrollbar-color: rgba(167, 139, 250, 0.34) rgba(255, 255, 255, 0.045);
+  scrollbar-width: thin;
+}
+
+.rag-chat-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rag-chat-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 999px;
+}
+
+.rag-chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.34);
+  border-radius: 999px;
+}
+
+.rag-chat-turns {
+  display: grid;
+  gap: 22px;
+}
+
+.rag-chat-turn {
+  display: grid;
+  gap: 12px;
+}
+
+.rag-message {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.rag-message-user {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(147, 197, 253, 0.22);
+  color: rgba(239, 246, 255, 0.92);
+  justify-self: end;
+  max-width: min(760px, 70%);
+}
+
+.rag-message-user p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.rag-message-assistant {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  display: grid;
+  gap: 10px;
+  justify-self: start;
+  max-width: min(1120px, 96%);
+  padding: 0;
+  width: min(1120px, 96%);
+}
+
+.rag-answer-actions,
+.rag-chat-input-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.rag-answer-label {
+  align-items: center;
+  color: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 6px;
+}
+
+.rag-answer-status {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 3px 8px;
+}
+
+.rag-answer-status-streaming {
+  background: rgba(59, 130, 246, 0.16);
+  color: rgba(191, 219, 254, 0.95);
+}
+
+.rag-answer-status-completed {
+  background: rgba(34, 197, 94, 0.12);
+  color: rgba(187, 247, 208, 0.92);
+}
+
+.rag-answer-status-aborted,
+.rag-answer-status-error {
+  background: rgba(239, 68, 68, 0.12);
+  color: rgba(254, 202, 202, 0.94);
+}
+
+.rag-answer-status-repaired,
+.rag-answer-status-fallback {
+  background: rgba(245, 158, 11, 0.12);
+  color: rgba(253, 230, 138, 0.94);
+}
+
+.rag-chat-answer-body {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  min-width: 0;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+
+.rag-chat-answer-body .markdown-answer,
+.rag-chat-answer-body .markdown-code,
+.rag-chat-answer-body .markdown-table-wrap {
+  max-width: 100%;
+}
+
+.rag-answer-actions {
+  flex-wrap: wrap;
+}
+
+.rag-answer-details {
+  display: grid;
+  gap: 10px;
+}
+
+.rag-answer-details .evidence-section,
+.rag-answer-details .confidence-strip {
+  max-height: none;
+  overflow: visible;
+}
+
+.rag-answer-details .document-evidence-scroll,
+.rag-answer-details .evidence-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.rag-chat-composer {
+  background: rgba(9, 9, 11, 0.78);
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+
+.rag-chat-bottom-details {
+  display: grid;
+  gap: 10px;
+}
+
+.rag-chat-evidence-toggle {
+  justify-self: start;
+}
+
+.rag-chat-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.rag-chat-topbar .rag-ai-composer-footer {
+  margin: 0;
+}
+
+.rag-chat-controls .stack label {
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.rag-repo-label-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.rag-repo-inline-meta {
+  color: rgba(226, 232, 240, 0.5);
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-chat-controls select,
+.rag-chat-controls .mode-control {
+  background: rgba(10, 10, 11, 0.72);
+  border-color: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.rag-chat-input-shell {
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.rag-chat-input-shell textarea,
+.workspace-shell-v3 .rag-command-panel .rag-chat-input-shell textarea {
+  appearance: none;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  min-height: 74px;
+  padding: 0 !important;
+  resize: vertical;
+  width: 100%;
+}
+
+.rag-chat-input-shell textarea:focus {
+  outline: none;
+}
+
+.rag-chat-input-footer {
+  justify-content: space-between;
+}
+
+.rag-chat-input-tools {
+  min-width: 0;
+}
+
+.rag-chat-empty {
+  align-content: center;
+  color: rgba(226, 232, 240, 0.66);
+  display: grid;
+  gap: 8px;
+  min-height: 260px;
+  text-align: center;
+}
+
+.rag-chat-empty strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 20px;
+}
+
+.rag-chat-empty p {
+  margin: 0 auto;
+  max-width: 520px;
+}
+
+@media (max-width: 820px) {
+  .rag-chat-panel {
+    height: calc(117vh - 131px);
+    min-height: 750px;
+  }
+
+  .rag-message-user,
+  .rag-message-assistant {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .rag-chat-answer-body {
+    min-width: 0;
+  }
+
+  .rag-chat-input-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rag-chat-topbar-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rag-chat-topbar-actions {
+    width: 100%;
+  }
+}
+
 /* Product-theme overrides for diagnostics and saved evidence surfaces. */
 .workspace-shell-v3 .code-workspace-product .confidence-strip,
 .workspace-shell-v3 .document-workspace-product .confidence-strip {
@@ -4853,6 +5208,10 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   min-height: 0;
   overflow: visible;
   padding-right: 0;
+}
+
+.saved-workspace-product .saved-conversation-snapshot-list {
+  flex: 1 1 auto;
 }
 
 .conversation-turn-card {

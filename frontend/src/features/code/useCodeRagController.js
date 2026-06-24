@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { buildSavedConversationPayload } from '../../lib/ragConversationSave.js';
 
 export function useCodeRagController({
   activeSpaceId,
@@ -39,6 +40,7 @@ export function useCodeRagController({
   const [codeConversations, setCodeConversations] = useState([]);
   const [codeConversationId, setCodeConversationId] = useState('');
   const [codeConversationTurns, setCodeConversationTurns] = useState([]);
+  const [pendingCodeTurn, setPendingCodeTurn] = useState(null);
   const [codeSearchQuery, setCodeSearchQuery] = useState('');
   const [codeSearchResults, setCodeSearchResults] = useState([]);
   const [referenceSymbol, setReferenceSymbol] = useState('');
@@ -84,6 +86,7 @@ export function useCodeRagController({
     setCodeConversations([]);
     setCodeConversationId('');
     setCodeConversationTurns([]);
+    setPendingCodeTurn(null);
   }
 
   function spacePath(path) {
@@ -141,7 +144,7 @@ export function useCodeRagController({
       const tokenRequired = targetRepository?.authType === 'TOKEN' && !targetRepository?.credentialStored;
       if (tokenRequired && !indexCredential.token) {
         setSelectedRepositoryId(repositoryId);
-        throw new Error('?낅젰??怨꾩젙?쇰줈 ??μ냼瑜??몃뜳?깊븯?ㅻ㈃ Git ?먭꺽 利앸챸???낅젰?섏꽭??');
+        throw new Error('입력한 계정으로 저장소를 인덱싱하려면 Git 자격 증명을 입력하세요.');
       }
       await request(`/api/code/repositories/${repositoryId}/index`, {
         method: 'POST',
@@ -208,7 +211,7 @@ export function useCodeRagController({
   }
 
   async function deleteRepository(repositoryId, name) {
-    if (!window.confirm(`'${name}' ??μ냼瑜???젣?섏떆寃좎뒿?덇퉴?`)) return;
+    if (!window.confirm(`'${name}' 저장소를 삭제하시겠습니까?`)) return;
     await run(`repo-delete-${repositoryId}`, async () => {
       await request(`/api/code/repositories/${repositoryId}`, { method: 'DELETE' });
       setRepositories((current) => current.filter((repo) => repo.id !== repositoryId));
@@ -250,6 +253,8 @@ export function useCodeRagController({
   async function askCode(event) {
     event.preventDefault();
     await run('code-ask', async () => {
+      const submittedQuestion = codeQuestion.trim();
+      if (!submittedQuestion) return;
       const parentTurnId = codeConversationTurns.at(-1)?.id || null;
       const followup = Boolean(codeConversationId);
       const effectiveMode = followup ? '' : codeMode;
@@ -259,7 +264,7 @@ export function useCodeRagController({
       const payload = {
         repositoryId: effectiveRepositoryId,
         spaceId: activeSpaceId,
-        question: codeQuestion,
+        question: submittedQuestion,
         mode: effectiveMode,
         limit: followup ? null : codeMode === 'overview' ? 16 : 10,
         conversationId: codeConversationId || null,
@@ -270,15 +275,24 @@ export function useCodeRagController({
       let sawStream = false;
       const controller = new AbortController();
       askAbortRef.current = controller;
-      setCodeAnswer({
+      const initialAnswer = {
         mode: effectiveMode || codeMode,
+        question: submittedQuestion,
         answer: '',
         evidence: [],
         confidence: '',
         diagnostics: ['답변을 생성하는 중입니다.'],
         repositoryId: effectiveRepositoryId,
         streaming: true,
+        status: 'streaming',
+      };
+      setCodeAnswer(initialAnswer);
+      setPendingCodeTurn({
+        ...initialAnswer,
+        clientId: `pending-code-${Date.now()}`,
+        parentTurnId,
       });
+      setCodeQuestion('');
       try {
         await streamRequest('/api/code/ask/stream', {
           method: 'POST',
@@ -288,12 +302,18 @@ export function useCodeRagController({
             if (eventName === 'delta') {
               sawStream = true;
               const text = eventData?.text || '';
-              setCodeAnswer((current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, repositoryId: effectiveRepositoryId, streaming: true }));
+              const update = (current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
+              setCodeAnswer(update);
+              setPendingCodeTurn(update);
             } else if (eventName === 'evidence') {
-              setCodeAnswer((current) => ({ ...(current || {}), evidence: eventData?.evidence || [], repositoryId: effectiveRepositoryId }));
+              const update = (current) => ({ ...(current || {}), evidence: eventData?.evidence || [], repositoryId: effectiveRepositoryId });
+              setCodeAnswer(update);
+              setPendingCodeTurn(update);
             } else if (eventName === 'replace') {
               sawStream = true;
-              setCodeAnswer((current) => ({ ...(current || {}), answer: eventData?.answer || '', repositoryId: effectiveRepositoryId, streaming: true }));
+              const update = (current) => ({ ...(current || {}), answer: eventData?.answer || '', repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
+              setCodeAnswer(update);
+              setPendingCodeTurn(update);
             } else if (eventName === 'done') {
               data = eventData;
             } else if (eventName === 'error') {
@@ -312,20 +332,32 @@ export function useCodeRagController({
         }
       } catch (err) {
         if (err.name === 'AbortError') {
-          setCodeAnswer((current) => ({ ...(current || {}), streaming: false, aborted: true, diagnostics: ['사용자가 답변 생성을 중단했습니다.'] }));
+          const update = (current) => ({ ...(current || {}), streaming: false, aborted: true, status: 'aborted', diagnostics: ['사용자가 답변 생성을 중단했습니다.'] });
+          setCodeAnswer(update);
+          setPendingCodeTurn(update);
           return;
         }
         if (!sawStream && err.code !== 'STREAM_LIMIT_EXCEEDED') {
           data = await request('/api/code/ask', { method: 'POST', json: payload });
         } else {
-          throw err;
+          const update = (current) => ({
+            ...(current || {}),
+            streaming: false,
+            error: true,
+            status: 'error',
+            diagnostics: [err.message || '코드 RAG 스트리밍에 실패했습니다.'],
+          });
+          setCodeAnswer(update);
+          setPendingCodeTurn(update);
+          return;
         }
       } finally {
         if (askAbortRef.current === controller) {
           askAbortRef.current = null;
         }
       }
-      setCodeAnswer(data ? { ...data, repositoryId: effectiveRepositoryId } : data);
+      const completed = data ? { ...data, question: submittedQuestion, repositoryId: effectiveRepositoryId, status: answerLifecycleStatus(data, sawStream) } : data;
+      setCodeAnswer(completed);
       setCodeAnswerSavedId('');
       if (data?.conversationId) {
         setCodeConversationId(data.conversationId);
@@ -335,16 +367,21 @@ export function useCodeRagController({
             id: data.turnId,
             conversationId: data.conversationId,
             parentTurnId,
-            question: codeQuestion,
+            question: submittedQuestion,
             rewrittenQuestion: data.rewrittenQuestion,
             mode: data.mode,
             answer: data.answer,
             confidence: data.confidence,
             evidence: data.evidence || [],
             diagnostics: data.diagnostics || [],
+            repositoryId: effectiveRepositoryId,
+            status: completed.status,
           },
         ]);
+        setPendingCodeTurn(null);
         await refreshCodeConversations();
+      } else {
+        setPendingCodeTurn((current) => current ? { ...current, ...completed, streaming: false } : null);
       }
     });
   }
@@ -369,12 +406,13 @@ export function useCodeRagController({
         setSelectedRepositoryId(repositoryId);
       }
       setCodeConversationId(conversationId);
-      setCodeConversationTurns(turns);
+      setCodeConversationTurns(turns.map((turn) => ({ ...turn, repositoryId, status: answerLifecycleStatus(turn, true) })));
+      setPendingCodeTurn(null);
       const lastTurn = turns.at(-1);
       if (lastTurn) {
-        setCodeQuestion(lastTurn.question || '');
         setCodeAnswer({
           mode: lastTurn.mode,
+          question: lastTurn.question || '',
           answer: lastTurn.answer,
           evidence: lastTurn.evidence || [],
           confidence: lastTurn.confidence,
@@ -383,6 +421,7 @@ export function useCodeRagController({
           turnId: lastTurn.id,
           rewrittenQuestion: lastTurn.rewrittenQuestion,
           repositoryId,
+          status: answerLifecycleStatus(lastTurn, true),
         });
         setCodeAnswerSavedId('');
       }
@@ -392,6 +431,7 @@ export function useCodeRagController({
   function startNewCodeConversation() {
     setCodeConversationId('');
     setCodeConversationTurns([]);
+    setPendingCodeTurn(null);
     setCodeAnswer(null);
     setCodeAnswerSavedId('');
     setCodeQuestion('');
@@ -407,20 +447,21 @@ export function useCodeRagController({
   async function saveCodeAnswer() {
     if (!codeAnswer) return;
     await run('save-code-answer', async () => {
+      const turnsForSave = codeConversationTurns.length
+        ? codeConversationTurns
+        : [codeAnswer];
       const saved = await request('/api/saved-answers', {
         method: 'POST',
-        json: {
+        json: buildSavedConversationPayload({
           spaceId: activeSpaceId,
           answerType: 'CODE',
-          question: codeQuestion,
           mode: codeAnswer.mode,
-          answer: codeAnswer.answer,
-          citations: [],
-          evidence: codeAnswer.evidence || [],
-          confidence: codeAnswer.confidence,
-          diagnostics: codeAnswer.diagnostics || [],
-          repositoryId: selectedRepositoryId || null,
-        },
+          conversationId: codeConversationId || codeAnswer.conversationId || null,
+          turns: turnsForSave,
+          fallbackAnswer: codeAnswer,
+          fallbackQuestion: codeAnswer.question || codeQuestion,
+          repositoryId: codeAnswer.repositoryId || selectedRepositoryId || null,
+        }),
       });
       setCodeAnswerSavedId(saved.id);
       setSavedAnswers((current) => [savedSummary(saved), ...current.filter((item) => item.id !== saved.id)]);
@@ -487,6 +528,7 @@ export function useCodeRagController({
     codeConversations,
     codeConversationId,
     codeConversationTurns,
+    pendingCodeTurn,
     refreshCodeConversations,
     loadCodeConversation,
     startNewCodeConversation,
@@ -519,4 +561,15 @@ export function useCodeRagController({
     searchCode,
     findReferences,
   };
+}
+
+function answerLifecycleStatus(answer = {}, streamed = false) {
+  if (answer?.status) return answer.status;
+  if (answer?.streaming) return 'streaming';
+  if (answer?.aborted) return 'aborted';
+  if (answer?.error) return 'error';
+  const diagnostics = (answer?.diagnostics || []).join(' ').toLowerCase();
+  if (diagnostics.includes('fallback') || (!streamed && answer?.answer)) return 'fallback';
+  if (diagnostics.includes('repair') || diagnostics.includes('repaired') || diagnostics.includes('보정')) return 'repaired';
+  return 'completed';
 }

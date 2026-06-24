@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { buildSavedConversationPayload } from '../../lib/ragConversationSave.js';
 
 export function useDocumentRagController({
   activeSpaceId,
@@ -35,6 +36,7 @@ export function useDocumentRagController({
   const [documentConversations, setDocumentConversations] = useState([]);
   const [documentConversationId, setDocumentConversationId] = useState('');
   const [documentConversationTurns, setDocumentConversationTurns] = useState([]);
+  const [pendingDocumentTurn, setPendingDocumentTurn] = useState(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [documentDetail, setDocumentDetail] = useState(null);
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
@@ -80,6 +82,7 @@ export function useDocumentRagController({
     setDocumentConversations([]);
     setDocumentConversationId('');
     setDocumentConversationTurns([]);
+    setPendingDocumentTurn(null);
     setSelectedDocumentId('');
     setDocumentDetail(null);
     setDocumentPreviewOpen(false);
@@ -166,9 +169,11 @@ export function useDocumentRagController({
   async function ask(event) {
     event.preventDefault();
     await run('ask', async () => {
+      const submittedQuestion = question.trim();
+      if (!submittedQuestion) return;
       const parentTurnId = documentConversationTurns.at(-1)?.id || null;
       const payload = {
-        question,
+        question: submittedQuestion,
         mode: answerMode,
         speedProfile: documentSpeedProfile,
         spaceId: activeSpaceId,
@@ -180,15 +185,24 @@ export function useDocumentRagController({
       let sawStream = false;
       const controller = new AbortController();
       askAbortRef.current = controller;
-      setAnswer({
+      const initialAnswer = {
         mode: answerMode,
+        question: submittedQuestion,
         answer: '',
         citations: [],
         evidence: [],
         confidence: '',
         diagnostics: ['답변을 생성하는 중입니다.'],
         streaming: true,
+        status: 'streaming',
+      };
+      setAnswer(initialAnswer);
+      setPendingDocumentTurn({
+        ...initialAnswer,
+        clientId: `pending-document-${Date.now()}`,
+        parentTurnId,
       });
+      setQuestion('');
       try {
         await streamRequest('/api/rag/ask/stream', {
           method: 'POST',
@@ -198,12 +212,18 @@ export function useDocumentRagController({
             if (eventName === 'delta') {
               sawStream = true;
               const text = eventData?.text || '';
-              setAnswer((current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, streaming: true }));
+              const update = (current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, streaming: true, status: 'streaming' });
+              setAnswer(update);
+              setPendingDocumentTurn(update);
             } else if (eventName === 'evidence') {
-              setAnswer((current) => ({ ...(current || {}), citations: eventData?.citations || [], evidence: eventData?.evidence || [] }));
+              const update = (current) => ({ ...(current || {}), citations: eventData?.citations || [], evidence: eventData?.evidence || [] });
+              setAnswer(update);
+              setPendingDocumentTurn(update);
             } else if (eventName === 'replace') {
               sawStream = true;
-              setAnswer((current) => ({ ...(current || {}), answer: eventData?.answer || '', streaming: true }));
+              const update = (current) => ({ ...(current || {}), answer: eventData?.answer || '', streaming: true, status: 'streaming' });
+              setAnswer(update);
+              setPendingDocumentTurn(update);
             } else if (eventName === 'done') {
               data = eventData;
             } else if (eventName === 'error') {
@@ -222,20 +242,32 @@ export function useDocumentRagController({
         }
       } catch (err) {
         if (err.name === 'AbortError') {
-          setAnswer((current) => ({ ...(current || {}), streaming: false, aborted: true, diagnostics: ['사용자가 답변 생성을 중단했습니다.'] }));
+          const update = (current) => ({ ...(current || {}), streaming: false, aborted: true, status: 'aborted', diagnostics: ['사용자가 답변 생성을 중단했습니다.'] });
+          setAnswer(update);
+          setPendingDocumentTurn(update);
           return;
         }
         if (!sawStream && err.code !== 'STREAM_LIMIT_EXCEEDED') {
           data = await request('/api/rag/ask', { method: 'POST', json: payload });
         } else {
-          throw err;
+          const update = (current) => ({
+            ...(current || {}),
+            streaming: false,
+            error: true,
+            status: 'error',
+            diagnostics: [err.message || '문서 RAG 스트리밍에 실패했습니다.'],
+          });
+          setAnswer(update);
+          setPendingDocumentTurn(update);
+          return;
         }
       } finally {
         if (askAbortRef.current === controller) {
           askAbortRef.current = null;
         }
       }
-      setAnswer(data);
+      const completed = { ...data, question: submittedQuestion, status: answerLifecycleStatus(data, sawStream) };
+      setAnswer(completed);
       setAnswerSavedId('');
       if (data?.conversationId) {
         setDocumentConversationId(data.conversationId);
@@ -245,7 +277,7 @@ export function useDocumentRagController({
             id: data.turnId,
             conversationId: data.conversationId,
             parentTurnId,
-            question,
+            question: submittedQuestion,
             rewrittenQuestion: data.rewrittenQuestion,
             mode: data.mode,
             answer: data.answer,
@@ -253,9 +285,13 @@ export function useDocumentRagController({
             citations: data.citations || [],
             evidence: data.evidence || [],
             diagnostics: data.diagnostics || [],
+            status: completed.status,
           },
         ]);
+        setPendingDocumentTurn(null);
         await refreshDocumentConversations();
+      } else {
+        setPendingDocumentTurn((current) => current ? { ...current, ...completed, streaming: false } : null);
       }
     });
   }
@@ -276,12 +312,13 @@ export function useDocumentRagController({
       const detail = await request(`/api/rag/conversations/${conversationId}`);
       const turns = detail?.turns || [];
       setDocumentConversationId(conversationId);
-      setDocumentConversationTurns(turns);
+      setDocumentConversationTurns(turns.map((turn) => ({ ...turn, status: answerLifecycleStatus(turn, true) })));
+      setPendingDocumentTurn(null);
       const lastTurn = turns.at(-1);
       if (lastTurn) {
-        setQuestion(lastTurn.question || '');
         setAnswer({
           mode: lastTurn.mode,
+          question: lastTurn.question || '',
           answer: lastTurn.answer,
           citations: lastTurn.citations || [],
           evidence: lastTurn.evidence || [],
@@ -290,6 +327,7 @@ export function useDocumentRagController({
           conversationId,
           turnId: lastTurn.id,
           rewrittenQuestion: lastTurn.rewrittenQuestion,
+          status: answerLifecycleStatus(lastTurn, true),
         });
         setAnswerSavedId('');
       }
@@ -299,6 +337,7 @@ export function useDocumentRagController({
   function startNewDocumentConversation() {
     setDocumentConversationId('');
     setDocumentConversationTurns([]);
+    setPendingDocumentTurn(null);
     setAnswer(null);
     setAnswerSavedId('');
     setQuestion('');
@@ -307,19 +346,20 @@ export function useDocumentRagController({
   async function saveAnswer() {
     if (!answer) return;
     await run('save-answer', async () => {
+      const turnsForSave = documentConversationTurns.length
+        ? documentConversationTurns
+        : [answer];
       const saved = await request('/api/saved-answers', {
         method: 'POST',
-        json: {
+        json: buildSavedConversationPayload({
           spaceId: activeSpaceId,
           answerType: 'DOCUMENT',
-          question,
           mode: answer.mode,
-          answer: answer.answer,
-          citations: answer.citations || [],
-          evidence: answer.evidence || [],
-          confidence: answer.confidence,
-          diagnostics: answer.diagnostics || [],
-        },
+          conversationId: documentConversationId || answer.conversationId || null,
+          turns: turnsForSave,
+          fallbackAnswer: answer,
+          fallbackQuestion: answer.question || question,
+        }),
       });
       setAnswerSavedId(saved.id);
       setSavedAnswers((current) => [savedSummary(saved), ...current.filter((item) => item.id !== saved.id)]);
@@ -343,7 +383,7 @@ export function useDocumentRagController({
   }
 
   async function deleteDocument(documentId, title) {
-    if (!window.confirm(`'${title}' 臾몄꽌瑜???젣?좉퉴?? ??젣??臾몄꽌???댁??듭뿉??蹂듦뎄?????덉뒿?덈떎.`)) return;
+    if (!window.confirm(`'${title}' 문서를 삭제할까요? 삭제한 문서는 대화에서 복구할 수 없습니다.`)) return;
     await run(`delete-${documentId}`, async () => {
       await request(`/api/documents/${documentId}`, { method: 'DELETE' });
       await refreshDocuments();
@@ -354,6 +394,7 @@ export function useDocumentRagController({
       setSearchResults((current) => current.filter((result) => result.documentId !== documentId));
       if (answer?.citations?.some((result) => result.documentId === documentId)) {
         setAnswer(null);
+        setPendingDocumentTurn(null);
       }
     });
   }
@@ -458,6 +499,7 @@ export function useDocumentRagController({
     documentConversations,
     documentConversationId,
     documentConversationTurns,
+    pendingDocumentTurn,
     refreshDocumentConversations,
     loadDocumentConversation,
     startNewDocumentConversation,
@@ -486,4 +528,15 @@ export function useDocumentRagController({
     openDocumentPreview,
     closeDocumentPreview,
   };
+}
+
+function answerLifecycleStatus(answer = {}, streamed = false) {
+  if (answer?.status) return answer.status;
+  if (answer?.streaming) return 'streaming';
+  if (answer?.aborted) return 'aborted';
+  if (answer?.error) return 'error';
+  const diagnostics = (answer?.diagnostics || []).join(' ').toLowerCase();
+  if (diagnostics.includes('fallback') || (!streamed && answer?.answer)) return 'fallback';
+  if (diagnostics.includes('repair') || diagnostics.includes('repaired') || diagnostics.includes('보정')) return 'repaired';
+  return 'completed';
 }

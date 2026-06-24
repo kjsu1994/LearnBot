@@ -1,6 +1,7 @@
 import { Bookmark, Code2, Database, Edit3, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { formatDate, getAnswerModeLabel, getCodeModeLabel } from '../../lib/formatters.js';
+import { getSavedConversationSnapshot } from '../../lib/ragConversationSave.js';
 import { AnswerModal } from '../common/AnswerModal.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
@@ -216,6 +217,7 @@ function SavedAnswerDetail({
   loading,
 }) {
   const [answerModalOpen, setAnswerModalOpen] = useState(false);
+  const conversationSnapshot = getSavedConversationSnapshot(selectedSavedAnswer);
 
   if (!selectedSavedAnswer) {
     return (
@@ -228,6 +230,20 @@ function SavedAnswerDetail({
           </div>
         </div>
       </section>
+    );
+  }
+
+  if (conversationSnapshot) {
+    return (
+      <SavedConversationSnapshotDetail
+        selectedSavedAnswer={selectedSavedAnswer}
+        snapshot={conversationSnapshot}
+        editingTitle={editingTitle}
+        setEditingTitle={setEditingTitle}
+        saveTitle={saveTitle}
+        deleteSavedAnswer={deleteSavedAnswer}
+        loading={loading}
+      />
     );
   }
 
@@ -270,13 +286,101 @@ function SavedAnswerDetail({
         />
       )}
       <SavedEvidence evidence={selectedSavedAnswer.evidence || []} />
-      {Array.isArray(selectedSavedAnswer.diagnostics) && selectedSavedAnswer.diagnostics.length > 0 && (
+      {visibleDiagnostics(selectedSavedAnswer.diagnostics).length > 0 && (
         <div className="detail-box">
           <strong>진단</strong>
           <ul className="saved-diagnostics">
-            {selectedSavedAnswer.diagnostics.map((item, index) => <li key={`${index}-${item}`}>{String(item)}</li>)}
+            {visibleDiagnostics(selectedSavedAnswer.diagnostics).map((item, index) => <li key={`${index}-${item}`}>{String(item)}</li>)}
           </ul>
         </div>
+      )}
+      <div className="action-row">
+        <button className="ghost-button" type="button" disabled={loading(`saved-delete-${selectedSavedAnswer.id}`)} onClick={() => deleteSavedAnswer(selectedSavedAnswer.id)}>
+          {loading(`saved-delete-${selectedSavedAnswer.id}`) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+          삭제
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SavedConversationSnapshotDetail({
+  selectedSavedAnswer,
+  snapshot,
+  editingTitle,
+  setEditingTitle,
+  saveTitle,
+  deleteSavedAnswer,
+  loading,
+}) {
+  const [expandedTurn, setExpandedTurn] = useState(null);
+  const turns = snapshot.turns || [];
+  const expandedTurnTitle = expandedTurn
+    ? `${selectedSavedAnswer.title || '저장된 대화'} · ${expandedTurn.index}`
+    : '저장된 대화 답변';
+
+  return (
+    <section className="panel saved-answer-detail library-detail-panel conversation-history-panel">
+      <div className="panel-title">
+        {selectedSavedAnswer.answerType === 'CODE' ? <Code2 size={18} /> : <Database size={18} />}
+        <div>
+          <h2>{selectedSavedAnswer.title}</h2>
+          <p>{typeLabel(selectedSavedAnswer.answerType)} · 저장된 대화 · {turns.length}턴 · {formatDate(selectedSavedAnswer.createdAt)}</p>
+        </div>
+      </div>
+      <form className="inline-control" onSubmit={saveTitle}>
+        <input value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} />
+        <button className="ghost-button" disabled={!editingTitle.trim() || loading(`saved-title-${selectedSavedAnswer.id}`)}>
+          {loading(`saved-title-${selectedSavedAnswer.id}`) ? <Loader2 className="spin" size={16} /> : <Edit3 size={16} />}
+          이름 변경
+        </button>
+      </form>
+      <div className="conversation-turn-list saved-conversation-snapshot-list">
+        {turns.map((turn, index) => (
+          <article className="conversation-turn-card" key={turn.id || index}>
+            <div className="conversation-turn-head">
+              <strong>{index === 0 ? '질문' : '추가 질문'} {index + 1}</strong>
+              <small>{turn.createdAt ? formatDate(turn.createdAt) : modeLabel({ answerType: selectedSavedAnswer.answerType, mode: turn.mode })}</small>
+            </div>
+            <div className="conversation-message user-message">
+              <strong>{index === 0 ? '질문' : '추가 질문'}</strong>
+              <p>{turn.question}</p>
+            </div>
+            {turn.rewrittenQuestion && turn.rewrittenQuestion !== turn.question && (
+              <details className="conversation-context-details">
+                <summary>이전 대화 참고 정보</summary>
+                <p>{turn.rewrittenQuestion}</p>
+              </details>
+            )}
+            <div className="conversation-message assistant-message">
+              <strong>답변</strong>
+              <div className="saved-answer-body conversation-answer-body">
+                <div className="saved-answer-body-toolbar">
+                  <button
+                    className="icon-button answer-expand-button"
+                    type="button"
+                    title="크게 보기"
+                    onClick={() => setExpandedTurn(turn)}
+                  >
+                    <Maximize2 size={15} />
+                  </button>
+                </div>
+                <MarkdownAnswer text={turn.answer} />
+              </div>
+            </div>
+            <CollapsibleEvidence evidence={turn.evidence || turn.citations || []} />
+          </article>
+        ))}
+      </div>
+      {expandedTurn && (
+        <AnswerModal
+          title={expandedTurnTitle}
+          subtitle={`${typeLabel(selectedSavedAnswer.answerType)} · ${modeLabel({ answerType: selectedSavedAnswer.answerType, mode: expandedTurn.mode })}`}
+          answer={expandedTurn.answer}
+          className="saved-answer-modal"
+          bodyClassName="saved-answer-modal-body"
+          onClose={() => setExpandedTurn(null)}
+        />
       )}
       <div className="action-row">
         <button className="ghost-button" type="button" disabled={loading(`saved-delete-${selectedSavedAnswer.id}`)} onClick={() => deleteSavedAnswer(selectedSavedAnswer.id)}>
@@ -437,6 +541,10 @@ function typeLabel(type) {
   if (type === 'CODE') return '코드';
   if (type === 'DOCUMENT') return '문서';
   return type || '-';
+}
+
+function visibleDiagnostics(diagnostics = []) {
+  return (Array.isArray(diagnostics) ? diagnostics : []).filter((item) => item?.kind !== 'SAVED_CONVERSATION');
 }
 
 function modeLabel(answer) {

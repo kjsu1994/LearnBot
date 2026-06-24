@@ -131,6 +131,7 @@ export default function App() {
     documentConversations,
     documentConversationId,
     documentConversationTurns,
+    pendingDocumentTurn,
     refreshDocumentConversations,
     loadDocumentConversation,
     startNewDocumentConversation,
@@ -201,6 +202,7 @@ export default function App() {
     codeConversations,
     codeConversationId,
     codeConversationTurns,
+    pendingCodeTurn,
     refreshCodeConversations,
     loadCodeConversation,
     startNewCodeConversation,
@@ -969,6 +971,7 @@ export default function App() {
             codeConversations={codeConversations}
             codeConversationId={codeConversationId}
             codeConversationTurns={codeConversationTurns}
+            pendingCodeTurn={pendingCodeTurn}
             refreshCodeConversations={refreshCodeConversations}
             loadCodeConversation={loadCodeConversation}
             startNewCodeConversation={startNewCodeConversation}
@@ -1058,6 +1061,7 @@ export default function App() {
             documentConversations={documentConversations}
             documentConversationId={documentConversationId}
             documentConversationTurns={documentConversationTurns}
+            pendingDocumentTurn={pendingDocumentTurn}
             refreshDocumentConversations={refreshDocumentConversations}
             loadDocumentConversation={loadDocumentConversation}
             startNewDocumentConversation={startNewDocumentConversation}

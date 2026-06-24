@@ -83,8 +83,16 @@ function useStreamingAutoScroll(anchorRef, streaming, content) {
       stickyRef.current = false;
     }
 
-    function handleWheel() {
-      pauseAutoFollow();
+    function handleWheel(event) {
+      if (Date.now() < autoScrollUntilRef.current) return;
+      if (event.deltaY > 0 && isNearBottom(scrollContainer)) {
+        userPausedRef.current = false;
+        stickyRef.current = true;
+        return;
+      }
+      if (event.deltaY < 0) {
+        pauseAutoFollow();
+      }
     }
 
     function handleTouchStart() {
@@ -120,6 +128,9 @@ function useStreamingAutoScroll(anchorRef, streaming, content) {
     scrollContainerRef.current = scrollContainer;
     autoScrollUntilRef.current = Date.now() + 120;
     scrollToBottom(scrollContainer);
+    requestAnimationFrame(() => {
+      if (stickyRef.current) scrollToBottom(scrollContainer);
+    });
   }, [anchorRef, streaming, content]);
 }
 

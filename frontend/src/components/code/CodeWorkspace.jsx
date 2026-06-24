@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bookmark, CheckCircle2, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { escapeHtml, highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
 import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
-import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
-import { AnswerModal } from '../common/AnswerModal.jsx';
-import { RagAskComposer } from '../common/RagAskComposer.jsx';
+import { IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
+import { RagChatPanel } from '../common/RagChatPanel.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
@@ -118,9 +117,12 @@ function CodeWorkspace(props) {
     showSourceManagement = true,
   } = props;
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
-  const [answerModalOpen, setAnswerModalOpen] = useState(false);
   const answerStreamAnchorRef = useRef(null);
-  useStreamingAutoScroll(answerStreamAnchorRef, codeAnswer?.streaming, codeAnswer?.answer);
+  const chatTurns = props.pendingCodeTurn
+    ? [...(codeConversationTurns || []), props.pendingCodeTurn]
+    : (codeConversationTurns || []);
+  const latestAnswer = props.pendingCodeTurn || codeAnswer;
+  useStreamingAutoScroll(answerStreamAnchorRef, latestAnswer?.streaming, latestAnswer?.answer);
 
   return (
     <section className="workspace-grid code-grid workspace-product code-workspace-product">
@@ -139,117 +141,53 @@ function CodeWorkspace(props) {
       {showSourceManagement && <CodeSourceManagementPanel {...props} />}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
-        <form className="panel ask-panel rag-command-panel" onSubmit={askCode}><RagAskComposer
-            title="코드에게 질문하기"
-            description="파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 분석합니다."
-            icon={<MessageSquare size={18} />}
-            controls={(
-              <>
-                <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
-                <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
-              </>
-            )}
-            guide={(
-              <ConversationInlineActions
-                activeConversationId={codeConversationId}
-                turnCount={codeConversationTurns.length}
-                loading={loading}
-                loadingKey="code-conversations"
-                onRefresh={refreshCodeConversations}
-                onNew={startNewCodeConversation}
+        <RagChatPanel
+          domain="CODE"
+          turns={chatTurns}
+          question={codeQuestion}
+          setQuestion={setCodeQuestion}
+          onSubmit={askCode}
+          onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
+          placeholder={activeCodeModeGuide.placeholder}
+          loading={loading('code-ask')}
+          disabled={!codeQuestion.trim()}
+          submitLabel={codeConversationId ? '추가 질문' : '코드 질문'}
+          emptyTitle="코드에게 질문하기"
+          emptyDescription="저장소의 실제 파일, 라인, 참조 근거를 바탕으로 코드 질문에 답합니다."
+          controls={(
+            <>
+              <RepositorySelect
+                repositories={repositories}
+                selectedRepository={selectedRepository}
+                selectedRepositoryId={selectedRepositoryId}
+                setSelectedRepositoryId={setSelectedRepositoryId}
               />
-            )}
-            value={codeQuestion}
-            setValue={setCodeQuestion}
-            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
-            placeholder={activeCodeModeGuide.placeholder}
-            loading={loading('code-ask')}
-            disabled={!codeQuestion.trim()}
-            submitLabel={codeConversationId ? '추가 질문' : '코드 질문'}
-            templates={[
-              { label: '구조 요약', prompt: '선택한 저장소의 주요 구조와 진입점을 근거와 함께 요약해줘.' },
-              { label: '오류 원인', prompt: '이 오류가 발생할 수 있는 코드 경로와 수정 후보를 근거와 함께 알려줘.' },
-              { label: '참조 추적', prompt: '이 기능을 호출하는 위치와 영향 범위를 파일/라인 근거와 함께 추적해줘.' },
-              { label: '변경 영향', prompt: '이 코드를 변경하면 영향을 받을 수 있는 모듈과 테스트 포인트를 알려줘.' },
-            ]}
-            footer={selectedRepository && (
-              <div className="detail-box compact-box">
-                <strong>{selectedRepository.name}</strong>
-                <small>{selectedRepository.lastIndexedCommit ? `commit ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : '아직 인덱싱된 commit이 없습니다.'}</small>
-              </div>
-            )}
-          />
-          <div className="panel-title">
-            <MessageSquare size={18} />
-            <div>
-              <h2>코드에게 질문하기</h2>
-              <p>파일, 클래스, 메서드, UI 이벤트 흐름을 실제 코드 근거와 함께 분석합니다.</p>
-            </div>
-          </div>
-          <RepositorySelect repositories={repositories} selectedRepositoryId={selectedRepositoryId} setSelectedRepositoryId={setSelectedRepositoryId} />
-          <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
-          <div className="code-question-toolbar">
-            <button className="code-ask-button" disabled={!codeQuestion || loading('code-ask')}>
-              {loading('code-ask') ? <Loader2 className="spin" size={15} /> : <MessageSquare size={15} />}
-              {codeConversationId ? '추가 질문' : '코드 질문'}
-            </button>
-          </div>
-          <textarea
-            value={codeQuestion}
-            onChange={(event) => setCodeQuestion(event.target.value)}
-            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(codeQuestion.trim()) && !loading('code-ask'))}
-            placeholder={activeCodeModeGuide.placeholder}
-          />
-          {selectedRepository && (
-            <div className="detail-box compact-box">
-              <strong>{selectedRepository.name}</strong>
-              <small>{selectedRepository.lastIndexedCommit ? `commit ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : '아직 인덱싱된 commit이 없습니다.'}</small>
-            </div>
+              <ModeControl modes={codeModes} value={codeMode} setValue={setCodeMode} className="code-mode-control" />
+            </>
           )}
-          {codeAnswer && (
-            <div className="answer code-answer">
-              <div className="answer-title">
-                <div className="answer-title-main">
-                  <CheckCircle2 size={16} />
-                  <strong>{getCodeModeLabel(codeAnswer.mode)} 답변</strong>
-                </div>
-                <div className="answer-actions">
-                  {codeAnswer.streaming && (
-                    <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={props.cancelCodeAsk}>
-                      <X size={15} />
-                    </button>
-                  )}
-                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? "저장됨" : "답변 저장"} disabled={props.answerSavedId || codeAnswer.streaming || loading('save-code-answer')} onClick={props.saveAnswer}>
-                    {loading('save-code-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
-                  </button>
-                  <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
-                    <Maximize2 size={15} />
-                  </button>
-                </div>
-              </div>
-              <AnswerStatus confidence={codeAnswer.confidence} diagnostics={codeAnswer.diagnostics} />
-              {codeAnswer.rewrittenQuestion && codeAnswer.rewrittenQuestion !== codeQuestion && (
-                <small className="answer-mode">이전 코드 근거를 참고해 후속 질문으로 처리했습니다.</small>
-              )}
-              <div className="answer-body">
-                <MarkdownAnswer text={codeAnswer.answer} streaming={codeAnswer.streaming} />
-                <span className="stream-scroll-anchor" ref={answerStreamAnchorRef} aria-hidden="true" />
-              </div>
-              <CodeEvidenceList evidence={codeAnswer.evidence} onOpenEvidence={openCodeFile} />
-            </div>
-          )}
-          {answerModalOpen && codeAnswer && (
-            <AnswerModal
-              title={`${getCodeModeLabel(codeAnswer.mode)} 답변`}
-              subtitle={selectedRepository?.name || '코드 답변'}
-              answer={codeAnswer.answer}
-              className="code-answer-modal"
-              bodyClassName="code-answer-modal-body"
-              onClose={() => setAnswerModalOpen(false)}
+          guide={(
+            <ConversationInlineActions
+              activeConversationId={codeConversationId}
+              turnCount={codeConversationTurns.length}
+              loading={loading}
+              loadingKey="code-conversations"
+              onRefresh={refreshCodeConversations}
+              onNew={startNewCodeConversation}
             />
           )}
-        </form>
-
+          templates={[
+            { label: '구조 요약', prompt: '선택한 저장소의 주요 구조와 진입점을 근거와 함께 요약해줘.' },
+            { label: '오류 원인', prompt: '이 오류가 발생할 수 있는 코드 경로와 수정 후보를 근거와 함께 알려줘.' },
+            { label: '참조 추적', prompt: '이 기능을 호출하는 위치와 영향 범위를 파일/라인 근거와 함께 추적해줘.' },
+            { label: '변경 영향', prompt: '이 코드를 변경하면 영향을 받을 수 있는 모듈과 테스트 포인트를 알려줘.' },
+          ]}
+          evidenceRenderer={(turn) => <CodeEvidenceList evidence={turn.evidence} onOpenEvidence={openCodeFile} />}
+          onSaveAnswer={props.saveAnswer}
+          onCancel={props.cancelCodeAsk}
+          answerSavedId={props.answerSavedId}
+          saveLoading={loading('save-code-answer')}
+          streamAnchorRef={answerStreamAnchorRef}
+        />
         <form className="panel search-panel rag-search-panel" onSubmit={searchCode}>
           <div className="panel-title">
             <Search size={18} />
@@ -562,19 +500,19 @@ function JobStrip({ job, repoId, failures, loadFailures, loading, diagnostics, l
   return (
     <div className="job-strip">
       <span>
-        {getStatusLabel(job.status)} {'\u00B7'} {job.processedFiles}/{job.totalFiles || '-'} files {'\u00B7'} {job.totalChunks} chunks
-        {job.failedFiles > 0 ? ` \u00B7 ${'\uC2E4\uD328'} ${job.failedFiles}` : ''}
+        {getStatusLabel(job.status)} {'·'} {job.processedFiles}/{job.totalFiles || '-'} files {'·'} {job.totalChunks} chunks
+        {job.failedFiles > 0 ? ` · ${'실패'} ${job.failedFiles}` : ''}
       </span>
       {jobChangeText(job) && <small className="job-change-line">{jobChangeText(job)}</small>}
       <EnrichmentStatusLine job={job} />
-      <div className="progress-track" aria-label={'\uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
+      <div className="progress-track" aria-label={'인덱싱 진행률'}>
         <span style={{ width: `${jobPercent(job)}%` }} />
       </div>
       {job.errorMessage && <div className="failure-line"><AlertTriangle size={14} />{job.errorMessage}</div>}
       {canShowFailures && (
         <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadFailures(repoId, job.id); }}>
           {loading ? <Loader2 className="spin" size={14} /> : <Eye size={14} />}
-          {'\uC2E4\uD328 \uC0AC\uC720'}
+          {'실패 사유'}
         </button>
       )}
       <button className="ghost-button compact-action" type="button" onClick={(event) => { event.stopPropagation(); loadDiagnostics(repoId, job.id); }}>
@@ -616,14 +554,14 @@ function JobDiagnosticList({ diagnostics }) {
 
 function JobFailureList({ failures }) {
   if (!failures.length) {
-    return <p className="empty compact-empty">{'\uAE30\uB85D\uB41C \uD30C\uC77C\uBCC4 \uC2E4\uD328 \uC0AC\uC720\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uC18C \uC218\uC900 \uC624\uB958 \uBA54\uC2DC\uC9C0\uB97C \uD655\uC778\uD558\uC138\uC694.'}</p>;
+    return <p className="empty compact-empty">{'기록된 파일별 실패 사유가 없습니다. 저장소 수준 오류 메시지를 확인하세요.'}</p>;
   }
   return (
     <div className="failure-list">
       {failures.map((failure) => (
         <div className="failure-item" key={failure.id}>
           <strong>{failure.filePath || 'repository'}</strong>
-          <small>{failure.stage} {'\u00B7'} {formatDate(failure.createdAt)}</small>
+          <small>{failure.stage} {'·'} {formatDate(failure.createdAt)}</small>
           <span>{failure.message}</span>
         </div>
       ))}
@@ -655,10 +593,16 @@ function enrichmentStatusText(status) {
   return labels[status] ?? status ?? '';
 }
 
-function RepositorySelect({ repositories, selectedRepositoryId, setSelectedRepositoryId }) {
+function RepositorySelect({ repositories, selectedRepository, selectedRepositoryId, setSelectedRepositoryId }) {
+  const repositoryMeta = selectedRepository
+    ? `${selectedRepository.name}${selectedRepository.lastIndexedCommit ? ` · commit ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : ''}`
+    : '전체 저장소';
   return (
     <div className="stack">
-      <label htmlFor="repo-select">질문 대상</label>
+      <label className="rag-repo-label-row" htmlFor="repo-select">
+        <span>질문 대상</span>
+        <small className="rag-repo-inline-meta">{repositoryMeta}</small>
+      </label>
       <select id="repo-select" value={selectedRepositoryId} onChange={(event) => setSelectedRepositoryId(event.target.value)}>
         <option value="">전체 저장소</option>
         {repositories.map((repo) => (
@@ -675,15 +619,15 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
   useEffect(() => {
     setExpanded(false);
   }, [evidenceKey]);
-  if (!evidence.length) return <p className="empty compact-empty">{'\uD45C\uC2DC\uD560 \uCF54\uB4DC \uADFC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>;
+  if (!evidence.length) return <p className="empty compact-empty">{'표시할 코드 근거가 없습니다.'}</p>;
   const groupedEvidence = groupCodeEvidence(evidence);
   const visibleEvidence = expanded ? groupedEvidence : groupedEvidence.slice(0, evidencePreviewLimit);
   const hiddenCount = Math.max(groupedEvidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
-        <strong>{'\uCF54\uB4DC \uADFC\uAC70'}</strong>
-        <small>{visibleEvidence.length}/{groupedEvidence.length}{'\uAC1C \uD30C\uC77C \uD45C\uC2DC'}</small>
+        <strong>{'코드 근거'}</strong>
+        <small>{visibleEvidence.length}/{groupedEvidence.length}{'개 파일 표시'}</small>
       </div>
       <div className="evidence-list">
         {visibleEvidence.map((group) => {
@@ -693,7 +637,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
           const groupRanges = codeEvidenceRanges(group.items);
           const openRanges = groupRanges.length ? groupRanges : primaryRange;
           const metaText = group.items.length > 1
-            ? `${group.items.length}\uAC1C \uADFC\uAC70 \u00B7 ${group.locationSummary}`
+            ? `${group.items.length}개 근거 · ${group.locationSummary}`
             : codeEvidenceMetaText(item);
           return (
             <article className="evidence-card code-evidence" key={group.evidenceKey}>
@@ -702,7 +646,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
                 {canOpen && (
                   <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, openRanges)}>
                     <Eye size={14} />
-                    {'\uC5F4\uAE30'}
+                    {'열기'}
                   </button>
                 )}
               </div>
@@ -733,7 +677,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
       {groupedEvidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '\uD575\uC2EC \uADFC\uAC70\uB9CC \uBCF4\uAE30' : `\uC804\uCCB4 \uADFC\uAC70 \uD30C\uC77C ${groupedEvidence.length}\uAC1C \uBCF4\uAE30`}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 파일 ${groupedEvidence.length}개 보기`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
@@ -797,10 +741,10 @@ function codeEvidenceRanges(items = []) {
 function codeEvidenceMetaText(item = {}) {
   const isCommitDiff = item.metadata?.kind === 'commit_diff';
   if (isCommitDiff) {
-    return `${item.metadata?.changeType || item.chunkType} \u00B7 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`;
+    return `${item.metadata?.changeType || item.chunkType} · +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`;
   }
   const location = item.lineStart > 0 ? `${item.lineStart}-${item.lineEnd || item.lineStart}` : 'lines -';
-  return `${location} \u00B7 ${item.chunkType || 'code'}`;
+  return `${location} · ${item.chunkType || 'code'}`;
 }
 
 function codeEvidenceLocationSummary(items = []) {
@@ -846,7 +790,7 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
           }}
         >
           <Eye size={14} />
-          {'\uC5F4\uAE30'}
+          {'열기'}
         </Button>
       ),
     },
@@ -856,7 +800,7 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
       className="code-search-table"
       columns={columns}
       data={results}
-      empty={'\uCF54\uB4DC \uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}
+      empty={'코드 검색 결과가 없습니다.'}
       onRowClick={(item) => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}
     />
   );
@@ -865,8 +809,8 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
 function CodeReferenceResults({ result, onOpenEvidence }) {
   return (
     <div className="reference-results">
-      <ReferenceGroup title={'\uC815\uC758'} items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
-      <ReferenceGroup title={'\uCC38\uC870'} items={result.references || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title={'정의'} items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title={'참조'} items={result.references || []} onOpenEvidence={onOpenEvidence} />
     </div>
   );
 }
@@ -881,14 +825,14 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              {'\uC5F4\uAE30'}
+              {'열기'}
             </button>
           </div>
-          <small>{item.lineStart}-{item.lineEnd} {'\u00B7'} {item.chunkType}</small>
+          <small>{item.lineStart}-{item.lineEnd} {'·'} {item.chunkType}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!items.length && <p className="empty compact-empty">{'\uACB0\uACFC \uC5C6\uC74C'}</p>}
+      {!items.length && <p className="empty compact-empty">{'결과 없음'}</p>}
     </div>
   );
 }
@@ -931,10 +875,10 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
             <FileCode2 size={18} />
             <div>
               <h2 id="code-modal-title">{fileName}</h2>
-              <p>{detail?.filePath || '\uCF54\uB4DC \uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</p>
+              <p>{detail?.filePath || '코드 파일을 불러오는 중입니다.'}</p>
             </div>
           </div>
-          <button className="icon-button code-modal-close" type="button" title={'\uB2EB\uAE30'} onClick={() => onClose?.()}>
+          <button className="icon-button code-modal-close" type="button" title={'닫기'} onClick={() => onClose?.()}>
             <X size={18} />
           </button>
         </header>
@@ -949,14 +893,14 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
           {loading && (
             <div className="code-modal-state">
               <Loader2 className="spin" size={22} />
-              <strong>{'\uCF54\uB4DC \uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</strong>
+              <strong>{'코드 파일을 불러오는 중입니다.'}</strong>
             </div>
           )}
 
           {!loading && !detail && (
             <div className="code-modal-state">
               <FileCode2 size={22} />
-              <strong>{'\uD45C\uC2DC\uD560 \uCF54\uB4DC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</strong>
+              <strong>{'표시할 코드가 없습니다.'}</strong>
             </div>
           )}
 
@@ -1002,8 +946,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>{'\uCF54\uB4DC \uBBF8\uB9AC\uBCF4\uAE30'}</h2>
-            <p>{'\uD30C\uC77C\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4.'}</p>
+            <h2>{'코드 미리보기'}</h2>
+            <p>{'파일을 불러오는 중입니다.'}</p>
           </div>
         </div>
       </section>
@@ -1015,8 +959,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>{'\uCF54\uB4DC \uBBF8\uB9AC\uBCF4\uAE30'}</h2>
-            <p>{'\uD30C\uC77C\uC774\uB098 \uADFC\uAC70\uB97C \uC120\uD0DD\uD558\uBA74 \uC6D0\uBB38 \uCF54\uB4DC\uB97C \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}</p>
+            <h2>{'코드 미리보기'}</h2>
+            <p>{'파일이나 근거를 선택하면 원문 코드를 확인할 수 있습니다.'}</p>
           </div>
         </div>
       </section>
@@ -1030,7 +974,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <FileCode2 size={18} />
         <div>
           <h2>{detail.filePath}</h2>
-          <p>{detail.language} {'\u00B7'} {detail.chunks?.length || 0} chunks</p>
+          <p>{detail.language} {'·'} {detail.chunks?.length || 0} chunks</p>
         </div>
       </div>
       <pre className="code-viewer">

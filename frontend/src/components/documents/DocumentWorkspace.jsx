@@ -1,22 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bookmark, CheckCircle2, ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, Maximize2, MessageSquare, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Database, Eye, FileCode2, FileUp, Globe, Info, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { answerModes, documentSpeedProfiles, evidencePreviewLimit } from '../../config/constants.js';
-import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getAnswerModeLabel, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
+import { formatDate, formatFileSize, formatSelectedFiles, getAnswerModeGuide, getPreviewTypeLabel, getSourceLabel, getStatusLabel, splitReaderParagraphs, submitFormOnShortcut } from '../../lib/formatters.js';
 import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
-import { AnswerStatus, IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
-import { AnswerModal } from '../common/AnswerModal.jsx';
-import { RagAskComposer } from '../common/RagAskComposer.jsx';
+import { IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
+import { RagChatPanel } from '../common/RagChatPanel.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
 import { DataTable } from '../ui/data-table.jsx';
 
 function DocumentWorkspace(props) {
   const activeAnswerModeGuide = getAnswerModeGuide(props.answerMode);
-  const [answerModalOpen, setAnswerModalOpen] = useState(false);
   const answerStreamAnchorRef = useRef(null);
   const showSourceManagement = props.showSourceManagement !== false;
-  useStreamingAutoScroll(answerStreamAnchorRef, props.answer?.streaming, props.answer?.answer);
+  const chatTurns = props.pendingDocumentTurn
+    ? [...(props.documentConversationTurns || []), props.pendingDocumentTurn]
+    : (props.documentConversationTurns || []);
+  const latestAnswer = props.pendingDocumentTurn || props.answer;
+  useStreamingAutoScroll(answerStreamAnchorRef, latestAnswer?.streaming, latestAnswer?.answer);
 
   return (
     <section className="workspace-grid workspace-product document-workspace-product">
@@ -40,83 +42,48 @@ function DocumentWorkspace(props) {
       )}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
-        <form className="panel ask-panel rag-command-panel" onSubmit={props.ask}>
-          <RagAskComposer
-            title="문서에게 질문하기"
-            description="새로운 문서/주제로 질문하려면 새 대화를 시작하세요."
-            icon={<MessageSquare size={18} />}
-            controls={(
-              <>
-                <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
-                <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
-              </>
-            )}
-            guide={(
-              <ConversationInlineActions
-                activeConversationId={props.documentConversationId || ''}
-                turnCount={(props.documentConversationTurns || []).length}
-                loading={props.loading}
-                loadingKey="document-conversations"
-                onRefresh={props.refreshDocumentConversations}
-                onNew={props.startNewDocumentConversation}
-              />
-            )}
-            value={props.question}
-            setValue={props.setQuestion}
-            onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
-            placeholder={activeAnswerModeGuide.placeholder}
-            loading={props.loading('ask')}
-            disabled={!props.question.trim()}
-            submitLabel={props.documentConversationId ? '추가 질문' : '답변 생성'}
-            templates={[
-              { label: '요약', prompt: '이 문서들의 핵심 내용을 출처와 함께 요약해줘.' },
-              { label: '절차', prompt: '관련 절차를 단계별로 정리하고 각 단계의 근거를 알려줘.' },
-              { label: '위치', prompt: '질문과 관련된 값, 위치, 조건을 원문 근거와 함께 찾아줘.' },
-              { label: '출처 중심', prompt: '답변보다 근거 문서와 인용 위치를 중심으로 정리해줘.' },
-            ]}
-          />
-          {props.answer && (
-            <div className="answer">
-              <div className="answer-title">
-                <div className="answer-title-main">
-                  <CheckCircle2 size={16} />
-                  <strong>답변</strong>
-                </div>
-                <div className="answer-actions">
-                  {props.answer.streaming && (
-                    <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={props.cancelAsk}>
-                      <X size={15} />
-                    </button>
-                  )}
-                  <button className="icon-button answer-expand-button" type="button" title={props.answerSavedId ? '저장됨' : '답변 저장'} disabled={props.answerSavedId || props.answer.streaming || props.loading('save-answer')} onClick={props.saveAnswer}>
-                    {props.loading('save-answer') ? <Loader2 className="spin" size={15} /> : <Bookmark size={15} />}
-                  </button>
-                  <button className="icon-button answer-expand-button" type="button" title="크게 보기" onClick={() => setAnswerModalOpen(true)}>
-                    <Maximize2 size={15} />
-                  </button>
-                </div>
-              </div>
-              <small className="answer-mode">{getAnswerModeLabel(props.answer.mode)} 紐⑤뱶</small>
-              {props.answer.rewrittenQuestion && props.answer.rewrittenQuestion !== props.question && (
-                <small className="answer-mode">이전 문서 근거를 참고해 후속 질문으로 처리했습니다.</small>
-              )}
-              <AnswerStatus confidence={props.answer.confidence} diagnostics={props.answer.diagnostics} />
-              <div className="answer-body">
-                <MarkdownAnswer text={props.answer.answer} streaming={props.answer.streaming} />
-                <span className="stream-scroll-anchor" ref={answerStreamAnchorRef} aria-hidden="true" />
-              </div>
-              <EvidenceList evidence={props.answer.evidence} onOpenEvidence={props.openDocumentPreview} />
-            </div>
+        <RagChatPanel
+          domain="DOCUMENT"
+          turns={chatTurns}
+          question={props.question}
+          setQuestion={props.setQuestion}
+          onSubmit={props.ask}
+          onKeyDown={(event) => submitFormOnShortcut(event, Boolean(props.question.trim()) && !props.loading('ask'))}
+          placeholder={activeAnswerModeGuide.placeholder}
+          loading={props.loading('ask')}
+          disabled={!props.question.trim()}
+          submitLabel={props.documentConversationId ? '추가 질문' : '답변 생성'}
+          emptyTitle={'문서에게 질문하기'}
+          emptyDescription={'인덱싱된 문서를 근거로 질문하면 답변과 출처를 대화 흐름으로 보여줍니다.'}
+          controls={(
+            <>
+              <ModeControl modes={answerModes} value={props.answerMode} setValue={props.setAnswerMode} />
+              <ModeControl modes={documentSpeedProfiles} value={props.documentSpeedProfile} setValue={props.setDocumentSpeedProfile} />
+            </>
           )}
-          {answerModalOpen && props.answer && (
-            <AnswerModal
-              title="답변"
-              subtitle={`${getAnswerModeLabel(props.answer.mode)} 모드`}
-              answer={props.answer.answer}
-              onClose={() => setAnswerModalOpen(false)}
+          guide={(
+            <ConversationInlineActions
+              activeConversationId={props.documentConversationId || ''}
+              turnCount={(props.documentConversationTurns || []).length}
+              loading={props.loading}
+              loadingKey="document-conversations"
+              onRefresh={props.refreshDocumentConversations}
+              onNew={props.startNewDocumentConversation}
             />
           )}
-        </form>
+          templates={[
+            { label: '요약', prompt: '이 문서들의 핵심 내용을 출처와 함께 요약해줘.' },
+            { label: '절차', prompt: '관련 절차를 단계별로 정리하고 각 단계의 근거를 알려줘.' },
+            { label: '위치', prompt: '질문과 관련된 값, 위치, 조건을 원문 근거와 함께 찾아줘.' },
+            { label: '출처 중심', prompt: '답변보다 근거 문서와 인용 위치를 중심으로 정리해줘.' },
+          ]}
+          evidenceRenderer={(turn) => <EvidenceList evidence={turn.evidence} onOpenEvidence={props.openDocumentPreview} />}
+          onSaveAnswer={props.saveAnswer}
+          onCancel={props.cancelAsk}
+          answerSavedId={props.answerSavedId}
+          saveLoading={props.loading('save-answer')}
+          streamAnchorRef={answerStreamAnchorRef}
+        />
         <form className="panel search-panel rag-search-panel" onSubmit={props.search}>
           <div className="panel-title">
             <Search size={18} />
@@ -357,8 +324,8 @@ function DocumentSourceList({
       <div className="panel-title">
         <FileCode2 size={18} />
         <div>
-          <h2>{'\uBB38\uC11C \uC800\uC7A5\uC18C \uBAA9\uB85D'}</h2>
-          <p>{documents.length ? `${documents.length}\uAC1C \uBB38\uC11C` : '\uB4F1\uB85D\uB41C \uBB38\uC11C\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.'}</p>
+          <h2>{'문서 저장소 목록'}</h2>
+          <p>{documents.length ? `${documents.length}개 문서` : '등록된 문서가 없습니다.'}</p>
         </div>
       </div>
       <div className="document-list scrollable-list repo-list document-source-list">
@@ -372,21 +339,21 @@ function DocumentSourceList({
               onClick={() => loadDocumentDetail(document.id)}
             >
               <div className="document-main">
-                <strong>{document.title || document.sourceUri || '\uBB38\uC11C'}</strong>
+                <strong>{document.title || document.sourceUri || '문서'}</strong>
                 <small>{document.sourceUri || document.contentType || '-'}</small>
               </div>
               <div className="document-meta">
                 <StatusBadge status={document.sourceStatus} />
-                <small>{getSourceLabel(document.sourceType)} {'\u00B7'} {formatDate(document.createdAt)}</small>
+                <small>{getSourceLabel(document.sourceType)} {'·'} {formatDate(document.createdAt)}</small>
               </div>
               <div className="document-actions">
-                <IconButton title={'\uBBF8\uB9AC\uBCF4\uAE30'} onClick={(event) => { event.stopPropagation(); openDocumentPreview(document.id); }}>
+                <IconButton title={'미리보기'} onClick={(event) => { event.stopPropagation(); openDocumentPreview(document.id); }}>
                   <Eye size={15} />
                 </IconButton>
-                <IconButton title={'\uC7AC\uC778\uB371\uC2F1'} disabled={!!runningJob || loading(`document-reindex-${document.id}`)} onClick={(event) => { event.stopPropagation(); reindexDocument(document.id); }}>
+                <IconButton title={'재인덱싱'} disabled={!!runningJob || loading(`document-reindex-${document.id}`)} onClick={(event) => { event.stopPropagation(); reindexDocument(document.id); }}>
                   {loading(`document-reindex-${document.id}`) ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
                 </IconButton>
-                <IconButton danger title={'\uBB38\uC11C \uC0AD\uC81C'} disabled={!!runningJob || loading(`delete-${document.id}`)} onClick={(event) => { event.stopPropagation(); deleteDocument(document.id, document.title || document.sourceUri); }}>
+                <IconButton danger title={'문서 삭제'} disabled={!!runningJob || loading(`delete-${document.id}`)} onClick={(event) => { event.stopPropagation(); deleteDocument(document.id, document.title || document.sourceUri); }}>
                   {loading(`delete-${document.id}`) ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
                 </IconButton>
               </div>
@@ -403,7 +370,7 @@ function DocumentSourceList({
             </article>
           );
         })}
-        {documents.length === 0 && <p className="empty">{'\uC6F9 URL\uC744 \uB4F1\uB85D\uD558\uAC70\uB098 \uD30C\uC77C\uC744 \uC5C5\uB85C\uB4DC\uD574 \uC778\uB371\uC2F1\uC744 \uC2DC\uC791\uD558\uC138\uC694.'}</p>}
+        {documents.length === 0 && <p className="empty">{'웹 URL을 등록하거나 파일을 업로드해 인덱싱을 시작하세요.'}</p>}
       </div>
     </section>
   );
@@ -414,7 +381,7 @@ function DocumentJobStrip({ job, diagnostics, loadDiagnostics, retryStage, diagn
     <div className="job-strip">
       <span>{documentJobSummary(job)}</span>
       <EnrichmentStatusLine job={job} />
-      <div className="progress-track" aria-label={'\uBB38\uC11C \uC778\uB371\uC2F1 \uC9C4\uD589\uB960'}>
+      <div className="progress-track" aria-label={'문서 인덱싱 진행률'}>
         <span style={{ width: `${documentJobPercent(job)}%` }} />
       </div>
       {job.errorMessage && <div className="failure-line">{job.errorMessage}</div>}
@@ -486,10 +453,10 @@ function documentJobSummary(job) {
   const chunks = Number(job?.totalChunks || 0);
   const embedded = Number(job?.embeddedChunks || 0);
   const reused = Number(job?.reusedChunks || 0);
-  const parts = [`${status} \u00B7 ${processed}/${total || '-'} files \u00B7 ${chunks} chunks`];
-  if (embedded > 0) parts.push(`\uCD94\uAC00 ${embedded}`);
-  if (reused > 0) parts.push(`\uC7AC\uC0AC\uC6A9 ${reused}`);
-  return parts.join(' \u00B7 ');
+  const parts = [`${status} · ${processed}/${total || '-'} files · ${chunks} chunks`];
+  if (embedded > 0) parts.push(`추가 ${embedded}`);
+  if (reused > 0) parts.push(`재사용 ${reused}`);
+  return parts.join(' · ');
 }
 
 function documentJobPercent(job) {
