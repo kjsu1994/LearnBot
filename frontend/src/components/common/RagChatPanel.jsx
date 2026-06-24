@@ -52,6 +52,11 @@ function RagChatPanel({
     if (event.target.closest('textarea, input, select, button, [role="button"], summary')) return;
     const nextTop = scrollEl.scrollTop + event.deltaY;
     const maxTop = scrollEl.scrollHeight - scrollEl.clientHeight;
+    if (maxTop <= 0 && turns.length === 0) {
+      event.preventDefault();
+      window.scrollBy({ top: event.deltaY, behavior: 'auto' });
+      return;
+    }
     if (maxTop <= 0) return;
     const canScroll = (event.deltaY < 0 && scrollEl.scrollTop > 0) || (event.deltaY > 0 && scrollEl.scrollTop < maxTop);
     if (!canScroll) return;
@@ -60,7 +65,7 @@ function RagChatPanel({
   }
 
   return (
-    <form className="panel ask-panel rag-command-panel rag-chat-panel" onSubmit={onSubmit} onWheel={handleChatWheel}>
+    <form className={turns.length === 0 ? 'panel ask-panel rag-command-panel rag-chat-panel rag-chat-panel-empty' : 'panel ask-panel rag-command-panel rag-chat-panel'} onSubmit={onSubmit} onWheel={handleChatWheel}>
       {(controls || guide || templates.length > 0 || footer) && (
         <div className="rag-chat-topbar">
           {latestTurn && (
@@ -68,11 +73,6 @@ function RagChatPanel({
               <span>{latestModeLabel ? `${latestModeLabel} 답변` : '답변'}</span>
               <strong className={`rag-answer-status rag-answer-status-${latestStatus}`}>{answerStatusLabel(latestStatus)}</strong>
               <div className="rag-chat-topbar-answer-actions">
-                {canCancel && (
-                  <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={onCancel}>
-                    <X size={15} />
-                  </button>
-                )}
                 <button
                   className="icon-button answer-expand-button"
                   type="button"
@@ -139,10 +139,17 @@ function RagChatPanel({
           />
           <div className="rag-chat-input-footer">
             <div className="rag-chat-input-tools" />
-            <button className="rag-ai-send-button" disabled={disabled || loading} type="submit">
-              {loading ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
-              {submitLabel}
-            </button>
+            <div className="rag-chat-submit-actions">
+              {canCancel && (
+                <button className="icon-button answer-expand-button stream-stop-button" type="button" title="답변 생성 중단" onClick={onCancel}>
+                  <X size={15} />
+                </button>
+              )}
+              <button className="rag-ai-send-button" disabled={disabled || loading} type="submit">
+                {loading ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
+                {submitLabel}
+              </button>
+            </div>
           </div>
         </div>
         {hasDetails && (

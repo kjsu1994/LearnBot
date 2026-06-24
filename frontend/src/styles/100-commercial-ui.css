@@ -4563,6 +4563,10 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   scrollbar-width: thin;
 }
 
+.rag-chat-panel-empty .rag-chat-scroll {
+  overscroll-behavior: auto;
+}
+
 .rag-chat-scroll::-webkit-scrollbar {
   width: 8px;
 }
@@ -4691,6 +4695,26 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
 .rag-answer-details {
   display: grid;
   gap: 10px;
+  max-height: min(34vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-color: rgba(167, 139, 250, 0.34) rgba(255, 255, 255, 0.045);
+  scrollbar-width: thin;
+}
+
+.rag-answer-details::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rag-answer-details::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 999px;
+}
+
+.rag-answer-details::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.34);
+  border-radius: 999px;
 }
 
 .rag-answer-details .evidence-section,
@@ -4711,9 +4735,6 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   display: grid;
   gap: 10px;
   padding: 14px;
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   flex: 0 0 auto;
 }
 
@@ -4798,6 +4819,13 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   min-width: 0;
 }
 
+.rag-chat-submit-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .rag-chat-empty {
   align-content: center;
   color: rgba(226, 232, 240, 0.66);
@@ -4836,6 +4864,10 @@ body > .answer-modal-portal-backdrop .saved-answer-modal-body {
   .rag-chat-input-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .rag-chat-submit-actions {
+    width: 100%;
   }
 
   .rag-chat-topbar-row {
