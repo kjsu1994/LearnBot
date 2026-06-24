@@ -181,6 +181,35 @@ class OllamaClientTest {
         assertThat(calls).hasValue(1);
     }
 
+    @Test
+    void ollamaStreamStripsSplitReasoningTags() {
+        LearnBotProperties properties = new LearnBotProperties();
+        AdminSettingsService adminSettingsService = mock(AdminSettingsService.class);
+        when(adminSettingsService.primaryLlmSettings()).thenReturn(new AdminSettingsService.LlmSettings("http://primary:11434", "qwen:test", true, "primary"));
+        when(adminSettingsService.auxiliaryLlmSettings()).thenReturn(new AdminSettingsService.LlmSettings("http://auxiliary:11434", "qwen-small:test", true, "auxiliary"));
+
+        ExchangeFunction exchange = request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_NDJSON_VALUE)
+                .body("""
+                        {"message":{"content":"<thi"},"done":false}
+                        {"message":{"content":"nk>hidden reasoning</think> visible"},"done":false}
+                        {"message":{"content":" answer"},"done_reason":"stop","done":true,"prompt_eval_count":5,"eval_count":6}
+                        """)
+                .build());
+        OllamaClient client = new OllamaClient(WebClient.builder().exchangeFunction(exchange), properties, adminSettingsService);
+
+        List<OllamaClient.ChatStreamDelta> deltas = client.streamChat("system", "user", null)
+                .collectList()
+                .block();
+
+        assertThat(deltas).hasSize(3);
+        assertThat(String.join("", deltas.stream().map(OllamaClient.ChatStreamDelta::content).toList()))
+                .isEqualTo(" visible answer");
+        assertThat(deltas.get(2).done()).isTrue();
+        assertThat(deltas.get(2).promptEvalCount()).isEqualTo(5);
+        assertThat(deltas.get(2).evalCount()).isEqualTo(6);
+    }
+
     private BodyInserter.Context bodyInserterContext() {
         return new BodyInserter.Context() {
             @Override

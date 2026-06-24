@@ -70,13 +70,6 @@ LEARNBOT_RERANKER_WARMUP_ON_STARTUP=false
 LEARNBOT_RERANKER_IDLE_UNLOAD_SECONDS=300
 ```
 
-The Compose file uses the same production-style layout as the existing stack:
-
-- `x-timezone-env` for `Asia/Seoul`
-- explicit `nginx` service built from `nginx:stable`
-- `nginx/nginx.conf` and `nginx/backend-upstream.inc`
-- `minio`, `redis`, `postgres`, `ollama`, `backend`, and `nginx`
-
 ## Storage and Migration
 
 Runtime data is not stored inside the Git-tracked project folder by default.

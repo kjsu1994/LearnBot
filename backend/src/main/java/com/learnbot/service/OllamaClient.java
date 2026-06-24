@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -169,7 +170,7 @@ public class OllamaClient {
             throw new IllegalArgumentException("Ollama returned an empty chat response.");
         }
         ChatResult result = new ChatResult(
-                response.message().content().trim(),
+                stripReasoningBlocks(response.message().content()).trim(),
                 response.doneReason(),
                 Boolean.TRUE.equals(response.done()),
                 response.promptEvalCount() == null ? 0 : response.promptEvalCount(),
@@ -220,6 +221,7 @@ public class OllamaClient {
         }
         AdminSettingsService.LlmSettings settings = candidates.get(index);
         AtomicInteger emitted = new AtomicInteger(0);
+        ReasoningTagStripper reasoningStripper = new ReasoningTagStripper();
         Map<String, Object> options = optionMap(maxOutputTokens);
         String keepAlive = keepAliveFor(settings.role());
         return webClientBuilder.clone()
@@ -231,7 +233,7 @@ public class OllamaClient {
                 .retrieve()
                 .bodyToFlux(String.class)
                 .flatMapIterable(this::splitJsonLines)
-                .map(line -> toStreamDelta(line, settings, index > 0))
+                .map(line -> toStreamDelta(line, settings, index > 0, reasoningStripper))
                 .doOnNext(delta -> {
                     if (!delta.content().isEmpty()) {
                         emitted.incrementAndGet();
@@ -300,12 +302,12 @@ public class OllamaClient {
                 .toList();
     }
 
-    private ChatStreamDelta toStreamDelta(String line, AdminSettingsService.LlmSettings settings, boolean fallbackUsed) {
+    private ChatStreamDelta toStreamDelta(String line, AdminSettingsService.LlmSettings settings, boolean fallbackUsed, ReasoningTagStripper reasoningStripper) {
         try {
             ChatResponse response = objectMapper.readValue(line, ChatResponse.class);
             String content = response.message() == null || response.message().content() == null ? "" : response.message().content();
             return new ChatStreamDelta(
-                    content,
+                    reasoningStripper.accept(content),
                     response.doneReason(),
                     Boolean.TRUE.equals(response.done()),
                     response.promptEvalCount() == null ? 0 : response.promptEvalCount(),
@@ -333,6 +335,63 @@ public class OllamaClient {
             return properties.getOllama().getAuxiliaryKeepAlive();
         }
         return properties.getOllama().getPrimaryKeepAlive();
+    }
+
+    private static String stripReasoningBlocks(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replaceAll("(?is)<think>.*?</think>", "");
+    }
+
+    private static final class ReasoningTagStripper {
+        private static final String OPEN = "<think>";
+        private static final String CLOSE = "</think>";
+        private boolean inside;
+        private String pending = "";
+
+        String accept(String chunk) {
+            if (chunk == null || chunk.isEmpty()) {
+                return "";
+            }
+            String text = pending + chunk;
+            pending = "";
+            StringBuilder visible = new StringBuilder();
+            while (!text.isEmpty()) {
+                String lower = text.toLowerCase(Locale.ROOT);
+                if (inside) {
+                    int closeIndex = lower.indexOf(CLOSE);
+                    if (closeIndex < 0) {
+                        pending = suffixThatMayBeTag(text, CLOSE);
+                        return visible.toString();
+                    }
+                    inside = false;
+                    text = text.substring(closeIndex + CLOSE.length());
+                    continue;
+                }
+                int openIndex = lower.indexOf(OPEN);
+                if (openIndex >= 0) {
+                    visible.append(text, 0, openIndex);
+                    inside = true;
+                    text = text.substring(openIndex + OPEN.length());
+                    continue;
+                }
+                pending = suffixThatMayBeTag(text, OPEN);
+                visible.append(text, 0, text.length() - pending.length());
+                return visible.toString();
+            }
+            return visible.toString();
+        }
+
+        private String suffixThatMayBeTag(String text, String tag) {
+            String lower = text.toLowerCase(Locale.ROOT);
+            for (int length = Math.min(tag.length() - 1, text.length()); length > 0; length--) {
+                if (tag.startsWith(lower.substring(lower.length() - length))) {
+                    return text.substring(text.length() - length);
+                }
+            }
+            return "";
+        }
     }
 
     private void putIfConfigured(Map<String, Object> body, String key, String value) {
