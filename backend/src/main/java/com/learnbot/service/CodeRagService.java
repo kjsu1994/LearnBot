@@ -474,6 +474,7 @@ public class CodeRagService {
                         : java.util.stream.Stream.concat(java.util.stream.Stream.of(question), conversationAnchorQueries(question, conversationContext).stream()).toList(),
                 false,
                 false,
+                false,
                 "initial search"
         );
         int iteration = 1;
@@ -1209,6 +1210,14 @@ public class CodeRagService {
         }
         if (retrieval != null && retrieval.iteration() > 1) {
             notes.add("RAG pipeline retried code retrieval once because the first evidence set was weak.");
+        }
+        if (retrieval != null && retrieval.queryPlan() != null) {
+            RagPipelineService.QueryPlan plan = retrieval.queryPlan();
+            notes.add("Code query rewrite status: attempted=" + plan.rewriteAttempted()
+                    + ", used=" + plan.rewriteUsed()
+                    + ", failed=" + plan.rewriteFailed()
+                    + ", reason=" + plan.reason()
+                    + ", queryCount=" + plan.queries().size() + ".");
         }
         if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
             notes.add("RAG pipeline used query rewrite as an auxiliary code retrieval signal.");

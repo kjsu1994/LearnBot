@@ -50,7 +50,7 @@ public class RagPipelineService {
         addQueries(queries, baselineQueries);
 
         if (!pipeline().isRewriteEnabled()) {
-            return new QueryPlan(domain, List.copyOf(queries), false, false, "rewrite disabled");
+            return new QueryPlan(domain, List.copyOf(queries), false, false, false, "rewrite disabled");
         }
 
         try {
@@ -67,6 +67,7 @@ public class RagPipelineService {
             return new QueryPlan(
                     domain,
                     List.copyOf(queries),
+                    true,
                     usedRewrite,
                     false,
                     usedRewrite ? "llm rewrite accepted" : "llm rewrite returned no usable queries"
@@ -74,7 +75,7 @@ public class RagPipelineService {
         } catch (RuntimeException ex) {
             log.info("RAG query rewrite skipped domain={} reason={} question={}",
                     domain, ex.getClass().getSimpleName(), abbreviate(question));
-            return new QueryPlan(domain, List.copyOf(queries), false, true, "llm rewrite failed");
+            return new QueryPlan(domain, List.copyOf(queries), true, false, true, "llm rewrite failed");
         }
     }
 
@@ -445,6 +446,7 @@ public class RagPipelineService {
     public record QueryPlan(
             Domain domain,
             List<String> queries,
+            boolean rewriteAttempted,
             boolean rewriteUsed,
             boolean rewriteFailed,
             String reason
