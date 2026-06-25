@@ -590,7 +590,7 @@ public class LearnBotProperties {
             private int rewriteMaxOutputTokens = 192;
 
             @Min(1)
-            private int rewriteTimeoutSeconds = 3;
+            private int rewriteTimeoutSeconds = 12;
 
             @Min(1)
             private int maxQueryCountBalanced = 2;
