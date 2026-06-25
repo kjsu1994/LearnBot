@@ -46,6 +46,7 @@ const answerModes = [
 
 const codeModes = [
   { value: 'overview', label: '통합 질문' },
+  { value: 'reasoning', label: '구현 의도' },
   { value: 'locate', label: '위치 찾기' },
   { value: 'method', label: '메서드 설명' },
   { value: 'flow', label: '호출 흐름' },

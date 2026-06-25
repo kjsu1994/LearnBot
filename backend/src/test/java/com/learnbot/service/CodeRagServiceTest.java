@@ -667,7 +667,88 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("overview");
+        assertThat(response.mode()).isEqualTo("reasoning");
+    }
+
+    @Test
+    void implementationReasonQuestionUsesReasoningModeAndPromptGuidance() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult controller = result("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.72);
+        CodeSearchResult serviceResult = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.68);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(controller, serviceResult));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("구현 의도는 컨트롤러와 서비스 책임을 분리하려는 구조로 보입니다 [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "로그인 로직은 왜 컨트롤러가 아니라 서비스에서 처리해?",
+                "auto",
+                null
+        );
+
+        ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(systemPrompt.capture(), anyString());
+        assertThat(response.mode()).isEqualTo("reasoning");
+        assertThat(systemPrompt.getValue()).contains("inferred design intent");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("REASONING"));
+    }
+
+    @Test
+    void reasoningModeFallsBackWithCitationsWhenModelAnswerIsUncited() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("서비스에 있어서 좋아 보입니다."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "이 구현 의도가 뭐야?",
+                "auto",
+                null
+        );
+
+        assertThat(response.mode()).isEqualTo("reasoning");
+        assertThat(response.answer()).contains("구현 의도");
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
+    }
+
+    @Test
+    void explicitLocateStillWinsForLocationQuestions() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
+        CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "로그인 구현 파일 어디 있어?",
+                "auto",
+                null
+        );
+
+        assertThat(response.mode()).isEqualTo("locate");
+        assertThat(response.answer()).contains("후보 위치");
     }
 
     @Test

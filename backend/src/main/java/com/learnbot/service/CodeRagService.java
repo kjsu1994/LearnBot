@@ -31,6 +31,7 @@ public class CodeRagService {
     private static final int DEFAULT_CONTEXT_LIMIT = 8;
     private static final int OVERVIEW_CONTEXT_CHARS = 620;
     private static final int DEFAULT_CONTEXT_CHARS = 1200;
+    private static final int REASONING_CONTEXT_CHARS = 1000;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
     private static final double CONVERSATION_PINNED_BOOST = 0.18;
 
@@ -200,6 +201,7 @@ public class CodeRagService {
                 Mention file path and line range when explaining code.
                 If evidence is insufficient, say what is missing and list the closest files found.
                 Include a short reliability note when evidence is weak or indirect.
+                When the user asks why code exists or whether an implementation makes sense, separate direct code evidence from inferred design intent.
                 For code explanations, structure the answer as follows when applicable:
                 1. Summary
                 2. Detailed explanation
@@ -344,11 +346,11 @@ public class CodeRagService {
     }
 
     private CodeQuestionMode classifyCodeQuestion(String question, String mode, RagConversationContext conversationContext) {
+        boolean autoMode = mode == null || mode.isBlank() || "auto".equalsIgnoreCase(mode.trim());
         CodeQuestionMode requested = CodeQuestionMode.from(mode);
         if (!properties.getRag().getOverview().isEnabled()) {
-            return requested;
+            return autoMode ? CodeQuestionMode.OVERVIEW : requested;
         }
-        boolean autoMode = mode == null || mode.isBlank() || "auto".equalsIgnoreCase(mode.trim());
         if (autoMode && previousAnswerExpansion(conversationContext)) {
             return CodeQuestionMode.OVERVIEW;
         }
@@ -357,16 +359,19 @@ public class CodeRagService {
             return requested;
         }
         String normalized = normalizeCodeText(question);
-        if (containsAny(normalized, "flow", "workflow", "sequence", "request flow", "call flow", "흐름", "과정", "절차", "순서", "호출")) {
+        if (isFlowIntent(normalized)) {
             return CodeQuestionMode.CALL_FLOW;
         }
-        if (containsAny(normalized, "impact", "effect", "affected", "test", "fix", "bug", "problem", "영향", "변경 영향", "테스트", "수정", "문제", "버그")) {
+        if (isImpactIntent(normalized)) {
             return CodeQuestionMode.IMPACT;
         }
-        if (containsAny(normalized, "locate", "where", "file", "line", "path", "위치", "어디", "파일", "라인", "경로")) {
+        if (isReasoningIntent(normalized)) {
+            return CodeQuestionMode.REASONING;
+        }
+        if (isLocateIntent(normalized)) {
             return CodeQuestionMode.LOCATE;
         }
-        if (containsAny(normalized, "architecture", "structure", "overview", "module", "component", "아키텍처", "구조", "개요", "구성", "전체")) {
+        if (isOverviewIntent(normalized)) {
             return CodeQuestionMode.OVERVIEW;
         }
         if (autoMode && conversationContext != null && conversationContext.contextual()) {
@@ -376,7 +381,29 @@ public class CodeRagService {
             }
             return conversationAnchorFallbackMode(conversationContext);
         }
-        return requested;
+        return autoMode ? CodeQuestionMode.OVERVIEW : requested;
+    }
+
+    private boolean isFlowIntent(String normalized) {
+        return containsAny(normalized, "flow", "workflow", "sequence", "request flow", "call flow", "흐름", "과정", "절차", "순서", "호출");
+    }
+
+    private boolean isImpactIntent(String normalized) {
+        return containsAny(normalized, "impact", "effect", "affected", "test", "fix", "bug", "problem", "risk", "regression", "영향", "변경 영향", "테스트", "수정", "문제", "버그", "리스크", "회귀");
+    }
+
+    private boolean isReasoningIntent(String normalized) {
+        return containsAny(normalized,
+                "why", "reason", "rationale", "intent", "intention", "design intent", "design reason", "tradeoff", "appropriate", "makes sense",
+                "왜", "이유", "의도", "설계 의도", "설계상", "구조상", "왜 이렇게", "이렇게 되어", "괜찮", "맞아", "적절", "애매", "타당", "판단");
+    }
+
+    private boolean isLocateIntent(String normalized) {
+        return containsAny(normalized, "locate", "where", "file", "line", "path", "위치", "어디", "파일", "라인", "경로");
+    }
+
+    private boolean isOverviewIntent(String normalized) {
+        return containsAny(normalized, "architecture", "structure", "overview", "module", "component", "summary", "아키텍처", "구조", "개요", "구성", "전체", "요약");
     }
 
     private CodeQuestionMode previousTurnMode(RagConversationContext conversationContext) {
@@ -408,7 +435,8 @@ public class CodeRagService {
     private boolean canInheritAutoMode(CodeQuestionMode mode) {
         return mode == CodeQuestionMode.LOCATE
                 || mode == CodeQuestionMode.EXPLAIN_METHOD
-                || mode == CodeQuestionMode.UI_EVENT;
+                || mode == CodeQuestionMode.UI_EVENT
+                || mode == CodeQuestionMode.REASONING;
     }
 
     private CodeRetrieval retrieveCodeEvidence(
@@ -672,7 +700,7 @@ public class CodeRagService {
 
     private int minCodeEvidence(CodeQuestionMode questionMode) {
         return switch (questionMode) {
-            case OVERVIEW, IMPACT -> 4;
+            case OVERVIEW, IMPACT, REASONING -> 4;
             case CALL_FLOW -> 3;
             default -> 2;
         };
@@ -722,7 +750,7 @@ public class CodeRagService {
                     .toList();
             return preservePinnedEvidence(ranked, selected, limit);
         }
-        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT) {
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
             return preservePinnedEvidence(ranked, selected, limit);
         }
@@ -815,6 +843,13 @@ public class CodeRagService {
                     "요청 처리 흐름 컨트롤러 서비스 저장소 핸들러"
             );
         }
+        if (questionMode == CodeQuestionMode.REASONING) {
+            return List.of(
+                    base + " design intent rationale responsibility tradeoff",
+                    "implementation reason design intent responsibility related callers dependencies",
+                    "구현 의도 설계 이유 책임 관계 호출 영향 근거"
+            );
+        }
         return List.of(
                 base + " project structure architecture modules responsibilities",
                 "project structure repository summary module map architecture",
@@ -836,7 +871,9 @@ public class CodeRagService {
         if (results.isEmpty()) {
             return "No source-code context retrieved.";
         }
-        int maxChars = questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_CHARS : DEFAULT_CONTEXT_CHARS;
+        int maxChars = questionMode == CodeQuestionMode.OVERVIEW
+                ? OVERVIEW_CONTEXT_CHARS
+                : questionMode == CodeQuestionMode.REASONING ? REASONING_CONTEXT_CHARS : DEFAULT_CONTEXT_CHARS;
         return IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
@@ -953,8 +990,26 @@ public class CodeRagService {
             case CALL_FLOW -> flowFallbackAnswer(results);
             case UI_EVENT -> uiEventFallbackAnswer(results);
             case IMPACT -> impactFallbackAnswer(results);
+            case REASONING -> reasoningFallbackAnswer(results);
             case OVERVIEW -> overviewFallbackAnswer(results);
         };
+    }
+
+    private String reasoningFallbackAnswer(List<CodeSearchResult> results) {
+        StringBuilder builder = new StringBuilder("검색된 코드 근거 기준으로 구현 의도/이유를 보수적으로 정리합니다.\n\n");
+        builder.append("## 구현 의도 추정\n");
+        for (int index = 0; index < Math.min(results.size(), 5); index++) {
+            CodeSearchResult result = results.get(index);
+            builder.append("- ").append(result.filePath()).append(":")
+                    .append(result.lineStart()).append("-").append(result.lineEnd())
+                    .append(fallbackSymbolText(result))
+                    .append(" 근거상 이 코드는 `").append(category(result)).append("` 역할의 일부입니다 [")
+                    .append(index + 1).append("].\n");
+        }
+        builder.append("\n## 주의점\n");
+        builder.append("- 실제 설계 의도 문서나 커밋 메시지는 근거에 포함되지 않았으므로, 위 내용은 코드 구조에서 확인되는 범위의 추정입니다.\n");
+        builder.append("- 더 정확한 판단이 필요하면 관련 호출 흐름이나 변경 영향 질문으로 범위를 좁혀 확인하세요.\n");
+        return builder.toString();
     }
 
     private String overviewFallbackAnswer(List<CodeSearchResult> results) {
@@ -1145,7 +1200,7 @@ public class CodeRagService {
             CodeRetrieval retrieval
     ) {
         List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten));
-        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.IMPACT) {
+        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             long projectContext = answerResults.stream().filter(result -> isProjectContext(result.chunkType())).count();
             long distinctFiles = answerResults.stream().map(CodeSearchResult::filePath).distinct().count();
             notes.add("Code question mode was classified as " + questionMode.name()
@@ -1351,6 +1406,9 @@ public class CodeRagService {
         }
         if (normalized.contains("호출") || normalized.contains("흐름") || normalized.contains("flow")) {
             terms.addAll(List.of("controller", "service", "repository", "handler", "request", "response"));
+        }
+        if (isReasoningIntent(normalized)) {
+            terms.addAll(List.of("design", "intent", "reason", "rationale", "service", "controller", "repository", "config", "의도", "이유", "설계"));
         }
         return terms.stream()
                 .map(this::normalizeCodeText)
@@ -1720,6 +1778,7 @@ public class CodeRagService {
 
     enum CodeQuestionMode {
         OVERVIEW("overview", "Synthesize search, definitions, references, and nearby chunks. Answer natural-language architecture questions with sections: summary, related files/methods, flow, evidence, and limitations."),
+        REASONING("reasoning", "Explain why the implementation appears to be structured this way. Separate direct code evidence from inferred design intent, tradeoffs, and uncertainty."),
         LOCATE("locate", "Find where the requested feature or behavior is implemented. Prioritize files, classes, methods, and line ranges."),
         EXPLAIN_METHOD("method", "Explain the selected or named method. Cover inputs, side effects, called logic, and return/result behavior."),
         CALL_FLOW("flow", "Explain the call flow step by step using only cited code. Keep the sequence compact."),

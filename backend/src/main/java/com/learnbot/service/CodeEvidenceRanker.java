@@ -247,6 +247,7 @@ public class CodeEvidenceRanker {
         return switch (mode) {
             case CALL_FLOW -> (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT") ? 0.18 : 0);
             case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY") ? 0.22 : 0.04;
+            case REASONING -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "CONTAINS", "DEFINES") || isStructured(type) ? 0.20 : 0.04;
             case UI_EVENT -> ("event_handler".equals(type) || "xaml_event".equals(type) || "xaml_view".equals(type)
                     || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO")) ? 0.25 : 0.02;
             case OVERVIEW -> isProjectContext(type) || path.contains("/config/") || path.contains("/web/") || path.contains("/service/") ? 0.18 : 0.04;
