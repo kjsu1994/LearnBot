@@ -1074,7 +1074,7 @@ function AdminWorkspace({
                   id="tuning-aux-model"
                   value={tuningLlmForm.auxiliaryChatModel}
                   onChange={(event) => setTuningLlmForm((current) => ({ ...current, auxiliaryChatModel: event.target.value }))}
-                  placeholder={adminTuning?.effectiveAuxiliaryChatModel || 'qwen3.5:2b-q4_K_M'}
+                  placeholder={adminTuning?.effectiveAuxiliaryChatModel || 'qwen3:4b-instruct'}
                   spellCheck="false"
                 />
               </div>

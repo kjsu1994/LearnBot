@@ -207,7 +207,7 @@ The backend deployment image includes both Java 17 and the .NET 8 runtime requir
 Change models with environment variables:
 
 ```bash
-LLM_MODEL=qwen3:8b-q4_K_M, qwen3.5:2b-q4_K_M
+LLM_MODEL=qwen3:8b-q4_K_M, qwen3:4b-instruct
 EMBEDDING_MODEL=bge-m3
 ```
 

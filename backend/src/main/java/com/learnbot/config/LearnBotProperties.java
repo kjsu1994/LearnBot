@@ -415,7 +415,7 @@ public class LearnBotProperties {
         private String primaryChatModel = "qwen3:8b-q4_K_M";
 
         @NotBlank
-        private String auxiliaryChatModel = "qwen3.5:2b-q4_K_M";
+        private String auxiliaryChatModel = "qwen3:4b-instruct";
 
         @NotBlank
         private String embeddingModel = "bge-m3";

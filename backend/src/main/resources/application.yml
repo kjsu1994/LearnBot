@@ -50,7 +50,7 @@ learnbot:
     base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
     chat-model: ${PRIMARY_LLM_MODEL:qwen3:8b-q4_K_M}
     primary-chat-model: ${PRIMARY_LLM_MODEL:qwen3:8b-q4_K_M}
-    auxiliary-chat-model: ${AUXILIARY_LLM_MODEL:qwen3.5:2b-q4_K_M}
+    auxiliary-chat-model: ${AUXILIARY_LLM_MODEL:qwen3:4b-instruct}
     embedding-model: ${EMBEDDING_MODEL:${OLLAMA_EMBEDDING_MODEL:bge-m3}}
     temperature: ${LLM_TEMPERATURE:0.2}
     context-window: ${LLM_CONTEXT_WINDOW:${OLLAMA_CONTEXT_LENGTH:4096}}
