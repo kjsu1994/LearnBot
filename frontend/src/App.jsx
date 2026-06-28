@@ -205,6 +205,8 @@ export default function App() {
     setCodeAgentInstruction,
     codeAgentPlan,
     codeAgentPatch,
+    codeAgentApplyResult,
+    codeAgentTestResult,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -238,6 +240,9 @@ export default function App() {
     cancelCodeAsk,
     generateCodeAgentPlan,
     generateCodeAgentPatch,
+    applyCodeAgentPatch,
+    rollbackCodeAgentPatch,
+    runCodeAgentTest,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,
@@ -980,6 +985,8 @@ export default function App() {
             setCodeAgentInstruction={setCodeAgentInstruction}
             codeAgentPlan={codeAgentPlan}
             codeAgentPatch={codeAgentPatch}
+            codeAgentApplyResult={codeAgentApplyResult}
+            codeAgentTestResult={codeAgentTestResult}
             codeConversations={codeConversations}
             codeConversationId={codeConversationId}
             codeConversationTurns={codeConversationTurns}
@@ -1014,6 +1021,9 @@ export default function App() {
             cancelCodeAsk={cancelCodeAsk}
             generateCodeAgentPlan={generateCodeAgentPlan}
             generateCodeAgentPatch={generateCodeAgentPatch}
+            applyCodeAgentPatch={applyCodeAgentPatch}
+            rollbackCodeAgentPatch={rollbackCodeAgentPatch}
+            runCodeAgentTest={runCodeAgentTest}
             searchCode={searchCode}
             findReferences={findReferences}
             loading={loading}

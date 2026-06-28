@@ -1,5 +1,6 @@
 docker compose up -d --build  : using CPU
 .\scripts\up.ps1 -Build  : auto using GPU
+./scripts/up.ps1 -NoBuild
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  : using GPU
 
 

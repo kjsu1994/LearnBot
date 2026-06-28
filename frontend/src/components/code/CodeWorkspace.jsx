@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { codeModes, evidencePreviewLimit } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { escapeHtml, highlightLanguage, highlightedLineHtml } from '../../lib/highlight.js';
@@ -100,6 +100,8 @@ function CodeWorkspace(props) {
     setCodeAgentInstruction = () => {},
     codeAgentPlan,
     codeAgentPatch,
+    codeAgentApplyResult,
+    codeAgentTestResult,
     codeConversations = [],
     codeConversationId = '',
     codeConversationTurns = [],
@@ -116,6 +118,9 @@ function CodeWorkspace(props) {
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
     generateCodeAgentPatch = () => {},
+    applyCodeAgentPatch = () => {},
+    rollbackCodeAgentPatch = () => {},
+    runCodeAgentTest = () => {},
     searchCode = (event) => event.preventDefault(),
     findReferences = (event) => event.preventDefault(),
     loading = () => false,
@@ -199,10 +204,15 @@ function CodeWorkspace(props) {
           setInstruction={setCodeAgentInstruction}
           plan={codeAgentPlan}
           patch={codeAgentPatch}
+          applyResult={codeAgentApplyResult}
+          testResult={codeAgentTestResult}
           selectedRepositoryId={selectedRepositoryId}
           loading={loading}
           onPlan={generateCodeAgentPlan}
           onPatch={generateCodeAgentPatch}
+          onApply={applyCodeAgentPatch}
+          onRollback={rollbackCodeAgentPatch}
+          onTest={runCodeAgentTest}
         />
         <form className="panel search-panel rag-search-panel" onSubmit={searchCode}>
           <div className="panel-title">
@@ -258,20 +268,27 @@ function CodeAgentPanel({
   setInstruction = () => {},
   plan,
   patch,
+  applyResult,
+  testResult,
   selectedRepositoryId = '',
   loading = () => false,
   onPlan = (event) => event.preventDefault(),
   onPatch = () => {},
+  onApply = () => {},
+  onRollback = () => {},
+  onTest = () => {},
 }) {
   const targetFiles = plan?.targetFiles || [];
   const canPlan = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-plan');
   const canPatch = Boolean(selectedRepositoryId && instruction.trim() && targetFiles.length && !loading('code-agent-patch'));
+  const canApply = Boolean(patch?.valid && patch?.files?.length && !applyResult?.applied) && !loading('code-agent-apply');
+  const canRollback = Boolean(applyResult?.patchSessionId && applyResult?.rollbackAvailable) && !loading('code-agent-rollback');
   return (
     <section className="panel code-agent-panel">
       <div className="panel-title">
         <FileCode2 size={18} />
         <div>
-          <h2>Patch Agent v1</h2>
+          <h2>Patch Agent v2</h2>
           <p>수정 계획과 검증된 unified diff를 제안합니다. 파일 자동 적용은 하지 않습니다.</p>
         </div>
       </div>
@@ -336,6 +353,47 @@ function CodeAgentPanel({
               <pre><code>{file.diff}</code></pre>
             </article>
           ))}
+          <div className="action-row">
+            <button type="button" disabled={!canApply} onClick={onApply}>
+              {loading('code-agent-apply') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+              적용
+            </button>
+            <button type="button" className="ghost-button" disabled={!applyResult?.patchSessionId || loading('code-agent-test-backend-test')} onClick={() => onTest('backend-test')}>
+              {loading('code-agent-test-backend-test') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+              backend test
+            </button>
+            <button type="button" className="ghost-button" disabled={!applyResult?.patchSessionId || loading('code-agent-test-frontend-build')} onClick={() => onTest('frontend-build')}>
+              {loading('code-agent-test-frontend-build') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+              frontend build
+            </button>
+            <button type="button" className="ghost-button" disabled={!canRollback} onClick={onRollback}>
+              {loading('code-agent-rollback') ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
+              rollback
+            </button>
+          </div>
+          {applyResult && (
+            <div className="code-agent-result compact-result">
+              <div className="result-heading">
+                <strong>{applyResult.applied ? '적용 완료' : '적용 실패'}</strong>
+                <Badge variant={applyResult.applied ? 'outline' : 'destructive'}>{applyResult.patchSessionId || 'no-session'}</Badge>
+              </div>
+              {!!applyResult.changedFiles?.length && <small>{applyResult.changedFiles.join(', ')}</small>}
+              <WarningList warnings={applyResult.warnings} />
+              {applyResult.rollback && (
+                <small>{applyResult.rollback.rolledBack ? `rollback 완료: ${applyResult.rollback.restoredFiles?.join(', ') || ''}` : 'rollback 실패'}</small>
+              )}
+            </div>
+          )}
+          {testResult && (
+            <div className="code-agent-result compact-result">
+              <div className="result-heading">
+                <strong>{testResult.commandKey}</strong>
+                <Badge variant={testResult.exitCode === 0 ? 'outline' : 'destructive'}>{testResult.allowed ? `exit ${testResult.exitCode}` : 'blocked'}</Badge>
+              </div>
+              <WarningList warnings={testResult.warnings} />
+              {testResult.summary && <pre><code>{testResult.summary}</code></pre>}
+            </div>
+          )}
         </div>
       )}
     </section>

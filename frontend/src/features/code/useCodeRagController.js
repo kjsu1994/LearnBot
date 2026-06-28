@@ -39,6 +39,8 @@ export function useCodeRagController({
   const [codeAgentInstruction, setCodeAgentInstruction] = useState('');
   const [codeAgentPlan, setCodeAgentPlan] = useState(null);
   const [codeAgentPatch, setCodeAgentPatch] = useState(null);
+  const [codeAgentApplyResult, setCodeAgentApplyResult] = useState(null);
+  const [codeAgentTestResult, setCodeAgentTestResult] = useState(null);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeConversations, setCodeConversations] = useState([]);
   const [codeConversationId, setCodeConversationId] = useState('');
@@ -89,6 +91,8 @@ export function useCodeRagController({
     setCodeAgentInstruction('');
     setCodeAgentPlan(null);
     setCodeAgentPatch(null);
+    setCodeAgentApplyResult(null);
+    setCodeAgentTestResult(null);
     setCodeConversations([]);
     setCodeConversationId('');
     setCodeConversationTurns([]);
@@ -534,6 +538,8 @@ export function useCodeRagController({
       });
       setCodeAgentPlan(plan);
       setCodeAgentPatch(null);
+      setCodeAgentApplyResult(null);
+      setCodeAgentTestResult(null);
     });
   }
 
@@ -552,6 +558,64 @@ export function useCodeRagController({
         },
       });
       setCodeAgentPatch(patch);
+      setCodeAgentApplyResult(null);
+      setCodeAgentTestResult(null);
+    });
+  }
+
+  async function applyCodeAgentPatch() {
+    const instruction = codeAgentInstruction.trim();
+    const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
+    const diff = codeAgentPatch?.files?.[0]?.diff || '';
+    if (!instruction || !selectedRepositoryId || !targetFiles.length || !diff || !codeAgentPatch?.valid) return;
+    if (!window.confirm('검증된 diff를 로컬 저장소 파일에 적용할까요? 적용 전 스냅샷이 저장됩니다.')) return;
+    await run('code-agent-apply', async () => {
+      const result = await request('/api/code-agent/apply', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          instruction,
+          diff,
+          targetFiles,
+        },
+      });
+      setCodeAgentApplyResult(result);
+      setCodeAgentTestResult(null);
+      await refreshCodeFiles(selectedRepositoryId, fileQuery);
+    });
+  }
+
+  async function rollbackCodeAgentPatch() {
+    if (!selectedRepositoryId || !codeAgentApplyResult?.patchSessionId) return;
+    if (!window.confirm('이 Patch Agent 세션으로 적용한 변경을 이전 스냅샷으로 되돌릴까요?')) return;
+    await run('code-agent-rollback', async () => {
+      const result = await request('/api/code-agent/rollback', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          patchSessionId: codeAgentApplyResult.patchSessionId,
+        },
+      });
+      setCodeAgentApplyResult((current) => ({ ...(current || {}), rollback: result, rollbackAvailable: !result.rolledBack }));
+      await refreshCodeFiles(selectedRepositoryId, fileQuery);
+    });
+  }
+
+  async function runCodeAgentTest(commandKey) {
+    if (!selectedRepositoryId || !codeAgentApplyResult?.patchSessionId || !commandKey) return;
+    await run(`code-agent-test-${commandKey}`, async () => {
+      const result = await request('/api/code-agent/test', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          patchSessionId: codeAgentApplyResult.patchSessionId,
+          commandKey,
+        },
+      });
+      setCodeAgentTestResult(result);
     });
   }
 
@@ -587,6 +651,8 @@ export function useCodeRagController({
     setCodeAgentInstruction,
     codeAgentPlan,
     codeAgentPatch,
+    codeAgentApplyResult,
+    codeAgentTestResult,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -620,6 +686,9 @@ export function useCodeRagController({
     cancelCodeAsk,
     generateCodeAgentPlan,
     generateCodeAgentPatch,
+    applyCodeAgentPatch,
+    rollbackCodeAgentPatch,
+    runCodeAgentTest,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,

@@ -59,6 +59,32 @@ public class CodePatchFileLoader {
         return new LoadResult(List.copyOf(files), List.copyOf(warnings));
     }
 
+    public LocalTargetFile localTarget(UUID repositoryId, String requestedPath) {
+        CodeRepositoryRecord repo = repository.findRepository(repositoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Code repository was not found."));
+        String path = normalizePath(requestedPath);
+        String rejection = rejectionReason(path);
+        if (rejection != null) {
+            throw new IllegalArgumentException(rejection + ": " + path);
+        }
+        if (repo.localPath() == null || repo.localPath().isBlank() || repo.localPath().contains("://")) {
+            throw new IllegalArgumentException("Patch apply requires a local repository path.");
+        }
+        Path root = Path.of(repo.localPath()).toAbsolutePath().normalize();
+        Path target = root.resolve(path).toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalArgumentException("Invalid file path outside repository root: " + path);
+        }
+        if (!Files.isRegularFile(target)) {
+            throw new IllegalArgumentException("Target file does not exist locally: " + path);
+        }
+        Map<String, UUID> idsByPath = repository.findActiveFileIdsByPath(repositoryId, List.of(path));
+        if (!idsByPath.containsKey(path)) {
+            throw new IllegalArgumentException("Target file is not indexed: " + path);
+        }
+        return new LocalTargetFile(path, target, contentReader.read(target));
+    }
+
     public List<String> normalizeRequestedPaths(List<String> requestedPaths, List<String> warnings) {
         if (requestedPaths == null || requestedPaths.isEmpty()) {
             return List.of();
@@ -140,6 +166,9 @@ public class CodePatchFileLoader {
     }
 
     public record LoadedPatchFile(UUID fileId, String path, String language, String content) {
+    }
+
+    public record LocalTargetFile(String path, Path localPath, String content) {
     }
 
     public record LoadResult(List<LoadedPatchFile> files, List<String> warnings) {

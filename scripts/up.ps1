@@ -1,9 +1,11 @@
 param(
     [switch]$Build,
+    [switch]$NoBuild,
     [switch]$Cpu
 )
 
 $ErrorActionPreference = "Stop"
+$shouldBuild = $Build -or -not $NoBuild
 
 if ([string]::IsNullOrWhiteSpace($env:OLLAMA_CONTEXT_LENGTH) -or $env:OLLAMA_CONTEXT_LENGTH -eq "2048") {
     $env:OLLAMA_CONTEXT_LENGTH = "4096"
@@ -23,7 +25,7 @@ function Invoke-Compose {
         $args += @("-f", $file)
     }
     $args += @("up", "-d")
-    if ($Build) {
+    if ($shouldBuild) {
         $args += "--build"
     }
 
@@ -43,8 +45,26 @@ function Test-NvidiaSmi {
     return $LASTEXITCODE -eq 0
 }
 
+function Build-FrontendDist {
+    if (-not $shouldBuild) {
+        return
+    }
+    Write-Host "Building frontend dist for nginx volume mount."
+    Push-Location frontend
+    try {
+        & npm run build
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm run build exited with code $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 $baseFiles = @("docker-compose.yml")
 $gpuFiles = @("docker-compose.yml", "docker-compose.gpu.yml")
+
+Build-FrontendDist
 
 if ($Cpu) {
     Write-Host "Starting LearnBot with CPU Ollama."
