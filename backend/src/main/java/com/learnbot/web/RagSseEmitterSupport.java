@@ -75,6 +75,10 @@ public class RagSseEmitterSupport {
             event("evidence", data);
         }
 
+        public void status(String stage, String message) {
+            event("status", Map.of("stage", stage == null ? "" : stage, "message", message == null ? "" : message));
+        }
+
         public void delta(String text) {
             event("delta", Map.of("text", text == null ? "" : text));
         }

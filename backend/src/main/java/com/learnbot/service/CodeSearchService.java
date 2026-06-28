@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,6 +47,7 @@ public class CodeSearchService {
     private final CodeRepository repository;
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
+    private final Map<String, CachedEmbedding> embeddingCache = new ConcurrentHashMap<>();
 
     public CodeSearchService(CodeRepository repository, OllamaClient ollamaClient, LearnBotProperties properties) {
         this.repository = repository;
@@ -88,7 +90,7 @@ public class CodeSearchService {
 
         try {
             String semanticQuery = String.join(" ", expandedQueries);
-            List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+            List<Double> embedding = embeddingFor(semanticQuery);
             for (CodeSearchResult result : repository.search(repositoryId, semanticQuery, embedding, candidateLimit, safeSpaceIds, selectedSpaceId)) {
                 merge(merged, result);
             }
@@ -427,6 +429,52 @@ public class CodeSearchService {
         return value == null ? "" : value;
     }
 
+    private List<Double> embeddingFor(String semanticQuery) {
+        if (!embeddingCacheEnabled()) {
+            return ollamaClient.embed(List.of(semanticQuery)).get(0);
+        }
+        String key = embeddingCacheKey(semanticQuery);
+        long now = System.currentTimeMillis();
+        CachedEmbedding cached = embeddingCache.get(key);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            return cached.values();
+        }
+        List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+        embeddingCache.put(key, new CachedEmbedding(embedding, now + embeddingCacheTtlMillis()));
+        pruneEmbeddingCache(now);
+        return embedding;
+    }
+
+    private boolean embeddingCacheEnabled() {
+        return properties.getRag().getPipeline().isQueryEmbeddingCacheEnabled();
+    }
+
+    private long embeddingCacheTtlMillis() {
+        return Math.max(1, properties.getRag().getPipeline().getQueryEmbeddingCacheTtlSeconds()) * 1000L;
+    }
+
+    private String embeddingCacheKey(String query) {
+        return normalizeCodeText(query).toLowerCase(Locale.ROOT);
+    }
+
+    private void pruneEmbeddingCache(long now) {
+        int max = Math.max(1, properties.getRag().getPipeline().getQueryEmbeddingCacheMaxEntries());
+        if (embeddingCache.size() <= max) {
+            return;
+        }
+        embeddingCache.entrySet().removeIf(entry -> entry.getValue().expiresAtMillis() <= now);
+        if (embeddingCache.size() <= max) {
+            return;
+        }
+        int remove = embeddingCache.size() - max;
+        for (String key : new ArrayList<>(embeddingCache.keySet())) {
+            embeddingCache.remove(key);
+            if (--remove <= 0) {
+                break;
+            }
+        }
+    }
+
     private void merge(Map<UUID, CodeSearchResult> merged, CodeSearchResult result) {
         CodeSearchResult current = merged.get(result.chunkId());
         if (current == null || result.score() > current.score()) {
@@ -455,5 +503,8 @@ public class CodeSearchService {
                 result.score() + value,
                 result.metadata()
         );
+    }
+
+    private record CachedEmbedding(List<Double> values, long expiresAtMillis) {
     }
 }

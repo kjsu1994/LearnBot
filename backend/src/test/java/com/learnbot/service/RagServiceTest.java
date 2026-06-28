@@ -15,6 +15,7 @@ import reactor.core.publisher.Flux;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -682,6 +683,154 @@ class RagServiceTest {
     }
 
     @Test
+    void streamingUsesCompactPromptWithoutChangingVisibleEvidence() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "What benefits are available?";
+        String longSourceUri = "https://example.com/docs/" + "very-long-path/".repeat(30) + "benefits-policy.html";
+        UUID hiddenChunkId = UUID.randomUUID();
+        List<SearchResult> results = List.of(
+                searchResult(UUID.randomUUID(), UUID.randomUUID(), 0, "benefits-a.pdf", "application/pdf", "Health check support and vacation support are available."),
+                searchResult(UUID.randomUUID(), UUID.randomUUID(), 1, "benefits-b.pdf", "application/pdf", "Education support is available for eligible employees."),
+                searchResult(UUID.randomUUID(), UUID.randomUUID(), 2, "benefits-c.pdf", "application/pdf", "Family event support is available under the policy."),
+                searchResult(UUID.randomUUID(), UUID.randomUUID(), 3, "benefits-d.pdf", "application/pdf", "Meal support is described in the benefits policy."),
+                searchResultWithSource(UUID.randomUUID(), hiddenChunkId, 4, "benefits-e.pdf", longSourceUri, "application/pdf", "Commuting support is available for approved cases."),
+                searchResult(UUID.randomUUID(), UUID.randomUUID(), 5, "benefits-f.pdf", "application/pdf", "Wellness support is available through the program.")
+        );
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        results,
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(streamDelta("Benefits include health checks and education support [1][2].", false), streamDelta("", true)));
+
+        StringBuilder statuses = new StringBuilder();
+        AskResponse response = service.askStreaming(
+                question,
+                null,
+                "qa",
+                "BALANCED",
+                null,
+                null,
+                new RagService.AnswerStreamSink() {
+                    @Override
+                    public void onStatus(String stage, String message) {
+                        statuses.append(stage).append("|");
+                    }
+
+                    @Override
+                    public void onEvidence(List<SearchResult> citations, List<com.learnbot.dto.AnswerEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                    }
+                }
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), anyInt());
+        assertThat(promptCaptor.getValue()).contains("Key excerpt:");
+        assertThat(promptCaptor.getValue()).doesNotContain(longSourceUri, hiddenChunkId.toString());
+        assertThat(response.evidence()).hasSize(6);
+        assertThat(statuses.toString()).contains("retrieval_started|", "evidence_ready|", "llm_started|");
+    }
+
+    @Test
+    void streamingKeepsRequiredConversationEvidenceDetailed() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        UUID requiredChunkId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        SearchResult required = searchResult(
+                UUID.randomUUID(),
+                requiredChunkId,
+                42,
+                "access-control.pdf",
+                "application/pdf",
+                "Required pinned evidence states that administrators must use MFA before approving access.",
+                Map.of("conversationRequired", true, "previousAnswerItem", "Access control")
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "expand that item",
+                List.of(),
+                List.of(),
+                List.of(new DocumentConversationAnchor(requiredChunkId, required.documentId(), "access-control.pdf", "file://access-control.pdf", 42, null, "Access control", "Security > Access", "policy")),
+                true,
+                ConversationIntent.PREVIOUS_ANSWER_EXPANSION,
+                List.of(new PreviousAnswerItem("Access control", "summary [1]", List.of(1), List.of(requiredChunkId))),
+                List.of(requiredChunkId),
+                List.of()
+        );
+
+        when(documentRepository.findActiveChunksByIds(any(), isNull(SearchFilter.class), any(), isNull()))
+                .thenReturn(List.of(required));
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(streamDelta("Administrators must use MFA before approving access [1].", false), streamDelta("", true)));
+
+        AskResponse response = service.askConversationalStreaming(
+                "expand that item",
+                context,
+                null,
+                "qa",
+                "BALANCED",
+                List.of(spaceId),
+                null,
+                new NoopDocumentStreamSink()
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), anyInt());
+        assertThat(promptCaptor.getValue()).contains("Required pinned evidence states that administrators must use MFA");
+        assertThat(response.evidence()).anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("conversationRequired", true));
+    }
+
+    @Test
+    void streamingQuoteModePreservesLongerSourceExcerpt() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "Quote the exact exception clause.";
+        String importantTail = "The exact exception clause says emergency approval is allowed only when the incident commander records the reason.";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "exception-policy.pdf",
+                "application/pdf",
+                "Background. ".repeat(80) + importantTail);
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(streamDelta("Emergency approval requires recording the reason [1].", false), streamDelta("", true)));
+
+        service.askStreaming(question, null, "quote", "BALANCED", null, null, new NoopDocumentStreamSink());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), anyInt());
+        assertThat(promptCaptor.getValue()).contains(importantTail);
+    }
+
+    @Test
     void nonStreamingAnswerMissingCitationIsNotReplacedWhenOtherwiseUseful() {
         SearchService searchService = mock(SearchService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -728,20 +877,47 @@ class RagServiceTest {
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content) {
+        return searchResult(documentId, chunkId, chunkIndex, title, "file://" + title, contentType, content, Map.of());
+    }
+
+    private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content, Map<String, Object> metadata) {
+        return searchResult(documentId, chunkId, chunkIndex, title, "file://" + title, contentType, content, metadata);
+    }
+
+    private SearchResult searchResultWithSource(UUID documentId, UUID chunkId, int chunkIndex, String title, String sourceUri, String contentType, String content) {
+        return searchResult(documentId, chunkId, chunkIndex, title, sourceUri, contentType, content, Map.of());
+    }
+
+    private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String sourceUri, String contentType, String content, Map<String, Object> metadata) {
         return new SearchResult(
                 chunkId,
                 documentId,
                 title,
-                "file://" + title,
+                sourceUri,
                 "FILE",
                 contentType,
                 chunkIndex,
                 content,
+                metadata,
                 0.9
         );
     }
 
     private DocumentChunkDetail chunk(int chunkIndex, String content) {
         return new DocumentChunkDetail(UUID.randomUUID(), chunkIndex, content, OffsetDateTime.now());
+    }
+
+    private static class NoopDocumentStreamSink implements RagService.AnswerStreamSink {
+        @Override
+        public void onEvidence(List<SearchResult> citations, List<com.learnbot.dto.AnswerEvidence> evidence) {
+        }
+
+        @Override
+        public void onDelta(String text) {
+        }
+
+        @Override
+        public void onReplace(String answer, String reason) {
+        }
     }
 }

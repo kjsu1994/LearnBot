@@ -311,6 +311,13 @@ export function useCodeRagController({
               const update = (current) => ({ ...(current || {}), evidence: eventData?.evidence || [], repositoryId: effectiveRepositoryId });
               setCodeAnswer(update);
               setPendingCodeTurn(update);
+            } else if (eventName === 'status') {
+              const message = eventData?.message || '';
+              if (message) {
+                const update = (current) => ({ ...(current || {}), diagnostics: [message], repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
+                setCodeAnswer(update);
+                setPendingCodeTurn(update);
+              }
             } else if (eventName === 'replace') {
               sawStream = true;
               if (streamedText) return;

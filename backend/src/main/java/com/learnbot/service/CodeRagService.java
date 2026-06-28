@@ -178,6 +178,9 @@ public class CodeRagService {
         String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
         CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, mode, conversationContext);
         int safeLimit = safeLimit(questionMode, limit);
+        if (streamSink != null) {
+            streamSink.onStatus("retrieval_started", "코드 근거를 검색하고 있습니다.");
+        }
         long retrievalStarted = System.nanoTime();
         CodeRetrieval retrieval = retrieveCodeEvidence(repositoryId, selectedSpaceId, spaceIds, effectiveQuestion, questionMode, safeLimit, conversationContext);
         long retrievalMs = elapsedMs(retrievalStarted);
@@ -210,7 +213,7 @@ public class CodeRagService {
                 5. Important implementation details
                 
                 Use markdown headings.
-                Prefer detailed explanations over brief summaries.
+                Start with the conclusion and core flow, then add details only when the evidence supports them.
                 Explain not only what the code does, but also why it exists and how it interacts with related components.
                 Do not speculate beyond the provided evidence.
                 """ + "\n" + questionMode.instruction();
@@ -222,12 +225,14 @@ public class CodeRagService {
                 questionMode,
                 systemPrompt,
                 promptPrefix,
-                answerContextResults(questionMode, effectiveQuestion, results)
+                answerContextResults(questionMode, effectiveQuestion, results),
+                streamSink != null
         );
         List<CodeSearchResult> answerResults = contextBundle.results();
         String userPrompt = promptPrefix + "\n\nSource-code context:\n" + contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
         if (streamSink != null) {
+            streamSink.onStatus("evidence_ready", "답변에 사용할 코드 근거를 정리했습니다.");
             streamSink.onEvidence(buildEvidence(answerResults));
         }
         String answer;
@@ -241,9 +246,13 @@ public class CodeRagService {
         StringBuilder streamedAnswer = new StringBuilder();
         try {
             long llmStarted = System.nanoTime();
+            int maxOutputTokens = maxOutputTokens(questionMode);
+            if (streamSink != null) {
+                streamSink.onStatus("llm_started", "코드 답변 생성을 시작했습니다.");
+            }
             OllamaClient.ChatResult chatResult = streamSink == null
-                    ? ollamaClient.chatResult(systemPrompt, userPrompt)
-                    : stream(systemPrompt, userPrompt, streamSink, streamedAnswer);
+                    ? chatWithLimit(systemPrompt, userPrompt, maxOutputTokens)
+                    : stream(systemPrompt, userPrompt, streamSink, streamedAnswer, maxOutputTokens);
             llmMs += elapsedMs(llmStarted);
             finalChatResult = chatResult;
             answer = chatResult.content();
@@ -254,7 +263,7 @@ public class CodeRagService {
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
                 long retryStarted = System.nanoTime();
-                OllamaClient.ChatResult retryResult = ollamaClient.chatResult(systemPrompt + "\nBe concise and citation-strict.", retryPrompt);
+                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, Math.min(maxOutputTokens, 700));
                 llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
                 if (qualityFailureReason(retryAnswer, answerResults.size(), retryResult.doneReason()) == null) {
@@ -897,9 +906,14 @@ public class CodeRagService {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private OllamaClient.ChatResult stream(String systemPrompt, String userPrompt, CodeAnswerStreamSink streamSink, StringBuilder streamedAnswer) {
+    private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
+        OllamaClient.ChatResult result = ollamaClient.chatResult(systemPrompt, userPrompt, maxOutputTokens);
+        return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
+    }
+
+    private OllamaClient.ChatResult stream(String systemPrompt, String userPrompt, CodeAnswerStreamSink streamSink, StringBuilder streamedAnswer, int maxOutputTokens) {
         AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
-        ollamaClient.streamChat(systemPrompt, userPrompt, null)
+        ollamaClient.streamChat(systemPrompt, userPrompt, maxOutputTokens)
                 .bufferTimeout(256, java.time.Duration.ofMillis(35))
                 .filter(batch -> !batch.isEmpty())
                 .doOnNext(batch -> {
@@ -937,19 +951,87 @@ public class CodeRagService {
             CodeQuestionMode questionMode,
             String systemPrompt,
             String promptPrefix,
-            List<CodeSearchResult> results
+            List<CodeSearchResult> results,
+            boolean compactForStreaming
     ) {
         List<CodeSearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
-        String context = buildContext(question, questionMode, selected);
+        String context = compactForStreaming ? buildStreamingContext(question, questionMode, selected) : buildContext(question, questionMode, selected);
         int budget = promptTokenBudget();
         int requiredCount = (int) selected.stream().filter(this::isRequiredConversationPinned).count();
         int minResults = Math.min(selected.size(), Math.max(requiredCount, isConversationPinned(selected) ? 1 : Math.min(2, selected.size())));
         while (selected.size() > minResults
                 && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
             removeBudgetCandidate(selected);
-            context = buildContext(question, questionMode, selected);
+            context = compactForStreaming ? buildStreamingContext(question, questionMode, selected) : buildContext(question, questionMode, selected);
         }
         return new CodeContextBundle(List.copyOf(selected), context);
+    }
+
+    private String buildStreamingContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
+        if (results.isEmpty()) {
+            return "No source-code context retrieved.";
+        }
+        int detailedLimit = Math.min(results.size(), detailedStreamingContextLimit(questionMode, results));
+        int detailedChars = streamingDetailedContextChars(questionMode);
+        int compactChars = streamingCompactContextChars(questionMode);
+        return IntStream.range(0, results.size())
+                .mapToObj(index -> {
+                    CodeSearchResult result = results.get(index);
+                    boolean detailed = index < detailedLimit || isRequiredConversationPinned(result);
+                    return detailed
+                            ? streamingDetailedContextLine(question, result, index + 1, detailedChars)
+                            : streamingCompactContextLine(question, result, index + 1, compactChars);
+                })
+                .collect(Collectors.joining("\n\n"));
+    }
+
+    private int detailedStreamingContextLimit(CodeQuestionMode questionMode, List<CodeSearchResult> results) {
+        int requiredCount = (int) results.stream().filter(this::isRequiredConversationPinned).count();
+        int base = switch (questionMode) {
+            case LOCATE -> 3;
+            case OVERVIEW, REASONING, CALL_FLOW -> 5;
+            case EXPLAIN_METHOD, UI_EVENT, IMPACT -> 4;
+        };
+        return Math.max(base, requiredCount);
+    }
+
+    private int streamingDetailedContextChars(CodeQuestionMode questionMode) {
+        return switch (questionMode) {
+            case LOCATE -> 520;
+            case OVERVIEW -> 620;
+            case REASONING, CALL_FLOW -> 900;
+            case EXPLAIN_METHOD, UI_EVENT, IMPACT -> 820;
+        };
+    }
+
+    private int streamingCompactContextChars(CodeQuestionMode questionMode) {
+        return switch (questionMode) {
+            case LOCATE -> 180;
+            case OVERVIEW -> 220;
+            case REASONING, CALL_FLOW -> 320;
+            case EXPLAIN_METHOD, UI_EVENT, IMPACT -> 280;
+        };
+    }
+
+    private String streamingDetailedContextLine(String question, CodeSearchResult result, int citationNumber, int maxChars) {
+        return "[" + citationNumber + "] " + compactCodeHeader(result)
+                + graphContext(result)
+                + evidenceRankingContext(result)
+                + "\n" + codeExcerpt(question, result, maxChars);
+    }
+
+    private String streamingCompactContextLine(String question, CodeSearchResult result, int citationNumber, int maxChars) {
+        return "[" + citationNumber + "] " + compactCodeHeader(result)
+                + "\nKey excerpt: " + codeExcerpt(question, result, maxChars);
+    }
+
+    private String compactCodeHeader(CodeSearchResult result) {
+        return result.filePath() + ":" + result.lineStart() + "-" + result.lineEnd()
+                + " type=" + result.chunkType()
+                + nullable(" class=", result.className())
+                + nullable(" method=", result.methodName())
+                + nullable(" control=", result.controlName())
+                + nullable(" event=", result.eventName());
     }
 
     private boolean isConversationPinned(List<CodeSearchResult> results) {
@@ -976,6 +1058,19 @@ public class CodeRagService {
         int contextWindow = Math.max(2048, pipelineService.contextWindow());
         int configured = Math.max(512, pipelineService.promptTokenBudgetBalanced());
         return Math.min(configured, Math.max(1800, contextWindow - 700));
+    }
+
+    private int maxOutputTokens(CodeQuestionMode questionMode) {
+        int configured = pipelineService.maxOutputTokens();
+        if (configured > 0) {
+            return configured;
+        }
+        return switch (questionMode) {
+            case OVERVIEW, REASONING -> 1100;
+            case CALL_FLOW, EXPLAIN_METHOD -> 900;
+            case UI_EVENT, IMPACT -> 800;
+            case LOCATE -> 600;
+        };
     }
 
     private int estimateTokens(String value) {
@@ -1773,6 +1868,9 @@ public class CodeRagService {
     }
 
     public interface CodeAnswerStreamSink {
+        default void onStatus(String stage, String message) {
+        }
+
         void onEvidence(List<CodeEvidence> evidence);
 
         void onDelta(String text);

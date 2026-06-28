@@ -263,6 +263,11 @@ public class CodeController {
                 ));
                 CodeRagService.CodeAnswerStreamSink sink = new CodeRagService.CodeAnswerStreamSink() {
                     @Override
+                    public void onStatus(String stage, String message) {
+                        events.status(stage, message);
+                    }
+
+                    @Override
                     public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
                         events.evidence(Map.of("evidence", evidence));
                     }

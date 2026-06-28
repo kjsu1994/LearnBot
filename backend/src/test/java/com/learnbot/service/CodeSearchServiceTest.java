@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -87,6 +88,26 @@ class CodeSearchServiceTest {
         searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
 
         verify(repository).graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt(), anyList());
+    }
+
+    @Test
+    void cachesSemanticQueryEmbeddingAcrossRepeatedCodeSearches() {
+        CodeRepository repository = mock(CodeRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeSearchService searchService = new CodeSearchService(repository, ollamaClient, new LearnBotProperties());
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult seed = result("backend/AuthController.java", "method", "login", 0.9);
+        when(repository.keywordSearch(eq(repositoryId), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(seed));
+        when(repository.search(eq(repositoryId), anyString(), anyList(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(seed));
+        when(repository.relatedChunks(any(), anyList(), anyInt(), anyInt())).thenReturn(List.of());
+        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1, 0.2, 0.3)));
+
+        searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
+        searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
+
+        verify(ollamaClient, times(1)).embed(anyList());
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score) {

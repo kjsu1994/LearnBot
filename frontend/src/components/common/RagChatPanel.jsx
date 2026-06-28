@@ -189,7 +189,7 @@ function RagChatTurn({
           <small className="answer-mode">이전 근거를 참고해 후속 질문으로 처리했습니다.</small>
         )}
         <div className="answer-body rag-chat-answer-body">
-          <MarkdownAnswer text={answer || pendingStatusText(status)} streaming={status === 'streaming'} />
+          <MarkdownAnswer text={answer || pendingStatusText(status, turn)} streaming={status === 'streaming'} />
           {isLatest && <span className="stream-scroll-anchor" ref={streamAnchorRef} aria-hidden="true" />}
         </div>
       </div>
@@ -221,9 +221,11 @@ function answerStatusLabel(status) {
   return labels[status] || '완료';
 }
 
-function pendingStatusText(status) {
+function pendingStatusText(status, turn = {}) {
   if (status === 'aborted') return '답변 생성이 중단되었습니다.';
   if (status === 'error') return '답변 생성 중 오류가 발생했습니다.';
+  const latestDiagnostic = Array.isArray(turn.diagnostics) ? turn.diagnostics.at(-1) : '';
+  if (status === 'streaming' && latestDiagnostic) return latestDiagnostic;
   return '';
 }
 

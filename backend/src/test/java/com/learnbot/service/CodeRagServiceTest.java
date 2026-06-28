@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -834,7 +835,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.streamChat(anyString(), anyString(), isNull()))
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
                 .thenReturn(Flux.just(
                         streamDelta("The streamed code answer is useful but lacks a citation.", false),
                         streamDelta("", true)
@@ -869,6 +870,63 @@ class CodeRagServiceTest {
         assertThat(visible.toString()).isEqualTo("The streamed code answer is useful but lacks a citation.");
         assertThat(response.answer()).isEqualTo("The streamed code answer is useful but lacks a citation.");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Streaming answer was kept"));
+    }
+
+    @Test
+    void streamingUsesStatusEventsCompactContextAndModeOutputLimit() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        List<CodeSearchResult> results = List.of(
+                result("backend/AuthController.java", "method", "login", 0.90, "public LoginResponse login() { return authService.login(); }"),
+                result("backend/AuthService.java", "method", "login", 0.85, "public LoginResponse login() { authenticate(); issueToken(); }"),
+                result("backend/SessionService.java", "method", "issue", 0.80, "public Token issue() { return tokenService.issue(); }"),
+                result("backend/AuditService.java", "method", "record", 0.70, "public void record() { auditRepository.save(); }"),
+                result("backend/NotificationService.java", "method", "notifyLogin", 0.60, "public void notifyLogin() { publisher.publish(); }"),
+                result("backend/MetricsService.java", "method", "recordLogin", 0.50, "public void recordLogin() { meter.increment(); }")
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(900)))
+                .thenReturn(Flux.just(streamDelta("Login calls the controller and service path [1][2].", false), streamDelta("", true)));
+
+        StringBuilder statuses = new StringBuilder();
+        CodeAskResponse response = service.askStreaming(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login call flow work?",
+                "flow",
+                6,
+                new CodeRagService.CodeAnswerStreamSink() {
+                    @Override
+                    public void onStatus(String stage, String message) {
+                        statuses.append(stage).append("|");
+                    }
+
+                    @Override
+                    public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                    }
+                }
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), eq(900));
+        assertThat(promptCaptor.getValue()).contains("Key excerpt:");
+        assertThat(statuses.toString()).contains("retrieval_started|", "evidence_ready|", "llm_started|");
+        assertThat(response.evidence()).hasSize(6);
     }
 
     private static OllamaClient.ChatResult chat(String content) {

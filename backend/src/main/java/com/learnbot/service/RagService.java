@@ -148,6 +148,9 @@ public class RagService {
         );
         DocumentQuestionType questionType = classifyDocumentQuestion(effectiveQuestion, answerMode);
         int topK = retrievalLimit(effectiveQuestion, answerMode, questionType, requestedSpeedProfile);
+        if (streamSink != null) {
+            streamSink.onStatus("retrieval_started", "문서 근거를 검색하고 있습니다.");
+        }
         long retrievalStarted = System.nanoTime();
         DocumentRetrieval retrieval = retrieveDocuments(effectiveQuestion, filter, answerMode, questionType, requestedSpeedProfile, topK, spaceIds, selectedSpaceId, conversationContext);
         long retrievalMs = elapsedMs(retrievalStarted);
@@ -181,11 +184,12 @@ public class RagService {
         String systemPrompt = systemPrompt(answerMode, questionType) + conversationSystemRule(conversationContext);
         String promptPrefix = questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
                 + conversationFocus(conversationContext);
-        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations, conversationContext);
+        ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations, conversationContext, streamSink != null);
         citations = contextBundle.citations();
         String context = contextBundle.context();
         long contextMs = elapsedMs(contextStarted);
         if (streamSink != null) {
+            streamSink.onStatus("evidence_ready", "답변에 사용할 근거를 정리했습니다.");
             streamSink.onEvidence(citations, buildEvidence(citations));
         }
 
@@ -201,6 +205,9 @@ public class RagService {
         StringBuilder streamedAnswer = new StringBuilder();
         try {
             long llmStarted = System.nanoTime();
+            if (streamSink != null) {
+                streamSink.onStatus("llm_started", "답변 생성을 시작했습니다.");
+            }
             OllamaClient.ChatResult chatResult = streamSink == null
                     ? chatWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()))
                     : streamWithLimit(systemPrompt, userPrompt, maxOutputTokens(answerMode, questionType, retrieval.effectiveProfile()), streamSink, streamedAnswer);
@@ -1555,19 +1562,106 @@ public class RagService {
             String systemPrompt,
             String promptPrefix,
             List<SearchResult> results,
-            RagConversationContext conversationContext
+            RagConversationContext conversationContext,
+            boolean compactForStreaming
     ) {
         List<SearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
-        String context = buildContext(question, answerMode, questionType, speedProfile, selected);
+        String context = compactForStreaming
+                ? buildStreamingContext(question, answerMode, questionType, speedProfile, selected)
+                : buildContext(question, answerMode, questionType, speedProfile, selected);
         int budget = promptTokenBudget(speedProfile);
         int requiredCount = (int) selected.stream().filter(this::isRequiredConversationPinned).count();
         int minCitations = Math.min(selected.size(), Math.max(minContextCitations(answerMode, questionType), requiredCount));
         while (selected.size() > minCitations
                 && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
             removeBudgetCandidate(selected);
-            context = buildContext(question, answerMode, questionType, speedProfile, selected);
+            context = compactForStreaming
+                    ? buildStreamingContext(question, answerMode, questionType, speedProfile, selected)
+                    : buildContext(question, answerMode, questionType, speedProfile, selected);
         }
         return new ContextBundle(List.copyOf(selected), context);
+    }
+
+    private String buildStreamingContext(String question, AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, List<SearchResult> results) {
+        if (results.isEmpty()) {
+            return "No context retrieved.";
+        }
+        int limit = Math.min(results.size(), contextLimit(answerMode, questionType, speedProfile));
+        int detailedLimit = Math.min(limit, detailedStreamingContextLimit(answerMode, questionType, speedProfile, results));
+        int detailedExcerptChars = Math.min(contextExcerptChars(answerMode, questionType, speedProfile), streamingDetailedExcerptChars(answerMode, questionType));
+        int compactExcerptChars = streamingCompactExcerptChars(answerMode, questionType);
+        return IntStream.range(0, limit)
+                .mapToObj(index -> {
+                    SearchResult result = results.get(index);
+                    boolean detailed = index < detailedLimit || isRequiredConversationPinned(result);
+                    return detailed
+                            ? streamingDetailedContextLine(question, result, index + 1, detailedExcerptChars)
+                            : streamingCompactContextLine(question, result, index + 1, compactExcerptChars);
+                })
+                .collect(Collectors.joining("\n\n"));
+    }
+
+    private int detailedStreamingContextLimit(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, List<SearchResult> results) {
+        int requiredCount = (int) results.stream().filter(this::isRequiredConversationPinned).count();
+        int base;
+        if (answerMode == AnswerMode.QUOTE || questionType == DocumentQuestionType.CLAUSE_EXPLANATION || questionType == DocumentQuestionType.PROCEDURE) {
+            base = 5;
+        } else if (answerMode == AnswerMode.TABLE || questionType == DocumentQuestionType.COUNT_OR_TABLE || questionType == DocumentQuestionType.COMPARISON) {
+            base = 4;
+        } else if (isOverviewQuestionType(questionType)) {
+            base = 4;
+        } else {
+            base = speedProfile == DocumentSpeedProfile.FAST ? 3 : 4;
+        }
+        return Math.max(base, requiredCount);
+    }
+
+    private int streamingDetailedExcerptChars(AnswerMode answerMode, DocumentQuestionType questionType) {
+        if (answerMode == AnswerMode.QUOTE || questionType == DocumentQuestionType.CLAUSE_EXPLANATION || questionType == DocumentQuestionType.PROCEDURE) {
+            return 900;
+        }
+        if (answerMode == AnswerMode.TABLE || questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return 760;
+        }
+        if (isOverviewQuestionType(questionType) || questionType == DocumentQuestionType.COMPARISON) {
+            return 720;
+        }
+        return 620;
+    }
+
+    private int streamingCompactExcerptChars(AnswerMode answerMode, DocumentQuestionType questionType) {
+        if (answerMode == AnswerMode.QUOTE || questionType == DocumentQuestionType.CLAUSE_EXPLANATION || questionType == DocumentQuestionType.PROCEDURE) {
+            return 360;
+        }
+        if (answerMode == AnswerMode.TABLE || questionType == DocumentQuestionType.COUNT_OR_TABLE) {
+            return 320;
+        }
+        return 260;
+    }
+
+    private String streamingDetailedContextLine(String question, SearchResult result, int citationNumber, int excerptChars) {
+        return "[" + citationNumber + "] " + compactContextHeader(result)
+                + "\n" + relevantExcerpt(question, result.content(), excerptChars);
+    }
+
+    private String streamingCompactContextLine(String question, SearchResult result, int citationNumber, int excerptChars) {
+        return "[" + citationNumber + "] " + compactContextHeader(result)
+                + "\nKey excerpt: " + relevantExcerpt(question, result.content(), excerptChars);
+    }
+
+    private String compactContextHeader(SearchResult result) {
+        List<String> parts = new ArrayList<>();
+        parts.add(safe(result.title()));
+        addMetadataLabel(parts, "page", metadataString(result, "pageNumber"));
+        addMetadataLabel(parts, "section", metadataString(result, "sectionTitle"));
+        addMetadataLabel(parts, "heading", metadataString(result, "headingPath"));
+        addMetadataLabel(parts, "table", metadataString(result, "tableId"));
+        addMetadataLabel(parts, "type", metadataString(result, "documentType"));
+        parts.add("chunk=" + result.chunkIndex());
+        return parts.stream()
+                .map(String::trim)
+                .filter(part -> !part.isBlank())
+                .collect(Collectors.joining(" | "));
     }
 
     private void removeBudgetCandidate(List<SearchResult> selected) {
@@ -3416,6 +3510,9 @@ public class RagService {
     }
 
     public interface AnswerStreamSink {
+        default void onStatus(String stage, String message) {
+        }
+
         void onEvidence(List<SearchResult> citations, List<AnswerEvidence> evidence);
 
         void onDelta(String text);

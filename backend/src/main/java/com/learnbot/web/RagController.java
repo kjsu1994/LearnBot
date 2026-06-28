@@ -84,6 +84,11 @@ public class RagController {
                     ));
                     RagService.AnswerStreamSink sink = new RagService.AnswerStreamSink() {
                         @Override
+                        public void onStatus(String stage, String message) {
+                            events.status(stage, message);
+                        }
+
+                        @Override
                         public void onEvidence(java.util.List<com.learnbot.dto.SearchResult> citations, java.util.List<com.learnbot.dto.AnswerEvidence> evidence) {
                             events.evidence(java.util.Map.of("citations", citations, "evidence", evidence));
                         }

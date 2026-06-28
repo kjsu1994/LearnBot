@@ -239,6 +239,13 @@ export function useDocumentRagController({
               const update = (current) => ({ ...(current || {}), citations: eventData?.citations || [], evidence: eventData?.evidence || [] });
               setAnswer(update);
               setPendingDocumentTurn(update);
+            } else if (eventName === 'status') {
+              const message = eventData?.message || '';
+              if (message) {
+                const update = (current) => ({ ...(current || {}), diagnostics: [message], streaming: true, status: 'streaming' });
+                setAnswer(update);
+                setPendingDocumentTurn(update);
+              }
             } else if (eventName === 'replace') {
               sawStream = true;
               if (streamedText) return;
