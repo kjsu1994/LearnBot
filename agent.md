@@ -79,6 +79,20 @@ User chat goal -> central RAG search/planning -> tool decision -> user Local Age
 
 LearnBot does not need to implement every part of this vision from scratch. Use proven open-source projects aggressively when they provide reliable value for crawling, parsing, indexing, retrieval, embeddings, vector search, agent orchestration, sandboxing, diff application, code intelligence, observability, or UI infrastructure. However, open source must serve the LearnBot product direction, not redefine it. Do not bend the service into an awkward shape just to fit a library or framework. Prefer integrating, wrapping, or replacing open-source components behind clear local interfaces so the product can keep its own quality, safety, privacy, and workflow requirements.
 
+The normal user experience should remain web-first: users access the LearnBot conversation UI through the central website. For local file changes, each user should run a separate Local Agent on their own PC. The Local Agent should be packaged in stages:
+
+- Early internal pilot: a PowerShell installer that downloads a lightweight agent executable, creates configuration, pairs it with the user's LearnBot account, registers approved workspace roots, and starts the agent.
+- Practical internal use: the same agent executable registered as a Windows Service or equivalent background process with logs, restart behavior, configuration, and update support.
+- Mature distribution: a signed MSI or EXE installer with uninstall, auto-update, proxy/internal-network support, and optional GUI settings.
+
+The preferred network model is outbound connection from the Local Agent to the central server, usually over WebSocket or a similarly controlled channel. The central server should not depend on directly reaching a user's PC by LAN IP or localhost. The server plans and orchestrates; the Local Agent executes approved local tools and returns observations.
+
+The Local Agent should be small, safe, and tool-oriented. It may be implemented with a deployment-friendly runtime such as Go or .NET even if the central server is Java/Spring. The important requirement is not language uniformity; it is reliable local execution, clear tool schemas, easy installation, low resource use, and strong safety boundaries.
+
+Server-side direct file mutation must not become the default product path. Server-local apply, test, and rollback code may exist only as a prototype, shared sandbox, migration bridge, or admin/debug capability. User-owned repository changes should ultimately be executed by the user's Local Agent. Keep planning, retrieval, validation, approval, session history, and UI review flows on the central service where useful, but move side-effectful local actions such as file writes, test commands, git operations, and rollback restoration behind the USER_LOCAL_AGENT execution target.
+
+The Local Agent should also provide a simple CLI experience similar in spirit to running `codex` from PowerShell. A user should eventually be able to install LearnBot locally and use a `learnbot` command to manage login, pairing, agent start/stop/status, workspace registration, diagnostics, logs, opening the web UI, and optionally lightweight CLI chat or fix/review commands. The web UI remains the main conversation and review surface, but the CLI should make local setup and day-to-day agent control feel natural for developers.
+
 Design implications:
 
 - Separate tool orchestration from tool execution location.

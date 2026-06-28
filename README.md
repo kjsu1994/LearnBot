@@ -1,4 +1,4 @@
-docker compose up -d --build  : using CPU
+﻿docker compose up -d --build  : using CPU
 .\scripts\up.ps1 -Build  : auto using GPU
 ./scripts/up.ps1 -NoBuild
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  : using GPU
@@ -193,7 +193,7 @@ Roslyn `AUTO` mode selects `SAFE_SOLUTION`, `SAFE_PROJECT`, or `SIMPLE` from rep
 
 The optional LLM stage runs as a durable post-index enrichment job after the deterministic graph is active. Pending work survives restarts, retries up to three times, and is skipped when a newer index replaces it. It only accepts known graph node keys and approved relationship types, and records output with lower confidence. If JavaParser, dependency resolution, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
 
-Each indexing job records `SUCCESS`, `PARTIAL`, `FAILED`, or `SKIPPED` diagnostics for the base graph, Java classpath, Java semantic analysis, Roslyn, and LLM enrichment. The Code workspace exposes these under **분석 진단**. They are also available from:
+Each indexing job records `SUCCESS`, `PARTIAL`, `FAILED`, or `SKIPPED` diagnostics for the base graph, Java classpath, Java semantic analysis, Roslyn, and LLM enrichment. The Code workspace exposes these under **遺꾩꽍 吏꾨떒**. They are also available from:
 
 ```text
 GET /api/code/repositories/{repositoryId}/jobs/{jobId}/diagnostics
@@ -348,28 +348,51 @@ RAG answer responses include `confidence` and `diagnostics` fields so the UI can
 Conversational RAG responses can also include `conversationId`, `turnId`, and `rewrittenQuestion`. For conversational requests, `rewrittenQuestion` is the effective standalone search question, not raw chat history.
 
 
-LearnBot Service final Architecture Plan
+## LearnBot Service Final Architecture Plan
 
-                Chat / Web / CLI
-                        │
-                ┌───────┴────────┐
-                │                │
-          Document Agent    Code Agent
-                │                │
-         Document RAG      Graph Code RAG
-                │                │
-                └───────┬────────┘
-                        │
-                 Planning Engine
-                        │
-                 Patch Engine
-                        │
-          Tool Calling / Sandbox
-        ┌──────┼────────┼────────┐
-        │      │        │        │
-     Git     Test    Build    Docker
-        │      │        │        │
-                Approval Layer
-                        │
-                Local Agent / CLI
+LearnBot's long-term product direction is a web-first local RAG agent service with per-user Local Agents for user-owned workspace changes.
 
+```text
+User
+ |
+ |  Web conversation, review, approvals
+ v
+Web UI / optional learnbot CLI
+ |
+ v
+Central LearnBot Server
+ |
+ +-- Document Agent  -> Document RAG
+ |
+ +-- Code Agent      -> Graph Code RAG
+ |
+ +-- Planning / tool orchestration
+ |
+ +-- Change proposal / diff validation
+ |
+ +-- Approval / session / audit / rollback metadata
+ |
+ |  Outbound tool request over WebSocket or equivalent
+ v
+User Local Agent / learnbot CLI
+ |
+ +-- Approved workspace roots only
+ |
+ +-- Read files / write approved patches
+ |
+ +-- Git status / diff
+ |
+ +-- Allowlisted test and build commands
+ |
+ +-- Rollback restoration
+ |
+ +-- Optional local diagnostics and logs
+```
+
+Responsibility split:
+
+- The central server owns retrieval, ranking, planning, model calls, validation, approvals, conversation history, diagnostics, and orchestration.
+- The Local Agent owns user-PC side effects: file writes, test/build execution, git operations, rollback restoration, and workspace-local diagnostics.
+- Server-local apply/test/rollback may exist only as a prototype, shared sandbox, migration bridge, or admin/debug capability. It must not become the default product path for user-owned repository changes.
+- The preferred network model is outbound connection from each Local Agent to the central server. The server should not depend on directly reaching user PCs by LAN IP or localhost.
+- The CLI should eventually feel natural from PowerShell, similar to running `codex`: users can run `learnbot` to pair, start/stop/status the agent, register workspaces, open the web UI, run diagnostics, view logs, and optionally use lightweight CLI chat/fix/review commands.
