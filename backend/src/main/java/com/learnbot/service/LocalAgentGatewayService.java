@@ -82,6 +82,15 @@ public class LocalAgentGatewayService {
                 .anyMatch(workspace -> workspaceId.equals(workspace.workspaceId()) && workspace.approved());
     }
 
+    public Optional<LocalAgentWorkspaceSummary> approvedWorkspace(UUID userId, UUID workspaceId) {
+        if (workspaceId == null) return Optional.empty();
+        return latest(userId)
+                .stream()
+                .flatMap(snapshot -> snapshot.workspaces().stream())
+                .filter(workspace -> workspaceId.equals(workspace.workspaceId()) && workspace.approved())
+                .findFirst();
+    }
+
     public boolean isConnected(UUID userId, UUID agentId) {
         if (agentId == null) return false;
         return latest(userId)

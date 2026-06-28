@@ -96,6 +96,39 @@ public class LocalAgentToolExecutionRepository {
         return executions.stream().findFirst();
     }
 
+    public Optional<Map<String, Object>> findLatestRepositoryVerificationForSourceRequest(UUID userId, UUID sourceRequestId) {
+        List<Map<String, Object>> results = jdbc.query("""
+                SELECT output -> 'repositoryVerification' AS repository_verification
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'sourceRequestId' = :sourceRequestId
+                  AND output ? 'repositoryVerification'
+                ORDER BY finished_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("sourceRequestId", sourceRequestId.toString()),
+                (rs, rowNum) -> fromJson(rs.getString("repository_verification"), new TypeReference<Map<String, Object>>() {}));
+        return results.stream().findFirst();
+    }
+
+    public Optional<Map<String, Object>> findLatestPatchDryRunOutputForSourceRequest(UUID userId, UUID sourceRequestId) {
+        List<Map<String, Object>> results = jdbc.query("""
+                SELECT output
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'sourceRequestId' = :sourceRequestId
+                  AND tool_name = 'patch.apply'
+                  AND output ->> 'dryRun' = 'true'
+                ORDER BY finished_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("sourceRequestId", sourceRequestId.toString()),
+                (rs, rowNum) -> fromJson(rs.getString("output"), new TypeReference<Map<String, Object>>() {}));
+        return results.stream().findFirst();
+    }
+
     public Optional<LocalAgentToolExecution> updateApprovalDecision(
             UUID id,
             UUID userId,
@@ -120,6 +153,24 @@ public class LocalAgentToolExecutionRepository {
                 .addValue("status", status.name())
                 .addValue("warning", toJson(List.of(warning)))
                 .addValue("finished", status == LocalAgentToolStatus.REJECTED));
+        return updated == 0 ? Optional.empty() : find(id);
+    }
+
+    public Optional<LocalAgentToolExecution> releaseApprovedHeldPatch(UUID id, UUID userId, String warning) {
+        int updated = jdbc.update("""
+                UPDATE local_agent_tool_executions
+                SET status = 'APPROVED',
+                    request_warnings = request_warnings || CAST(:warning AS jsonb)
+                WHERE id = :id
+                  AND user_id = :userId
+                  AND tool_name = 'patch.apply'
+                  AND execution_target = 'USER_LOCAL_AGENT'
+                  AND approval_state = 'APPROVED'
+                  AND status = 'APPROVED_HELD'
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("userId", userId)
+                .addValue("warning", toJson(List.of(warning))));
         return updated == 0 ? Optional.empty() : find(id);
     }
 

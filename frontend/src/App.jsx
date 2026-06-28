@@ -210,6 +210,10 @@ export default function App() {
     codeAgentMutationPolicy,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
+    codeAgentLocalPatchDryRunRequest,
+    codeAgentLocalPatchDryRunResult,
+    codeAgentLocalRepositoryObservationRequest,
+    codeAgentLocalRepositoryObservationResult,
     localAgentStatus,
     localAgentTokens,
     codeConversations,
@@ -248,6 +252,10 @@ export default function App() {
     prepareCodeAgentLocalPatchRequest,
     decideCodeAgentLocalPatchApproval,
     refreshCodeAgentLocalPatchReadiness,
+    queueCodeAgentLocalPatchDryRun,
+    refreshCodeAgentLocalPatchDryRunResult,
+    queueCodeAgentLocalRepositoryObservation,
+    refreshCodeAgentLocalRepositoryObservationResult,
     refreshLocalAgentStatus,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
@@ -1001,6 +1009,10 @@ export default function App() {
             codeAgentMutationPolicy={codeAgentMutationPolicy}
             codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
             codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
+            codeAgentLocalPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
+            codeAgentLocalPatchDryRunResult={codeAgentLocalPatchDryRunResult}
+            codeAgentLocalRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
+            codeAgentLocalRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
             localAgentStatus={localAgentStatus}
             localAgentTokens={localAgentTokens}
             codeConversations={codeConversations}
@@ -1040,6 +1052,10 @@ export default function App() {
             prepareCodeAgentLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
             decideCodeAgentLocalPatchApproval={decideCodeAgentLocalPatchApproval}
             refreshCodeAgentLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
+            queueCodeAgentLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
+            refreshCodeAgentLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
+            queueCodeAgentLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
+            refreshCodeAgentLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
             refreshLocalAgentStatus={refreshLocalAgentStatus}
             refreshLocalAgentTokens={refreshLocalAgentTokens}
             revokeLocalAgentToken={revokeLocalAgentToken}

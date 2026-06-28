@@ -9,8 +9,11 @@ It is intentionally safe by default:
 - It sends heartbeat with approved local workspace summaries.
 - It polls the durable server-side tool queue.
 - It writes `agent.log` and `agent-state.json` next to the config file.
-- It handles `agent.status`, `agent.doctor`, `workspace.list`, path-contained `file.read`, read-only `git.status`, and bounded read-only `git.diff`.
-- It rejects path traversal, workspace escape, binary file reads, file mutation, arbitrary command execution, patch, test, and rollback tools.
+- It handles `agent.status`, `agent.doctor`, `workspace.list`, path-contained `file.read`, read-only `git.status`, bounded read-only `git.diff`, and dry-run-only `patch.apply` preflight requests.
+- It rejects path traversal, workspace escape, binary file reads, file mutation, arbitrary command execution, patch mutation, test, and rollback tools. `patch.apply` requires `dryRunOnly=true` and refuses any request with `mutationAllowed=true`.
+- Dry-run `patch.apply` responses include hash/context observations plus managed snapshot and rollback observations. After preflight passes, the agent copies target files into `%USERPROFILE%\.learnbot\snapshots\<manifestId>\files\`, writes a manifest, returns `snapshotCreated=true`, and still keeps `mutationApplied=false`.
+- Patch hunk application and a temp-file rewrite sequence have Local Agent self-test coverage for the future write path, but they are not wired to public filesystem mutation or release gates yet.
+- The first real snapshot creation boundary is specified in `../docs/local-agent-snapshot-implementation-plan.md`; patch application, tests, and rollback restore remain disabled after snapshot creation.
 
 Example:
 

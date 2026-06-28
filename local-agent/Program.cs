@@ -35,6 +35,7 @@ internal sealed class LearnBotLocalAgent
             "git" => await GitCommand(args[1..]),
             "doctor" => Doctor(),
             "open" => Open(),
+            "self-test" => SelfTest(args[1..]),
             "help" or "--help" or "-h" => Help(),
             _ => Unknown(args[0])
         };
@@ -687,6 +688,13 @@ internal sealed class LearnBotLocalAgent
                     error = gitDiff.Error;
                 }
                 break;
+            case "patch.apply":
+                var patch = DryRunPatchApply(config, TryGuid(request, "workspaceId"), request);
+                foreach (var item in patch.Output) output[item.Key] = item.Value;
+                status = patch.Status;
+                failureCode = patch.FailureCode;
+                error = patch.Error;
+                break;
             default:
                 status = "REJECTED";
                 failureCode = "UNSAFE_TOOL";
@@ -715,6 +723,7 @@ internal sealed class LearnBotLocalAgent
     private const int AbsoluteMaxReadBytes = 512_000;
     private const int DefaultMaxDiffBytes = 200_000;
     private const int AbsoluteMaxDiffBytes = 512_000;
+    private const int AbsoluteMaxPatchBytes = 512_000;
 
     private ToolResult ReadWorkspaceFile(AgentConfig config, Guid? workspaceId, string requestedPath, int maxBytes)
     {
@@ -821,6 +830,7 @@ internal sealed class LearnBotLocalAgent
             var output = ParseGitStatus(stdout);
             output["workspaceId"] = workspace.Workspace!.WorkspaceId;
             output["path"] = root;
+            AddGitIdentity(root, output);
             return ToolResult.Ok(output);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -877,6 +887,125 @@ internal sealed class LearnBotLocalAgent
             ["truncated"] = truncated,
             ["hasChanges"] = bytes.Length > 0
         });
+    }
+
+    private ToolResult DryRunPatchApply(AgentConfig config, Guid? workspaceId, JsonElement request)
+    {
+        if (!request.TryGetProperty("input", out var input))
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "patch.apply input is required.");
+        }
+        if (TryInputBool(input, "dryRunOnly") != true)
+        {
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply requires dryRunOnly=true until patch mutation release gates are implemented.");
+        }
+        if (TryInputBool(input, "mutationAllowed") == true)
+        {
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply dry-run refuses requests that allow mutation.");
+        }
+
+        var workspace = ResolveApprovedWorkspace(config, workspaceId);
+        if (!workspace.Success)
+        {
+            return ToolResult.Fail(workspace.Status, workspace.FailureCode!, workspace.Error!);
+        }
+        var diff = TryInputString(request, "diff") ?? "";
+        if (string.IsNullOrWhiteSpace(diff))
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "patch.apply diff is required.");
+        }
+        if (Encoding.UTF8.GetByteCount(diff) > AbsoluteMaxPatchBytes)
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "patch.apply diff exceeds the local safety limit.");
+        }
+
+        var targetFiles = TryInputStringList(input, "targetFiles");
+        var expectedFiles = TryExpectedFiles(input);
+        var parsed = ParseUnifiedDiff(diff);
+        if (!parsed.Success)
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", parsed.Error ?? "Invalid unified diff.");
+        }
+        if (parsed.Files.Count == 0)
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "Patch did not contain file changes.");
+        }
+
+        var root = workspace.Root!;
+        var fileResults = new List<Dictionary<string, object?>>();
+        foreach (var file in parsed.Files)
+        {
+            if (targetFiles.Count > 0 && !targetFiles.Contains(file.Path, StringComparer.Ordinal))
+            {
+                return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch modifies a file outside targetFiles: " + file.Path);
+            }
+
+            var target = Path.GetFullPath(Path.Combine(root, file.Path));
+            if (!IsWithin(root, target))
+            {
+                return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch path escapes the approved workspace: " + file.Path);
+            }
+            if (!File.Exists(target))
+            {
+                return ToolResult.Fail("FAILED", "TOOL_FAILED", "Patch target file was not found: " + file.Path);
+            }
+
+            var bytes = File.ReadAllBytes(target);
+            if (bytes.Any(value => value == 0))
+            {
+                return ToolResult.Fail("FAILED", "TOOL_FAILED", "Binary files are not supported by patch.apply dry-run: " + file.Path);
+            }
+            var content = Encoding.UTF8.GetString(bytes);
+            var actualSha = Sha256Hex(bytes);
+            expectedFiles.TryGetValue(file.Path, out var expected);
+            var hashMatches = expected?.Sha256 is not null
+                && string.Equals(expected.Sha256, actualSha, StringComparison.OrdinalIgnoreCase);
+            var lines = SplitLines(content);
+            var hunkResults = file.Hunks.Select(hunk => DryRunHunk(lines, hunk)).ToList();
+            var contextMatches = hunkResults.All(item => item.ContextMatches);
+
+            fileResults.Add(new Dictionary<string, object?>
+            {
+                ["path"] = file.Path,
+                ["absolutePath"] = target,
+                ["expectedSha256"] = expected?.Sha256,
+                ["actualSha256"] = actualSha,
+                ["bytes"] = bytes.LongLength,
+                ["hashMatches"] = hashMatches,
+                ["contextMatches"] = contextMatches,
+                ["hunks"] = hunkResults.Select(item => new Dictionary<string, object?>
+                {
+                    ["oldStart"] = item.OldStart,
+                    ["oldLineCount"] = item.OldLineCount,
+                    ["contextMatches"] = item.ContextMatches,
+                    ["message"] = item.Message
+                }).ToList()
+            });
+
+            if (!hashMatches && !contextMatches)
+            {
+                var mismatchOutput = PatchDryRunOutput(workspace.Workspace!.WorkspaceId, input, fileResults, preflightPassed: false);
+                return ToolResult.Fail("REJECTED", "CONTEXT_MISMATCH", "Patch context did not match local file: " + file.Path, mismatchOutput);
+            }
+        }
+
+        var snapshot = CreateSnapshot(workspace.Workspace!.WorkspaceId, root, input, fileResults);
+        if (!snapshot.Created)
+        {
+            var failedOutput = PatchDryRunOutput(workspace.Workspace!.WorkspaceId, input, fileResults, preflightPassed: true, snapshot);
+            return ToolResult.Fail(
+                "FAILED",
+                "TOOL_FAILED",
+                snapshot.Error ?? "Snapshot creation failed.",
+                failedOutput);
+        }
+
+        var output = PatchDryRunOutput(workspace.Workspace!.WorkspaceId, input, fileResults, preflightPassed: true, snapshot);
+        return ToolResult.Fail(
+            "REJECTED",
+            "UNSAFE_TOOL",
+            "Patch dry-run passed and a local snapshot was created, but file mutation is disabled until release gates and rollback safety are implemented.",
+            output);
     }
 
     private async Task<ToolResult> RunGitDiff(string root, bool cached, string? relativePath)
@@ -976,6 +1105,90 @@ internal sealed class LearnBotLocalAgent
             ["changes"] = changes
         };
     }
+
+    private void AddGitIdentity(string root, Dictionary<string, object?> output)
+    {
+        var warnings = new List<string>();
+        var gitRoot = RunGitIdentity(root, "rev-parse", "--show-toplevel");
+        var headCommit = RunGitIdentity(root, "rev-parse", "HEAD");
+        var branch = RunGitIdentity(root, "branch", "--show-current");
+        var remoteName = RunGitIdentity(root, "config", "--get", "branch." + (branch.Value ?? "") + ".remote");
+        var remoteUrl = !string.IsNullOrWhiteSpace(remoteName.Value)
+            ? RunGitIdentity(root, "config", "--get", "remote." + remoteName.Value + ".url")
+            : RunGitIdentity(root, "config", "--get", "remote.origin.url");
+
+        AddIdentityWarning(warnings, gitRoot.Warning);
+        AddIdentityWarning(warnings, headCommit.Warning);
+        AddIdentityWarning(warnings, branch.Warning);
+        AddIdentityWarning(warnings, remoteName.Warning);
+        AddIdentityWarning(warnings, remoteUrl.Warning);
+
+        output["repositoryIdentity"] = new Dictionary<string, object?>
+        {
+            ["gitRoot"] = NormalizePath(gitRoot.Value),
+            ["branch"] = branch.Value,
+            ["headCommit"] = headCommit.Value,
+            ["remoteName"] = remoteName.Value,
+            ["remoteUrl"] = remoteUrl.Value
+        };
+        output["identityComplete"] = !string.IsNullOrWhiteSpace(headCommit.Value);
+        if (warnings.Count > 0)
+        {
+            output["identityWarnings"] = warnings.Distinct(StringComparer.Ordinal).ToList();
+        }
+    }
+
+    private GitIdentityValue RunGitIdentity(string root, params string[] args)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                WorkingDirectory = root,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            foreach (var arg in args)
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+            startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return new GitIdentityValue(null, "Failed to start git " + string.Join(' ', args) + ".");
+            }
+            if (!process.WaitForExit(TimeSpan.FromSeconds(5)))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                return new GitIdentityValue(null, "git " + string.Join(' ', args) + " timed out.");
+            }
+            var stdout = process.StandardOutput.ReadToEnd().Trim();
+            var stderr = process.StandardError.ReadToEnd().Trim();
+            if (process.ExitCode != 0)
+            {
+                return new GitIdentityValue(null, string.IsNullOrWhiteSpace(stderr) ? "git " + string.Join(' ', args) + " failed." : stderr);
+            }
+            return new GitIdentityValue(stdout, null);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return new GitIdentityValue(null, "git executable is unavailable.");
+        }
+    }
+
+    private static void AddIdentityWarning(List<string> warnings, string? warning)
+    {
+        if (!string.IsNullOrWhiteSpace(warning))
+        {
+            warnings.Add(warning);
+        }
+    }
+
+    private static string? NormalizePath(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Replace('\\', '/');
 
     private WorkspaceResolution ResolveApprovedWorkspace(AgentConfig config, Guid? workspaceId)
     {
@@ -1166,6 +1379,769 @@ internal sealed class LearnBotLocalAgent
         return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
 
+    private static Dictionary<string, object?> PatchDryRunOutput(
+        Guid workspaceId,
+        JsonElement input,
+        List<Dictionary<string, object?>> fileResults,
+        bool preflightPassed,
+        SnapshotCreationResult? snapshot = null) => new()
+    {
+        ["workspaceId"] = workspaceId,
+        ["dryRun"] = true,
+        ["preflightPassed"] = preflightPassed,
+        ["mutationApplied"] = false,
+        ["snapshotCreated"] = snapshot?.Created ?? false,
+        ["snapshotObservation"] = SnapshotObservation(input, fileResults, snapshot),
+        ["rollbackObservation"] = RollbackObservation(input, fileResults),
+        ["files"] = fileResults
+    };
+
+    private static Dictionary<string, object?> SnapshotObservation(JsonElement input, List<Dictionary<string, object?>> fileResults, SnapshotCreationResult? snapshot)
+    {
+        JsonElement? policy = input.TryGetProperty("snapshotPolicy", out var value) && value.ValueKind == JsonValueKind.Object
+            ? value
+            : null;
+        var created = snapshot?.Created ?? false;
+        return new Dictionary<string, object?>
+        {
+            ["required"] = TryObjectBool(policy, "required") ?? true,
+            ["scope"] = TryObjectString(policy, "scope") ?? "TARGET_FILES",
+            ["location"] = TryObjectString(policy, "location") ?? "LOCAL_AGENT_MANAGED",
+            ["createBeforeMutation"] = TryObjectBool(policy, "createBeforeMutation") ?? true,
+            ["includeExpectedHashes"] = TryObjectBool(policy, "includeExpectedHashes") ?? true,
+            ["manifestPreview"] = snapshot?.Manifest ?? SnapshotManifestPreview(input, fileResults),
+            ["wouldCreate"] = true,
+            ["created"] = created,
+            ["error"] = snapshot?.Error,
+            ["files"] = fileResults.Select(SnapshotFileObservation).ToList()
+        };
+    }
+
+    private static Dictionary<string, object?> RollbackObservation(JsonElement input, List<Dictionary<string, object?>> fileResults)
+    {
+        JsonElement? policy = input.TryGetProperty("rollbackPolicy", out var value) && value.ValueKind == JsonValueKind.Object
+            ? value
+            : null;
+        return new Dictionary<string, object?>
+        {
+            ["required"] = TryObjectBool(policy, "required") ?? true,
+            ["tool"] = TryObjectString(policy, "tool") ?? "rollback.restore",
+            ["restoreScope"] = TryObjectString(policy, "restoreScope") ?? "SNAPSHOT_TARGET_FILES",
+            ["requiresUserApproval"] = TryObjectBool(policy, "requiresUserApproval") ?? true,
+            ["restorePreconditions"] = RollbackRestorePreconditions(fileResults),
+            ["wouldRestore"] = true,
+            ["restored"] = false,
+            ["files"] = fileResults.Select(SnapshotFileObservation).ToList()
+        };
+    }
+
+    private static Dictionary<string, object?> SnapshotManifestPreview(JsonElement input, List<Dictionary<string, object?>> fileResults)
+    {
+        var manifestId = SnapshotManifestId(input, fileResults);
+        var targetPaths = fileResults
+            .Select(file => file.TryGetValue("path", out var path) ? path?.ToString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .ToList();
+        var validLayout = TryBuildSnapshotLayout(AgentDataDirectory(), manifestId, targetPaths, out var layout, out var layoutError);
+        return new Dictionary<string, object?>
+        {
+            ["id"] = manifestId,
+            ["version"] = 1,
+            ["schema"] = "learnbot.local-agent.snapshot-manifest.v1",
+            ["workspaceId"] = TryInputGuidString(input, "workspaceId"),
+            ["sourceRequestId"] = TryInputStringFromObject(input, "sourceRequestId"),
+            ["managedRoot"] = "%USERPROFILE%\\.learnbot\\snapshots",
+            ["relativeManifestPath"] = layout?.RelativeManifestPath ?? manifestId + "\\manifest.json",
+            ["contentStrategy"] = "COPY_TARGET_FILES_BEFORE_MUTATION",
+            ["created"] = false,
+            ["writesPlanned"] = false,
+            ["pathGuardPassed"] = validLayout,
+            ["pathGuardError"] = layoutError,
+            ["files"] = fileResults.Select(file => SnapshotManifestFilePreview(file, layout)).ToList(),
+            ["cleanupPolicy"] = new Dictionary<string, object?>
+            {
+                ["retentionDays"] = 30,
+                ["deleteOnlyAfterSuccessfulRollbackOrUserCleanup"] = true
+            }
+        };
+    }
+
+    private static Dictionary<string, object?> SnapshotManifestFilePreview(Dictionary<string, object?> file, SnapshotLayout? layout)
+    {
+        var path = file.TryGetValue("path", out var pathValue) ? pathValue : null;
+        var normalizedPath = path?.ToString()?.Replace('\\', '/');
+        var snapshotFile = layout?.Files.FirstOrDefault(item => string.Equals(item.Path, normalizedPath, StringComparison.Ordinal));
+        return new Dictionary<string, object?>
+        {
+            ["path"] = path,
+            ["snapshotRelativePath"] = snapshotFile?.SnapshotRelativePath ?? (path is null ? null : "files/" + path.ToString()!.Replace('\\', '/')),
+            ["expectedSha256"] = file.TryGetValue("expectedSha256", out var expected) ? expected : null,
+            ["actualSha256"] = file.TryGetValue("actualSha256", out var actual) ? actual : null,
+            ["hashMatches"] = file.TryGetValue("hashMatches", out var hashMatches) ? hashMatches : null,
+            ["contextMatches"] = file.TryGetValue("contextMatches", out var contextMatches) ? contextMatches : null
+        };
+    }
+
+    private static List<Dictionary<string, object?>> RollbackRestorePreconditions(List<Dictionary<string, object?>> fileResults) =>
+    [
+        new()
+        {
+            ["key"] = "snapshotManifestExists",
+            ["required"] = true,
+            ["previewOnly"] = true
+        },
+        new()
+        {
+            ["key"] = "targetFilesStillWithinWorkspace",
+            ["required"] = true,
+            ["previewOnly"] = true
+        },
+        new()
+        {
+            ["key"] = "targetFileCount",
+            ["required"] = fileResults.Count,
+            ["previewOnly"] = true
+        },
+        new()
+        {
+            ["key"] = "userApprovalRequired",
+            ["required"] = true,
+            ["previewOnly"] = true
+        }
+    ];
+
+    private static string SnapshotManifestId(JsonElement input, List<Dictionary<string, object?>> fileResults)
+    {
+        var sourceRequestId = TryInputStringFromObject(input, "sourceRequestId") ?? "no-source-request";
+        var fileKey = string.Join("|", fileResults.Select(file => file.TryGetValue("path", out var path) ? path?.ToString() ?? "" : ""));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sourceRequestId + "|" + fileKey));
+        return "snap-" + Convert.ToHexString(hash)[..16].ToLowerInvariant();
+    }
+
+    private static SnapshotCreationResult CreateSnapshot(
+        Guid workspaceId,
+        string workspaceRoot,
+        JsonElement input,
+        List<Dictionary<string, object?>> fileResults)
+    {
+        var manifestId = SnapshotManifestId(input, fileResults);
+        var targetPaths = fileResults
+            .Select(file => file.TryGetValue("path", out var path) ? path?.ToString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .ToList();
+        if (!TryBuildSnapshotLayout(AgentDataDirectory(), manifestId, targetPaths, out var layout, out var layoutError) || layout is null)
+        {
+            return SnapshotCreationResult.Failed(layoutError ?? "Invalid snapshot layout.");
+        }
+        if (Directory.Exists(layout.SnapshotRoot))
+        {
+            manifestId = manifestId + "-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff");
+            if (!TryBuildSnapshotLayout(AgentDataDirectory(), manifestId, targetPaths, out layout, out layoutError) || layout is null)
+            {
+                return SnapshotCreationResult.Failed(layoutError ?? "Invalid snapshot layout.");
+            }
+        }
+
+        var stagingRoot = Path.GetFullPath(Path.Combine(layout.SnapshotsRoot, layout.ManifestId + ".staging-" + Guid.NewGuid().ToString("N")));
+        if (!IsWithin(layout.SnapshotsRoot, stagingRoot))
+        {
+            return SnapshotCreationResult.Failed("Snapshot staging path escapes managed snapshot directory.");
+        }
+        if (Directory.Exists(layout.SnapshotRoot))
+        {
+            return SnapshotCreationResult.Failed("Snapshot target already exists: " + layout.RelativeManifestPath);
+        }
+
+        try
+        {
+            var manifestFiles = new List<Dictionary<string, object?>>();
+            foreach (var file in fileResults)
+            {
+                var path = file.TryGetValue("path", out var pathValue) ? pathValue?.ToString()?.Replace('\\', '/') : null;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot target file path is missing.");
+                }
+                var layoutFile = layout.Files.FirstOrDefault(item => string.Equals(item.Path, path, StringComparison.Ordinal));
+                if (layoutFile is null)
+                {
+                    return SnapshotCreationResult.Failed("Snapshot target file was not present in the validated layout: " + path);
+                }
+
+                var sourcePath = file.TryGetValue("absolutePath", out var absolutePath) ? absolutePath?.ToString() : null;
+                if (string.IsNullOrWhiteSpace(sourcePath))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot source file path is missing: " + path);
+                }
+                sourcePath = Path.GetFullPath(sourcePath);
+                if (!IsWithin(workspaceRoot, sourcePath))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot source file escapes the approved workspace: " + path);
+                }
+                if (!File.Exists(sourcePath))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot source file was not found: " + path);
+                }
+
+                var bytes = File.ReadAllBytes(sourcePath);
+                if (bytes.Any(value => value == 0))
+                {
+                    return SnapshotCreationResult.Failed("Binary files are not supported by patch.apply snapshot: " + path);
+                }
+                var actualSha = Sha256Hex(bytes);
+                var previousActual = file.TryGetValue("actualSha256", out var previousActualValue) ? previousActualValue?.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(previousActual) && !string.Equals(previousActual, actualSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot source changed after dry-run preflight: " + path);
+                }
+
+                var destinationPath = Path.GetFullPath(Path.Combine(stagingRoot, layoutFile.SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+                if (!IsWithin(stagingRoot, destinationPath))
+                {
+                    return SnapshotCreationResult.Failed("Snapshot staging file path escapes staging root: " + path);
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                File.Copy(sourcePath, destinationPath, overwrite: false);
+
+                manifestFiles.Add(new Dictionary<string, object?>
+                {
+                    ["path"] = path,
+                    ["snapshotRelativePath"] = layoutFile.SnapshotRelativePath,
+                    ["expectedSha256"] = file.TryGetValue("expectedSha256", out var expected) ? expected : null,
+                    ["actualSha256"] = actualSha,
+                    ["bytes"] = bytes.LongLength,
+                    ["hashMatches"] = file.TryGetValue("hashMatches", out var hashMatches) ? hashMatches : null,
+                    ["contextMatches"] = file.TryGetValue("contextMatches", out var contextMatches) ? contextMatches : null
+                });
+            }
+
+            var manifest = new Dictionary<string, object?>
+            {
+                ["id"] = layout.ManifestId,
+                ["version"] = 1,
+                ["schema"] = "learnbot.local-agent.snapshot-manifest.v1",
+                ["workspaceId"] = workspaceId,
+                ["sourceRequestId"] = TryInputStringFromObject(input, "sourceRequestId"),
+                ["createdAt"] = DateTimeOffset.UtcNow,
+                ["workspaceRoot"] = workspaceRoot,
+                ["managedRoot"] = "%USERPROFILE%\\.learnbot\\snapshots",
+                ["relativeManifestPath"] = layout.RelativeManifestPath,
+                ["contentStrategy"] = "COPY_TARGET_FILES_BEFORE_MUTATION",
+                ["created"] = true,
+                ["writesPlanned"] = true,
+                ["writesCompleted"] = true,
+                ["pathGuardPassed"] = true,
+                ["files"] = manifestFiles,
+                ["cleanupPolicy"] = new Dictionary<string, object?>
+                {
+                    ["retentionDays"] = 30,
+                    ["deleteOnlyAfterSuccessfulRollbackOrUserCleanup"] = true
+                }
+            };
+
+            Directory.CreateDirectory(stagingRoot);
+            var stagingManifestPath = Path.GetFullPath(Path.Combine(stagingRoot, "manifest.json"));
+            if (!IsWithin(stagingRoot, stagingManifestPath))
+            {
+                return SnapshotCreationResult.Failed("Snapshot manifest staging path escapes staging root.");
+            }
+            File.WriteAllText(stagingManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+            Directory.Move(stagingRoot, layout.SnapshotRoot);
+            return SnapshotCreationResult.Succeeded(manifest);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return SnapshotCreationResult.Failed("Snapshot creation failed: " + ex.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(stagingRoot))
+            {
+                try
+                {
+                    Directory.Delete(stagingRoot, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup only. The failed tool result still reports snapshot creation failure.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Best-effort cleanup only. The failed tool result still reports snapshot creation failure.
+                }
+            }
+        }
+    }
+
+    private static bool TryBuildSnapshotLayout(
+        string agentDataDirectory,
+        string manifestId,
+        IReadOnlyCollection<string> targetPaths,
+        out SnapshotLayout? layout,
+        out string? error)
+    {
+        layout = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(manifestId) || !manifestId.StartsWith("snap-", StringComparison.Ordinal) || manifestId.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '-')))
+        {
+            error = "Invalid snapshot manifest id.";
+            return false;
+        }
+        var snapshotsRoot = Path.GetFullPath(Path.Combine(agentDataDirectory, "snapshots")).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var snapshotRoot = Path.GetFullPath(Path.Combine(snapshotsRoot, manifestId)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!IsWithin(snapshotsRoot, snapshotRoot))
+        {
+            error = "Snapshot root escapes managed snapshot directory.";
+            return false;
+        }
+        var manifestPath = Path.GetFullPath(Path.Combine(snapshotRoot, "manifest.json"));
+        if (!IsWithin(snapshotRoot, manifestPath))
+        {
+            error = "Snapshot manifest path escapes snapshot root.";
+            return false;
+        }
+
+        var files = new List<SnapshotFilePath>();
+        foreach (var rawPath in targetPaths)
+        {
+            var normalized = rawPath.Replace('\\', '/');
+            if (!IsSafeRelativeSnapshotPath(normalized))
+            {
+                error = "Snapshot target path is not workspace-relative: " + rawPath;
+                return false;
+            }
+            var snapshotRelativePath = "files/" + normalized;
+            var destinationPath = Path.GetFullPath(Path.Combine(snapshotRoot, snapshotRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            if (!IsWithin(snapshotRoot, destinationPath))
+            {
+                error = "Snapshot file path escapes snapshot root: " + rawPath;
+                return false;
+            }
+            files.Add(new SnapshotFilePath(normalized, snapshotRelativePath, destinationPath));
+        }
+
+        layout = new SnapshotLayout(manifestId, snapshotsRoot, snapshotRoot, manifestId + "/manifest.json", manifestPath, files);
+        return true;
+    }
+
+    private static bool IsSafeRelativeSnapshotPath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Contains(':') || value.StartsWith("/", StringComparison.Ordinal) || Path.IsPathRooted(value))
+        {
+            return false;
+        }
+        var parts = value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 && parts.All(part => part != "." && part != "..");
+    }
+
+    private static Dictionary<string, object?> SnapshotFileObservation(Dictionary<string, object?> file)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["path"] = file.TryGetValue("path", out var path) ? path : null,
+            ["expectedSha256"] = file.TryGetValue("expectedSha256", out var expected) ? expected : null,
+            ["actualSha256"] = file.TryGetValue("actualSha256", out var actual) ? actual : null,
+            ["hashMatches"] = file.TryGetValue("hashMatches", out var hashMatches) ? hashMatches : null,
+            ["contextMatches"] = file.TryGetValue("contextMatches", out var contextMatches) ? contextMatches : null
+        };
+    }
+
+    private static bool? TryObjectBool(JsonElement? input, string property)
+    {
+        return input is { ValueKind: JsonValueKind.Object } value
+            ? TryInputBool(value, property)
+            : null;
+    }
+
+    private static string? TryObjectString(JsonElement? input, string property)
+    {
+        return input is { ValueKind: JsonValueKind.Object } value
+            ? TryInputStringFromObject(value, property)
+            : null;
+    }
+
+    private static string? TryInputStringFromObject(JsonElement input, string property)
+    {
+        if (!input.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static string? TryInputGuidString(JsonElement input, string property)
+    {
+        if (!input.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed.ToString();
+        }
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static PatchParseResult ParseUnifiedDiff(string diff)
+    {
+        var lines = diff.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var files = new List<PatchFile>();
+        PatchFile? currentFile = null;
+        PatchHunk? currentHunk = null;
+        string? oldPath = null;
+
+        foreach (var rawLine in lines)
+        {
+            if (rawLine.StartsWith("--- ", StringComparison.Ordinal))
+            {
+                oldPath = NormalizeDiffPath(rawLine[4..].Trim());
+                currentHunk = null;
+                continue;
+            }
+            if (rawLine.StartsWith("+++ ", StringComparison.Ordinal))
+            {
+                var newPath = NormalizeDiffPath(rawLine[4..].Trim());
+                var path = newPath == "/dev/null" ? oldPath : newPath;
+                if (string.IsNullOrWhiteSpace(path) || path == "/dev/null")
+                {
+                    return PatchParseResult.Fail("Patch target path is missing.");
+                }
+                currentFile = new PatchFile(path);
+                files.Add(currentFile);
+                currentHunk = null;
+                continue;
+            }
+            if (rawLine.StartsWith("@@ ", StringComparison.Ordinal))
+            {
+                if (currentFile is null)
+                {
+                    return PatchParseResult.Fail("Patch hunk appeared before a file header.");
+                }
+                if (!TryParseHunkHeader(rawLine, out var oldStart, out var oldCount))
+                {
+                    return PatchParseResult.Fail("Invalid hunk header: " + rawLine);
+                }
+                currentHunk = new PatchHunk(oldStart, oldCount);
+                currentFile.Hunks.Add(currentHunk);
+                continue;
+            }
+            if (currentHunk is null)
+            {
+                continue;
+            }
+            if (rawLine.StartsWith("\\", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (rawLine.Length == 0)
+            {
+                currentHunk.Lines.Add(new PatchLine(' ', ""));
+                continue;
+            }
+            var marker = rawLine[0];
+            if (marker is ' ' or '-' or '+')
+            {
+                currentHunk.Lines.Add(new PatchLine(marker, rawLine[1..]));
+                continue;
+            }
+            return PatchParseResult.Fail("Invalid patch line marker in hunk.");
+        }
+
+        return PatchParseResult.Ok(files);
+    }
+
+    private static HunkDryRunResult DryRunHunk(string[] fileLines, PatchHunk hunk)
+    {
+        var expected = hunk.Lines
+            .Where(line => line.Marker is ' ' or '-')
+            .Select(line => line.Text)
+            .ToArray();
+        if (expected.Length == 0)
+        {
+            return new HunkDryRunResult(hunk.OldStart, hunk.OldCount, true, "Hunk has no existing-line context to verify.");
+        }
+
+        var startIndex = Math.Max(0, hunk.OldStart - 1);
+        if (MatchesAt(fileLines, expected, startIndex))
+        {
+            return new HunkDryRunResult(hunk.OldStart, hunk.OldCount, true, "Hunk context matched at the expected location.");
+        }
+
+        for (var index = 0; index <= fileLines.Length - expected.Length; index++)
+        {
+            if (index == startIndex) continue;
+            if (MatchesAt(fileLines, expected, index))
+            {
+                return new HunkDryRunResult(hunk.OldStart, hunk.OldCount, true, "Hunk context matched at a shifted location.");
+            }
+        }
+
+        return new HunkDryRunResult(hunk.OldStart, hunk.OldCount, false, "Hunk context did not match the local file.");
+    }
+
+    private static bool TryApplyPatchToLines(
+        IReadOnlyList<string> originalLines,
+        PatchFile patchFile,
+        out List<string> updatedLines,
+        out string? error)
+    {
+        updatedLines = originalLines.ToList();
+        error = null;
+        var lineOffset = 0;
+
+        foreach (var hunk in patchFile.Hunks)
+        {
+            var startIndex = Math.Max(0, hunk.OldStart - 1 + lineOffset);
+            if (!TryApplyHunkToLines(updatedLines, hunk, startIndex, out var delta, out error))
+            {
+                error = "Patch hunk could not be applied to " + patchFile.Path + ": " + error;
+                return false;
+            }
+            lineOffset += delta;
+        }
+
+        return true;
+    }
+
+    private static bool TryApplyHunkToLines(
+        List<string> lines,
+        PatchHunk hunk,
+        int startIndex,
+        out int delta,
+        out string? error)
+    {
+        delta = 0;
+        error = null;
+        if (startIndex < 0 || startIndex > lines.Count)
+        {
+            error = "hunk start is outside the file.";
+            return false;
+        }
+
+        var cursor = startIndex;
+        var removeCount = 0;
+        var replacement = new List<string>();
+        foreach (var line in hunk.Lines)
+        {
+            if (line.Marker is ' ' or '-')
+            {
+                if (cursor >= lines.Count)
+                {
+                    error = "hunk expected more existing lines than the file contains.";
+                    return false;
+                }
+                if (!string.Equals(lines[cursor], line.Text, StringComparison.Ordinal))
+                {
+                    error = "hunk context does not match at line " + (cursor + 1) + ".";
+                    return false;
+                }
+                cursor++;
+                removeCount++;
+            }
+
+            if (line.Marker is ' ' or '+')
+            {
+                replacement.Add(line.Text);
+            }
+        }
+
+        lines.RemoveRange(startIndex, removeCount);
+        lines.InsertRange(startIndex, replacement);
+        delta = replacement.Count - removeCount;
+        return true;
+    }
+
+    private static PatchWriteSequenceResult TryWritePatchedFileWithRecheck(
+        string workspaceRoot,
+        string targetPath,
+        PatchFile patchFile,
+        string? expectedSha256)
+    {
+        var root = Path.GetFullPath(workspaceRoot);
+        var target = Path.GetFullPath(targetPath);
+        if (!IsWithin(root, target))
+        {
+            return PatchWriteSequenceResult.Failed("Patch target escapes the approved workspace.");
+        }
+        if (!File.Exists(target))
+        {
+            return PatchWriteSequenceResult.Failed("Patch target file was not found.");
+        }
+
+        var beforeBytes = File.ReadAllBytes(target);
+        if (beforeBytes.Any(value => value == 0))
+        {
+            return PatchWriteSequenceResult.Failed("Binary files are not supported by patch write.");
+        }
+        var beforeSha = Sha256Hex(beforeBytes);
+        if (!string.IsNullOrWhiteSpace(expectedSha256)
+            && !string.Equals(expectedSha256, beforeSha, StringComparison.OrdinalIgnoreCase))
+        {
+            return PatchWriteSequenceResult.Failed("Patch target changed after snapshot creation.");
+        }
+
+        var text = DecodeUtf8PreservingBom(beforeBytes, out var hasUtf8Bom);
+        var newline = DetectLineEnding(text);
+        var hadFinalNewline = text.EndsWith("\n", StringComparison.Ordinal);
+        var lines = SplitLines(text);
+        if (hadFinalNewline && lines.Length > 0 && lines[^1].Length == 0)
+        {
+            lines = lines[..^1];
+        }
+
+        if (!TryApplyPatchToLines(lines, patchFile, out var updatedLines, out var error))
+        {
+            return PatchWriteSequenceResult.Failed(error ?? "Patch hunk could not be applied.");
+        }
+
+        var updatedText = string.Join(newline, updatedLines);
+        if (hadFinalNewline)
+        {
+            updatedText += newline;
+        }
+        var updatedBytes = EncodeUtf8PreservingBom(updatedText, hasUtf8Bom);
+        var tempPath = target + ".learnbot-patch-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(tempPath, updatedBytes);
+            File.Move(tempPath, target, overwrite: true);
+            var afterBytes = File.ReadAllBytes(target);
+            var afterSha = Sha256Hex(afterBytes);
+            return PatchWriteSequenceResult.Succeeded(beforeSha, afterSha, beforeBytes.LongLength, afterBytes.LongLength, newline);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return PatchWriteSequenceResult.Failed("Patch write failed: " + ex.Message);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
+    private static string DetectLineEnding(string text) =>
+        text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+
+    private static string DecodeUtf8PreservingBom(byte[] bytes, out bool hasUtf8Bom)
+    {
+        hasUtf8Bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        return Encoding.UTF8.GetString(hasUtf8Bom ? bytes[3..] : bytes);
+    }
+
+    private static byte[] EncodeUtf8PreservingBom(string text, bool hasUtf8Bom)
+    {
+        var body = Encoding.UTF8.GetBytes(text);
+        if (!hasUtf8Bom)
+        {
+            return body;
+        }
+        var output = new byte[body.Length + 3];
+        output[0] = 0xEF;
+        output[1] = 0xBB;
+        output[2] = 0xBF;
+        Buffer.BlockCopy(body, 0, output, 3, body.Length);
+        return output;
+    }
+
+    private static bool MatchesAt(string[] fileLines, string[] expected, int startIndex)
+    {
+        if (startIndex < 0 || startIndex + expected.Length > fileLines.Length) return false;
+        for (var offset = 0; offset < expected.Length; offset++)
+        {
+            if (!string.Equals(fileLines[startIndex + offset], expected[offset], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool TryParseHunkHeader(string header, out int oldStart, out int oldCount)
+    {
+        oldStart = 0;
+        oldCount = 0;
+        var marker = header.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(part => part.StartsWith("-", StringComparison.Ordinal));
+        if (marker is null) return false;
+        var range = marker[1..].Split(',', 2);
+        if (!int.TryParse(range[0], out oldStart) || oldStart < 0) return false;
+        oldCount = range.Length == 2 && int.TryParse(range[1], out var parsedCount) ? parsedCount : 1;
+        return oldCount >= 0;
+    }
+
+    private static string NormalizeDiffPath(string path)
+    {
+        if (path == "/dev/null") return path;
+        var withoutTimestamp = path.Split('\t')[0].Trim();
+        if (withoutTimestamp.StartsWith("a/", StringComparison.Ordinal) || withoutTimestamp.StartsWith("b/", StringComparison.Ordinal))
+        {
+            withoutTimestamp = withoutTimestamp[2..];
+        }
+        return withoutTimestamp.Replace('\\', '/');
+    }
+
+    private static string[] SplitLines(string content) =>
+        content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
+    private static string Sha256Hex(byte[] bytes) =>
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private static List<string> TryInputStringList(JsonElement input, string property)
+    {
+        if (!input.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        return value.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+            .Select(item => item.GetString()!.Replace('\\', '/'))
+            .ToList();
+    }
+
+    private static Dictionary<string, ExpectedFile> TryExpectedFiles(JsonElement input)
+    {
+        if (!input.TryGetProperty("expectedFiles", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return new Dictionary<string, ExpectedFile>(StringComparer.Ordinal);
+        }
+        return value.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(item => new ExpectedFile(
+                item.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String ? path.GetString()?.Replace('\\', '/') ?? "" : "",
+                item.TryGetProperty("sha256", out var sha) && sha.ValueKind == JsonValueKind.String ? sha.GetString() ?? "" : ""))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Path))
+            .GroupBy(item => item.Path, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+    }
+
+    private static bool? TryInputBool(JsonElement input, string property)
+    {
+        if (!input.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => null
+        };
+    }
+
     private static Guid? TryGuid(JsonElement element, string property)
     {
         return element.TryGetProperty(property, out var value) && value.ValueKind != JsonValueKind.Null
@@ -1210,6 +2186,261 @@ internal sealed class LearnBotLocalAgent
 
     private static bool PathEquals(string left, string right) =>
         string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+
+    private static int SelfTest(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            return Unknown("self-test " + string.Join(' ', args));
+        }
+        if (string.Equals(args[0], "snapshot-create", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestSnapshotCreate();
+        }
+        if (string.Equals(args[0], "patch-apply-memory", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchApplyMemory();
+        }
+        if (string.Equals(args[0], "patch-write-sequence", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchWriteSequence();
+        }
+        if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
+        {
+            return Unknown("self-test " + string.Join(' ', args));
+        }
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-self-test");
+        var ok = TryBuildSnapshotLayout(root, "snap-0123456789abcdef", ["src/App.cs", "README.md"], out var layout, out var error)
+            && layout is not null
+            && layout.Files.Count == 2
+            && layout.RelativeManifestPath == "snap-0123456789abcdef/manifest.json"
+            && layout.Files[0].SnapshotRelativePath == "files/src/App.cs"
+            && IsWithin(Path.Combine(root, "snapshots"), layout.ManifestPath);
+        ok = ok
+            && !TryBuildSnapshotLayout(root, "../escape", ["README.md"], out _, out _)
+            && !TryBuildSnapshotLayout(root, "snap-0123456789abcdef", ["../secret.txt"], out _, out _)
+            && !TryBuildSnapshotLayout(root, "snap-0123456789abcdef", ["/tmp/secret.txt"], out _, out _)
+            && !TryBuildSnapshotLayout(root, "snap-0123456789abcdef", ["C:/secret.txt"], out _, out _);
+        if (!ok)
+        {
+            Console.Error.WriteLine(error ?? "snapshot guard self-test failed");
+            return 1;
+        }
+        Console.WriteLine("snapshot-guards-ok");
+        return 0;
+    }
+
+    private static int SelfTestSnapshotCreate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-self-test-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var workspaceRoot = Path.Combine(root, "workspace");
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "src"));
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            var sourcePath = Path.Combine(workspaceRoot, "src", "App.cs");
+            var sourceBytes = Encoding.UTF8.GetBytes("class App {}\n");
+            File.WriteAllBytes(sourcePath, sourceBytes);
+            var sourceHash = Sha256Hex(sourceBytes);
+            using var inputJson = JsonDocument.Parse("""
+            {
+              "workspaceId": "11111111-1111-1111-1111-111111111111",
+              "sourceRequestId": "22222222-2222-2222-2222-222222222222"
+            }
+            """);
+            var files = new List<Dictionary<string, object?>>
+            {
+                new()
+                {
+                    ["path"] = "src/App.cs",
+                    ["absolutePath"] = sourcePath,
+                    ["expectedSha256"] = sourceHash,
+                    ["actualSha256"] = sourceHash,
+                    ["bytes"] = sourceBytes.LongLength,
+                    ["hashMatches"] = true,
+                    ["contextMatches"] = true
+                }
+            };
+
+            var result = CreateSnapshot(Guid.Parse("11111111-1111-1111-1111-111111111111"), workspaceRoot, inputJson.RootElement, files);
+            var manifest = result.Manifest;
+            var manifestPath = manifest is not null && manifest.TryGetValue("relativeManifestPath", out var relativeManifestPath)
+                ? Path.Combine(agentRoot, "snapshots", relativeManifestPath!.ToString()!.Replace('/', Path.DirectorySeparatorChar))
+                : "";
+            var copiedPath = manifest is not null
+                && manifest.TryGetValue("files", out var manifestFiles)
+                && manifestFiles is List<Dictionary<string, object?>> list
+                && list.Count == 1
+                && list[0].TryGetValue("snapshotRelativePath", out var snapshotRelativePath)
+                    ? Path.Combine(Path.GetDirectoryName(manifestPath)!, snapshotRelativePath!.ToString()!.Replace('/', Path.DirectorySeparatorChar))
+                    : "";
+
+            var ok = result.Created
+                && manifest is not null
+                && File.Exists(manifestPath)
+                && File.Exists(copiedPath)
+                && manifest.TryGetValue("created", out var created)
+                && created is true
+                && manifest.TryGetValue("writesCompleted", out var writesCompleted)
+                && writesCompleted is true;
+            if (!ok)
+            {
+                Console.Error.WriteLine(result.Error ?? "snapshot create self-test failed");
+                return 1;
+            }
+            Console.WriteLine("snapshot-create-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
+    private static int SelfTestPatchApplyMemory()
+    {
+        var parsed = ParseUnifiedDiff("""
+        --- a/src/App.cs
+        +++ b/src/App.cs
+        @@ -1,3 +1,4 @@
+         class App {
+        -    string Name = "old";
+        +    string Name = "new";
+        +    string Mode = "safe";
+         }
+        """);
+        var mismatch = ParseUnifiedDiff("""
+        --- a/src/App.cs
+        +++ b/src/App.cs
+        @@ -1,2 +1,2 @@
+         class App {
+        -    string Name = "missing";
+        +    string Name = "new";
+        """);
+        var ok = parsed.Success
+            && parsed.Files.Count == 1
+            && TryApplyPatchToLines(
+                ["class App {", "    string Name = \"old\";", "}"],
+                parsed.Files[0],
+                out var updated,
+                out var error)
+            && error is null
+            && updated.SequenceEqual(["class App {", "    string Name = \"new\";", "    string Mode = \"safe\";", "}"])
+            && mismatch.Success
+            && mismatch.Files.Count == 1
+            && !TryApplyPatchToLines(
+                ["class App {", "    string Name = \"old\";"],
+                mismatch.Files[0],
+                out _,
+                out var mismatchError)
+            && !string.IsNullOrWhiteSpace(mismatchError);
+        if (!ok)
+        {
+            Console.Error.WriteLine("patch apply memory self-test failed");
+            return 1;
+        }
+        Console.WriteLine("patch-apply-memory-ok");
+        return 0;
+    }
+
+    private static int SelfTestPatchWriteSequence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-patch-write-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var workspaceRoot = Path.Combine(root, "workspace");
+            var srcRoot = Path.Combine(workspaceRoot, "src");
+            Directory.CreateDirectory(srcRoot);
+            var targetPath = Path.Combine(srcRoot, "App.cs");
+            var original = "class App {\r\n    string Name = \"old\";\r\n}\r\n";
+            File.WriteAllText(targetPath, original, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var originalHash = Sha256Hex(File.ReadAllBytes(targetPath));
+            var parsed = ParseUnifiedDiff("""
+            --- a/src/App.cs
+            +++ b/src/App.cs
+            @@ -1,3 +1,4 @@
+             class App {
+            -    string Name = "old";
+            +    string Name = "new";
+            +    string Mode = "safe";
+             }
+            """);
+            var mismatch = ParseUnifiedDiff("""
+            --- a/src/App.cs
+            +++ b/src/App.cs
+            @@ -1,2 +1,2 @@
+             class App {
+            -    string Name = "missing";
+            +    string Name = "new";
+            """);
+            var escapedPath = Path.Combine(root, "escape.cs");
+            File.WriteAllText(escapedPath, original, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            var writeResult = parsed.Success && parsed.Files.Count == 1
+                ? TryWritePatchedFileWithRecheck(workspaceRoot, targetPath, parsed.Files[0], originalHash)
+                : PatchWriteSequenceResult.Failed("parse failed");
+            var updated = File.ReadAllText(targetPath);
+            var unchangedHash = Sha256Hex(File.ReadAllBytes(targetPath));
+            var mismatchResult = mismatch.Success && mismatch.Files.Count == 1
+                ? TryWritePatchedFileWithRecheck(workspaceRoot, targetPath, mismatch.Files[0], unchangedHash)
+                : PatchWriteSequenceResult.Failed("mismatch parse failed");
+            var afterMismatch = File.ReadAllText(targetPath);
+            var staleHashResult = parsed.Success && parsed.Files.Count == 1
+                ? TryWritePatchedFileWithRecheck(workspaceRoot, targetPath, parsed.Files[0], originalHash)
+                : PatchWriteSequenceResult.Failed("stale parse failed");
+            var escapeResult = parsed.Success && parsed.Files.Count == 1
+                ? TryWritePatchedFileWithRecheck(workspaceRoot, escapedPath, parsed.Files[0], Sha256Hex(File.ReadAllBytes(escapedPath)))
+                : PatchWriteSequenceResult.Failed("escape parse failed");
+
+            var ok = writeResult.Success
+                && string.Equals(writeResult.BeforeSha256, originalHash, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(writeResult.BeforeSha256, writeResult.AfterSha256, StringComparison.OrdinalIgnoreCase)
+                && writeResult.LineEnding == "\r\n"
+                && updated == "class App {\r\n    string Name = \"new\";\r\n    string Mode = \"safe\";\r\n}\r\n"
+                && !mismatchResult.Success
+                && afterMismatch == updated
+                && !staleHashResult.Success
+                && !escapeResult.Success;
+            if (!ok)
+            {
+                Console.Error.WriteLine("patch write sequence self-test failed");
+                return 1;
+            }
+            Console.WriteLine("patch-write-sequence-ok");
+            return 0;
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
 
     private static int Help()
     {
@@ -1285,7 +2516,88 @@ internal sealed record ToolResult(
     public static ToolResult Ok(Dictionary<string, object?> output) => new(true, "SUCCEEDED", null, null, output);
 
     public static ToolResult Fail(string status, string failureCode, string error) => new(false, status, failureCode, error, new());
+
+    public static ToolResult Fail(string status, string failureCode, string error, Dictionary<string, object?> output) => new(false, status, failureCode, error, output);
 }
+
+internal sealed record ExpectedFile(string Path, string Sha256);
+
+internal sealed record GitIdentityValue(string? Value, string? Warning);
+
+internal sealed record SnapshotCreationResult(bool Created, string? Error, Dictionary<string, object?>? Manifest)
+{
+    public static SnapshotCreationResult Succeeded(Dictionary<string, object?> manifest) => new(true, null, manifest);
+
+    public static SnapshotCreationResult Failed(string error) => new(false, error, null);
+}
+
+internal sealed record SnapshotLayout(
+    string ManifestId,
+    string SnapshotsRoot,
+    string SnapshotRoot,
+    string RelativeManifestPath,
+    string ManifestPath,
+    List<SnapshotFilePath> Files);
+
+internal sealed record SnapshotFilePath(string Path, string SnapshotRelativePath, string DestinationPath);
+
+internal sealed record PatchLine(char Marker, string Text);
+
+internal sealed record PatchWriteSequenceResult(
+    bool Success,
+    string? Error,
+    string? BeforeSha256,
+    string? AfterSha256,
+    long? BeforeBytes,
+    long? AfterBytes,
+    string? LineEnding)
+{
+    public static PatchWriteSequenceResult Succeeded(
+        string beforeSha256,
+        string afterSha256,
+        long beforeBytes,
+        long afterBytes,
+        string lineEnding) => new(true, null, beforeSha256, afterSha256, beforeBytes, afterBytes, lineEnding);
+
+    public static PatchWriteSequenceResult Failed(string error) => new(false, error, null, null, null, null, null);
+}
+
+internal sealed class PatchHunk
+{
+    public PatchHunk(int oldStart, int oldCount)
+    {
+        OldStart = oldStart;
+        OldCount = oldCount;
+    }
+
+    public int OldStart { get; }
+    public int OldCount { get; }
+    public List<PatchLine> Lines { get; } = [];
+}
+
+internal sealed class PatchFile
+{
+    public PatchFile(string path)
+    {
+        Path = path;
+    }
+
+    public string Path { get; }
+    public List<PatchHunk> Hunks { get; } = [];
+}
+
+internal sealed record PatchParseResult(bool Success, List<PatchFile> Files, string? Error)
+{
+    public static PatchParseResult Ok(List<PatchFile> files) => new(true, files, null);
+
+    public static PatchParseResult Fail(string error) => new(false, [], error);
+}
+
+internal sealed record HunkDryRunResult(
+    int OldStart,
+    int OldLineCount,
+    bool ContextMatches,
+    string Message);
 
 internal sealed record ToolResponse(
     Guid SessionId,

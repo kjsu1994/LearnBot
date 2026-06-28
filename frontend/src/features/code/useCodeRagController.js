@@ -44,6 +44,10 @@ export function useCodeRagController({
   const [codeAgentMutationPolicy, setCodeAgentMutationPolicy] = useState(null);
   const [codeAgentLocalPatchRequest, setCodeAgentLocalPatchRequest] = useState(null);
   const [codeAgentLocalPatchReadiness, setCodeAgentLocalPatchReadiness] = useState(null);
+  const [codeAgentLocalPatchDryRunRequest, setCodeAgentLocalPatchDryRunRequest] = useState(null);
+  const [codeAgentLocalPatchDryRunResult, setCodeAgentLocalPatchDryRunResult] = useState(null);
+  const [codeAgentLocalRepositoryObservationRequest, setCodeAgentLocalRepositoryObservationRequest] = useState(null);
+  const [codeAgentLocalRepositoryObservationResult, setCodeAgentLocalRepositoryObservationResult] = useState(null);
   const [localAgentStatus, setLocalAgentStatus] = useState(null);
   const [localAgentTokens, setLocalAgentTokens] = useState([]);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
@@ -112,6 +116,10 @@ export function useCodeRagController({
     setCodeAgentMutationPolicy(null);
     setCodeAgentLocalPatchRequest(null);
     setCodeAgentLocalPatchReadiness(null);
+    setCodeAgentLocalPatchDryRunRequest(null);
+    setCodeAgentLocalPatchDryRunResult(null);
+    setCodeAgentLocalRepositoryObservationRequest(null);
+    setCodeAgentLocalRepositoryObservationResult(null);
     setLocalAgentStatus(null);
     setLocalAgentTokens([]);
     setCodeConversations([]);
@@ -638,6 +646,10 @@ export function useCodeRagController({
       setCodeAgentTestResult(null);
       setCodeAgentLocalPatchRequest(null);
       setCodeAgentLocalPatchReadiness(null);
+      setCodeAgentLocalPatchDryRunRequest(null);
+      setCodeAgentLocalPatchDryRunResult(null);
+      setCodeAgentLocalRepositoryObservationRequest(null);
+      setCodeAgentLocalRepositoryObservationResult(null);
     });
   }
 
@@ -663,6 +675,10 @@ export function useCodeRagController({
       });
       setCodeAgentLocalPatchRequest(result);
       setCodeAgentLocalPatchReadiness(null);
+      setCodeAgentLocalPatchDryRunRequest(null);
+      setCodeAgentLocalPatchDryRunResult(null);
+      setCodeAgentLocalRepositoryObservationRequest(null);
+      setCodeAgentLocalRepositoryObservationResult(null);
     });
   }
 
@@ -680,6 +696,10 @@ export function useCodeRagController({
       } else {
         setCodeAgentLocalPatchReadiness(null);
       }
+      setCodeAgentLocalPatchDryRunRequest(null);
+      setCodeAgentLocalPatchDryRunResult(null);
+      setCodeAgentLocalRepositoryObservationRequest(null);
+      setCodeAgentLocalRepositoryObservationResult(null);
     });
   }
 
@@ -688,6 +708,59 @@ export function useCodeRagController({
     return await run(`code-agent-local-patch-readiness-${requestId}`, async () => {
       const result = await request(`/api/local-agents/tools/${requestId}/readiness`);
       setCodeAgentLocalPatchReadiness(result);
+      return result;
+    });
+  }
+
+  async function queueCodeAgentLocalPatchDryRun(requestId = codeAgentLocalPatchRequest?.requestId) {
+    if (!requestId) return null;
+    return await run(`code-agent-local-patch-dry-run-${requestId}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}/dry-run`, {
+        method: 'POST',
+      });
+      setCodeAgentLocalPatchDryRunRequest(result);
+      setCodeAgentLocalPatchDryRunResult(null);
+      return result;
+    });
+  }
+
+  async function refreshCodeAgentLocalPatchDryRunResult(requestId = codeAgentLocalPatchDryRunRequest?.requestId) {
+    if (!requestId) return null;
+    return await run(`code-agent-local-patch-dry-run-result-${requestId}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}`);
+      setCodeAgentLocalPatchDryRunResult(result);
+      return result;
+    });
+  }
+
+  async function queueCodeAgentLocalRepositoryObservation() {
+    const agentId = codeAgentLocalPatchRequest?.agentId || localAgentStatus?.agentId;
+    const workspaceId = codeAgentLocalPatchRequest?.workspaceId || codeAgentLocalPatchRequest?.input?.localWorkspace?.workspaceId;
+    if (!agentId || !workspaceId) return null;
+    return await run(`code-agent-local-repository-observation-${workspaceId}`, async () => {
+      const result = await request('/api/local-agents/tools/read-only', {
+        method: 'POST',
+        json: {
+          agentId,
+          workspaceId,
+          toolName: 'git.status',
+          input: {
+            sourceRepository: codeAgentLocalPatchRequest?.input?.sourceRepository || null,
+            sourceRequestId: codeAgentLocalPatchRequest?.requestId || null,
+          },
+        },
+      });
+      setCodeAgentLocalRepositoryObservationRequest(result);
+      setCodeAgentLocalRepositoryObservationResult(null);
+      return result;
+    });
+  }
+
+  async function refreshCodeAgentLocalRepositoryObservationResult(requestId = codeAgentLocalRepositoryObservationRequest?.requestId) {
+    if (!requestId) return null;
+    return await run(`code-agent-local-repository-observation-result-${requestId}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}`);
+      setCodeAgentLocalRepositoryObservationResult(result);
       return result;
     });
   }
@@ -785,6 +858,10 @@ export function useCodeRagController({
     codeAgentMutationPolicy,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
+    codeAgentLocalPatchDryRunRequest,
+    codeAgentLocalPatchDryRunResult,
+    codeAgentLocalRepositoryObservationRequest,
+    codeAgentLocalRepositoryObservationResult,
     localAgentStatus,
     localAgentTokens,
     codeConversations,
@@ -823,6 +900,10 @@ export function useCodeRagController({
     prepareCodeAgentLocalPatchRequest,
     decideCodeAgentLocalPatchApproval,
     refreshCodeAgentLocalPatchReadiness,
+    queueCodeAgentLocalPatchDryRun,
+    refreshCodeAgentLocalPatchDryRunResult,
+    queueCodeAgentLocalRepositoryObservation,
+    refreshCodeAgentLocalRepositoryObservationResult,
     refreshLocalAgentStatus,
     refreshCodeAgentMutationPolicy,
     refreshLocalAgentTokens,

@@ -105,6 +105,10 @@ function CodeWorkspace(props) {
     codeAgentMutationPolicy,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
+    codeAgentLocalPatchDryRunRequest,
+    codeAgentLocalPatchDryRunResult,
+    codeAgentLocalRepositoryObservationRequest,
+    codeAgentLocalRepositoryObservationResult,
     localAgentStatus,
     codeConversations = [],
     codeConversationId = '',
@@ -125,6 +129,10 @@ function CodeWorkspace(props) {
     prepareCodeAgentLocalPatchRequest = () => {},
     decideCodeAgentLocalPatchApproval = () => {},
     refreshCodeAgentLocalPatchReadiness = () => {},
+    queueCodeAgentLocalPatchDryRun = () => {},
+    refreshCodeAgentLocalPatchDryRunResult = () => {},
+    queueCodeAgentLocalRepositoryObservation = () => {},
+    refreshCodeAgentLocalRepositoryObservationResult = () => {},
     refreshLocalAgentStatus = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
@@ -217,6 +225,10 @@ function CodeWorkspace(props) {
           mutationPolicy={codeAgentMutationPolicy}
           localPatchRequest={codeAgentLocalPatchRequest}
           localPatchReadiness={codeAgentLocalPatchReadiness}
+          localPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
+          localPatchDryRunResult={codeAgentLocalPatchDryRunResult}
+          localRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
+          localRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
           localAgentStatus={localAgentStatus}
           localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
@@ -226,6 +238,10 @@ function CodeWorkspace(props) {
           onPrepareLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
           onLocalPatchApproval={decideCodeAgentLocalPatchApproval}
           onRefreshLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
+          onQueueLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
+          onRefreshLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
+          onQueueLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
+          onRefreshLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
           onRefreshLocalAgent={refreshLocalAgentStatus}
           onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
           onRevokeLocalAgentToken={props.revokeLocalAgentToken}
@@ -282,6 +298,80 @@ function CodeWorkspace(props) {
   );
 }
 
+function isExpectedDryRunRefusal(result) {
+  return result?.status === 'REJECTED'
+    && result?.failureCode === 'UNSAFE_TOOL'
+    && result?.output?.dryRun === true
+    && result?.output?.preflightPassed === true
+    && result?.output?.mutationApplied === false;
+}
+
+function summarizeDryRunObservationFiles(files = []) {
+  return files
+    .map((file) => `${file.path || '(unknown)'}:${file.hashMatches ? 'hash-ok' : 'hash-check'}/${file.contextMatches ? 'context-ok' : 'context-blocked'}`)
+    .join(', ');
+}
+
+function findReadinessCheck(readiness, key) {
+  return (readiness?.checks || []).find((check) => check.key === key) || null;
+}
+
+function formatReadinessCheck(check) {
+  return `${check.passed ? 'pass' : 'blocked'} / ${check.key}: ${check.message}`;
+}
+
+function compareRepositoryObservation(source = {}, observationResult = {}) {
+  if (observationResult?.output?.repositoryVerification) {
+    return observationResult.output.repositoryVerification;
+  }
+  const identity = observationResult?.output?.repositoryIdentity || {};
+  const checks = [];
+  addRepositoryCheck(checks, 'branch', source.branch, identity.branch, { skipHead: true });
+  addRepositoryCheck(checks, 'head', source.lastIndexedCommit, identity.headCommit);
+  addRepositoryCheck(checks, 'remote', source.gitUrl, identity.remoteUrl, { normalizeUrl: true });
+  const considered = checks.filter((check) => check.status !== 'SKIPPED');
+  if (!observationResult || observationResult.status !== 'SUCCEEDED') {
+    return { status: 'UNVERIFIED', checks, message: 'Local repository observation has not completed successfully.' };
+  }
+  if (!considered.length || considered.some((check) => check.status === 'UNKNOWN')) {
+    return { status: 'UNVERIFIED', checks, message: 'Not enough local repository identity data to verify this workspace.' };
+  }
+  if (considered.some((check) => check.status === 'MISMATCH')) {
+    return { status: 'MISMATCH', checks, message: 'Local workspace identity does not match the indexed repository metadata.' };
+  }
+  return { status: 'MATCH', checks, message: 'Observed local repository identity matches available indexed metadata.' };
+}
+
+function addRepositoryCheck(checks, key, expected, actual, options = {}) {
+  const expectedText = String(expected || '').trim();
+  const actualText = String(actual || '').trim();
+  if (options.skipHead && (!expectedText || expectedText.toUpperCase() === 'HEAD')) {
+    checks.push({ key, status: 'SKIPPED', expected: expectedText, actual: actualText });
+    return;
+  }
+  if (!expectedText || !actualText) {
+    checks.push({ key, status: 'UNKNOWN', expected: expectedText, actual: actualText });
+    return;
+  }
+  const left = options.normalizeUrl ? normalizeRepositoryUrl(expectedText) : expectedText.toLowerCase();
+  const right = options.normalizeUrl ? normalizeRepositoryUrl(actualText) : actualText.toLowerCase();
+  const matched = key === 'head'
+    ? left === right || left.startsWith(right) || right.startsWith(left)
+    : left === right;
+  checks.push({ key, status: matched ? 'MATCH' : 'MISMATCH', expected: expectedText, actual: actualText });
+}
+
+function normalizeRepositoryUrl(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/^git@([^:]+):/i, 'https://$1/')
+    .replace(/^ssh:\/\/git@/i, 'https://')
+    .replace(/^https?:\/\/([^@/]+@)/i, 'https://')
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/g, '')
+    .toLowerCase();
+}
+
 function CodeAgentPanel({
   instruction = '',
   setInstruction = () => {},
@@ -292,6 +382,10 @@ function CodeAgentPanel({
   mutationPolicy,
   localPatchRequest,
   localPatchReadiness,
+  localPatchDryRunRequest,
+  localPatchDryRunResult,
+  localRepositoryObservationRequest,
+  localRepositoryObservationResult,
   localAgentStatus,
   localAgentTokens = [],
   selectedRepositoryId = '',
@@ -301,6 +395,10 @@ function CodeAgentPanel({
   onPrepareLocalPatchRequest = () => {},
   onLocalPatchApproval = () => {},
   onRefreshLocalPatchReadiness = () => {},
+  onQueueLocalPatchDryRun = () => {},
+  onRefreshLocalPatchDryRunResult = () => {},
+  onQueueLocalRepositoryObservation = () => {},
+  onRefreshLocalRepositoryObservationResult = () => {},
   onRefreshLocalAgent = () => {},
   onRefreshLocalAgentTokens = () => {},
   onRevokeLocalAgentToken = () => {},
@@ -331,9 +429,42 @@ function CodeAgentPanel({
   const canDecideLocalPatchRequest = localPatchRequest?.status === 'APPROVAL_REQUIRED';
   const canRefreshReadiness = localPatchRequest?.status === 'APPROVED_HELD'
     && !loading(`code-agent-local-patch-readiness-${localPatchRequest.requestId}`);
+  const canQueueDryRun = localPatchRequest?.status === 'APPROVED_HELD'
+    && !loading(`code-agent-local-patch-dry-run-${localPatchRequest.requestId}`);
+  const canRefreshDryRun = Boolean(localPatchDryRunRequest?.requestId)
+    && !loading(`code-agent-local-patch-dry-run-result-${localPatchDryRunRequest.requestId}`);
+  const localObservationWorkspaceId = localPatchRequest?.workspaceId || localPatchRequest?.input?.localWorkspace?.workspaceId;
+  const canQueueRepositoryObservation = Boolean(localPatchRequest?.agentId && localObservationWorkspaceId)
+    && !loading(`code-agent-local-repository-observation-${localObservationWorkspaceId}`);
+  const canRefreshRepositoryObservation = Boolean(localRepositoryObservationRequest?.requestId)
+    && !loading(`code-agent-local-repository-observation-result-${localRepositoryObservationRequest.requestId}`);
   const visibleReadiness = localPatchReadiness?.requestId === localPatchRequest?.requestId
     ? localPatchReadiness
     : null;
+  const visibleDryRun = localPatchDryRunResult?.requestId === localPatchDryRunRequest?.requestId
+    ? localPatchDryRunResult
+    : null;
+  const visibleRepositoryObservation = localRepositoryObservationResult?.requestId === localRepositoryObservationRequest?.requestId
+    ? localRepositoryObservationResult
+    : null;
+  const repositoryObservationComparison = compareRepositoryObservation(
+    localPatchRequest?.input?.sourceRepository,
+    visibleRepositoryObservation
+  );
+  const readinessRepositoryVerification = visibleReadiness?.repositoryVerification || null;
+  const readinessWorkspaceVerification = visibleReadiness?.workspaceVerification || null;
+  const readinessPatchRelease = visibleReadiness?.patchReleaseReadiness || null;
+  const readinessPatchExecutionGate = visibleReadiness?.patchExecutionGate || null;
+  const readinessReleaseAttemptModel = visibleReadiness?.releaseAttemptModel || readinessPatchExecutionGate?.releaseAttemptModel || null;
+  const expectedDryRunRefusal = isExpectedDryRunRefusal(visibleDryRun);
+  const dryRunSnapshotObservation = visibleDryRun?.output?.snapshotObservation;
+  const dryRunRollbackObservation = visibleDryRun?.output?.rollbackObservation;
+  const readinessSnapshot = visibleReadiness?.snapshotReadiness || null;
+  const readinessRollback = visibleReadiness?.rollbackReadiness || null;
+  const readinessSnapshotManifestCheck = findReadinessCheck(visibleReadiness, 'snapshotManifestPreview');
+  const readinessRollbackPreconditionsCheck = findReadinessCheck(visibleReadiness, 'rollbackRestorePreconditions');
+  const visibleReadinessChecks = (visibleReadiness?.checks || [])
+    .filter((check) => !['snapshotManifestPreview', 'rollbackRestorePreconditions'].includes(check.key));
   return (
     <section className="panel code-agent-panel">
       <div className="panel-title">
@@ -493,8 +624,97 @@ function CodeAgentPanel({
               {!!localPatchRequest.input?.expectedFiles?.length && (
                 <small>expected hashes: {localPatchRequest.input.expectedFiles.map((file) => `${file.path}:${String(file.sha256 || '').slice(0, 12)}`).join(', ')}</small>
               )}
+              {localPatchRequest.input?.sourceRepository && (
+                <small>
+                  source: {localPatchRequest.input.sourceRepository.name || localPatchRequest.input.sourceRepository.id}
+                  {localPatchRequest.input.sourceRepository.branch ? ` / ${localPatchRequest.input.sourceRepository.branch}` : ''}
+                  {localPatchRequest.input.sourceRepository.lastIndexedCommit ? ` / ${String(localPatchRequest.input.sourceRepository.lastIndexedCommit).slice(0, 12)}` : ''}
+                </small>
+              )}
+              {localPatchRequest.input?.localWorkspace && (
+                <small>
+                  workspace: {localPatchRequest.input.localWorkspace.name || localPatchRequest.input.localWorkspace.workspaceId}
+                  {localPatchRequest.input.localWorkspace.rootPath ? ` / ${localPatchRequest.input.localWorkspace.rootPath}` : ''}
+                </small>
+              )}
+              {localPatchRequest.input?.workspaceVerification && (
+                <small>
+                  workspace verification: {localPatchRequest.input.workspaceVerification.status || 'UNKNOWN'}
+                  {localPatchRequest.input.workspaceVerification.blocking ? ' / blocking release' : ''}
+                  {localPatchRequest.input.workspaceVerification.reason ? ` / ${localPatchRequest.input.workspaceVerification.reason}` : ''}
+                </small>
+              )}
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={!canQueueRepositoryObservation}
+                  onClick={onQueueLocalRepositoryObservation}
+                >
+                  {loading(`code-agent-local-repository-observation-${localObservationWorkspaceId}`) ? <Loader2 className="spin" size={16} /> : <GitBranch size={16} />}
+                  Queue repository observation
+                </button>
+                {localRepositoryObservationRequest && (
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!canRefreshRepositoryObservation}
+                    onClick={() => onRefreshLocalRepositoryObservationResult(localRepositoryObservationRequest.requestId)}
+                  >
+                    {loading(`code-agent-local-repository-observation-result-${localRepositoryObservationRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                    Refresh repository observation
+                  </button>
+                )}
+              </div>
+              {localRepositoryObservationRequest && (
+                <div className="failure-list">
+                  <div className="failure-item">
+                    <strong>Repository observation request: {localRepositoryObservationRequest.requestId}</strong>
+                    <span>tool: {localRepositoryObservationRequest.request?.toolName} / read-only</span>
+                  </div>
+                  {visibleRepositoryObservation && (
+                    <div className="failure-item">
+                      <strong>Repository observation: {visibleRepositoryObservation.status}</strong>
+                      {visibleRepositoryObservation.error && <span>{visibleRepositoryObservation.error}</span>}
+                      {visibleRepositoryObservation.output?.repositoryIdentity && (
+                        <span>
+                          local: {visibleRepositoryObservation.output.repositoryIdentity.branch || visibleRepositoryObservation.output.branch || 'branch-unknown'}
+                          {visibleRepositoryObservation.output.repositoryIdentity.headCommit ? ` / ${String(visibleRepositoryObservation.output.repositoryIdentity.headCommit).slice(0, 12)}` : ''}
+                          {visibleRepositoryObservation.output.repositoryIdentity.remoteUrl ? ` / ${visibleRepositoryObservation.output.repositoryIdentity.remoteUrl}` : ''}
+                        </span>
+                      )}
+                      {visibleRepositoryObservation.output?.identityComplete !== undefined && <span>identity complete: {String(visibleRepositoryObservation.output.identityComplete)}</span>}
+                      {!!visibleRepositoryObservation.output?.identityWarnings?.length && <span>warnings: {visibleRepositoryObservation.output.identityWarnings.join(', ')}</span>}
+                      <span>comparison: {repositoryObservationComparison.status} / {repositoryObservationComparison.message}</span>
+                      {repositoryObservationComparison.checks
+                        .filter((check) => check.status !== 'SKIPPED')
+                        .map((check) => (
+                          <span key={check.key}>
+                            {check.key}: {check.status}
+                            {check.expected ? ` / indexed ${String(check.expected).slice(0, 48)}` : ' / indexed unknown'}
+                            {check.actual ? ` / local ${String(check.actual).slice(0, 48)}` : ' / local unknown'}
+                          </span>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {localPatchRequest.input?.staleIndexPolicy && <small>stale index: {localPatchRequest.input.staleIndexPolicy}</small>}
               {localPatchRequest.input?.requiresSnapshot && <small>snapshot required before file writes</small>}
+              {localPatchRequest.input?.snapshotPolicy && (
+                <small>
+                  snapshot policy: {localPatchRequest.input.snapshotPolicy.scope || 'TARGET_FILES'}
+                  {localPatchRequest.input.snapshotPolicy.location ? ` / ${localPatchRequest.input.snapshotPolicy.location}` : ''}
+                  {localPatchRequest.input.snapshotPolicy.createBeforeMutation ? ' / before mutation' : ''}
+                </small>
+              )}
+              {localPatchRequest.input?.rollbackPolicy && (
+                <small>
+                  rollback policy: {localPatchRequest.input.rollbackPolicy.tool || 'rollback.restore'}
+                  {localPatchRequest.input.rollbackPolicy.restoreScope ? ` / ${localPatchRequest.input.rollbackPolicy.restoreScope}` : ''}
+                  {localPatchRequest.input.rollbackPolicy.requiresUserApproval ? ' / approval required' : ''}
+                </small>
+              )}
               <WarningList warnings={localPatchRequest.requestWarnings} />
               <div className="action-row">
                 <button
@@ -527,6 +747,80 @@ function CodeAgentPanel({
                     {loading(`code-agent-local-patch-readiness-${localPatchRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
                     Check execution readiness
                   </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!canQueueDryRun}
+                    onClick={() => onQueueLocalPatchDryRun(localPatchRequest.requestId)}
+                  >
+                    {loading(`code-agent-local-patch-dry-run-${localPatchRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                    Queue Local Agent dry-run
+                  </button>
+                </div>
+              )}
+              {localPatchDryRunRequest && (
+                <div className="failure-list">
+                  <div className="failure-item">
+                    <strong>Local dry-run request: {localPatchDryRunRequest.requestId}</strong>
+                    <span>
+                      queued as {localPatchDryRunRequest.request?.toolName}
+                      {localPatchDryRunRequest.request?.input?.sourceRequestId ? ` from ${localPatchDryRunRequest.request.input.sourceRequestId}` : ''}
+                    </span>
+                    <span>No file write is released; this request asks the Local Agent for preflight observations only.</span>
+                    <button
+                      type="button"
+                      className="ghost-button compact-action"
+                      disabled={!canRefreshDryRun}
+                      onClick={() => onRefreshLocalPatchDryRunResult(localPatchDryRunRequest.requestId)}
+                    >
+                      {loading(`code-agent-local-patch-dry-run-result-${localPatchDryRunRequest.requestId}`) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+                      Refresh dry-run result
+                    </button>
+                  </div>
+                  {visibleDryRun && (
+                    <div className="failure-item">
+                      <strong>{expectedDryRunRefusal ? 'Dry-run completed; mutation refused as expected' : `Dry-run status: ${visibleDryRun.status}`}</strong>
+                      {visibleDryRun.error && <span>{visibleDryRun.error}</span>}
+                      {visibleDryRun.failureCode && <span>{expectedDryRunRefusal ? 'safety gate' : 'failure'}: {visibleDryRun.failureCode}</span>}
+                      {visibleDryRun.output?.preflightPassed !== undefined && <span>preflight passed: {String(visibleDryRun.output.preflightPassed)}</span>}
+                      {visibleDryRun.output?.mutationApplied !== undefined && <span>mutation applied: {String(visibleDryRun.output.mutationApplied)}</span>}
+                      {visibleDryRun.output?.snapshotCreated !== undefined && <span>snapshot created: {String(visibleDryRun.output.snapshotCreated)}</span>}
+                      {dryRunSnapshotObservation && (
+                        <span>
+                          snapshot would create: {String(dryRunSnapshotObservation.wouldCreate)}
+                          {dryRunSnapshotObservation.created !== undefined ? ` / created: ${String(dryRunSnapshotObservation.created)}` : ''}
+                          {dryRunSnapshotObservation.scope ? ` / ${dryRunSnapshotObservation.scope}` : ''}
+                          {dryRunSnapshotObservation.location ? ` / ${dryRunSnapshotObservation.location}` : ''}
+                        </span>
+                      )}
+                      {dryRunSnapshotObservation?.manifestPreview && (
+                        <span>
+                          snapshot manifest: {dryRunSnapshotObservation.manifestPreview.id || '(preview)'}
+                          {dryRunSnapshotObservation.manifestPreview.relativeManifestPath ? ` / ${dryRunSnapshotObservation.manifestPreview.relativeManifestPath}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.created !== undefined ? ` / manifest created: ${String(dryRunSnapshotObservation.manifestPreview.created)}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.writesPlanned !== undefined ? ` / writes planned: ${String(dryRunSnapshotObservation.manifestPreview.writesPlanned)}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.writesCompleted !== undefined ? ` / writes completed: ${String(dryRunSnapshotObservation.manifestPreview.writesCompleted)}` : ''}
+                        </span>
+                      )}
+                      {dryRunRollbackObservation && (
+                        <span>
+                          rollback would restore: {String(dryRunRollbackObservation.wouldRestore)}
+                          {dryRunRollbackObservation.restored !== undefined ? ` / restored: ${String(dryRunRollbackObservation.restored)}` : ''}
+                          {dryRunRollbackObservation.tool ? ` / ${dryRunRollbackObservation.tool}` : ''}
+                          {dryRunRollbackObservation.restoreScope ? ` / ${dryRunRollbackObservation.restoreScope}` : ''}
+                        </span>
+                      )}
+                      {!!dryRunSnapshotObservation?.files?.length && (
+                        <span>snapshot files: {summarizeDryRunObservationFiles(dryRunSnapshotObservation.files)}</span>
+                      )}
+                      {!!visibleDryRun.output?.files?.length && (
+                        <span>
+                          files: {visibleDryRun.output.files.map((file) => `${file.path}:${file.contextMatches ? 'context-ok' : 'context-blocked'}`).join(', ')}
+                        </span>
+                      )}
+                      <WarningList warnings={visibleDryRun.responseWarnings} />
+                    </div>
+                  )}
                 </div>
               )}
               {visibleReadiness && (
@@ -535,7 +829,128 @@ function CodeAgentPanel({
                     <strong>Execution readiness: {visibleReadiness.readyToRelease ? 'ready' : 'blocked'}</strong>
                     <span>{visibleReadiness.message}</span>
                   </div>
-                  {(visibleReadiness.checks || []).map((check) => (
+                  {readinessRepositoryVerification && (
+                    <div className="failure-item">
+                      <strong>Recorded repository verification: {readinessRepositoryVerification.status || 'UNVERIFIED'}</strong>
+                      {readinessRepositoryVerification.message && <span>{readinessRepositoryVerification.message}</span>}
+                      {(readinessRepositoryVerification.checks || [])
+                        .filter((check) => check.status !== 'SKIPPED')
+                        .map((check) => (
+                          <span key={check.key}>
+                            {check.key}: {check.status}
+                            {check.expected ? ` / indexed ${String(check.expected).slice(0, 48)}` : ' / indexed unknown'}
+                            {check.actual ? ` / local ${String(check.actual).slice(0, 48)}` : ' / local unknown'}
+                          </span>
+                        ))}
+                    </div>
+                  )}
+                  {readinessWorkspaceVerification && (
+                    <div className="failure-item">
+                      <strong>Effective workspace verification: {readinessWorkspaceVerification.status || 'UNVERIFIED'}</strong>
+                      {readinessWorkspaceVerification.blocking !== undefined && <span>blocking release: {String(readinessWorkspaceVerification.blocking)}</span>}
+                      {readinessWorkspaceVerification.reason && <span>{readinessWorkspaceVerification.reason}</span>}
+                      {readinessWorkspaceVerification.source && <span>source: {readinessWorkspaceVerification.source}</span>}
+                    </div>
+                  )}
+                  {readinessPatchRelease && (
+                    <div className="failure-item">
+                      <strong>Pre-apply release checklist: {readinessPatchRelease.status || 'UNKNOWN'}</strong>
+                      {readinessPatchRelease.message && <span>{readinessPatchRelease.message}</span>}
+                      <span>
+                        preconditions passed: {String(readinessPatchRelease.preconditionsPassed)}
+                        {readinessPatchRelease.releaseGateEnabled !== undefined ? ` / release gate: ${String(readinessPatchRelease.releaseGateEnabled)}` : ''}
+                        {readinessPatchRelease.mutationEnabled !== undefined ? ` / mutation enabled: ${String(readinessPatchRelease.mutationEnabled)}` : ''}
+                      </span>
+                      {(readinessPatchRelease.prerequisites || []).map((item) => (
+                        <span key={item.key}>
+                          {item.passed ? 'pass' : 'blocked'} / {item.key}: {item.message}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {readinessPatchExecutionGate && (
+                    <div className="failure-item">
+                      <strong>Internal patch execution gate: {readinessPatchExecutionGate.status || 'UNKNOWN'}</strong>
+                      {readinessPatchExecutionGate.message && <span>{readinessPatchExecutionGate.message}</span>}
+                      <span>
+                        claim enabled: {String(readinessPatchExecutionGate.claimEnabled)}
+                        {readinessPatchExecutionGate.writeHelperEnabled !== undefined ? ` / write helper: ${String(readinessPatchExecutionGate.writeHelperEnabled)}` : ''}
+                        {readinessPatchExecutionGate.releaseGateEnabled !== undefined ? ` / release gate: ${String(readinessPatchExecutionGate.releaseGateEnabled)}` : ''}
+                        {readinessPatchExecutionGate.sourceRequestRelationship ? ` / ${readinessPatchExecutionGate.sourceRequestRelationship}` : ''}
+                      </span>
+                      {readinessPatchExecutionGate.preReleaseRevalidation && (
+                        <span>
+                          pre-release revalidation: {readinessPatchExecutionGate.preReleaseRevalidation.status || 'UNKNOWN'}
+                          {readinessPatchExecutionGate.preReleaseRevalidation.passed !== undefined ? ` / passed: ${String(readinessPatchExecutionGate.preReleaseRevalidation.passed)}` : ''}
+                          {readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshDryRunAfterReleaseAttempt !== undefined ? ` / fresh dry-run: ${String(readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshDryRunAfterReleaseAttempt)}` : ''}
+                          {readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshRepositoryVerificationAfterReleaseAttempt !== undefined ? ` / fresh repo check: ${String(readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshRepositoryVerificationAfterReleaseAttempt)}` : ''}
+                        </span>
+                      )}
+                      {readinessReleaseAttemptModel && (
+                        <span>
+                          release attempt model: {readinessReleaseAttemptModel.status || 'UNKNOWN'}
+                          {readinessReleaseAttemptModel.schema ? ` / ${readinessReleaseAttemptModel.schema}` : ''}
+                          {readinessReleaseAttemptModel.staleWindowSeconds !== undefined ? ` / stale window ${readinessReleaseAttemptModel.staleWindowSeconds}s` : ''}
+                          {readinessReleaseAttemptModel.requiredEvidence?.length ? ` / evidence ${readinessReleaseAttemptModel.requiredEvidence.length}` : ''}
+                        </span>
+                      )}
+                      {(readinessPatchExecutionGate.requiredBeforeEnablement || []).slice(0, 5).map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
+                    </div>
+                  )}
+                  {(readinessSnapshotManifestCheck || readinessRollbackPreconditionsCheck) && (
+                    <div className="failure-item">
+                      <strong>Snapshot readiness: {readinessSnapshot?.status || (readinessSnapshotManifestCheck?.passed && readinessRollbackPreconditionsCheck?.passed ? 'observed' : 'blocked')}</strong>
+                      {readinessSnapshot?.message && <span>{readinessSnapshot.message}</span>}
+                      {readinessSnapshot && (
+                        <span>
+                          snapshot created: {String(readinessSnapshot.snapshotCreated)}
+                          {readinessSnapshot.manifestCreated !== undefined ? ` / manifest created: ${String(readinessSnapshot.manifestCreated)}` : ''}
+                          {readinessSnapshot.writesPlanned !== undefined ? ` / writes planned: ${String(readinessSnapshot.writesPlanned)}` : ''}
+                          {readinessSnapshot.writesCompleted !== undefined ? ` / writes completed: ${String(readinessSnapshot.writesCompleted)}` : ''}
+                        </span>
+                      )}
+                      {readinessSnapshot?.relativeManifestPath && (
+                        <span>
+                          manifest: {readinessSnapshot.manifestId || '(snapshot)'} / {readinessSnapshot.relativeManifestPath}
+                          {readinessSnapshot.fileCount !== undefined ? ` / files ${readinessSnapshot.fileCount}` : ''}
+                        </span>
+                      )}
+                      {readinessSnapshotManifestCheck && <span>{formatReadinessCheck(readinessSnapshotManifestCheck)}</span>}
+                      {readinessRollbackPreconditionsCheck && <span>{formatReadinessCheck(readinessRollbackPreconditionsCheck)}</span>}
+                      {dryRunSnapshotObservation?.manifestPreview && (
+                        <span>
+                          latest dry-run manifest: {dryRunSnapshotObservation.manifestPreview.id || '(preview)'}
+                          {dryRunSnapshotObservation.manifestPreview.relativeManifestPath ? ` / ${dryRunSnapshotObservation.manifestPreview.relativeManifestPath}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.created !== undefined ? ` / manifest created: ${String(dryRunSnapshotObservation.manifestPreview.created)}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.writesPlanned !== undefined ? ` / writes planned: ${String(dryRunSnapshotObservation.manifestPreview.writesPlanned)}` : ''}
+                          {dryRunSnapshotObservation.manifestPreview.writesCompleted !== undefined ? ` / writes completed: ${String(dryRunSnapshotObservation.manifestPreview.writesCompleted)}` : ''}
+                        </span>
+                      )}
+                      {!dryRunSnapshotObservation?.manifestPreview && <span>Queue and refresh a Local Agent dry-run to provide snapshot manifest evidence.</span>}
+                    </div>
+                  )}
+                  {readinessRollback && (
+                    <div className="failure-item">
+                      <strong>Rollback manifest readiness: {readinessRollback.status || 'UNKNOWN'}</strong>
+                      {readinessRollback.message && <span>{readinessRollback.message}</span>}
+                      <span>
+                        blocking release: {String(readinessRollback.blocking)}
+                        {readinessRollback.fileCount !== undefined ? ` / files ${readinessRollback.fileCount}` : ''}
+                        {readinessRollback.requiresUserApproval !== undefined ? ` / user approval: ${String(readinessRollback.requiresUserApproval)}` : ''}
+                      </span>
+                      {(readinessRollback.fileChecks || []).slice(0, 5).map((check) => (
+                        <span key={`${check.path}-${check.snapshotRelativePath}`}>
+                          {check.path || '(target)'} {'->'} {check.snapshotRelativePath || '(snapshot)'}
+                          {check.targetPathSafe !== undefined ? ` / target safe: ${String(check.targetPathSafe)}` : ''}
+                          {check.snapshotPathSafe !== undefined ? ` / snapshot safe: ${String(check.snapshotPathSafe)}` : ''}
+                        </span>
+                      ))}
+                      {(readinessRollback.fileChecks || []).length > 5 && <span>{readinessRollback.fileChecks.length - 5} more rollback file checks hidden</span>}
+                    </div>
+                  )}
+                  {visibleReadinessChecks.map((check) => (
                     <div className="failure-item" key={check.key}>
                       <strong>{check.passed ? 'pass' : 'blocked'} · {check.key}</strong>
                       <span>{check.message}</span>

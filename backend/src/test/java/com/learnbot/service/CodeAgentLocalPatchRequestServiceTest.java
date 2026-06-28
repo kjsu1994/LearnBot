@@ -6,7 +6,9 @@ import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.dto.LocalAgentWorkspaceSummary;
 import com.learnbot.dto.PatchValidationResult;
+import com.learnbot.repository.CodeRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -26,10 +28,14 @@ class CodeAgentLocalPatchRequestServiceTest {
     private final CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
     private final PatchValidationService validationService = mock(PatchValidationService.class);
     private final LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+    private final CodeRepository codeRepository = mock(CodeRepository.class);
+    private final LocalAgentGatewayService localAgentGatewayService = mock(LocalAgentGatewayService.class);
     private final CodeAgentLocalPatchRequestService service = new CodeAgentLocalPatchRequestService(
             fileLoader,
             validationService,
-            toolGatewayService
+            toolGatewayService,
+            codeRepository,
+            localAgentGatewayService
     );
 
     @Test
@@ -54,6 +60,23 @@ class CodeAgentLocalPatchRequestServiceTest {
         when(fileLoader.load(repositoryId, List.of(path))).thenReturn(new CodePatchFileLoader.LoadResult(
                 List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), path, "java", content)),
                 List.of("loaded")
+        ));
+        when(codeRepository.findRepository(repositoryId)).thenReturn(java.util.Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "learnbot",
+                "GIT",
+                "https://example.com/acme/learnbot.git",
+                null,
+                "https://example.com/acme/learnbot.git",
+                "main",
+                "NONE",
+                "/server/repos/learnbot",
+                "INDEXED",
+                "abc123"
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(java.util.Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "learnbot", "C:/work/learnbot", true)
         ));
         when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenReturn(new LocalAgentToolExecutionResponse(
                 requestId,
@@ -98,7 +121,13 @@ class CodeAgentLocalPatchRequestServiceTest {
         assertThat(request.input()).containsEntry("spaceId", spaceId.toString());
         assertThat(request.input()).containsEntry("requiresSnapshot", true);
         assertThat(request.input()).containsEntry("staleIndexPolicy", "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH");
+        assertThat(request.input().get("snapshotPolicy").toString()).contains("TARGET_FILES", "LOCAL_AGENT_MANAGED", "createBeforeMutation=true");
+        assertThat(request.input().get("rollbackPolicy").toString()).contains("rollback.restore", "SNAPSHOT_TARGET_FILES", "requiresUserApproval=true");
+        assertThat(request.input().get("sourceRepository").toString()).contains("learnbot", "abc123", "main");
+        assertThat(request.input().get("localWorkspace").toString()).contains(workspaceId.toString(), "C:/work/learnbot");
+        assertThat(request.input().get("workspaceVerification").toString()).contains("UNVERIFIED", "blocking=true");
         assertThat(request.input().get("expectedFiles").toString()).contains(path, sha256(content));
+        assertThat(request.warnings()).anyMatch(warning -> warning.contains("identity is not verified"));
     }
 
     private String sha256(String content) {
