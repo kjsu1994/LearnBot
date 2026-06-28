@@ -33,6 +33,12 @@ target/
 backend/target/
 *.class
 
+# .NET build output
+bin/
+obj/
+**/bin/
+**/obj/
+
 # Local runtime data and object-store volume mirrors
 postgres-data/
 ollama-data/

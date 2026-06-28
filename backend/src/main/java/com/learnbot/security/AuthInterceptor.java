@@ -25,6 +25,9 @@ public class AuthInterceptor implements HandlerInterceptor {
         if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)) {
             return true;
         }
+        if (isLocalAgentTokenEndpoint(path) && hasLocalAgentToken(request)) {
+            return true;
+        }
         String token = extractBearerHeaderToken(request.getHeader("Authorization"));
         if (token == null || token.isBlank()) {
             token = extractCookie(request, "learnbot_access_token");
@@ -42,6 +45,17 @@ public class AuthInterceptor implements HandlerInterceptor {
             return null;
         }
         return authorization.substring("Bearer ".length()).trim();
+    }
+
+    private boolean hasLocalAgentToken(HttpServletRequest request) {
+        String token = request.getHeader("X-Local-Agent-Token");
+        return token != null && !token.isBlank();
+    }
+
+    private boolean isLocalAgentTokenEndpoint(String path) {
+        return "/api/local-agents/heartbeat".equals(path)
+                || "/api/local-agents/ws".equals(path)
+                || path.startsWith("/api/local-agents/tools/");
     }
 
     private String extractCookie(HttpServletRequest request, String name) {

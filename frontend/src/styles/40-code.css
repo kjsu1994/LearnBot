@@ -67,6 +67,32 @@
   padding: 0 10px;
 }
 
+.local-agent-token-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.local-agent-token-row {
+  align-items: center;
+  border-top: 1px solid #e2e8e5;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding-top: 8px;
+}
+
+.local-agent-token-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.local-agent-token-row strong,
+.local-agent-token-row small {
+  overflow-wrap: anywhere;
+}
+
 .file-list {
   display: grid;
   gap: 7px;

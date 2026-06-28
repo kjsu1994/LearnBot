@@ -1,0 +1,15 @@
+package com.learnbot.dto;
+
+public enum LocalAgentFailureCode {
+    AGENT_DISCONNECTED,
+    WORKSPACE_NOT_APPROVED,
+    PATH_ESCAPE,
+    UNSAFE_TOOL,
+    APPROVAL_REQUIRED,
+    APPROVAL_DENIED,
+    TIMEOUT,
+    CONTEXT_MISMATCH,
+    TEST_FAILED,
+    ROLLBACK_REFUSED,
+    TOOL_FAILED
+}

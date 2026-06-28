@@ -10,16 +10,19 @@ import com.learnbot.dto.CodeAgentRollbackRequest;
 import com.learnbot.dto.CodeAgentRollbackResponse;
 import com.learnbot.dto.CodeAgentTestRequest;
 import com.learnbot.dto.CodeAgentTestResponse;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.CodeAgentApplyService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 
@@ -31,19 +34,22 @@ public class CodeAgentController {
     private final CodeIndexingService indexingService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
+    private final LearnBotProperties properties;
 
     public CodeAgentController(
             CodeAgentService codeAgentService,
             CodeAgentApplyService codeAgentApplyService,
             CodeIndexingService indexingService,
             AuthService authService,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            LearnBotProperties properties
     ) {
         this.codeAgentService = codeAgentService;
         this.codeAgentApplyService = codeAgentApplyService;
         this.indexingService = indexingService;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
+        this.properties = properties;
     }
 
     @PostMapping("/plan")
@@ -80,6 +86,7 @@ public class CodeAgentController {
 
     @PostMapping("/apply")
     CodeAgentApplyResponse apply(@Valid @RequestBody CodeAgentApplyRequest request) {
+        requireServerLocalMutationEnabled();
         var user = currentUserProvider.currentUser();
         UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
         UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
@@ -97,6 +104,7 @@ public class CodeAgentController {
 
     @PostMapping("/rollback")
     CodeAgentRollbackResponse rollback(@Valid @RequestBody CodeAgentRollbackRequest request) {
+        requireServerLocalMutationEnabled();
         var user = currentUserProvider.currentUser();
         UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
         UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
@@ -107,6 +115,7 @@ public class CodeAgentController {
 
     @PostMapping("/test")
     CodeAgentTestResponse test(@Valid @RequestBody CodeAgentTestRequest request) {
+        requireServerLocalMutationEnabled();
         var user = currentUserProvider.currentUser();
         UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
         UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
@@ -119,5 +128,14 @@ public class CodeAgentController {
                 request.patchSessionId(),
                 request.commandKey()
         );
+    }
+
+    private void requireServerLocalMutationEnabled() {
+        if (!properties.getCode().isServerLocalMutationEnabled()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Server-local Patch Agent apply/test/rollback is disabled. User-owned file changes must use the Local Agent path."
+            );
+        }
     }
 }

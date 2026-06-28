@@ -102,6 +102,7 @@ function CodeWorkspace(props) {
     codeAgentPatch,
     codeAgentApplyResult,
     codeAgentTestResult,
+    localAgentStatus,
     codeConversations = [],
     codeConversationId = '',
     codeConversationTurns = [],
@@ -118,6 +119,7 @@ function CodeWorkspace(props) {
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
     generateCodeAgentPatch = () => {},
+    refreshLocalAgentStatus = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
     runCodeAgentTest = () => {},
@@ -206,10 +208,15 @@ function CodeWorkspace(props) {
           patch={codeAgentPatch}
           applyResult={codeAgentApplyResult}
           testResult={codeAgentTestResult}
+          localAgentStatus={localAgentStatus}
+          localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
           loading={loading}
           onPlan={generateCodeAgentPlan}
           onPatch={generateCodeAgentPatch}
+          onRefreshLocalAgent={refreshLocalAgentStatus}
+          onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
+          onRevokeLocalAgentToken={props.revokeLocalAgentToken}
           onApply={applyCodeAgentPatch}
           onRollback={rollbackCodeAgentPatch}
           onTest={runCodeAgentTest}
@@ -270,10 +277,15 @@ function CodeAgentPanel({
   patch,
   applyResult,
   testResult,
+  localAgentStatus,
+  localAgentTokens = [],
   selectedRepositoryId = '',
   loading = () => false,
   onPlan = (event) => event.preventDefault(),
   onPatch = () => {},
+  onRefreshLocalAgent = () => {},
+  onRefreshLocalAgentTokens = () => {},
+  onRevokeLocalAgentToken = () => {},
   onApply = () => {},
   onRollback = () => {},
   onTest = () => {},
@@ -281,8 +293,10 @@ function CodeAgentPanel({
   const targetFiles = plan?.targetFiles || [];
   const canPlan = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-plan');
   const canPatch = Boolean(selectedRepositoryId && instruction.trim() && targetFiles.length && !loading('code-agent-patch'));
-  const canApply = Boolean(patch?.valid && patch?.files?.length && !applyResult?.applied) && !loading('code-agent-apply');
-  const canRollback = Boolean(applyResult?.patchSessionId && applyResult?.rollbackAvailable) && !loading('code-agent-rollback');
+  const canApply = false;
+  const canRollback = false;
+  const activeTokenCount = localAgentTokens.filter((token) => token.active).length;
+  const tokenRefreshLoading = loading('local-agent-tokens');
   return (
     <section className="panel code-agent-panel">
       <div className="panel-title">
@@ -290,6 +304,53 @@ function CodeAgentPanel({
         <div>
           <h2>Patch Agent v2</h2>
           <p>수정 계획과 검증된 unified diff를 제안합니다. 파일 자동 적용은 하지 않습니다.</p>
+        </div>
+      </div>
+      <div className="code-agent-result compact-result">
+        <div className="result-heading">
+          <strong>Local Agent</strong>
+          <Badge variant={localAgentStatus?.state === 'CONNECTED' ? 'outline' : 'destructive'}>{localAgentStatus?.state || 'DISCONNECTED'}</Badge>
+        </div>
+        <small>{localAgentStatus?.message || 'No Local Agent is connected. User-owned file changes require a per-user Local Agent.'}</small>
+        {!!localAgentStatus?.workspaces?.length && (
+          <small>{localAgentStatus.workspaces.filter((workspace) => workspace.approved).length}/{localAgentStatus.workspaces.length} approved workspaces</small>
+        )}
+        <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
+          <RefreshCw size={14} />
+          refresh
+        </button>
+        <div className="local-agent-token-list">
+          <div className="result-heading">
+            <strong>Tokens</strong>
+            <Badge variant={activeTokenCount ? 'outline' : 'secondary'}>{activeTokenCount} active</Badge>
+          </div>
+          {!localAgentTokens.length ? (
+            <small>No paired Local Agent tokens.</small>
+          ) : (
+            localAgentTokens.slice(0, 5).map((token) => (
+              <div className="local-agent-token-row" key={token.id}>
+                <span>
+                  <strong>{token.label || 'Local Agent'}</strong>
+                  <small>{token.agentId}</small>
+                  <small>{token.lastSeenAt ? `last seen ${formatDate(token.lastSeenAt)}` : `created ${formatDate(token.createdAt)}`}</small>
+                </span>
+                <Badge variant={token.active ? 'outline' : 'secondary'}>{token.revokedAt ? 'revoked' : token.active ? 'active' : 'expired'}</Badge>
+                {!token.revokedAt && (
+                  <button
+                    type="button"
+                    className="ghost-button compact-action"
+                    disabled={loading(`local-agent-token-revoke-${token.id}`)}
+                    onClick={() => onRevokeLocalAgentToken(token.id)}
+                  >
+                    {loading(`local-agent-token-revoke-${token.id}`) ? <Loader2 className="spin" size={14} /> : <Trash2 size={14} />}
+                    revoke
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+          {localAgentTokens.length > 5 && <small>{localAgentTokens.length - 5} older tokens hidden</small>}
+          {tokenRefreshLoading && <small>Refreshing tokens...</small>}
         </div>
       </div>
       <form className="stack" onSubmit={onPlan}>
@@ -353,7 +414,13 @@ function CodeAgentPanel({
               <pre><code>{file.diff}</code></pre>
             </article>
           ))}
-          <div className="action-row">
+          <div className="failure-list">
+            <div className="failure-item">
+              <strong>Local Agent required</strong>
+              <span>Diff proposals are available here, but applying files, running tests, and rollback are reserved for the per-user Local Agent path. Server-local execution is prototype/admin-debug only.</span>
+            </div>
+          </div>
+          <div className="action-row" hidden>
             <button type="button" disabled={!canApply} onClick={onApply}>
               {loading('code-agent-apply') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
               적용

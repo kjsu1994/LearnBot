@@ -394,5 +394,87 @@ Responsibility split:
 - The central server owns retrieval, ranking, planning, model calls, validation, approvals, conversation history, diagnostics, and orchestration.
 - The Local Agent owns user-PC side effects: file writes, test/build execution, git operations, rollback restoration, and workspace-local diagnostics.
 - Server-local apply/test/rollback may exist only as a prototype, shared sandbox, migration bridge, or admin/debug capability. It must not become the default product path for user-owned repository changes.
+- Server-local Patch Agent mutation is disabled by default. Set `LEARNBOT_CODE_SERVER_LOCAL_MUTATION_ENABLED=true` only for prototype/admin-debug runs.
 - The preferred network model is outbound connection from each Local Agent to the central server. The server should not depend on directly reaching user PCs by LAN IP or localhost.
 - The CLI should eventually feel natural from PowerShell, similar to running `codex`: users can run `learnbot` to pair, start/stop/status the agent, register workspaces, open the web UI, run diagnostics, view logs, and optionally use lightweight CLI chat/fix/review commands.
+
+### Local Agent Protocol Baseline
+
+The shared backend contract for future Local Agent work starts with `AgentExecutionTarget`, `LocalAgentToolName`, `LocalAgentToolRequest`, and `LocalAgentToolResponse` DTOs. Initial tools are `agent.status`, `agent.doctor`, `workspace.list`, `workspace.add`, `file.read`, `patch.apply`, `git.status`, `git.diff`, `command.runAllowed`, and `rollback.restore`.
+
+Side-effectful tools require approval metadata and must execute through `USER_LOCAL_AGENT` for user-owned workspaces. Failure states are explicit through `LocalAgentFailureCode`, including disconnected agents, unapproved workspaces, path escape, unsafe tools, approval denial, timeout, context mismatch, test failure, rollback refusal, and generic tool failure.
+
+The central gateway skeleton exposes `GET /api/local-agents/status` for the current user. Users can issue a one-time-visible Local Agent credential with `POST /api/local-agents/pairing-token`; the server stores only a hash in `local_agent_tokens`. Authenticated web users can inspect non-secret token metadata with `GET /api/local-agents/tokens` and revoke their own token with `DELETE /api/local-agents/tokens/{tokenId}`. Token list responses include id, agent id, label, expiry, created time, last-seen time, revoked time, and active state, but never the raw credential. A Local Agent can then call `POST /api/local-agents/heartbeat` with `X-Local-Agent-Token`, agent id, version, capabilities, and approved workspace summaries.
+
+Tool routing now has a durable polling baseline: the server records queued Local Agent work in `local_agent_tool_executions`, a token-authenticated Local Agent can claim the next request with `GET /api/local-agents/tools/next`, and it can persist a structured result with `POST /api/local-agents/tools/{requestId}/response`. For internal smoke and diagnostics, authenticated web users can enqueue only safe read-only requests through `POST /api/local-agents/tools/read-only` and inspect the persisted result through `GET /api/local-agents/tools/{requestId}`. That diagnostic enqueue path currently allows only `file.read`, `git.status`, and `git.diff`; mutation, command execution, patch, test, and rollback requests remain blocked. WebSocket transport work follows `docs/local-agent-websocket-transport.md`: the server skeleton is behind `LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED=false` by default, accepts only token-authenticated messages, registers connected sessions after `hello`/`heartbeat`, can push persisted read-only `tool.request` envelopes to connected agents, and can persist `tool.response` envelopes through the same completion service. The Local Agent CLI now accepts `polling`, `websocket`, and `auto` transport modes; `websocket` and `auto` try a live WebSocket hello/heartbeat, process pushed read-only `tool.request` messages during a bounded receive window, send `tool.response`, and keep durable polling active for fallback. The Code workspace shows disconnected/stale state and Local Agent token metadata/revocation controls so side-effectful local work does not silently fall back to server-local execution and stale pairings can be retired.
+
+### Local Agent MVP Skeleton
+
+The first local executable skeleton lives in `local-agent/` and builds as a .NET console app named `learnbot`. It is intended for the early internal pilot path, not as the final installer/service package yet.
+
+Current commands:
+
+- `learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]`
+- `learnbot agent start [--once] [--interval-seconds 15] [--transport polling|websocket|auto]`
+- `learnbot agent status`
+- `learnbot agent token`
+- `learnbot agent stop`
+- `learnbot agent logs [--tail 80]`
+- `learnbot workspace add <path>`
+- `learnbot workspace list`
+- `learnbot file read --workspace-id <workspace-id> --path <relative-path>`
+- `learnbot git status --workspace-id <workspace-id>`
+- `learnbot git diff --workspace-id <workspace-id> [--path <relative-path>] [--max-bytes <bytes>]`
+- `learnbot doctor`
+- `learnbot open`
+
+The skeleton stores config in `%USERPROFILE%\.learnbot\agent.json`, or in `LEARNBOT_AGENT_CONFIG` when that environment variable is set for tests. It writes a minimal run-state file and `agent.log` next to that config, so internal users can inspect `learnbot agent status` and `learnbot agent logs --tail 80` before a Windows Service or installer exists. `learnbot agent token` reports paired state, agent id, a non-secret token fingerprint, and the web management URL without printing the raw credential. Long-running `agent start` logs transient loop failures and continues polling; `--once` returns a failure exit code for smoke tests. The stored transport mode defaults to `polling`; `websocket` and `auto` try a bounded WebSocket hello/heartbeat and fall back to REST heartbeat if the endpoint is disabled, unreachable, or rejected. When WebSocket is unavailable, the run-state records the configured transport, active fallback transport, consecutive WebSocket failures, and the next retry time while durable polling continues. During the bounded WebSocket receive window, pushed `tool.request` messages reuse the same safe local handler as polling and return `tool.response`; durable polling remains active as fallback. It sends heartbeat, reports approved local workspace summaries, polls the durable tool queue, and handles `agent.status`, `agent.doctor`, `workspace.list`, path-contained `file.read`, read-only `git.status`, and bounded read-only `git.diff`. File reads are limited to approved workspace roots, reject path traversal/workspace escape, reject binary files, and cap returned content. Git status uses a fixed `git status --porcelain=v1 -b --untracked-files=all` command with optional locks disabled, and requires the approved workspace to be a Git worktree root. Git diff reads both staged and unstaged changes with `--no-ext-diff`, supports an optional workspace-contained relative `path`, and caps returned diff bytes. It rejects file mutation, command execution, patch, test, and rollback tools by default until the safety model and approval flow are implemented.
+
+A live polling smoke can be run against the local stack after `.\scripts\up.ps1 -Build`:
+
+```powershell
+.\scripts\local-agent-smoke.ps1 -Server http://localhost:8083 -WorkspacePath C:\Users\honeybadger\Desktop\LearnBot -ToolName file.read -Path README.md
+.\scripts\local-agent-smoke.ps1 -Server http://localhost:8083 -WorkspacePath C:\Users\honeybadger\Desktop\LearnBot -ToolName git.status
+.\scripts\local-agent-smoke.ps1 -Server http://localhost:8083 -WorkspacePath C:\Users\honeybadger\Desktop\LearnBot -ToolName git.diff -Path README.md
+```
+
+The script logs in, issues a pairing token, stores a temporary Local Agent config, registers the workspace, queues a read-only server request, runs the agent once, and verifies that the server persisted a `SUCCEEDED` tool response.
+
+When the backend is started with `LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED=true`, the same helper can require the WebSocket path. With the normal Docker helper, set the environment variable before starting or recreating the stack so the backend enables `/api/local-agents/ws` and Nginx forwards the WebSocket upgrade:
+
+```powershell
+$env:LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED = "true"
+.\scripts\up.ps1 -Build
+.\scripts\local-agent-smoke.ps1 -Server http://localhost:8083 -WorkspacePath C:\Users\honeybadger\Desktop\LearnBot -ToolName file.read -Path README.md -Transport websocket
+```
+
+In WebSocket mode, the helper starts the Local Agent before enqueueing the request and fails unless the agent log shows that the request completed through the WebSocket tool path.
+To verify fallback safety afterward, unset the flag or start the stack with the default `false` value and run the same smoke without `-Transport websocket`; the polling path should still persist a `SUCCEEDED` result.
+
+For internal foreground pilot use, `scripts/local-agent.ps1` wraps the common setup and run commands without pretending to be the final installer:
+
+```powershell
+$env:LEARNBOT_AGENT_LOGIN_ID = "jinsu.kim"
+$env:LEARNBOT_AGENT_PASSWORD = "admin1234"
+.\scripts\local-agent.ps1 -Action setup -Server http://localhost:8083 -WorkspacePath C:\Users\honeybadger\Desktop\LearnBot -Transport polling
+.\scripts\local-agent.ps1 -Action status
+.\scripts\local-agent.ps1 -Action token
+.\scripts\local-agent.ps1 -Action logs -Tail 80
+.\scripts\local-agent.ps1 -Action start
+.\scripts\local-agent.ps1 -Action background-start
+.\scripts\local-agent.ps1 -Action background-stop
+```
+
+The helper performs web login, requests a pairing token, runs `learnbot pair`, registers the workspace, and starts the foreground polling loop. It accepts `-Transport polling|websocket|auto`; `websocket` and `auto` try WebSocket hello/heartbeat first, then keep polling available for durable tool queue fallback. It is not a Windows Service, MSI, or background process manager.
+For the internal pilot, `background-start` launches the installed `learnbot.exe` in a hidden window, refuses duplicate starts when the recorded Local Agent process is running, and `background-stop` stops only the PID recorded by the Local Agent state file. This is still a helper, not a service supervisor.
+
+To publish a lightweight local executable for the internal pilot:
+
+```powershell
+.\scripts\local-agent-install.ps1 -Action install
+.\scripts\local-agent-install.ps1 -Action install -AddToUserPath
+learnbot agent status
+```
+
+The install helper publishes `local-agent/` to `%USERPROFILE%\.learnbot\bin` by default. It can optionally add that directory to the user's PATH. This remains a framework-dependent pilot install and does not create a Windows Service, MSI, updater, or background process manager.
+After publishing, `scripts/local-agent.ps1` uses the installed `%USERPROFILE%\.learnbot\bin\learnbot.exe` automatically when it exists; otherwise it falls back to `learnbot` on PATH or `dotnet run --project local-agent`.

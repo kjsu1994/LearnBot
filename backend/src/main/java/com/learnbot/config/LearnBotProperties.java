@@ -20,6 +20,7 @@ public class LearnBotProperties {
     private Code code = new Code();
     private Document document = new Document();
     private Auth auth = new Auth();
+    private LocalAgent localAgent = new LocalAgent();
     private Transfer transfer = new Transfer();
     private Retention retention = new Retention();
 
@@ -93,6 +94,14 @@ public class LearnBotProperties {
 
     public void setAuth(Auth auth) {
         this.auth = auth;
+    }
+
+    public LocalAgent getLocalAgent() {
+        return localAgent;
+    }
+
+    public void setLocalAgent(LocalAgent localAgent) {
+        this.localAgent = localAgent;
     }
 
     public Transfer getTransfer() {
@@ -1150,6 +1159,8 @@ public class LearnBotProperties {
         @NotBlank
         private String credentialSecret = "learnbot-local-dev-secret-change-me";
 
+        private boolean serverLocalMutationEnabled = false;
+
         private Context context = new Context();
         private Graph graph = new Graph();
 
@@ -1215,6 +1226,14 @@ public class LearnBotProperties {
 
         public void setCredentialSecret(String credentialSecret) {
             this.credentialSecret = credentialSecret;
+        }
+
+        public boolean isServerLocalMutationEnabled() {
+            return serverLocalMutationEnabled;
+        }
+
+        public void setServerLocalMutationEnabled(boolean serverLocalMutationEnabled) {
+            this.serverLocalMutationEnabled = serverLocalMutationEnabled;
         }
 
         public Context getContext() {
@@ -1636,6 +1655,18 @@ public class LearnBotProperties {
 
         public void setSessionHours(int sessionHours) {
             this.sessionHours = sessionHours;
+        }
+    }
+
+    public static class LocalAgent {
+        private boolean websocketEnabled = false;
+
+        public boolean isWebsocketEnabled() {
+            return websocketEnabled;
+        }
+
+        public void setWebsocketEnabled(boolean websocketEnabled) {
+            this.websocketEnabled = websocketEnabled;
         }
     }
 

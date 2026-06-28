@@ -41,6 +41,8 @@ export function useCodeRagController({
   const [codeAgentPatch, setCodeAgentPatch] = useState(null);
   const [codeAgentApplyResult, setCodeAgentApplyResult] = useState(null);
   const [codeAgentTestResult, setCodeAgentTestResult] = useState(null);
+  const [localAgentStatus, setLocalAgentStatus] = useState(null);
+  const [localAgentTokens, setLocalAgentTokens] = useState([]);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeConversations, setCodeConversations] = useState([]);
   const [codeConversationId, setCodeConversationId] = useState('');
@@ -70,6 +72,16 @@ export function useCodeRagController({
   }, [selectedRepositoryId]);
 
   useEffect(() => {
+    if (!activeSpaceId) {
+      setLocalAgentStatus(null);
+      setLocalAgentTokens([]);
+      return;
+    }
+    refreshLocalAgentStatus();
+    refreshLocalAgentTokens();
+  }, [activeSpaceId]);
+
+  useEffect(() => {
     const indexingRepos = repositories.filter((repo) => repo.status === 'INDEXING');
     if (!indexingRepos.length) return undefined;
     const timer = window.setInterval(() => {
@@ -93,6 +105,8 @@ export function useCodeRagController({
     setCodeAgentPatch(null);
     setCodeAgentApplyResult(null);
     setCodeAgentTestResult(null);
+    setLocalAgentStatus(null);
+    setLocalAgentTokens([]);
     setCodeConversations([]);
     setCodeConversationId('');
     setCodeConversationTurns([]);
@@ -543,6 +557,43 @@ export function useCodeRagController({
     });
   }
 
+  async function refreshLocalAgentStatus() {
+    try {
+      const status = await request('/api/local-agents/status');
+      setLocalAgentStatus(status);
+      return status;
+    } catch {
+      setLocalAgentStatus({
+        state: 'DISCONNECTED',
+        message: 'Local Agent status is unavailable.',
+        capabilities: [],
+        workspaces: [],
+      });
+      return null;
+    }
+  }
+
+  async function refreshLocalAgentTokens() {
+    try {
+      const tokens = await request('/api/local-agents/tokens');
+      setLocalAgentTokens(tokens || []);
+      return tokens || [];
+    } catch {
+      setLocalAgentTokens([]);
+      return [];
+    }
+  }
+
+  async function revokeLocalAgentToken(tokenId) {
+    if (!tokenId) return;
+    if (!window.confirm('Revoke this Local Agent token? The paired agent will need a new pairing token.')) return;
+    await run(`local-agent-token-revoke-${tokenId}`, async () => {
+      await request(`/api/local-agents/tokens/${tokenId}`, { method: 'DELETE' });
+      await refreshLocalAgentTokens();
+      await refreshLocalAgentStatus();
+    });
+  }
+
   async function generateCodeAgentPatch() {
     const instruction = codeAgentInstruction.trim();
     const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
@@ -653,6 +704,8 @@ export function useCodeRagController({
     codeAgentPatch,
     codeAgentApplyResult,
     codeAgentTestResult,
+    localAgentStatus,
+    localAgentTokens,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -686,6 +739,9 @@ export function useCodeRagController({
     cancelCodeAsk,
     generateCodeAgentPlan,
     generateCodeAgentPatch,
+    refreshLocalAgentStatus,
+    refreshLocalAgentTokens,
+    revokeLocalAgentToken,
     applyCodeAgentPatch,
     rollbackCodeAgentPatch,
     runCodeAgentTest,
