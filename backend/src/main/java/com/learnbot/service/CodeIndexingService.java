@@ -160,6 +160,10 @@ public class CodeIndexingService {
         return repository.listRepositories(authService.accessibleSpaceIds(user), selectedSpaceId);
     }
 
+    public UUID repositorySpace(AppUser user, UUID repositoryId) {
+        return requireRepositoryAccess(user, repositoryId).spaceId();
+    }
+
     public List<IndexingJobSummary> listJobs(AppUser user, UUID repositoryId) {
         requireRepositoryAccess(user, repositoryId);
         return repository.listJobs(repositoryId);
