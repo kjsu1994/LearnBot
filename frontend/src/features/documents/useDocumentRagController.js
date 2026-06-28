@@ -248,7 +248,8 @@ export function useDocumentRagController({
               }
             } else if (eventName === 'replace') {
               sawStream = true;
-              if (streamedText) return;
+              const reason = eventData?.reason || '';
+              if (!shouldApplyStreamReplacement(reason, streamedText)) return;
               const replacement = eventData?.answer || '';
               streamedText = replacement;
               const update = (current) => ({ ...(current || {}), answer: replacement, streaming: true, status: 'streaming' });
@@ -571,7 +572,15 @@ function answerLifecycleStatus(answer = {}, streamed = false) {
   if (answer?.aborted) return 'aborted';
   if (answer?.error) return 'error';
   const diagnostics = (answer?.diagnostics || []).join(' ').toLowerCase();
-  if (diagnostics.includes('fallback') || (!streamed && answer?.answer)) return 'fallback';
+  if (diagnostics.includes('fallback') || diagnostics.includes('retrieval-based fallback')) return 'fallback';
   if (diagnostics.includes('repair') || diagnostics.includes('repaired') || diagnostics.includes('보정')) return 'repaired';
   return 'completed';
+}
+
+function shouldApplyStreamReplacement(reason = '', currentText = '') {
+  if (!currentText) return true;
+  const normalized = String(reason || '').toLowerCase();
+  return normalized === 'length_continuation'
+    || normalized === 'answer_repair'
+    || normalized === 'commit_insight';
 }

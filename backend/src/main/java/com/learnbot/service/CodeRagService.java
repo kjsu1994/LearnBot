@@ -18,10 +18,13 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -230,6 +233,7 @@ public class CodeRagService {
         );
         List<CodeSearchResult> answerResults = contextBundle.results();
         String userPrompt = promptPrefix + "\n\nSource-code context:\n" + contextBundle.context();
+        int contextBudgetDropped = contextBundle.droppedCount();
         long contextMs = elapsedMs(contextStarted);
         if (streamSink != null) {
             streamSink.onStatus("evidence_ready", "답변에 사용할 코드 근거를 정리했습니다.");
@@ -334,7 +338,7 @@ public class CodeRagService {
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval),
+                        diagnostics(questionMode, results, answerResults, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval, contextBudgetDropped),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -480,8 +484,12 @@ public class CodeRagService {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
+        CodeQueryPlan deterministicPlan = codeQueryPlan(question, questionMode);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
         for (String query : conversationAnchorQueries(question, conversationContext)) {
+            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+        }
+        for (String query : deterministicPlan.auxiliaryQueries()) {
             collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
@@ -528,7 +536,43 @@ public class CodeRagService {
         }
 
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
-        return new CodeRetrieval(results, assessment, queryPlan, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+        return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private CodeQueryPlan codeQueryPlan(String question, CodeQuestionMode questionMode) {
+        String base = safe(question, "").trim();
+        if (base.isBlank()) {
+            return new CodeQueryPlan("EMPTY", List.of(base), true);
+        }
+        List<String> queries = new ArrayList<>();
+        queries.add(base);
+        String normalized = normalizeCodeText(base);
+        boolean patchIntent = containsAny(normalized,
+                "fix", "change", "modify", "implement", "patch", "bug", "regression",
+                "수정", "고쳐", "변경", "구현", "패치", "버그", "회귀");
+        boolean impactIntent = questionMode == CodeQuestionMode.IMPACT || containsAny(normalized,
+                "impact", "affected", "risk", "side effect", "test", "regression",
+                "영향", "리스크", "테스트", "회귀");
+        boolean flowIntent = questionMode == CodeQuestionMode.CALL_FLOW || isFlowIntent(normalized);
+        if (patchIntent) {
+            queries.add(base + " target files methods validation tests");
+            queries.add(base + " bug cause fix location related callers");
+        } else if (impactIntent) {
+            queries.add(base + " affected callers dependencies tests side effects");
+            queries.add(base + " related implementations usages graph impact");
+        } else if (questionMode == CodeQuestionMode.REASONING) {
+            queries.add(base + " design intent rationale dependencies callers");
+        } else if (flowIntent) {
+            queries.add(base + " entrypoint controller service repository call sequence");
+        }
+        List<String> planned = queries.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(3)
+                .toList();
+        String intent = patchIntent ? "PATCH_INTENT" : questionMode.name();
+        return new CodeQueryPlan(intent, planned, planned.size() <= 1);
     }
 
     private int collectPinnedConversationEvidence(
@@ -1069,7 +1113,8 @@ public class CodeRagService {
             removeBudgetCandidate(selected);
             context = compactForStreaming ? buildStreamingContext(question, questionMode, selected) : buildContext(question, questionMode, selected);
         }
-        return new CodeContextBundle(List.copyOf(selected), context);
+        int droppedCount = Math.max(0, (results == null ? 0 : results.size()) - selected.size());
+        return new CodeContextBundle(List.copyOf(selected), context, droppedCount);
     }
 
     private String buildStreamingContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
@@ -1400,14 +1445,37 @@ public class CodeRagService {
             CodeQuestionMode questionMode,
             List<CodeSearchResult> results,
             List<CodeSearchResult> answerResults,
+            String answer,
+            String doneReason,
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
             boolean answerContinued,
             boolean answerKeptAfterStreamValidation,
-            CodeRetrieval retrieval
+            CodeRetrieval retrieval,
+            int contextBudgetDropped
     ) {
         List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten && !answerKeptAfterStreamValidation));
+        CitationQuality citationQuality = citationQuality(answer, answerResults);
+        notes.add("RAG quality trace: answerChars=" + safe(answer, "").length()
+                + ", citedReferences=" + citationQuality.referencedCount()
+                + ", invalidCitationRefs=" + citationQuality.invalidCount()
+                + ", citationCoverage=" + citationQuality.coveragePercent() + "%"
+                + ", fallback=" + (llmUnavailable || (answerRewritten && !answerKeptAfterStreamValidation))
+                + ", retry=" + answerRetried
+                + ", continuation=" + answerContinued
+                + ", doneReason=" + safe(doneReason, "none") + ".");
+        if (!citationQuality.summary().isBlank()) {
+            notes.add("Citation support: " + citationQuality.summary());
+        }
+        notes.add(codeEvidenceSelectionSummary(answerResults, contextBudgetDropped));
+        if (retrieval != null && retrieval.deterministicPlan() != null) {
+            CodeQueryPlan plan = retrieval.deterministicPlan();
+            notes.add("Code query planner: intent=" + plan.intent()
+                    + ", queryCount=" + plan.queries().size()
+                    + ", auxiliaryQueries=" + Math.max(0, plan.queries().size() - 1)
+                    + ", originalOnlyFallback=" + plan.originalOnlyFallback() + ".");
+        }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             long projectContext = answerResults.stream().filter(result -> isProjectContext(result.chunkType())).count();
             long distinctFiles = answerResults.stream().map(CodeSearchResult::filePath).distinct().count();
@@ -1473,6 +1541,20 @@ public class CodeRagService {
         return notes;
     }
 
+    private String codeEvidenceSelectionSummary(List<CodeSearchResult> answerResults, int contextBudgetDropped) {
+        List<CodeSearchResult> safeResults = answerResults == null ? List.of() : answerResults;
+        Map<String, Long> typeCounts = safeResults.stream()
+                .map(result -> safe(result.chunkType(), "unknown"))
+                .collect(Collectors.groupingBy(type -> type.isBlank() ? "unknown" : type, LinkedHashMap::new, Collectors.counting()));
+        long graphExpanded = safeResults.stream().filter(this::isGraphExpanded).count();
+        long required = safeResults.stream().filter(this::isRequiredConversationPinned).count();
+        return "Evidence selection: selected=" + safeResults.size()
+                + ", budgetDropped=" + Math.max(0, contextBudgetDropped)
+                + ", chunkTypes=" + typeCounts
+                + ", graphExpanded=" + graphExpanded
+                + ", requiredPinned=" + required + ".";
+    }
+
     private List<String> diagnostics(
             List<CodeSearchResult> results,
             List<CodeSearchResult> answerResults,
@@ -1532,6 +1614,103 @@ public class CodeRagService {
 
     private boolean containsCitation(String answer) {
         return answer != null && answer.matches("(?s).*\\[\\d+].*");
+    }
+
+    private CitationQuality citationQuality(String answer, List<CodeSearchResult> evidence) {
+        String safeAnswer = safe(answer, "");
+        List<CodeSearchResult> safeEvidence = evidence == null ? List.of() : evidence;
+        Set<Integer> referenced = citationReferences(safeAnswer);
+        long invalid = referenced.stream()
+                .filter(index -> index < 1 || index > safeEvidence.size())
+                .count();
+        List<String> claims = claimSegments(safeAnswer);
+        long citedClaims = claims.stream().filter(this::containsCitation).count();
+        long weakSupport = claims.stream()
+                .filter(this::containsCitation)
+                .filter(claim -> !citationClaimSupported(claim, safeEvidence))
+                .count();
+        int coverage = claims.isEmpty() ? (referenced.isEmpty() ? 0 : 100) : (int) Math.round((100.0 * citedClaims) / claims.size());
+        StringBuilder summary = new StringBuilder();
+        if (invalid > 0) {
+            summary.append(invalid).append(" citation reference(s) point outside returned evidence.");
+        }
+        if (weakSupport > 0) {
+            if (!summary.isEmpty()) {
+                summary.append(" ");
+            }
+            summary.append(weakSupport).append(" cited claim(s) have weak lexical support in their cited code evidence.");
+        }
+        if (summary.isEmpty() && !referenced.isEmpty()) {
+            summary.append("All cited references point to returned evidence; weakSupport=").append(weakSupport).append(".");
+        }
+        return new CitationQuality(referenced.size(), (int) invalid, coverage, summary.toString());
+    }
+
+    private Set<Integer> citationReferences(String answer) {
+        Set<Integer> values = new HashSet<>();
+        Matcher matcher = Pattern.compile("\\[(\\d+)]").matcher(safe(answer, ""));
+        while (matcher.find()) {
+            try {
+                values.add(Integer.parseInt(matcher.group(1)));
+            } catch (NumberFormatException ignored) {
+                // Regex keeps this numeric, but keep parsing defensive.
+            }
+        }
+        return values;
+    }
+
+    private List<String> claimSegments(String answer) {
+        String normalized = safe(answer, "").replace('\r', '\n');
+        return Pattern.compile("[\\n.!?]+")
+                .splitAsStream(normalized)
+                .map(String::trim)
+                .filter(segment -> segment.length() >= 18)
+                .filter(segment -> segment.matches("(?s).*[\\p{L}\\p{N}].*"))
+                .limit(40)
+                .toList();
+    }
+
+    private boolean citationClaimSupported(String claim, List<CodeSearchResult> evidence) {
+        Set<Integer> refs = citationReferences(claim);
+        if (refs.isEmpty()) {
+            return false;
+        }
+        Set<String> claimTerms = supportTerms(claim);
+        if (claimTerms.isEmpty()) {
+            return true;
+        }
+        for (Integer ref : refs) {
+            if (ref == null || ref < 1 || ref > evidence.size()) {
+                return false;
+            }
+            Set<String> evidenceTerms = supportTerms(evidence.get(ref - 1).content());
+            long overlap = claimTerms.stream().filter(evidenceTerms::contains).count();
+            if (overlap >= Math.min(2, claimTerms.size())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> supportTerms(String value) {
+        Set<String> terms = new HashSet<>();
+        String normalized = safe(value, "").toLowerCase(Locale.ROOT).replaceAll("\\[\\d+]", " ");
+        Matcher matcher = Pattern.compile("[\\p{L}\\p{N}_-]{3,}").matcher(normalized);
+        while (matcher.find() && terms.size() < 32) {
+            String term = matcher.group();
+            if (!isCitationStopWord(term)) {
+                terms.add(term);
+            }
+        }
+        return terms;
+    }
+
+    private boolean isCitationStopWord(String term) {
+        return Set.of(
+                "the", "and", "for", "that", "this", "with", "from", "into", "also", "then",
+                "when", "where", "what", "how", "why", "are", "was", "were", "has", "have",
+                "public", "private", "class", "void", "return", "string", "있습니다", "합니다"
+        ).contains(term);
     }
 
     private List<String> primaryQuestionTerms(String question) {
@@ -1991,6 +2170,7 @@ public class CodeRagService {
             List<CodeSearchResult> results,
             RagPipelineService.EvidenceAssessment assessment,
             RagPipelineService.QueryPlan queryPlan,
+            CodeQueryPlan deterministicPlan,
             int iteration,
             int candidateCount,
             int pinnedCandidateCount,
@@ -1998,7 +2178,19 @@ public class CodeRagService {
     ) {
     }
 
-    private record CodeContextBundle(List<CodeSearchResult> results, String context) {
+    private record CodeQueryPlan(String intent, List<String> queries, boolean originalOnlyFallback) {
+        List<String> auxiliaryQueries() {
+            if (queries == null || queries.size() <= 1) {
+                return List.of();
+            }
+            return queries.subList(1, queries.size());
+        }
+    }
+
+    private record CodeContextBundle(List<CodeSearchResult> results, String context, int droppedCount) {
+    }
+
+    private record CitationQuality(int referencedCount, int invalidCount, int coveragePercent, String summary) {
     }
 
     private record LengthContinuation(String answer, String doneReason, OllamaClient.ChatResult chatResult, boolean continued) {

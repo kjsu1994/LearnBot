@@ -64,3 +64,4 @@ Don't remove pre-existing dead code unless asked.
 
 The test: Every changed line should trace directly to the user's request.
 
+서비스의 궁극적인 목표는 최상의 답변품질을 보유한 RAG기반 agent 서비스야 (속도가 빠르면 좋겠지만 속도만 빠른 쓰레기를 뱉는 서비스는 내가원하는방향이 아니야)

@@ -36,6 +36,9 @@ export function useCodeRagController({
   const [codeQuestion, setCodeQuestion] = useState('');
   const [codeMode, setCodeMode] = useState('overview');
   const [codeAnswer, setCodeAnswer] = useState(null);
+  const [codeAgentInstruction, setCodeAgentInstruction] = useState('');
+  const [codeAgentPlan, setCodeAgentPlan] = useState(null);
+  const [codeAgentPatch, setCodeAgentPatch] = useState(null);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeConversations, setCodeConversations] = useState([]);
   const [codeConversationId, setCodeConversationId] = useState('');
@@ -83,6 +86,9 @@ export function useCodeRagController({
     setHighlightRange(null);
     setCodeModalOpen(false);
     setCodeAnswerSavedId('');
+    setCodeAgentInstruction('');
+    setCodeAgentPlan(null);
+    setCodeAgentPatch(null);
     setCodeConversations([]);
     setCodeConversationId('');
     setCodeConversationTurns([]);
@@ -320,7 +326,8 @@ export function useCodeRagController({
               }
             } else if (eventName === 'replace') {
               sawStream = true;
-              if (streamedText) return;
+              const reason = eventData?.reason || '';
+              if (!shouldApplyStreamReplacement(reason, streamedText)) return;
               const replacement = eventData?.answer || '';
               streamedText = replacement;
               const update = (current) => ({ ...(current || {}), answer: replacement, repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
@@ -512,6 +519,42 @@ export function useCodeRagController({
     });
   }
 
+  async function generateCodeAgentPlan(event) {
+    event.preventDefault();
+    const instruction = codeAgentInstruction.trim();
+    if (!instruction || !selectedRepositoryId) return;
+    await run('code-agent-plan', async () => {
+      const plan = await request('/api/code-agent/plan', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          instruction,
+        },
+      });
+      setCodeAgentPlan(plan);
+      setCodeAgentPatch(null);
+    });
+  }
+
+  async function generateCodeAgentPatch() {
+    const instruction = codeAgentInstruction.trim();
+    const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
+    if (!instruction || !selectedRepositoryId || !targetFiles.length) return;
+    await run('code-agent-patch', async () => {
+      const patch = await request('/api/code-agent/patch', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          instruction,
+          targetFiles,
+        },
+      });
+      setCodeAgentPatch(patch);
+    });
+  }
+
   return {
     repositories,
     jobs,
@@ -540,6 +583,10 @@ export function useCodeRagController({
     codeMode,
     setCodeMode,
     codeAnswer,
+    codeAgentInstruction,
+    setCodeAgentInstruction,
+    codeAgentPlan,
+    codeAgentPatch,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -571,6 +618,8 @@ export function useCodeRagController({
     openCodeFile,
     askCode,
     cancelCodeAsk,
+    generateCodeAgentPlan,
+    generateCodeAgentPatch,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,
@@ -584,7 +633,15 @@ function answerLifecycleStatus(answer = {}, streamed = false) {
   if (answer?.aborted) return 'aborted';
   if (answer?.error) return 'error';
   const diagnostics = (answer?.diagnostics || []).join(' ').toLowerCase();
-  if (diagnostics.includes('fallback') || (!streamed && answer?.answer)) return 'fallback';
+  if (diagnostics.includes('fallback') || diagnostics.includes('retrieval-based fallback')) return 'fallback';
   if (diagnostics.includes('repair') || diagnostics.includes('repaired') || diagnostics.includes('보정')) return 'repaired';
   return 'completed';
+}
+
+function shouldApplyStreamReplacement(reason = '', currentText = '') {
+  if (!currentText) return true;
+  const normalized = String(reason || '').toLowerCase();
+  return normalized === 'length_continuation'
+    || normalized === 'answer_repair'
+    || normalized === 'commit_insight';
 }

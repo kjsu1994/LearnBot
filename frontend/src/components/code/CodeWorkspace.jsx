@@ -96,6 +96,10 @@ function CodeWorkspace(props) {
     codeMode = 'overview',
     setCodeMode = () => {},
     codeAnswer,
+    codeAgentInstruction = '',
+    setCodeAgentInstruction = () => {},
+    codeAgentPlan,
+    codeAgentPatch,
     codeConversations = [],
     codeConversationId = '',
     codeConversationTurns = [],
@@ -110,6 +114,8 @@ function CodeWorkspace(props) {
     referenceResult,
     openCodeFile = () => {},
     askCode = (event) => event.preventDefault(),
+    generateCodeAgentPlan = (event) => event.preventDefault(),
+    generateCodeAgentPatch = () => {},
     searchCode = (event) => event.preventDefault(),
     findReferences = (event) => event.preventDefault(),
     loading = () => false,
@@ -188,6 +194,16 @@ function CodeWorkspace(props) {
           saveLoading={loading('save-code-answer')}
           streamAnchorRef={answerStreamAnchorRef}
         />
+        <CodeAgentPanel
+          instruction={codeAgentInstruction}
+          setInstruction={setCodeAgentInstruction}
+          plan={codeAgentPlan}
+          patch={codeAgentPatch}
+          selectedRepositoryId={selectedRepositoryId}
+          loading={loading}
+          onPlan={generateCodeAgentPlan}
+          onPatch={generateCodeAgentPatch}
+        />
         <form className="panel search-panel rag-search-panel" onSubmit={searchCode}>
           <div className="panel-title">
             <Search size={18} />
@@ -234,6 +250,109 @@ function CodeWorkspace(props) {
         )}
       </div>
     </section>
+  );
+}
+
+function CodeAgentPanel({
+  instruction = '',
+  setInstruction = () => {},
+  plan,
+  patch,
+  selectedRepositoryId = '',
+  loading = () => false,
+  onPlan = (event) => event.preventDefault(),
+  onPatch = () => {},
+}) {
+  const targetFiles = plan?.targetFiles || [];
+  const canPlan = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-plan');
+  const canPatch = Boolean(selectedRepositoryId && instruction.trim() && targetFiles.length && !loading('code-agent-patch'));
+  return (
+    <section className="panel code-agent-panel">
+      <div className="panel-title">
+        <FileCode2 size={18} />
+        <div>
+          <h2>Patch Agent v1</h2>
+          <p>수정 계획과 검증된 unified diff를 제안합니다. 파일 자동 적용은 하지 않습니다.</p>
+        </div>
+      </div>
+      <form className="stack" onSubmit={onPlan}>
+        <label htmlFor="code-agent-instruction">수정 요청</label>
+        <textarea
+          id="code-agent-instruction"
+          rows={4}
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          placeholder="JWT 만료 시 401 응답을 반환하도록 수정해줘"
+        />
+        <div className="action-row">
+          <button disabled={!canPlan}>
+            {loading('code-agent-plan') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+            계획 생성
+          </button>
+          <button type="button" className="ghost-button" disabled={!canPatch} onClick={onPatch}>
+            {loading('code-agent-patch') ? <Loader2 className="spin" size={16} /> : <FileCode2 size={16} />}
+            diff 생성
+          </button>
+        </div>
+      </form>
+      {plan && (
+        <div className="code-agent-result">
+          <div className="result-heading">
+            <strong>{plan.summary}</strong>
+            <Badge variant={plan.riskLevel === 'high' ? 'destructive' : 'outline'}>{plan.riskLevel || 'medium'}</Badge>
+          </div>
+          <small>{plan.intent || 'unknown'}{plan.needsMoreContext ? ' · more context needed' : ''}</small>
+          <div className="code-agent-targets">
+            {targetFiles.map((file) => (
+              <article className="evidence-card code-evidence" key={file.path}>
+                <strong>{file.path}</strong>
+                <p>{file.reason}</p>
+              </article>
+            ))}
+          </div>
+          {!!plan.changePlan?.length && (
+            <ol className="code-agent-list">
+              {plan.changePlan.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ol>
+          )}
+          <WarningList warnings={plan.warnings} />
+        </div>
+      )}
+      {patch && (
+        <div className="code-agent-result">
+          <div className="result-heading">
+            <strong>{patch.summary}</strong>
+            <Badge variant={patch.valid ? 'outline' : 'destructive'}>{patch.valid ? 'valid' : 'invalid'}</Badge>
+          </div>
+          <WarningList warnings={patch.warnings} />
+          {!!patch.testSuggestions?.length && (
+            <div className="code-agent-tests">
+              {patch.testSuggestions.map((test) => <Badge variant="secondary" key={test}>{test}</Badge>)}
+            </div>
+          )}
+          {patch.files?.map((file) => (
+            <article className="code-agent-diff" key={file.path}>
+              <strong>{file.path}</strong>
+              <pre><code>{file.diff}</code></pre>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WarningList({ warnings = [] }) {
+  if (!warnings.length) return null;
+  return (
+    <div className="failure-list">
+      {warnings.map((warning, index) => (
+        <div className="failure-item" key={`${index}-${warning}`}>
+          <strong>Warning</strong>
+          <span>{warning}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

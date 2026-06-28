@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
@@ -984,6 +985,143 @@ class CodeRagServiceTest {
         assertThat(response.answer()).contains("starts token issuance [1]", "completing the flow [1]");
         assertThat(visible.toString()).isEqualTo(response.answer());
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("automatically continued"));
+    }
+
+    @Test
+    void diagnosticsReportInvalidCodeCitationReference() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult result = result(
+                "backend/AuthService.java",
+                "method",
+                "login",
+                0.82,
+                "public LoginResponse login() { authenticate(); issueToken(); }"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(
+                        streamDelta("Login authenticates the user and issues a token [2].", false),
+                        streamDelta("", true)
+                ));
+
+        CodeAskResponse response = service.askStreaming(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login work?",
+                "method",
+                4,
+                new CodeRagService.CodeAnswerStreamSink() {
+                    @Override
+                    public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                    }
+                }
+        );
+
+        assertThat(response.answer()).contains("[2]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("RAG quality trace").contains("invalidCitationRefs=1"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Citation support").contains("outside returned evidence"));
+    }
+
+    @Test
+    void diagnosticsReportCodeEvidenceSelectionSummary() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        List<CodeSearchResult> results = List.of(
+                result("backend/AuthController.java", "method", "login", 0.90, "public LoginResponse login() { return authService.login(); }"),
+                result("backend/AuthService.java", "method", "login", 0.85, "public LoginResponse login() { authenticate(); issueToken(); }")
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Login starts in the controller and calls the auth service [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login work?",
+                "flow",
+                4
+        );
+
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Evidence selection").contains("selected=2").contains("chunkTypes={method=2}"));
+    }
+
+    @Test
+    void deterministicCodePlannerAddsPatchIntentQueries() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult controller = result(
+                "backend/AuthController.java",
+                "method",
+                "login",
+                0.90,
+                "public LoginResponse login() { return authService.login(); }"
+        );
+        CodeSearchResult serviceResult = result(
+                "backend/AuthService.java",
+                "method",
+                "login",
+                0.88,
+                "public LoginResponse login() { validatePassword(); issueToken(); }"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(1, String.class);
+                    if (query.contains("target files methods validation tests")) {
+                        return List.of(controller);
+                    }
+                    if (query.contains("bug cause fix location related callers")) {
+                        return List.of(serviceResult);
+                    }
+                    return List.of();
+                });
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The likely patch area is the login controller and auth service [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Fix the login bug and identify impacted tests",
+                "auto",
+                4
+        );
+
+        assertThat(response.evidence()).hasSize(2);
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Code query planner").contains("intent=PATCH_INTENT").contains("auxiliaryQueries=2"));
+        verify(searchService).search(isNull(), eq("Fix the login bug and identify impacted tests"), anyInt(), anyList(), isNull());
+        verify(searchService).search(isNull(), argThat(query -> query.contains("target files methods validation tests")), anyInt(), anyList(), isNull());
+        verify(searchService).search(isNull(), argThat(query -> query.contains("bug cause fix location related callers")), anyInt(), anyList(), isNull());
     }
 
     private static OllamaClient.ChatResult chat(String content) {

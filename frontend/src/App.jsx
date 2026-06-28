@@ -201,6 +201,10 @@ export default function App() {
     codeMode,
     setCodeMode,
     codeAnswer,
+    codeAgentInstruction,
+    setCodeAgentInstruction,
+    codeAgentPlan,
+    codeAgentPatch,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -232,6 +236,8 @@ export default function App() {
     openCodeFile,
     askCode,
     cancelCodeAsk,
+    generateCodeAgentPlan,
+    generateCodeAgentPatch,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,
@@ -970,6 +976,10 @@ export default function App() {
             codeMode={codeMode}
             setCodeMode={setCodeMode}
             codeAnswer={codeAnswer}
+            codeAgentInstruction={codeAgentInstruction}
+            setCodeAgentInstruction={setCodeAgentInstruction}
+            codeAgentPlan={codeAgentPlan}
+            codeAgentPatch={codeAgentPatch}
             codeConversations={codeConversations}
             codeConversationId={codeConversationId}
             codeConversationTurns={codeConversationTurns}
@@ -1002,6 +1012,8 @@ export default function App() {
             openCodeFile={openCodeFile}
             askCode={askCode}
             cancelCodeAsk={cancelCodeAsk}
+            generateCodeAgentPlan={generateCodeAgentPlan}
+            generateCodeAgentPatch={generateCodeAgentPatch}
             searchCode={searchCode}
             findReferences={findReferences}
             loading={loading}

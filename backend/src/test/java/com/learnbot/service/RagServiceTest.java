@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -306,6 +307,54 @@ class RagServiceTest {
     }
 
     @Test
+    void deterministicQueryPlannerAddsMultiAspectDocumentQueries() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "Explain the approval procedure and exception conditions";
+        SearchResult procedure = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "approval-policy.pdf",
+                "application/pdf",
+                "The approval procedure starts with manager review and then compliance approval.");
+        SearchResult exception = searchResult(UUID.randomUUID(), UUID.randomUUID(), 1,
+                "approval-policy.pdf",
+                "application/pdf",
+                "Exception conditions apply during emergency operations and must be recorded.");
+
+        when(searchService.searchDetailed(anyString(), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(0, String.class);
+                    List<SearchResult> results;
+                    if (query.contains("procedure steps approval process")) {
+                        results = List.of(procedure);
+                    } else if (query.contains("exceptions conditions limits")) {
+                        results = List.of(exception);
+                    } else {
+                        results = List.of();
+                    }
+                    return new SearchService.SearchResponse(
+                            results,
+                            new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                    );
+                });
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The approval procedure requires manager and compliance review [1]. Exception conditions apply during emergencies [2]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.evidence()).hasSize(2);
+        assertThat(response.answer()).contains("[1]", "[2]");
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Document query planner").contains("intent=PROCEDURE").contains("auxiliaryQueries=2"));
+        verify(searchService).searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED"));
+        verify(searchService).searchDetailed(argThat(query -> query.contains("procedure steps approval process")), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED"));
+        verify(searchService).searchDetailed(argThat(query -> query.contains("exceptions conditions limits")), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED"));
+    }
+
+    @Test
     void documentEvidenceRankingAddsMetadataAndPromotesDirectMatch() {
         SearchService searchService = mock(SearchService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -329,6 +378,41 @@ class RagServiceTest {
 
         assertThat(response.evidence().get(0).title()).isEqualTo("security-policy.pdf");
         assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceRole", "evidenceRankReason");
+    }
+
+    @Test
+    void documentEvidenceSelectionPenalizesLowQualityWebEvidence() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, new LearnBotProperties());
+        String question = "Tell me the security policy";
+        SearchResult lowQualityWeb = searchResult(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                0,
+                "security-web.html",
+                "https://example.com/security",
+                "text/html",
+                "The security policy requires MFA and access reviews.",
+                Map.of("extractionQualityGrade", "LOW", "extractionQualityScore", 20)
+        );
+        SearchResult direct = searchResult(UUID.randomUUID(), UUID.randomUUID(), 1,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA and access reviews.");
+
+        when(searchService.search(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull()))
+                .thenReturn(List.of(lowQualityWeb, direct));
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("The security policy requires MFA and access reviews [1]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.evidence().get(0).title()).isEqualTo("security-policy.pdf");
+        assertThat(response.evidence()).anySatisfy(evidence ->
+                assertThat(evidence.metadata()).containsEntry("lowQualityWebEvidence", true));
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Evidence selection").contains("lowQualityWebSelected=1"));
     }
 
     @Test
@@ -683,6 +767,104 @@ class RagServiceTest {
     }
 
     @Test
+    void streamingContinuesWhenModelStopsByLength() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "Summarize the security policy.";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA for administrators and quarterly access reviews.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(
+                        streamDelta("The policy requires MFA for administrators [1].", false),
+                        streamDelta("", "length", true)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(new OllamaClient.ChatResult(
+                        "It also requires quarterly access reviews [1].",
+                        "stop",
+                        true,
+                        10,
+                        12,
+                        "http://ollama:11434",
+                        "qwen3:8b-q4_K_M",
+                        "primary",
+                        false
+                ));
+
+        StringBuilder visible = new StringBuilder();
+        AskResponse response = service.askStreaming(
+                question,
+                null,
+                "qa",
+                "BALANCED",
+                null,
+                null,
+                new RagService.AnswerStreamSink() {
+                    @Override
+                    public void onEvidence(List<SearchResult> citations, List<com.learnbot.dto.AnswerEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                        visible.append(text);
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                        visible.setLength(0);
+                        visible.append(answer);
+                    }
+                }
+        );
+
+        assertThat(response.answer()).contains("MFA for administrators [1]");
+        assertThat(response.answer()).contains("quarterly access reviews [1]");
+        assertThat(visible.toString()).isEqualTo(response.answer());
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("automatically continued"));
+    }
+
+    @Test
+    void diagnosticsReportInvalidDocumentCitationReference() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "What is the security policy?";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA for administrators.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The security policy requires MFA for administrators [2]."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.answer()).contains("[2]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("RAG quality trace").contains("invalidCitationRefs=1"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Citation support").contains("outside returned evidence"));
+    }
+
+    @Test
     void streamingUsesCompactPromptWithoutChangingVisibleEvidence() {
         SearchService searchService = mock(SearchService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -874,6 +1056,10 @@ class RagServiceTest {
 
     private static OllamaClient.ChatStreamDelta streamDelta(String content, boolean done) {
         return new OllamaClient.ChatStreamDelta(content, done ? "stop" : null, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+    }
+
+    private static OllamaClient.ChatStreamDelta streamDelta(String content, String doneReason, boolean done) {
+        return new OllamaClient.ChatStreamDelta(content, doneReason, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content) {

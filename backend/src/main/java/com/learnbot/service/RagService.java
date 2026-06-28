@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -187,6 +188,7 @@ public class RagService {
         ContextBundle contextBundle = buildBudgetedContext(effectiveQuestion, answerMode, questionType, retrieval.effectiveProfile(), systemPrompt, promptPrefix, citations, conversationContext, streamSink != null);
         citations = contextBundle.citations();
         String context = contextBundle.context();
+        int contextBudgetDropped = contextBundle.droppedCount();
         long contextMs = elapsedMs(contextStarted);
         if (streamSink != null) {
             streamSink.onStatus("evidence_ready", "답변에 사용할 근거를 정리했습니다.");
@@ -198,6 +200,7 @@ public class RagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        boolean answerContinued = false;
         boolean answerKeptAfterStreamValidation = false;
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
@@ -215,6 +218,20 @@ public class RagService {
             finalChatResult = chatResult;
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
+            if (isLengthStop(answerDoneReason)) {
+                long continuationStarted = System.nanoTime();
+                LengthContinuation continuation = continueLengthLimitedAnswer(systemPrompt, userPrompt, answer, answerMode, questionType, retrieval.effectiveProfile(), citations.size());
+                llmMs += elapsedMs(continuationStarted);
+                if (continuation.continued()) {
+                    answer = continuation.answer();
+                    answerDoneReason = continuation.doneReason();
+                    finalChatResult = continuation.chatResult();
+                    answerContinued = true;
+                    if (streamSink != null) {
+                        streamSink.onReplace(answer, "length_continuation");
+                    }
+                }
+            }
             String qualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
             if (qualityReason != null && streamedAnswer.isEmpty() && shouldRepairAnswer(qualityReason, retrieval.effectiveProfile())) {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
@@ -325,7 +342,7 @@ public class RagService {
                 buildEvidence(citations),
                 confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, answerKeptAfterStreamValidation, retrieval, questionType, timing),
+                        diagnostics(answerMode, citations, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval, questionType, timing, contextBudgetDropped),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -464,9 +481,15 @@ public class RagService {
         int searchLimit = documentSearchLimit(topK, effectiveProfile);
         int pinnedCandidateCount = collectPinnedConversationDocuments(question, filter, spaceIds, selectedSpaceId, conversationContext, merged);
         boolean expansionFromPinnedEvidence = previousAnswerExpansion(conversationContext) && pinnedCandidateCount > 0;
+        DocumentQueryPlan deterministicPlan = documentQueryPlan(question, questionType, effectiveProfile);
 
         if (!expansionFromPinnedEvidence) {
             searchAndMergeDocuments(question, question, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
+        }
+        if (!expansionFromPinnedEvidence && !isCountQuestion(question)) {
+            for (String query : deterministicPlan.auxiliaryQueries()) {
+                searchAndMergeDocuments(question, query, filter, searchLimit, effectiveProfile, spaceIds, selectedSpaceId, merged, queriesUsed, timing);
+            }
         }
         if (!expansionFromPinnedEvidence && usesAuxiliaryDocumentQueries(questionType)) {
             for (String query : overviewQueries(question, questionType, effectiveProfile)) {
@@ -563,7 +586,67 @@ public class RagService {
                 String.format(java.util.Locale.ROOT, "%.2f", assessment.coverage()),
                 abbreviate(question));
         int pinnedUsedCount = (int) citations.stream().filter(this::isConversationPinned).count();
-        return new DocumentRetrieval(citations, assessment, queryPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated, timing.snapshot(), pinnedCandidateCount, pinnedUsedCount);
+        return new DocumentRetrieval(citations, assessment, queryPlan, deterministicPlan, iteration, merged.size(), queriesUsed.size(), speedProfile, effectiveProfile, profileEscalated, timing.snapshot(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private DocumentQueryPlan documentQueryPlan(String question, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile) {
+        String base = safe(question).trim();
+        if (base.isBlank()) {
+            return new DocumentQueryPlan("EMPTY", List.of(), true);
+        }
+        List<String> queries = new ArrayList<>();
+        queries.add(base);
+        if (speedProfile == DocumentSpeedProfile.FAST) {
+            return new DocumentQueryPlan(questionType.name(), List.copyOf(queries), true);
+        }
+        String normalized = normalizeForSearch(base);
+        boolean asksCondition = containsAny(normalized, "condition", "criteria", "requirement", "scope", "applies", "조건", "기준", "범위", "적용");
+        boolean asksException = containsAny(normalized, "exception", "exclude", "limit", "except", "예외", "제외", "제한");
+        boolean asksProcedure = questionType == DocumentQuestionType.PROCEDURE || containsAny(normalized, "procedure", "process", "step", "approval", "절차", "과정", "승인", "단계");
+        switch (questionType) {
+            case PROCEDURE -> {
+                queries.add(base + " procedure steps approval process");
+                if (asksCondition || asksException) {
+                    queries.add(base + " exceptions conditions limits");
+                }
+            }
+            case CLAUSE_EXPLANATION -> {
+                queries.add(base + " conditions criteria scope applies");
+                if (asksException) {
+                    queries.add(base + " exceptions exclusions limits");
+                }
+            }
+            case COMPARISON -> {
+                queries.add(base + " comparison difference common points");
+                if (asksCondition || asksException) {
+                    queries.add(base + " conditions exceptions differences");
+                }
+            }
+            case PROCESS_FLOW -> {
+                queries.add(base + " process flow steps sequence");
+                queries.add(base + " inputs outputs exceptions");
+            }
+            case OVERVIEW, STRUCTURE, ARCHITECTURE -> queries.add(base + " overview structure main sections");
+            default -> {
+                if (asksProcedure) {
+                    queries.add(base + " procedure steps process");
+                }
+                if (asksCondition) {
+                    queries.add(base + " conditions criteria scope");
+                }
+                if (asksException) {
+                    queries.add(base + " exceptions exclusions limits");
+                }
+            }
+        }
+        int limit = speedProfile == DocumentSpeedProfile.DEEP ? 4 : 3;
+        List<String> planned = queries.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(limit)
+                .toList();
+        return new DocumentQueryPlan(questionType.name(), planned, planned.size() <= 1);
     }
 
     private int collectPinnedConversationDocuments(
@@ -730,6 +813,107 @@ public class RagService {
     private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
         OllamaClient.ChatResult result = ollamaClient.chatResult(systemPrompt, userPrompt, maxOutputTokens);
         return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
+    }
+
+    private LengthContinuation continueLengthLimitedAnswer(
+            String systemPrompt,
+            String originalUserPrompt,
+            String partialAnswer,
+            AnswerMode answerMode,
+            DocumentQuestionType questionType,
+            DocumentSpeedProfile speedProfile,
+            int evidenceCount
+    ) {
+        StringBuilder combined = new StringBuilder(safe(partialAnswer).trim());
+        OllamaClient.ChatResult lastResult = null;
+        String doneReason = "length";
+        int attempts = 0;
+        while (attempts < 2 && isLengthStop(doneReason)) {
+            attempts++;
+            OllamaClient.ChatResult continuation = chatWithLimit(
+                    systemPrompt + "\nContinue incomplete answers instead of restarting them. Keep citations valid and finish the answer.",
+                    continuationPrompt(originalUserPrompt, combined.toString(), attempts),
+                    continuationOutputTokens(answerMode, questionType, speedProfile, attempts)
+            );
+            if (continuation == null) {
+                break;
+            }
+            lastResult = mergeChatResults(lastResult, continuation, combined.toString());
+            String addition = safe(continuation.content()).trim();
+            if (addition.isBlank()) {
+                break;
+            }
+            appendContinuation(combined, addition);
+            doneReason = continuation.doneReason();
+            if (qualityFailureReason(combined.toString(), evidenceCount, doneReason) == null) {
+                break;
+            }
+        }
+        if (lastResult == null || combined.toString().trim().equals(safe(partialAnswer).trim())) {
+            return new LengthContinuation(partialAnswer, "length", null, false);
+        }
+        return new LengthContinuation(combined.toString().trim(), doneReason, lastResult, true);
+    }
+
+    private String continuationPrompt(String originalUserPrompt, String partialAnswer, int attempt) {
+        return originalUserPrompt
+                + "\n\nThe previous answer was cut off because the model reached the output limit."
+                + "\nDo not repeat completed sections. Continue from the exact point where it stopped."
+                + "\nFinish the remaining explanation with citations such as [1]."
+                + "\nThis is continuation attempt " + attempt + " of 2."
+                + "\n\nPartial answer to continue:\n" + partialAnswer;
+    }
+
+    private int continuationOutputTokens(AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, int attempt) {
+        int base;
+        if (answerMode == AnswerMode.SUMMARY || isOverviewQuestionType(questionType)) {
+            base = 1000;
+        } else if (answerMode == AnswerMode.TABLE || questionType == DocumentQuestionType.COUNT_OR_TABLE || questionType == DocumentQuestionType.COMPARISON) {
+            base = 900;
+        } else if (questionType == DocumentQuestionType.CLAUSE_EXPLANATION || questionType == DocumentQuestionType.PROCEDURE) {
+            base = 800;
+        } else {
+            base = 700;
+        }
+        if (speedProfile == DocumentSpeedProfile.DEEP) {
+            base += 160;
+        }
+        return attempt == 1 ? base : Math.max(500, base / 2);
+    }
+
+    private void appendContinuation(StringBuilder answer, String addition) {
+        if (answer.isEmpty()) {
+            answer.append(addition);
+            return;
+        }
+        if (!answer.toString().endsWith("\n") && !addition.startsWith("\n")) {
+            answer.append("\n\n");
+        }
+        answer.append(addition);
+    }
+
+    private OllamaClient.ChatResult mergeChatResults(OllamaClient.ChatResult previous, OllamaClient.ChatResult current, String existingContent) {
+        if (current == null) {
+            return previous;
+        }
+        if (previous == null) {
+            return current;
+        }
+        return new OllamaClient.ChatResult(
+                safe(existingContent) + "\n\n" + safe(current.content()),
+                current.doneReason(),
+                current.done(),
+                previous.promptEvalCount() + current.promptEvalCount(),
+                previous.evalCount() + current.evalCount(),
+                current.baseUrl(),
+                current.model(),
+                current.role(),
+                previous.fallbackUsed() || current.fallbackUsed()
+        );
+    }
+
+    private boolean isLengthStop(String doneReason) {
+        return "length".equalsIgnoreCase(safe(doneReason));
     }
 
     private OllamaClient.ChatResult streamWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens, AnswerStreamSink streamSink, StringBuilder streamedAnswer) {
@@ -1312,11 +1496,14 @@ public class RagService {
                 int seenForDocument = documentCounts.getOrDefault(result.documentId(), 0);
                 EvidenceScore score = documentEvidenceScore(question, answerMode, result, seenForDocument);
                 documentCounts.merge(result.documentId(), 1, Integer::sum);
-                ranked.add(withMetadata(result, Map.of(
-                        "evidenceScore", score.value(),
-                        "evidenceRole", score.role(),
-                        "evidenceRankReason", score.reason()
-                )));
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("evidenceScore", score.value());
+                metadata.put("evidenceRole", score.role());
+                metadata.put("evidenceRankReason", score.reason());
+                if (score.lowQualityWeb()) {
+                    metadata.put("lowQualityWebEvidence", true);
+                }
+                ranked.add(withMetadata(result, metadata));
             }
             return ranked.stream()
                     .sorted(Comparator
@@ -1363,8 +1550,12 @@ public class RagService {
         if (domainExpectedDocumentTypes(question).contains(metadataString(result, "documentType"))) {
             score += 0.08;
         }
+        boolean lowQualityWeb = isLowQualityWebEvidence(result);
+        if (lowQualityWeb && !isConversationPinned(result) && !isRequiredConversationPinned(result)) {
+            score -= 0.18;
+        }
         score -= Math.min(0.24, seenForDocument * 0.06);
-        return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument));
+        return new EvidenceScore(score, role, evidenceReason(role, termBoost, seenForDocument, lowQualityWeb), lowQualityWeb);
     }
 
     private Set<String> domainExpectedDocumentTypes(String question) {
@@ -1396,7 +1587,7 @@ public class RagService {
         return isDocumentContext(result) ? "context" : "direct";
     }
 
-    private String evidenceReason(String role, double termBoost, int seenForDocument) {
+    private String evidenceReason(String role, double termBoost, int seenForDocument, boolean lowQualityWeb) {
         List<String> reasons = new ArrayList<>();
         reasons.add("role=" + role);
         if (termBoost > 0) {
@@ -1405,7 +1596,29 @@ public class RagService {
         if (seenForDocument > 0) {
             reasons.add("document-diversity-penalty");
         }
+        if (lowQualityWeb) {
+            reasons.add("low-quality-web-penalty");
+        }
         return String.join(", ", reasons);
+    }
+
+    private boolean isLowQualityWebEvidence(SearchResult result) {
+        if (result == null) {
+            return false;
+        }
+        String sourceType = safe(result.sourceType()).toUpperCase(Locale.ROOT);
+        String sourceUri = safe(result.sourceUri()).toLowerCase(Locale.ROOT);
+        boolean webSource = sourceType.contains("WEB") || sourceUri.startsWith("http://") || sourceUri.startsWith("https://");
+        if (!webSource) {
+            return false;
+        }
+        String extractionGrade = metadataString(result, "extractionQualityGrade").toUpperCase(Locale.ROOT);
+        String crawlQuality = metadataString(result, "crawlQuality").toUpperCase(Locale.ROOT);
+        if ("LOW".equals(extractionGrade) || "LOW".equals(crawlQuality)) {
+            return true;
+        }
+        double qualityScore = metadataDouble(result, "extractionQualityScore", 100);
+        return qualityScore > 0 && qualityScore < 45;
     }
 
     private boolean metadataBoolean(SearchResult result, String key) {
@@ -1579,7 +1792,8 @@ public class RagService {
                     ? buildStreamingContext(question, answerMode, questionType, speedProfile, selected)
                     : buildContext(question, answerMode, questionType, speedProfile, selected);
         }
-        return new ContextBundle(List.copyOf(selected), context);
+        int droppedCount = Math.max(0, (results == null ? 0 : results.size()) - selected.size());
+        return new ContextBundle(List.copyOf(selected), context, droppedCount);
     }
 
     private String buildStreamingContext(String question, AnswerMode answerMode, DocumentQuestionType questionType, DocumentSpeedProfile speedProfile, List<SearchResult> results) {
@@ -3006,6 +3220,103 @@ public class RagService {
         return answer != null && answer.matches("(?s).*\\[\\d+].*");
     }
 
+    private CitationQuality citationQuality(String answer, List<SearchResult> citations) {
+        String safeAnswer = safe(answer);
+        List<SearchResult> safeCitations = citations == null ? List.of() : citations;
+        Set<Integer> referenced = citationReferences(safeAnswer);
+        long invalid = referenced.stream()
+                .filter(index -> index < 1 || index > safeCitations.size())
+                .count();
+        List<String> claims = claimSegments(safeAnswer);
+        long citedClaims = claims.stream().filter(this::containsCitation).count();
+        long weakSupport = claims.stream()
+                .filter(this::containsCitation)
+                .filter(claim -> !citationClaimSupported(claim, safeCitations))
+                .count();
+        int coverage = claims.isEmpty() ? (referenced.isEmpty() ? 0 : 100) : (int) Math.round((100.0 * citedClaims) / claims.size());
+        StringBuilder summary = new StringBuilder();
+        if (invalid > 0) {
+            summary.append(invalid).append(" citation reference(s) point outside returned evidence.");
+        }
+        if (weakSupport > 0) {
+            if (!summary.isEmpty()) {
+                summary.append(" ");
+            }
+            summary.append(weakSupport).append(" cited claim(s) have weak lexical support in their cited evidence.");
+        }
+        if (summary.isEmpty() && !referenced.isEmpty()) {
+            summary.append("All cited references point to returned evidence; weakSupport=").append(weakSupport).append(".");
+        }
+        return new CitationQuality(referenced.size(), (int) invalid, coverage, summary.toString());
+    }
+
+    private Set<Integer> citationReferences(String answer) {
+        Set<Integer> values = new HashSet<>();
+        Matcher matcher = Pattern.compile("\\[(\\d+)]").matcher(safe(answer));
+        while (matcher.find()) {
+            try {
+                values.add(Integer.parseInt(matcher.group(1)));
+            } catch (NumberFormatException ignored) {
+                // Regex keeps this numeric, but keep parsing defensive.
+            }
+        }
+        return values;
+    }
+
+    private List<String> claimSegments(String answer) {
+        String normalized = safe(answer).replace('\r', '\n');
+        return Pattern.compile("[\\n.!?]+")
+                .splitAsStream(normalized)
+                .map(String::trim)
+                .filter(segment -> segment.length() >= 18)
+                .filter(segment -> segment.matches("(?s).*[\\p{L}\\p{N}].*"))
+                .limit(40)
+                .toList();
+    }
+
+    private boolean citationClaimSupported(String claim, List<SearchResult> citations) {
+        Set<Integer> refs = citationReferences(claim);
+        if (refs.isEmpty()) {
+            return false;
+        }
+        Set<String> claimTerms = supportTerms(claim);
+        if (claimTerms.isEmpty()) {
+            return true;
+        }
+        for (Integer ref : refs) {
+            if (ref == null || ref < 1 || ref > citations.size()) {
+                return false;
+            }
+            Set<String> evidenceTerms = supportTerms(citations.get(ref - 1).content());
+            long overlap = claimTerms.stream().filter(evidenceTerms::contains).count();
+            if (overlap >= Math.min(2, claimTerms.size())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> supportTerms(String value) {
+        Set<String> terms = new HashSet<>();
+        String normalized = safe(value).toLowerCase(Locale.ROOT).replaceAll("\\[\\d+]", " ");
+        Matcher matcher = Pattern.compile("[\\p{L}\\p{N}_-]{3,}").matcher(normalized);
+        while (matcher.find() && terms.size() < 32) {
+            String term = matcher.group();
+            if (!isCitationStopWord(term)) {
+                terms.add(term);
+            }
+        }
+        return terms;
+    }
+
+    private boolean isCitationStopWord(String term) {
+        return Set.of(
+                "the", "and", "for", "that", "this", "with", "from", "into", "also", "then",
+                "when", "where", "what", "how", "why", "are", "was", "were", "has", "have",
+                "있습니다", "합니다", "대한", "근거", "문서", "코드"
+        ).contains(term);
+    }
+
     private String cleanConfidence(List<SearchResult> results, boolean llmUnavailable, boolean answerRewritten) {
         if (results == null || results.isEmpty()) {
             return "낮음";
@@ -3094,15 +3405,32 @@ public class RagService {
     private List<String> diagnostics(
             AnswerMode answerMode,
             List<SearchResult> results,
+            String answer,
+            String doneReason,
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
+            boolean answerContinued,
             boolean answerKeptAfterStreamValidation,
             DocumentRetrieval retrieval,
             DocumentQuestionType questionType,
-            AnswerTiming timing
+            AnswerTiming timing,
+            int contextBudgetDropped
     ) {
         List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten && !answerKeptAfterStreamValidation));
+        CitationQuality citationQuality = citationQuality(answer, results);
+        notes.add("RAG quality trace: answerChars=" + safe(answer).length()
+                + ", citedReferences=" + citationQuality.referencedCount()
+                + ", invalidCitationRefs=" + citationQuality.invalidCount()
+                + ", citationCoverage=" + citationQuality.coveragePercent() + "%"
+                + ", fallback=" + (llmUnavailable || (answerRewritten && !answerKeptAfterStreamValidation))
+                + ", retry=" + answerRetried
+                + ", continuation=" + answerContinued
+                + ", doneReason=" + (safe(doneReason).isBlank() ? "none" : safe(doneReason)) + ".");
+        if (!citationQuality.summary().isBlank()) {
+            notes.add("Citation support: " + citationQuality.summary());
+        }
+        notes.add(evidenceSelectionSummary(results, contextBudgetDropped));
         if (timing != null) {
             notes.add("Document RAG timing: retrieval=" + timing.retrievalMs()
                     + "ms, embedding=" + retrieval.timing().embeddingMs()
@@ -3169,6 +3497,13 @@ public class RagService {
                     + ", reason=" + plan.reason()
                     + ", queryCount=" + plan.queries().size() + ".");
         }
+        if (retrieval != null && retrieval.deterministicPlan() != null) {
+            DocumentQueryPlan plan = retrieval.deterministicPlan();
+            notes.add("Document query planner: intent=" + plan.intent()
+                    + ", queryCount=" + plan.queries().size()
+                    + ", auxiliaryQueries=" + Math.max(0, plan.queries().size() - 1)
+                    + ", originalOnlyFallback=" + plan.originalOnlyFallback() + ".");
+        }
         if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
             notes.add("RAG pipeline used query rewrite as an auxiliary retrieval signal.");
         }
@@ -3181,10 +3516,28 @@ public class RagService {
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
         }
+        if (answerContinued) {
+            notes.add("Answer generation reached the model output limit and was automatically continued before returning.");
+        }
         if (answerKeptAfterStreamValidation) {
             notes.add("Streaming answer was kept after self-check flagged the final text; review citations and confidence before relying on it.");
         }
         return notes;
+    }
+
+    private String evidenceSelectionSummary(List<SearchResult> results, int contextBudgetDropped) {
+        List<SearchResult> safeResults = results == null ? List.of() : results;
+        Map<String, Long> roleCounts = safeResults.stream()
+                .map(result -> metadataString(result, "evidenceRole"))
+                .map(role -> role.isBlank() ? "unknown" : role)
+                .collect(Collectors.groupingBy(role -> role, LinkedHashMap::new, Collectors.counting()));
+        long lowQualityWeb = safeResults.stream().filter(result -> metadataBoolean(result, "lowQualityWebEvidence")).count();
+        long required = safeResults.stream().filter(this::isRequiredConversationPinned).count();
+        return "Evidence selection: selected=" + safeResults.size()
+                + ", budgetDropped=" + Math.max(0, contextBudgetDropped)
+                + ", roles=" + roleCounts
+                + ", lowQualityWebSelected=" + lowQualityWeb
+                + ", requiredPinned=" + required + ".";
     }
 
     private List<String> conversationDiagnostics(
@@ -3450,6 +3803,7 @@ public class RagService {
         copyMetadata(result.metadata(), metadata, "evidenceScore");
         copyMetadata(result.metadata(), metadata, "evidenceRole");
         copyMetadata(result.metadata(), metadata, "evidenceRankReason");
+        copyMetadata(result.metadata(), metadata, "lowQualityWebEvidence");
         copyMetadata(result.metadata(), metadata, "conversationPinned");
         copyMetadata(result.metadata(), metadata, "conversationRequired");
         copyMetadata(result.metadata(), metadata, "previousAnswerItem");
@@ -3527,6 +3881,7 @@ public class RagService {
             List<SearchResult> citations,
             RagPipelineService.EvidenceAssessment assessment,
             RagPipelineService.QueryPlan queryPlan,
+            DocumentQueryPlan deterministicPlan,
             int iteration,
             int candidateCount,
             int queryCount,
@@ -3542,13 +3897,25 @@ public class RagService {
     private record QuerySearchResults(String query, List<SearchResult> results, SearchService.SearchTiming timing) {
     }
 
+    private record DocumentQueryPlan(String intent, List<String> queries, boolean originalOnlyFallback) {
+        List<String> auxiliaryQueries() {
+            if (queries == null || queries.size() <= 1) {
+                return List.of();
+            }
+            return queries.subList(1, queries.size());
+        }
+    }
+
     private record CountEntry(String title, SpreadsheetStats stats, int startCitation, int endCitation) {
     }
 
     private record EvidencePoint(String text, int citationIndex) {
     }
 
-    private record EvidenceScore(double value, String role, String reason) {
+    private record EvidenceScore(double value, String role, String reason, boolean lowQualityWeb) {
+    }
+
+    private record CitationQuality(int referencedCount, int invalidCount, int coveragePercent, String summary) {
     }
 
     private record AnswerTiming(
@@ -3562,7 +3929,10 @@ public class RagService {
     ) {
     }
 
-    private record ContextBundle(List<SearchResult> citations, String context) {
+    private record ContextBundle(List<SearchResult> citations, String context, int droppedCount) {
+    }
+
+    private record LengthContinuation(String answer, String doneReason, OllamaClient.ChatResult chatResult, boolean continued) {
     }
 
     private record RetrievalTiming(
