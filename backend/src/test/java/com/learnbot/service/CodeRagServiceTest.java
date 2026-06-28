@@ -891,7 +891,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.streamChat(anyString(), anyString(), eq(900)))
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(1400)))
                 .thenReturn(Flux.just(streamDelta("Login calls the controller and service path [1][2].", false), streamDelta("", true)));
 
         StringBuilder statuses = new StringBuilder();
@@ -923,10 +923,67 @@ class CodeRagServiceTest {
         );
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), eq(900));
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), eq(1400));
         assertThat(promptCaptor.getValue()).contains("Key excerpt:");
         assertThat(statuses.toString()).contains("retrieval_started|", "evidence_ready|", "llm_started|");
         assertThat(response.evidence()).hasSize(6);
+    }
+
+    @Test
+    void streamingContinuesWhenModelStopsByLength() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult result = result(
+                "backend/AuthService.java",
+                "method",
+                "login",
+                0.82,
+                "public LoginResponse login() { authenticate(); issueToken(); audit(); }"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(1400)))
+                .thenReturn(Flux.just(
+                        streamDelta("Login first authenticates the user and starts token issuance [1].", false),
+                        streamDelta("", "length", true)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(900)))
+                .thenReturn(chat("It then records audit information and returns the login response, completing the flow [1]."));
+
+        StringBuilder visible = new StringBuilder();
+        CodeAskResponse response = service.askStreaming(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login call flow work?",
+                "flow",
+                4,
+                new CodeRagService.CodeAnswerStreamSink() {
+                    @Override
+                    public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                        visible.append(text);
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                        visible.setLength(0);
+                        visible.append(answer);
+                    }
+                }
+        );
+
+        assertThat(response.answer()).contains("starts token issuance [1]", "completing the flow [1]");
+        assertThat(visible.toString()).isEqualTo(response.answer());
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("automatically continued"));
     }
 
     private static OllamaClient.ChatResult chat(String content) {
@@ -934,7 +991,11 @@ class CodeRagServiceTest {
     }
 
     private static OllamaClient.ChatStreamDelta streamDelta(String content, boolean done) {
-        return new OllamaClient.ChatStreamDelta(content, done ? "stop" : null, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+        return streamDelta(content, done ? "stop" : null, done);
+    }
+
+    private static OllamaClient.ChatStreamDelta streamDelta(String content, String doneReason, boolean done) {
+        return new OllamaClient.ChatStreamDelta(content, doneReason, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {

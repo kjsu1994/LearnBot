@@ -239,6 +239,7 @@ public class CodeRagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        boolean answerContinued = false;
         boolean answerKeptAfterStreamValidation = false;
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
@@ -257,6 +258,20 @@ public class CodeRagService {
             finalChatResult = chatResult;
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
+            if (isLengthStop(answerDoneReason)) {
+                long continuationStarted = System.nanoTime();
+                LengthContinuation continuation = continueLengthLimitedAnswer(systemPrompt, userPrompt, answer, questionMode, answerResults.size());
+                llmMs += elapsedMs(continuationStarted);
+                if (continuation.continued()) {
+                    answer = continuation.answer();
+                    answerDoneReason = continuation.doneReason();
+                    finalChatResult = continuation.chatResult();
+                    answerContinued = true;
+                    if (streamSink != null) {
+                        streamSink.onReplace(answer, "length_continuation");
+                    }
+                }
+            }
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
             if (qualityReason != null && streamedAnswer.isEmpty() && pipelineService.maxIterations() > 1) {
                 String retryPrompt = userPrompt
@@ -319,7 +334,7 @@ public class CodeRagService {
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, answerKeptAfterStreamValidation, retrieval),
+                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -911,6 +926,96 @@ public class CodeRagService {
         return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
     }
 
+    private LengthContinuation continueLengthLimitedAnswer(
+            String systemPrompt,
+            String originalUserPrompt,
+            String partialAnswer,
+            CodeQuestionMode questionMode,
+            int evidenceCount
+    ) {
+        StringBuilder combined = new StringBuilder(safe(partialAnswer, "").trim());
+        OllamaClient.ChatResult lastResult = null;
+        String doneReason = "length";
+        int attempts = 0;
+        while (attempts < 2 && isLengthStop(doneReason)) {
+            attempts++;
+            String continuationPrompt = continuationPrompt(originalUserPrompt, combined.toString(), attempts);
+            OllamaClient.ChatResult continuation = chatWithLimit(
+                    systemPrompt + "\nContinue incomplete answers instead of restarting them. Keep citations valid and finish the answer.",
+                    continuationPrompt,
+                    continuationOutputTokens(questionMode, attempts)
+            );
+            lastResult = mergeChatResults(lastResult, continuation, combined.toString());
+            String addition = safe(continuation.content(), "").trim();
+            if (addition.isBlank()) {
+                break;
+            }
+            appendContinuation(combined, addition);
+            doneReason = continuation.doneReason();
+            if (qualityFailureReason(combined.toString(), evidenceCount, doneReason) == null) {
+                break;
+            }
+        }
+        if (lastResult == null || combined.toString().trim().equals(safe(partialAnswer, "").trim())) {
+            return new LengthContinuation(partialAnswer, "length", null, false);
+        }
+        return new LengthContinuation(combined.toString().trim(), doneReason, lastResult, true);
+    }
+
+    private String continuationPrompt(String originalUserPrompt, String partialAnswer, int attempt) {
+        return originalUserPrompt
+                + "\n\nThe previous answer was cut off because the model reached the output limit."
+                + "\nDo not repeat completed sections. Continue from the exact point where it stopped."
+                + "\nFinish the remaining explanation with citations such as [1]."
+                + "\nThis is continuation attempt " + attempt + " of 2."
+                + "\n\nPartial answer to continue:\n" + partialAnswer;
+    }
+
+    private int continuationOutputTokens(CodeQuestionMode questionMode, int attempt) {
+        int base = switch (questionMode) {
+            case OVERVIEW, REASONING -> 1000;
+            case CALL_FLOW, EXPLAIN_METHOD -> 900;
+            case UI_EVENT, IMPACT -> 800;
+            case LOCATE -> 600;
+        };
+        return attempt == 1 ? base : Math.max(500, base / 2);
+    }
+
+    private void appendContinuation(StringBuilder answer, String addition) {
+        if (answer.isEmpty()) {
+            answer.append(addition);
+            return;
+        }
+        if (!answer.toString().endsWith("\n") && !addition.startsWith("\n")) {
+            answer.append("\n\n");
+        }
+        answer.append(addition);
+    }
+
+    private OllamaClient.ChatResult mergeChatResults(OllamaClient.ChatResult previous, OllamaClient.ChatResult current, String existingContent) {
+        if (current == null) {
+            return previous;
+        }
+        if (previous == null) {
+            return current;
+        }
+        return new OllamaClient.ChatResult(
+                safe(existingContent, "") + "\n\n" + safe(current.content(), ""),
+                current.doneReason(),
+                current.done(),
+                previous.promptEvalCount() + current.promptEvalCount(),
+                previous.evalCount() + current.evalCount(),
+                current.baseUrl(),
+                current.model(),
+                current.role(),
+                previous.fallbackUsed() || current.fallbackUsed()
+        );
+    }
+
+    private boolean isLengthStop(String doneReason) {
+        return "length".equalsIgnoreCase(safe(doneReason, ""));
+    }
+
     private OllamaClient.ChatResult stream(String systemPrompt, String userPrompt, CodeAnswerStreamSink streamSink, StringBuilder streamedAnswer, int maxOutputTokens) {
         AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
         ollamaClient.streamChat(systemPrompt, userPrompt, maxOutputTokens)
@@ -1066,10 +1171,10 @@ public class CodeRagService {
             return configured;
         }
         return switch (questionMode) {
-            case OVERVIEW, REASONING -> 1100;
-            case CALL_FLOW, EXPLAIN_METHOD -> 900;
-            case UI_EVENT, IMPACT -> 800;
-            case LOCATE -> 600;
+            case OVERVIEW, REASONING -> 1600;
+            case CALL_FLOW, EXPLAIN_METHOD -> 1400;
+            case UI_EVENT, IMPACT -> 1200;
+            case LOCATE -> 800;
         };
     }
 
@@ -1298,6 +1403,7 @@ public class CodeRagService {
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
+            boolean answerContinued,
             boolean answerKeptAfterStreamValidation,
             CodeRetrieval retrieval
     ) {
@@ -1357,6 +1463,9 @@ public class CodeRagService {
         }
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
+        }
+        if (answerContinued) {
+            notes.add("Answer generation reached the model output limit and was automatically continued before returning.");
         }
         if (answerKeptAfterStreamValidation) {
             notes.add("Streaming answer was kept after self-check flagged the final text; review citations and confidence before relying on it.");
@@ -1890,6 +1999,9 @@ public class CodeRagService {
     }
 
     private record CodeContextBundle(List<CodeSearchResult> results, String context) {
+    }
+
+    private record LengthContinuation(String answer, String doneReason, OllamaClient.ChatResult chatResult, boolean continued) {
     }
 
     enum CodeQuestionMode {
