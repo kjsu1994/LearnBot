@@ -257,12 +257,13 @@ public class RagService {
                     containsCitation(answer),
                     abbreviate(question));
             answerRewritten = true;
-            if (streamedAnswer.isEmpty()) {
+            boolean replaceWithFallback = streamedAnswer.isEmpty() && shouldReplaceAnswerWithFallback(answer, lowQualityReason);
+            if (replaceWithFallback) {
                 answer = fallbackAnswer(answerMode, originalQuestion, citations);
             } else {
                 answerKeptAfterStreamValidation = true;
             }
-            if (streamSink != null && streamedAnswer.isEmpty()) {
+            if (streamSink != null && replaceWithFallback) {
                 streamSink.onReplace(answer, "quality_fallback");
             }
         }
@@ -2856,6 +2857,18 @@ public class RagService {
                 || normalized.contains("incomplete")
                 || normalized.contains("too_short")
                 || normalized.contains("blank");
+    }
+
+    private boolean shouldReplaceAnswerWithFallback(String answer, String reason) {
+        String normalized = safe(reason).toLowerCase();
+        if (normalized.contains("missing_citation")) {
+            return safe(answer).trim().length() < 12;
+        }
+        return normalized.contains("blank")
+                || normalized.contains("placeholder")
+                || normalized.contains("too_short")
+                || normalized.contains("llm_unavailable")
+                || normalized.contains("empty");
     }
 
     private List<SearchResult> compactRepairCitations(

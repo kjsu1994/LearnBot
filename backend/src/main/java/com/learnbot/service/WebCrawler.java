@@ -154,8 +154,9 @@ public class WebCrawler {
             }
 
             SkipDecision skipDecision = skipDecision(page.document(), contentSignatures, current.depth());
-            if (skipDecision != null && shouldRetryWithPlaywright(skipDecision, safeOptions)) {
-                WebPageExtractor.FetchedPage renderedPage = retryWithPlaywright(sourceId, current, safeOptions, skipDecision);
+            SkipDecision retryDecision = playwrightRetryDecision(page.document(), skipDecision);
+            if (retryDecision != null && shouldRetryWithPlaywright(retryDecision, safeOptions)) {
+                WebPageExtractor.FetchedPage renderedPage = retryWithPlaywright(sourceId, current, safeOptions, retryDecision);
                 if (renderedPage != null) {
                     page = renderedPage;
                     skipDecision = skipDecision(page.document(), contentSignatures, current.depth());
@@ -190,6 +191,9 @@ public class WebCrawler {
         metadata.put("crawlQuality", "LOW");
         metadata.put("crawlQualityReason", decision.reasonCode());
         metadata.put("crawlQualityMessage", decision.message());
+        metadata.putIfAbsent("extractionQualityScore", 25);
+        metadata.putIfAbsent("extractionQualityGrade", "LOW");
+        metadata.putIfAbsent("extractionQualitySignals", List.of(decision.reasonCode()));
         if (decision.metadata() != null && !decision.metadata().isEmpty()) {
             metadata.put("crawlQualityDetails", decision.metadata());
         }
@@ -202,6 +206,29 @@ public class WebCrawler {
         );
     }
 
+    private SkipDecision playwrightRetryDecision(ExtractedDocument document, SkipDecision skipDecision) {
+        if (skipDecision != null) {
+            return skipDecision;
+        }
+        Map<String, Object> metadata = document.metadata() == null ? Map.of() : document.metadata();
+        String grade = stringMetadata(metadata, "extractionQualityGrade");
+        List<String> signals = listMetadata(metadata, "extractionQualitySignals");
+        boolean retryableSignal = signals.stream().anyMatch(signal ->
+                "RENDER_RECOMMENDED".equals(signal)
+                        || "LOW_CONTENT".equals(signal)
+                        || "LOW_TEXT_DENSITY".equals(signal)
+                        || "NAVIGATION_ONLY_PAGE".equals(signal)
+        );
+        if (!"LOW".equals(grade) || !retryableSignal) {
+            return null;
+        }
+        return new SkipDecision(
+                "LOW_EXTRACTION_QUALITY",
+                "Static crawl result has low extraction quality; retrying with Playwright fallback.",
+                Map.of("extractionQualityGrade", grade, "extractionQualitySignals", signals)
+        );
+    }
+
     private boolean shouldRetryWithPlaywright(SkipDecision skipDecision, CrawlOptions options) {
         if (skipDecision == null || options == null || options.renderMode() != WebRenderMode.STATIC) {
             return false;
@@ -211,7 +238,8 @@ public class WebCrawler {
         }
         return "LOW_CONTENT".equals(skipDecision.reasonCode())
                 || "NAVIGATION_ONLY_PAGE".equals(skipDecision.reasonCode())
-                || "LOW_TEXT_DENSITY".equals(skipDecision.reasonCode());
+                || "LOW_TEXT_DENSITY".equals(skipDecision.reasonCode())
+                || "LOW_EXTRACTION_QUALITY".equals(skipDecision.reasonCode());
     }
 
     private WebPageExtractor.FetchedPage retryWithPlaywright(UUID sourceId, CrawlUrl current, CrawlOptions options, SkipDecision skipDecision) {
@@ -332,6 +360,19 @@ public class WebCrawler {
     private int previewBlockCount(ExtractedDocument document) {
         Object value = document.metadata() == null ? null : document.metadata().get("webPreviewBlocks");
         return value instanceof List<?> list ? list.size() : -1;
+    }
+
+    private String stringMetadata(Map<String, Object> metadata, String key) {
+        Object value = metadata == null ? null : metadata.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private List<String> listMetadata(Map<String, Object> metadata, String key) {
+        Object value = metadata == null ? null : metadata.get(key);
+        if (value instanceof List<?> list) {
+            return list.stream().map(String::valueOf).toList();
+        }
+        return List.of();
     }
 
     private String contentSignature(String content) {

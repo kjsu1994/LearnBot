@@ -146,9 +146,64 @@ public class SearchService {
     }
 
     public List<String> expandedQueries(String query) {
-        if (System.nanoTime() >= 0) {
-            return cleanExpandedQueries(query);
+        return safeExpandedQueries(query);
+    }
+
+    private List<String> safeExpandedQueries(String query) {
+        String safeQuery = safeQuery(query);
+        if (safeQuery.isBlank()) {
+            return List.of();
         }
+        String normalized = normalize(safeQuery);
+        List<String> values = new ArrayList<>();
+        values.add(safeQuery);
+        addIfAny(values, normalized, List.of("차별", "예방", "개선", "discrimination", "prevention", "improvement"),
+                "차별 예방 개선",
+                "임금 복리후생 교육훈련 고충처리 차별 예방",
+                "discrimination prevention improvement");
+        addIfAny(values, normalized, List.of("요약", "개요", "정리", "전체", "핵심", "summary", "overview", "outline"),
+                "문서 요약 주요 내용",
+                "전체 구조 핵심 근거",
+                "document summary overview main topics");
+        addIfAny(values, normalized, List.of("구조", "목차", "섹션", "페이지", "조항", "위치", "어디", "structure", "section", "page", "where"),
+                "문서 구조 목차 섹션 페이지 조항",
+                "document structure section page heading");
+        addIfAny(values, normalized, List.of("표", "테이블", "시트", "행", "열", "건수", "개수", "합계", "table", "sheet", "row", "count", "total"),
+                "표 테이블 시트 행 열 건수 합계",
+                "table sheet row column count total");
+        addIfAny(values, normalized, List.of("원문", "인용", "근거", "quote", "citation", "evidence"),
+                "원문 인용 근거 조항",
+                "quote citation evidence clause");
+        addIfAny(values, normalized, List.of("로그인", "인증", "세션", "토큰", "login", "auth", "session", "token"),
+                "로그인 인증 세션 토큰",
+                "login auth authentication session token");
+        addIfAny(values, normalized, List.of("인덱스", "인덱싱", "임베딩", "청크", "검색", "index", "embedding", "chunk", "search"),
+                "인덱스 인덱싱 임베딩 청크 검색",
+                "index indexing embedding chunk search");
+        addIfAny(values, normalized, List.of("오류", "실패", "예외", "에러", "원인", "error", "exception", "failure", "failed"),
+                "오류 예외 실패 원인",
+                "error exception failure failed");
+        try {
+            values.addAll(domainProfileService.expandedQueries(safeQuery));
+        } catch (RuntimeException ignored) {
+            // Keep deterministic base expansions when profile lookup fails.
+        }
+        values.addAll(cleanExpandedQueries(query));
+        return values.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(16)
+                .toList();
+    }
+
+    private void addIfAny(List<String> values, String normalizedQuery, List<String> needles, String... expansions) {
+        if (needles.stream().map(this::normalize).anyMatch(needle -> !needle.isBlank() && normalizedQuery.contains(needle))) {
+            values.addAll(List.of(expansions));
+        }
+    }
+
+    private List<String> legacyExpandedQueries(String query) {
         String safeQuery = safeQuery(query);
         if (safeQuery.isBlank()) {
             return List.of();

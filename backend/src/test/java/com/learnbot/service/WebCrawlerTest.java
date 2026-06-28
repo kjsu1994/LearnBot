@@ -198,6 +198,48 @@ class WebCrawlerTest {
     }
 
     @Test
+    void retriesLowQualityStaticPageBasedOnExtractionSignals() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getCrawler().setMaxDepth(0);
+        properties.getCrawler().setMaxPagesPerRequest(30);
+        properties.getCrawler().setMinContentChars(30);
+        properties.getCrawler().setPlaywrightEnabled(true);
+        WebPageExtractor extractor = mock(WebPageExtractor.class);
+        WebCrawler crawler = new WebCrawler(properties, extractor);
+        UUID sourceId = UUID.randomUUID();
+
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"), any()))
+                .thenReturn(page(
+                        "https://example.com/docs",
+                        textWithMetadata(
+                                "Root",
+                                "https://example.com/docs",
+                                "Static content has enough text but extraction quality says rendering is needed.",
+                                Map.of(
+                                        "bodyTextLength", 78,
+                                        "host", "example.com",
+                                        "extractionQualityGrade", "LOW",
+                                        "extractionQualitySignals", List.of("RENDER_RECOMMENDED")
+                                )
+                        ),
+                        List.of()
+                ))
+                .thenReturn(page(
+                        "https://example.com/docs",
+                        text("Root", "Rendered documentation content with enough useful body text after JavaScript runs."),
+                        List.of()
+                ));
+
+        WebCrawler.CrawlResult result = crawler.crawl(sourceId, "https://example.com/docs", 0, 30,
+                new CrawlOptions(CrawlScope.START_PATH, RobotsFailurePolicy.FAIL_CLOSED, false, false, WebRenderMode.STATIC));
+
+        assertThat(result.documents()).extracting(ExtractedDocument::sourceUri)
+                .containsExactly("https://example.com/docs");
+        verify(extractor).fetchPage(eq(sourceId), eq("https://example.com/docs"),
+                argThat(options -> options.renderMode() == WebRenderMode.PLAYWRIGHT_FALLBACK));
+    }
+
+    @Test
     void indexesWeakStartPageWithLowQualityMetadataWhenNoFallbackIsAvailable() {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getCrawler().setMaxDepth(0);
@@ -221,7 +263,9 @@ class WebCrawlerTest {
         assertThat(result.documents()).hasSize(1);
         assertThat(result.documents().get(0).metadata())
                 .containsEntry("crawlQuality", "LOW")
-                .containsEntry("crawlQualityReason", "LOW_CONTENT");
+                .containsEntry("crawlQualityReason", "LOW_CONTENT")
+                .containsEntry("extractionQualityGrade", "LOW")
+                .containsEntry("extractionQualityScore", 25);
         assertThat(result.skippedCount()).isZero();
         verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs")),
                 eq("START_PAGE_INDEXED_WITH_LOW_QUALITY"), eq(0), eq(null), eq("text/html"), any(), any());
@@ -238,12 +282,16 @@ class WebCrawlerTest {
     }
 
     private ExtractedDocument textAt(String title, String sourceUri, String body) {
+        return textWithMetadata(title, sourceUri, body, Map.of("bodyTextLength", body.length(), "host", "example.com"));
+    }
+
+    private ExtractedDocument textWithMetadata(String title, String sourceUri, String body, Map<String, Object> metadata) {
         return new ExtractedDocument(
                 title,
                 sourceUri,
                 "text/html",
                 "Page title: " + title + "\nURL: " + sourceUri + "\n\n" + body,
-                Map.of("bodyTextLength", body.length(), "host", "example.com")
+                metadata
         );
     }
 }

@@ -106,6 +106,7 @@ public class WebPageExtractor {
         int previewBlockCount = 0;
         int linkCount = 0;
         boolean renderRecommended = false;
+        ExtractionQuality extractionQuality = ExtractionQuality.empty();
 
         if (allowedDomain && robotsDecision.allowed()) {
             try {
@@ -136,9 +137,11 @@ public class WebPageExtractor {
                     extractionStrategy = rootSelection.strategy();
                     previewBlockCount = webPreviewBlocks(doc).size();
                     linkCount = extractLinks(doc).size();
+                    extractionQuality = extractionQuality(bodyText.length(), staticTextDensity, previewBlockCount, linkCount, renderRecommended);
                     if (staticTextLength < properties.getCrawler().getMinContentChars()) {
                         recommendations.add("Static extraction is below the minimum content threshold: " + staticTextLength + " chars.");
                     }
+                    recommendations.addAll(extractionQuality.recommendations());
                     if (renderRecommended && !properties.getCrawler().isPlaywrightEnabled()) {
                         recommendations.add("The page looks like it may need rendering, but Playwright is disabled.");
                     }
@@ -173,6 +176,9 @@ public class WebPageExtractor {
                 renderRecommended,
                 staticTextLength,
                 staticTextDensity,
+                extractionQuality.score(),
+                extractionQuality.grade(),
+                extractionQuality.signals(),
                 selectorUsed,
                 extractionStrategy,
                 previewBlockCount,
@@ -257,6 +263,14 @@ public class WebPageExtractor {
             RootSelection rootSelection = previewRootSelection(doc);
             List<Map<String, Object>> previewBlocks = webPreviewBlocks(doc);
             String structuredText = webPreviewText(previewBlocks);
+            double htmlTextDensity = textDensity(doc, bodyText);
+            ExtractionQuality extractionQuality = extractionQuality(
+                    bodyText.length(),
+                    htmlTextDensity,
+                    previewBlocks.size(),
+                    links.size(),
+                    renderOutcome.rendered() || shouldRenderWithPlaywright(doc, safeOptions)
+            );
             String content = webContentHeader(title, url, heading) + (structuredText.isBlank() ? bodyText : structuredText);
             List<String> images = doc.select("img[src]").stream()
                     .map(element -> firstNonBlank(element.attr("alt"), element.absUrl("src")))
@@ -280,7 +294,10 @@ public class WebPageExtractor {
             metadata.put("heading", heading);
             metadata.put("headings", headings);
             metadata.put("bodyTextLength", bodyText.length());
-            metadata.put("htmlTextDensity", textDensity(doc, bodyText));
+            metadata.put("htmlTextDensity", htmlTextDensity);
+            metadata.put("extractionQualityScore", extractionQuality.score());
+            metadata.put("extractionQualityGrade", extractionQuality.grade());
+            metadata.put("extractionQualitySignals", extractionQuality.signals());
             metadata.put("selectorUsed", rootSelection.selector());
             metadata.put("extractionStrategy", rootSelection.strategy());
             metadata.put("contentType", responseContentType);
@@ -484,12 +501,64 @@ public class WebPageExtractor {
                 && (doc.select("#app, #root, [data-reactroot], script[src*=bundle], script[src*=app]").size() > 0);
     }
 
+    private boolean shouldRenderWithPlaywright(Document doc, CrawlOptions options) {
+        String bodyText = doc.body() == null ? "" : cleanText(doc.body().text());
+        return options.renderMode() == WebRenderMode.PLAYWRIGHT_ALWAYS
+                || bodyText.length() < properties.getCrawler().getPlaywrightMinStaticChars()
+                || looksLikeSpaShell(doc);
+    }
+
     private double textDensity(Document doc, String bodyText) {
         int htmlLength = doc == null ? 0 : doc.outerHtml().length();
         if (htmlLength <= 0) {
             return 0.0;
         }
         return Math.min(1.0, (double) cleanText(bodyText).length() / htmlLength);
+    }
+
+    private ExtractionQuality extractionQuality(
+            int bodyTextLength,
+            double textDensity,
+            int previewBlockCount,
+            int linkCount,
+            boolean renderRecommended
+    ) {
+        int score = 100;
+        List<String> signals = new ArrayList<>();
+        List<String> recommendations = new ArrayList<>();
+        int minContent = Math.max(1, properties.getCrawler().getMinContentChars());
+        if (bodyTextLength < minContent) {
+            score -= 45;
+            signals.add("LOW_CONTENT");
+            recommendations.add("Extracted body text is below the configured minimum.");
+        } else if (bodyTextLength < minContent * 2) {
+            score -= 15;
+            signals.add("THIN_CONTENT");
+        }
+        if (textDensity > 0 && textDensity < properties.getCrawler().getMinTextDensity()) {
+            score -= 25;
+            signals.add("LOW_TEXT_DENSITY");
+            recommendations.add("The page has low text density and may contain navigation or boilerplate.");
+        }
+        if (previewBlockCount <= 1 && bodyTextLength < minContent * 2) {
+            score -= 20;
+            signals.add("NAVIGATION_ONLY_PAGE");
+            recommendations.add("Structured preview contains very few content blocks.");
+        }
+        if (renderRecommended) {
+            score -= properties.getCrawler().isPlaywrightEnabled() ? 5 : 15;
+            signals.add("RENDER_RECOMMENDED");
+            if (!properties.getCrawler().isPlaywrightEnabled()) {
+                recommendations.add("Enable Playwright rendering for pages that load content with JavaScript.");
+            }
+        }
+        if (linkCount > 80 && bodyTextLength < minContent * 3) {
+            score -= 10;
+            signals.add("LINK_HEAVY_PAGE");
+        }
+        int boundedScore = Math.max(0, Math.min(100, score));
+        String grade = boundedScore >= 75 ? "HIGH" : boundedScore >= 45 ? "MEDIUM" : "LOW";
+        return new ExtractionQuality(boundedScore, grade, List.copyOf(signals), List.copyOf(recommendations));
     }
 
     private URI toUriOrNull(String value) {
@@ -1002,6 +1071,12 @@ public class WebPageExtractor {
     private record RenderOutcome(Document document, boolean rendered, String fallbackReason) {
         static RenderOutcome staticOnly(Document document) {
             return new RenderOutcome(document, false, "");
+        }
+    }
+
+    private record ExtractionQuality(int score, String grade, List<String> signals, List<String> recommendations) {
+        static ExtractionQuality empty() {
+            return new ExtractionQuality(0, "UNKNOWN", List.of(), List.of());
         }
     }
 

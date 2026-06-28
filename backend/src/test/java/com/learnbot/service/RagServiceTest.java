@@ -681,6 +681,33 @@ class RagServiceTest {
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Streaming answer was kept"));
     }
 
+    @Test
+    void nonStreamingAnswerMissingCitationIsNotReplacedWhenOtherwiseUseful() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "What is the security policy?";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA for administrators.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("BALANCED")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The security policy requires MFA for administrators."));
+
+        AskResponse response = service.ask(question, null, "qa");
+
+        assertThat(response.answer()).isEqualTo("The security policy requires MFA for administrators.");
+    }
+
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {
         return searchResult(
                 documentId,

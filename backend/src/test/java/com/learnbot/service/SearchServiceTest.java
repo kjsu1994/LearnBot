@@ -62,6 +62,17 @@ class SearchServiceTest {
     }
 
     @Test
+    void expandsKoreanDiscriminationQuestionWithReadableTerms() {
+        SearchService service = new SearchService(null, null);
+
+        List<String> expanded = service.expandedQueries("차별 예방을 위해 무엇을 개선해야 해?");
+
+        assertThat(expanded)
+                .contains("차별 예방 개선")
+                .anySatisfy(query -> assertThat(query).contains("임금").contains("교육훈련"));
+    }
+
+    @Test
     void expandsSatelliteGseQuestionWithProfileTerms() {
         SearchService service = new SearchService(null, null);
 
