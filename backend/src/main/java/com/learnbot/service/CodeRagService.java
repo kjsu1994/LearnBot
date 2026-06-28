@@ -234,6 +234,7 @@ public class CodeRagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        boolean answerKeptAfterStreamValidation = false;
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
         long llmMs = 0;
@@ -248,7 +249,7 @@ public class CodeRagService {
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
-            if (qualityReason != null && pipelineService.maxIterations() > 1) {
+            if (qualityReason != null && streamedAnswer.isEmpty() && pipelineService.maxIterations() > 1) {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
@@ -278,11 +279,15 @@ public class CodeRagService {
             }
         }
         if (qualityFailureReason(answer, answerResults.size(), answerDoneReason) != null) {
-            answer = questionMode == CodeQuestionMode.OVERVIEW
-                    ? overviewFallbackAnswer(answerResults)
-                    : fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerRewritten = true;
-            if (streamSink != null) {
+            if (streamedAnswer.isEmpty()) {
+                answer = questionMode == CodeQuestionMode.OVERVIEW
+                        ? overviewFallbackAnswer(answerResults)
+                        : fallbackAnswer(questionMode, originalQuestion, answerResults);
+            } else {
+                answerKeptAfterStreamValidation = true;
+            }
+            if (streamSink != null && streamedAnswer.isEmpty()) {
                 streamSink.onReplace(answer, "quality_fallback");
             }
         }
@@ -305,7 +310,7 @@ public class CodeRagService {
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, retrieval),
+                        diagnostics(questionMode, results, answerResults, llmUnavailable, answerRewritten, answerRetried, answerKeptAfterStreamValidation, retrieval),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -1198,9 +1203,10 @@ public class CodeRagService {
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
+            boolean answerKeptAfterStreamValidation,
             CodeRetrieval retrieval
     ) {
-        List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten));
+        List<String> notes = new ArrayList<>(diagnostics(results, answerResults, llmUnavailable, answerRewritten && !answerKeptAfterStreamValidation));
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             long projectContext = answerResults.stream().filter(result -> isProjectContext(result.chunkType())).count();
             long distinctFiles = answerResults.stream().map(CodeSearchResult::filePath).distinct().count();
@@ -1256,6 +1262,9 @@ public class CodeRagService {
         }
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
+        }
+        if (answerKeptAfterStreamValidation) {
+            notes.add("Streaming answer was kept after self-check flagged the final text; review citations and confidence before relying on it.");
         }
         return notes;
     }

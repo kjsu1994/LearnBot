@@ -24,6 +24,7 @@ export function useDocumentRagController({
   const [webIncludeAttachments, setWebIncludeAttachments] = useState(false);
   const [webUseSitemap, setWebUseSitemap] = useState(false);
   const [webRenderMode, setWebRenderMode] = useState('PLAYWRIGHT_FALLBACK');
+  const [webInspect, setWebInspect] = useState(null);
   const [files, setFiles] = useState([]);
   const [fileBatchResult, setFileBatchResult] = useState(null);
   const [query, setQuery] = useState('');
@@ -76,6 +77,7 @@ export function useDocumentRagController({
     setDocuments([]);
     setDocumentJobs([]);
     setDocumentJobDiagnostics({});
+    setWebInspect(null);
     setFiles([]);
     setFileBatchResult(null);
     setAnswerSavedId('');
@@ -103,25 +105,41 @@ export function useDocumentRagController({
     setDocumentJobs(data || []);
   }
 
+  function webRequestPayload() {
+    return {
+      url: webUrl.trim(),
+      spaceId: activeSpaceId,
+      recursive: webRecursive,
+      maxDepth: Number(webMaxDepth),
+      maxPages: Number(webMaxPages),
+      crawlScope: webCrawlScope,
+      robotsFailurePolicy: webRobotsFailurePolicy,
+      includeAttachments: webIncludeAttachments,
+      useSitemap: webUseSitemap,
+      renderMode: webRenderMode,
+    };
+  }
+
+  async function inspectWeb(event) {
+    event.preventDefault();
+    await run('web-inspect', async () => {
+      const data = await request('/api/sources/web/inspect', {
+        method: 'POST',
+        json: webRequestPayload(),
+      });
+      setWebInspect(data);
+    });
+  }
+
   async function ingestWeb(event) {
     event.preventDefault();
     await run('web', async () => {
       await request('/api/sources/web', {
         method: 'POST',
-        json: {
-          url: webUrl.trim(),
-          spaceId: activeSpaceId,
-          recursive: webRecursive,
-          maxDepth: Number(webMaxDepth),
-          maxPages: Number(webMaxPages),
-          crawlScope: webCrawlScope,
-          robotsFailurePolicy: webRobotsFailurePolicy,
-          includeAttachments: webIncludeAttachments,
-          useSitemap: webUseSitemap,
-          renderMode: webRenderMode,
-        },
+        json: webRequestPayload(),
       });
       setWebUrl('');
+      setWebInspect(null);
       await Promise.all([refreshDocuments(), refreshDocumentJobs()]);
     });
   }
@@ -183,6 +201,7 @@ export function useDocumentRagController({
       };
       let data = null;
       let sawStream = false;
+      let streamedText = '';
       const controller = new AbortController();
       askAbortRef.current = controller;
       const initialAnswer = {
@@ -212,6 +231,7 @@ export function useDocumentRagController({
             if (eventName === 'delta') {
               sawStream = true;
               const text = eventData?.text || '';
+              streamedText += text;
               const update = (current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, streaming: true, status: 'streaming' });
               setAnswer(update);
               setPendingDocumentTurn(update);
@@ -221,7 +241,10 @@ export function useDocumentRagController({
               setPendingDocumentTurn(update);
             } else if (eventName === 'replace') {
               sawStream = true;
-              const update = (current) => ({ ...(current || {}), answer: eventData?.answer || '', streaming: true, status: 'streaming' });
+              if (streamedText) return;
+              const replacement = eventData?.answer || '';
+              streamedText = replacement;
+              const update = (current) => ({ ...(current || {}), answer: replacement, streaming: true, status: 'streaming' });
               setAnswer(update);
               setPendingDocumentTurn(update);
             } else if (eventName === 'done') {
@@ -265,6 +288,9 @@ export function useDocumentRagController({
         if (askAbortRef.current === controller) {
           askAbortRef.current = null;
         }
+      }
+      if (data && streamedText.trim()) {
+        data = { ...data, answer: streamedText.trim() };
       }
       const completed = { ...data, question: submittedQuestion, status: answerLifecycleStatus(data, sawStream) };
       setAnswer(completed);
@@ -483,6 +509,7 @@ export function useDocumentRagController({
     setWebUseSitemap,
     webRenderMode,
     setWebRenderMode,
+    webInspect,
     files,
     setFiles: updateUploadFiles,
     fileBatchResult,
@@ -514,6 +541,7 @@ export function useDocumentRagController({
     resetState,
     refreshDocuments,
     refreshDocumentJobs,
+    inspectWeb,
     ingestWeb,
     ingestFile,
     search,

@@ -194,6 +194,7 @@ public class RagService {
         boolean llmUnavailable = false;
         boolean answerRewritten = false;
         boolean answerRetried = false;
+        boolean answerKeptAfterStreamValidation = false;
         String answerDoneReason = null;
         OllamaClient.ChatResult finalChatResult = null;
         long llmMs = 0;
@@ -208,7 +209,7 @@ public class RagService {
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
             String qualityReason = qualityFailureReason(answer, citations.size(), answerDoneReason);
-            if (qualityReason != null && shouldRepairAnswer(qualityReason, retrieval.effectiveProfile())) {
+            if (qualityReason != null && streamedAnswer.isEmpty() && shouldRepairAnswer(qualityReason, retrieval.effectiveProfile())) {
                 log.info("RAG answer retry mode={} reason={} citations={} question={}",
                         answerMode.value(), qualityReason, citations.size(), abbreviate(question));
                 List<SearchResult> retryCitations = compactRepairCitations(citations, answerMode, questionType, retrieval.effectiveProfile());
@@ -255,9 +256,13 @@ public class RagService {
                     safe(answer).length(),
                     containsCitation(answer),
                     abbreviate(question));
-            answer = fallbackAnswer(answerMode, originalQuestion, citations);
             answerRewritten = true;
-            if (streamSink != null) {
+            if (streamedAnswer.isEmpty()) {
+                answer = fallbackAnswer(answerMode, originalQuestion, citations);
+            } else {
+                answerKeptAfterStreamValidation = true;
+            }
+            if (streamSink != null && streamedAnswer.isEmpty()) {
                 streamSink.onReplace(answer, "quality_fallback");
             }
         }
@@ -312,7 +317,7 @@ public class RagService {
                 buildEvidence(citations),
                 confidence(citations, llmUnavailable, answerRewritten, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, retrieval, questionType, timing),
+                        diagnostics(answerMode, citations, llmUnavailable, answerRewritten, answerRetried, answerKeptAfterStreamValidation, retrieval, questionType, timing),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -2985,11 +2990,12 @@ public class RagService {
             boolean llmUnavailable,
             boolean answerRewritten,
             boolean answerRetried,
+            boolean answerKeptAfterStreamValidation,
             DocumentRetrieval retrieval,
             DocumentQuestionType questionType,
             AnswerTiming timing
     ) {
-        List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten));
+        List<String> notes = new ArrayList<>(diagnostics(answerMode, results, llmUnavailable, answerRewritten && !answerKeptAfterStreamValidation));
         if (timing != null) {
             notes.add("Document RAG timing: retrieval=" + timing.retrievalMs()
                     + "ms, embedding=" + retrieval.timing().embeddingMs()
@@ -3067,6 +3073,9 @@ public class RagService {
         }
         if (answerRetried) {
             notes.add("Answer self-check retried generation once before returning the final answer.");
+        }
+        if (answerKeptAfterStreamValidation) {
+            notes.add("Streaming answer was kept after self-check flagged the final text; review citations and confidence before relying on it.");
         }
         return notes;
     }

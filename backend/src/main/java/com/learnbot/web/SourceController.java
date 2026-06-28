@@ -8,6 +8,7 @@ import com.learnbot.dto.DocumentPreviewResponse;
 import com.learnbot.dto.FileBatchIngestResponse;
 import com.learnbot.dto.FileIngestItemResponse;
 import com.learnbot.dto.IngestResponse;
+import com.learnbot.dto.WebInspectResponse;
 import com.learnbot.dto.WebIngestRequest;
 import com.learnbot.service.DocumentPreviewService;
 import com.learnbot.service.IngestionService;
@@ -53,6 +54,23 @@ public class SourceController {
     @PostMapping("/sources/web")
     IngestResponse ingestWeb(@Valid @RequestBody WebIngestRequest request) {
         return ingestionService.ingestWeb(
+                currentUserProvider.currentUser(),
+                request.spaceId(),
+                request.url(),
+                request.recursive(),
+                request.maxDepth(),
+                request.maxPages(),
+                request.crawlScope(),
+                request.robotsFailurePolicy(),
+                request.includeAttachments(),
+                request.useSitemap(),
+                request.renderMode()
+        );
+    }
+
+    @PostMapping("/sources/web/inspect")
+    WebInspectResponse inspectWeb(@Valid @RequestBody WebIngestRequest request) {
+        return ingestionService.inspectWeb(
                 currentUserProvider.currentUser(),
                 request.spaceId(),
                 request.url(),

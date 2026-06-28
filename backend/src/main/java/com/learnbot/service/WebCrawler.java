@@ -162,6 +162,14 @@ public class WebCrawler {
                 }
             }
             if (skipDecision != null) {
+                if (current.depth() == 0) {
+                    extractor.auditSkipped(sourceId, page.uri(), "START_PAGE_INDEXED_WITH_LOW_QUALITY", current.depth(),
+                            current.referrer() == null ? null : current.referrer().toString(), page.document().contentType(),
+                            "Start page was indexed despite weak extraction so the crawl can fall back gracefully. " + skipDecision.message(),
+                            skipDecision.metadata());
+                    documents.add(withCrawlMetadata(withQualityMetadata(page.document(), skipDecision), startUri, current.depth(), current.referrer()));
+                    continue;
+                }
                 skippedCount++;
                 extractor.auditSkipped(sourceId, page.uri(), skipDecision.reasonCode(), current.depth(),
                         current.referrer() == null ? null : current.referrer().toString(), page.document().contentType(),
@@ -172,6 +180,26 @@ public class WebCrawler {
         }
 
         return new CrawlResult(documents, fetchedCount, skippedCount);
+    }
+
+    private ExtractedDocument withQualityMetadata(ExtractedDocument document, SkipDecision decision) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (document.metadata() != null) {
+            metadata.putAll(document.metadata());
+        }
+        metadata.put("crawlQuality", "LOW");
+        metadata.put("crawlQualityReason", decision.reasonCode());
+        metadata.put("crawlQualityMessage", decision.message());
+        if (decision.metadata() != null && !decision.metadata().isEmpty()) {
+            metadata.put("crawlQualityDetails", decision.metadata());
+        }
+        return new ExtractedDocument(
+                document.title(),
+                document.sourceUri(),
+                document.contentType(),
+                document.content(),
+                metadata
+        );
     }
 
     private boolean shouldRetryWithPlaywright(SkipDecision skipDecision, CrawlOptions options) {

@@ -157,6 +157,7 @@ function DocumentSourcePanel(props) {
     setWebUseSitemap = () => {},
     webRenderMode = 'PLAYWRIGHT_FALLBACK',
     setWebRenderMode = () => {},
+    webInspect = null,
     files = [],
     setFiles = () => {},
     documents = [],
@@ -175,6 +176,7 @@ function DocumentSourcePanel(props) {
     reindexDocument = () => {},
     deleteDocument = () => {},
     fileBatchResult,
+    inspectWeb = (event) => event.preventDefault(),
     ingestWeb = (event) => event.preventDefault(),
     ingestFile = (event) => event.preventDefault(),
     loading = () => false,
@@ -200,6 +202,10 @@ function DocumentSourcePanel(props) {
           <button disabled={!webUrl || loading('web')}>
             {loading('web') ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
             인덱싱
+          </button>
+          <button type="button" className="ghost-button" disabled={!webUrl || loading('web-inspect')} onClick={inspectWeb}>
+            {loading('web-inspect') ? <Loader2 className="spin" size={16} /> : <Info size={16} />}
+            Inspect
           </button>
         </div>
         <label className="checkbox-row" htmlFor="admin-web-recursive">
@@ -252,6 +258,7 @@ function DocumentSourcePanel(props) {
             />
           </div>
         </div>
+        {webInspect && <WebInspectPanel inspect={webInspect} />}
       </form>
       <form className="stack" onSubmit={ingestFile}>
         <label htmlFor="admin-file-upload">파일 업로드</label>
@@ -302,6 +309,30 @@ function DocumentSourcePanel(props) {
         />
       )}
     </section>
+  );
+}
+
+function WebInspectPanel({ inspect }) {
+  const recommendations = inspect?.recommendations || [];
+  const status = inspect.allowedDomain && inspect.robotsAllowed !== false && recommendations.length === 0 ? 'Ready' : 'Needs attention';
+  return (
+    <div className="failure-item diagnostic-item">
+      <strong>Web inspect · {status}</strong>
+      <small>{inspect.normalizedUrl}</small>
+      <span>
+        host {inspect.host || '-'} · robots {inspect.robotsAllowed === false ? 'blocked' : 'allowed'} ·
+        text {inspect.staticTextLength || 0} · links {inspect.linkCount || 0} · sitemap {inspect.sitemapUrlCount || 0}
+      </span>
+      <span>
+        render {inspect.renderMode} · playwright {inspect.playwrightEnabled ? 'enabled' : 'disabled'} · chromium {inspect.chromiumAvailable ? 'available' : 'missing'} ·
+        root {inspect.selectorUsed || '-'} ({inspect.extractionStrategy || '-'})
+      </span>
+      {recommendations.length > 0 && (
+        <div className="selected-file-list">
+          {recommendations.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      )}
+    </div>
   );
 }
 

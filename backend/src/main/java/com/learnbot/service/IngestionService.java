@@ -8,6 +8,7 @@ import com.learnbot.dto.DocumentDetail;
 import com.learnbot.dto.DocumentIndexingJobSummary;
 import com.learnbot.dto.DocumentProcessingDiagnosticSummary;
 import com.learnbot.dto.IngestResponse;
+import com.learnbot.dto.WebInspectResponse;
 import com.learnbot.repository.DocumentRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -113,11 +114,42 @@ public class IngestionService {
         UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
         String normalizedUrl = webUrlNormalizer.normalize(url);
         CrawlOptions crawlOptions = crawlOptions(crawlScope, robotsFailurePolicy, includeAttachments, useSitemap, renderMode);
-        UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id());
+        Map<String, Object> sourceMetadata = webSourceMetadata(
+                Boolean.TRUE.equals(recursive),
+                maxDepth,
+                maxPages,
+                crawlOptions
+        );
+        UUID sourceId = repository.createSource(SourceType.WEB, normalizedUrl, normalizedUrl, resolvedSpaceId, user.id(), sourceMetadata);
         UUID jobId = repository.createDocumentJob(sourceId, resolvedSpaceId, "INITIAL_INDEX");
         executor.submit(() -> runWebIndex(user, sourceId, resolvedSpaceId, normalizedUrl, Boolean.TRUE.equals(recursive), maxDepth, maxPages, crawlOptions, jobId, false));
         auditService.log(user, "DOCUMENT_INGEST_STARTED", "SOURCE", sourceId, resolvedSpaceId, "Web document indexing started.");
         return new IngestResponse(sourceId, null, resolvedSpaceId, 0, SourceStatus.INDEXING.name(), 0, 0, 0);
+    }
+
+    public WebInspectResponse inspectWeb(
+            AppUser user,
+            UUID spaceId,
+            String url,
+            Boolean recursive,
+            Integer maxDepth,
+            Integer maxPages,
+            String crawlScope,
+            String robotsFailurePolicy,
+            Boolean includeAttachments,
+            Boolean useSitemap,
+            String renderMode
+    ) {
+        authService.resolveSpace(user, spaceId);
+        String normalizedUrl = webUrlNormalizer.normalize(url);
+        CrawlOptions crawlOptions = crawlOptions(crawlScope, robotsFailurePolicy, includeAttachments, useSitemap, renderMode);
+        return webPageExtractor.inspect(
+                normalizedUrl,
+                crawlOptions,
+                Boolean.TRUE.equals(recursive),
+                maxDepth == null ? properties.getCrawler().getMaxDepth() : maxDepth,
+                maxPages == null ? properties.getCrawler().getMaxPagesPerRequest() : maxPages
+        );
     }
 
     public IngestResponse ingestFile(AppUser user, UUID spaceId, MultipartFile file) {
@@ -258,7 +290,19 @@ public class IngestionService {
             switch (source.type()) {
                 case WEB -> {
                     String normalizedUrl = webUrlNormalizer.normalize(source.location());
-                    runWebIndex(user, source.id(), spaceId, normalizedUrl, previousDocumentCount > 1, null, null, defaultCrawlOptions(), jobId, true);
+                    WebCrawlSettings crawlSettings = webCrawlSettings(source.metadata(), previousDocumentCount);
+                    runWebIndex(
+                            user,
+                            source.id(),
+                            spaceId,
+                            normalizedUrl,
+                            crawlSettings.recursive(),
+                            crawlSettings.maxDepth(),
+                            crawlSettings.maxPages(),
+                            crawlSettings.options(),
+                            jobId,
+                            true
+                    );
                 }
                 case FILE -> {
                     StoredObject object = repository.findSourceObject(source.id())
@@ -564,6 +608,79 @@ public class IngestionService {
         ).normalized();
     }
 
+    private Map<String, Object> webSourceMetadata(boolean recursive, Integer maxDepth, Integer maxPages, CrawlOptions crawlOptions) {
+        CrawlOptions safeOptions = crawlOptions == null ? defaultCrawlOptions() : crawlOptions.normalized();
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("recursive", recursive);
+        options.put("maxDepth", maxDepth);
+        options.put("maxPages", maxPages);
+        options.put("crawlScope", safeOptions.scope().name());
+        options.put("robotsFailurePolicy", safeOptions.robotsFailurePolicy().name());
+        options.put("includeAttachments", safeOptions.includeAttachments());
+        options.put("useSitemap", safeOptions.useSitemap());
+        options.put("renderMode", safeOptions.renderMode().name());
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("webCrawlOptions", options);
+        return metadata;
+    }
+
+    private WebCrawlSettings webCrawlSettings(Map<String, Object> sourceMetadata, int previousDocumentCount) {
+        Object rawOptions = sourceMetadata == null ? null : sourceMetadata.get("webCrawlOptions");
+        if (!(rawOptions instanceof Map<?, ?> storedOptions)) {
+            return new WebCrawlSettings(previousDocumentCount > 1, null, null, defaultCrawlOptions());
+        }
+        boolean recursive = booleanValue(storedOptions.get("recursive"), previousDocumentCount > 1);
+        Integer maxDepth = integerValue(storedOptions.get("maxDepth"));
+        Integer maxPages = integerValue(storedOptions.get("maxPages"));
+        CrawlOptions options = crawlOptions(
+                stringValue(storedOptions.get("crawlScope")),
+                stringValue(storedOptions.get("robotsFailurePolicy")),
+                booleanObject(storedOptions.get("includeAttachments")),
+                booleanObject(storedOptions.get("useSitemap")),
+                stringValue(storedOptions.get("renderMode"))
+        );
+        return new WebCrawlSettings(recursive, maxDepth, maxPages, options);
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value == null) {
+            return fallback;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private Boolean booleanObject(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value == null) {
+            return null;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private Integer integerValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            String text = String.valueOf(value).trim();
+            return text.isBlank() ? null : Integer.parseInt(text);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
     private void recordFailure(AppUser user, UUID sourceId, UUID spaceId, String action, RuntimeException ex) {
         String message = failureMessage(ex);
         try {
@@ -623,6 +740,9 @@ public class IngestionService {
     }
 
     private record WebDocuments(List<ExtractedDocument> documents, int pageCount, int skippedCount) {
+    }
+
+    private record WebCrawlSettings(boolean recursive, Integer maxDepth, Integer maxPages, CrawlOptions options) {
     }
 
     private record IndexedDocument(

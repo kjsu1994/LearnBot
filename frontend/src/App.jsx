@@ -115,6 +115,7 @@ export default function App() {
     setWebUseSitemap,
     webRenderMode,
     setWebRenderMode,
+    webInspect,
     files,
     setFiles: updateUploadFiles,
     fileBatchResult,
@@ -146,6 +147,7 @@ export default function App() {
     resetState: resetDocumentState,
     refreshDocuments,
     refreshDocumentJobs,
+    inspectWeb,
     ingestWeb,
     ingestFile,
     search,
@@ -1028,9 +1030,11 @@ export default function App() {
             setWebUseSitemap={setWebUseSitemap}
             webRenderMode={webRenderMode}
             setWebRenderMode={setWebRenderMode}
+            webInspect={webInspect}
             files={files}
             setFiles={updateUploadFiles}
             fileBatchResult={fileBatchResult}
+            inspectWeb={inspectWeb}
             ingestWeb={ingestWeb}
             ingestFile={ingestFile}
             documents={documents}
@@ -1190,9 +1194,11 @@ export default function App() {
               setWebUseSitemap,
               webRenderMode,
               setWebRenderMode,
+              webInspect,
               files,
               setFiles: updateUploadFiles,
               fileBatchResult,
+              inspectWeb,
               ingestWeb,
               ingestFile,
               documents,

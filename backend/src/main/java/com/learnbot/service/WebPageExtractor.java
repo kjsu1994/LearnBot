@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.WebInspectResponse;
 import com.learnbot.repository.DocumentRepository;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
@@ -77,6 +78,108 @@ public class WebPageExtractor {
 
     public ExtractedDocument extract(UUID sourceId, String url, CrawlOptions options) {
         return fetchPage(sourceId, url, options).document();
+    }
+
+    public WebInspectResponse inspect(String url, CrawlOptions options, boolean recursive, int maxDepth, int maxPages) {
+        CrawlOptions safeOptions = options == null ? CrawlOptions.defaults() : options.normalized();
+        URI uri = URI.create(url);
+        requireHttpScheme(uri);
+        String host = requireHost(uri);
+        List<String> recommendations = new ArrayList<>();
+        boolean allowedDomain = isAllowedDomain(host);
+        if (!allowedDomain) {
+            recommendations.add("Domain is not in the crawler allowlist: " + host);
+        }
+
+        RobotsDecision robotsDecision = new RobotsDecision(true, null, "robots.txt check is disabled or ignored.");
+        if (allowedDomain && adminSettingsService.isRespectRobotsTxt() && safeOptions.robotsFailurePolicy() != RobotsFailurePolicy.IGNORE) {
+            robotsDecision = robotsAllows(uri, safeOptions.robotsFailurePolicy());
+            if (!robotsDecision.allowed()) {
+                recommendations.add(robotsDecision.message());
+            }
+        }
+
+        int staticTextLength = 0;
+        double staticTextDensity = 0.0;
+        String selectorUsed = "";
+        String extractionStrategy = "";
+        int previewBlockCount = 0;
+        int linkCount = 0;
+        boolean renderRecommended = false;
+
+        if (allowedDomain && robotsDecision.allowed()) {
+            try {
+                Connection.Response response = Jsoup.connect(url)
+                        .timeout(properties.getCrawler().getTimeoutSeconds() * 1000)
+                        .userAgent("LearnBot/0.1")
+                        .ignoreContentType(true)
+                        .ignoreHttpErrors(true)
+                        .execute();
+                String responseContentType = cleanContentType(response.contentType());
+                if (!isHtml(responseContentType)) {
+                    recommendations.add("URL did not return HTML content: " + responseContentType);
+                } else if (response.statusCode() >= 400) {
+                    recommendations.add("URL returned HTTP " + response.statusCode() + ".");
+                } else {
+                    Document doc = response.parse();
+                    doc.setBaseUri(url);
+                    String rawBodyText = doc.body() == null ? "" : cleanText(doc.body().text());
+                    renderRecommended = safeOptions.renderMode() == WebRenderMode.PLAYWRIGHT_ALWAYS
+                            || rawBodyText.length() < properties.getCrawler().getPlaywrightMinStaticChars()
+                            || looksLikeSpaShell(doc);
+                    sanitizeDocument(doc);
+                    String bodyText = doc.body() == null ? "" : cleanText(doc.body().text());
+                    staticTextLength = bodyText.length();
+                    staticTextDensity = textDensity(doc, bodyText);
+                    RootSelection rootSelection = previewRootSelection(doc);
+                    selectorUsed = rootSelection.selector();
+                    extractionStrategy = rootSelection.strategy();
+                    previewBlockCount = webPreviewBlocks(doc).size();
+                    linkCount = extractLinks(doc).size();
+                    if (staticTextLength < properties.getCrawler().getMinContentChars()) {
+                        recommendations.add("Static extraction is below the minimum content threshold: " + staticTextLength + " chars.");
+                    }
+                    if (renderRecommended && !properties.getCrawler().isPlaywrightEnabled()) {
+                        recommendations.add("The page looks like it may need rendering, but Playwright is disabled.");
+                    }
+                }
+            } catch (Exception ex) {
+                recommendations.add("Static fetch failed: " + ex.getMessage());
+            }
+        }
+
+        int sitemapUrlCount = 0;
+        if (allowedDomain && robotsDecision.allowed() && safeOptions.useSitemap()) {
+            sitemapUrlCount = sitemapUrls(null, uri, properties.getCrawler().getMaxSitemapUrls()).size();
+            if (sitemapUrlCount == 0) {
+                recommendations.add("No crawlable sitemap URLs were discovered.");
+            }
+        }
+
+        return new WebInspectResponse(
+                url,
+                host,
+                allowedDomain,
+                robotsDecision.allowed(),
+                robotsDecision.reasonCode(),
+                robotsDecision.message(),
+                recursive,
+                Math.max(0, maxDepth),
+                Math.max(1, maxPages),
+                safeOptions.scope().name(),
+                safeOptions.renderMode().name(),
+                properties.getCrawler().isPlaywrightEnabled(),
+                chromiumPathOrNull() != null,
+                renderRecommended,
+                staticTextLength,
+                staticTextDensity,
+                selectorUsed,
+                extractionStrategy,
+                previewBlockCount,
+                linkCount,
+                sitemapUrlCount,
+                recommendations
+        );
     }
 
     public FetchedPage fetchPage(UUID sourceId, String url) {
@@ -454,20 +557,33 @@ public class WebPageExtractor {
             return new RootSelection(null, "", "empty-body");
         }
         String selector = "main, article, [role=main], .docs-content, .document, .content, .contents, "
-                + "#content, #main, .markdown-body, .post, .entry-content, #app";
-        Element main = doc.selectFirst(selector);
-        if (main != null && cleanText(main.text()).length() >= Math.min(120, properties.getCrawler().getMinContentChars())) {
-            return new RootSelection(main, selectorFor(main), "selector");
-        }
-        Element dense = densestTextElement(body).orElse(body);
-        String strategy = dense == body ? "body-fallback" : "density";
-        return new RootSelection(dense, selectorFor(dense), strategy);
+                + "#content, #main, .markdown-body, .post, .entry-content, .page-content, .article-content, section, div";
+        int minimumText = Math.min(120, properties.getCrawler().getMinContentChars());
+        Element best = doc.select(selector).stream()
+                .filter(element -> cleanText(element.text()).length() >= minimumText)
+                .filter(element -> element.children().size() <= 140)
+                .max(Comparator.comparingDouble(this::contentRootScore))
+                .orElse(body);
+        String strategy = best == body ? "body-fallback" : "scored-selector";
+        return new RootSelection(best, selectorFor(best), strategy);
     }
 
-    private Optional<Element> densestTextElement(Element root) {
-        return root.select("main, article, section, div").stream()
-                .filter(element -> element.children().size() <= 80)
-                .max(Comparator.comparingInt(element -> cleanText(element.text()).length()));
+    private double contentRootScore(Element element) {
+        String text = cleanText(element.text());
+        int textLength = text.length();
+        int paragraphCount = element.select("p").size();
+        int headingCount = element.select("h1, h2, h3").size();
+        int listCount = element.select("li").size();
+        int tableCount = element.select("table").size();
+        int linkTextLength = element.select("a").stream()
+                .map(Element::text)
+                .mapToInt(value -> cleanText(value).length())
+                .sum();
+        String marker = (element.id() + " " + element.className() + " " + element.normalName()).toLowerCase(Locale.ROOT);
+        int navigationPenalty = marker.matches(".*(nav|menu|sidebar|footer|header|breadcrumb|toc|advert|cookie).*") ? 1_200 : 0;
+        double linkPenalty = Math.min(textLength, linkTextLength) * 1.8;
+        return textLength + headingCount * 120.0 + paragraphCount * 45.0 + listCount * 6.0 + tableCount * 90.0
+                - linkPenalty - navigationPenalty;
     }
 
     private String selectorFor(Element element) {

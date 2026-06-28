@@ -197,6 +197,36 @@ class WebCrawlerTest {
                 eq("STATIC_LOW_CONTENT_PLAYWRIGHT_RETRY"), eq(0), eq(null), eq(null), any(), any());
     }
 
+    @Test
+    void indexesWeakStartPageWithLowQualityMetadataWhenNoFallbackIsAvailable() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getCrawler().setMaxDepth(0);
+        properties.getCrawler().setMaxPagesPerRequest(30);
+        properties.getCrawler().setMinContentChars(30);
+        properties.getCrawler().setPlaywrightEnabled(false);
+        WebPageExtractor extractor = mock(WebPageExtractor.class);
+        WebCrawler crawler = new WebCrawler(properties, extractor);
+        UUID sourceId = UUID.randomUUID();
+
+        when(extractor.fetchPage(eq(sourceId), eq("https://example.com/docs"), any()))
+                .thenReturn(page(
+                        "https://example.com/docs",
+                        text("Root", "thin"),
+                        List.of()
+                ));
+
+        WebCrawler.CrawlResult result = crawler.crawl(sourceId, "https://example.com/docs", 0, 30,
+                new CrawlOptions(CrawlScope.START_PATH, RobotsFailurePolicy.FAIL_CLOSED, false, false, WebRenderMode.STATIC));
+
+        assertThat(result.documents()).hasSize(1);
+        assertThat(result.documents().get(0).metadata())
+                .containsEntry("crawlQuality", "LOW")
+                .containsEntry("crawlQualityReason", "LOW_CONTENT");
+        assertThat(result.skippedCount()).isZero();
+        verify(extractor).auditSkipped(eq(sourceId), eq(URI.create("https://example.com/docs")),
+                eq("START_PAGE_INDEXED_WITH_LOW_QUALITY"), eq(0), eq(null), eq("text/html"), any(), any());
+    }
+
     private WebPageExtractor.FetchedPage page(String url, ExtractedDocument document, List<URI> links) {
         return new WebPageExtractor.FetchedPage(URI.create(url), document, links, "example.com", true, 200);
     }

@@ -11,6 +11,7 @@ import com.learnbot.dto.SearchFilter;
 import com.learnbot.dto.SearchResult;
 import com.learnbot.repository.DocumentRepository;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -624,6 +625,62 @@ class RagServiceTest {
         });
     }
 
+    @Test
+    void streamingKeepsVisibleAnswerWhenSelfCheckWouldFallback() {
+        SearchService searchService = mock(SearchService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        DocumentRepository documentRepository = mock(DocumentRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        RagService service = new RagService(searchService, ollamaClient, documentRepository, properties);
+        String question = "What is the security policy?";
+        SearchResult result = searchResult(UUID.randomUUID(), UUID.randomUUID(), 0,
+                "security-policy.pdf",
+                "application/pdf",
+                "The security policy requires MFA for administrators.");
+
+        when(searchService.searchDetailed(eq(question), isNull(SearchFilter.class), anyInt(), isNull(), isNull(), eq("FAST")))
+                .thenReturn(new SearchService.SearchResponse(
+                        List.of(result),
+                        new SearchService.SearchTiming(1, 1, 1, 0, 1, false, 1)
+                ));
+        when(ollamaClient.streamChat(anyString(), anyString(), anyInt()))
+                .thenReturn(Flux.just(
+                        streamDelta("The streamed answer is useful but lacks a citation.", false),
+                        streamDelta("", true)
+                ));
+
+        StringBuilder visible = new StringBuilder();
+        AskResponse response = service.askStreaming(
+                question,
+                null,
+                "qa",
+                "FAST",
+                null,
+                null,
+                new RagService.AnswerStreamSink() {
+                    @Override
+                    public void onEvidence(List<SearchResult> citations, List<com.learnbot.dto.AnswerEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                        visible.append(text);
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                        visible.setLength(0);
+                        visible.append(answer);
+                    }
+                }
+        );
+
+        assertThat(visible.toString()).isEqualTo("The streamed answer is useful but lacks a citation.");
+        assertThat(response.answer()).isEqualTo("The streamed answer is useful but lacks a citation.");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Streaming answer was kept"));
+    }
+
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title) {
         return searchResult(
                 documentId,
@@ -637,6 +694,10 @@ class RagServiceTest {
 
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+    }
+
+    private static OllamaClient.ChatStreamDelta streamDelta(String content, boolean done) {
+        return new OllamaClient.ChatStreamDelta(content, done ? "stop" : null, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private SearchResult searchResult(UUID documentId, UUID chunkId, int chunkIndex, String title, String contentType, String content) {

@@ -12,6 +12,7 @@ import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -821,8 +822,61 @@ class CodeRagServiceTest {
         });
     }
 
+    @Test
+    void streamingKeepsVisibleAnswerWhenSelfCheckWouldFallback() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.streamChat(anyString(), anyString(), isNull()))
+                .thenReturn(Flux.just(
+                        streamDelta("The streamed code answer is useful but lacks a citation.", false),
+                        streamDelta("", true)
+                ));
+
+        StringBuilder visible = new StringBuilder();
+        CodeAskResponse response = service.askStreaming(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login work?",
+                "overview",
+                4,
+                new CodeRagService.CodeAnswerStreamSink() {
+                    @Override
+                    public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
+                    }
+
+                    @Override
+                    public void onDelta(String text) {
+                        visible.append(text);
+                    }
+
+                    @Override
+                    public void onReplace(String answer, String reason) {
+                        visible.setLength(0);
+                        visible.append(answer);
+                    }
+                }
+        );
+
+        assertThat(visible.toString()).isEqualTo("The streamed code answer is useful but lacks a citation.");
+        assertThat(response.answer()).isEqualTo("The streamed code answer is useful but lacks a citation.");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Streaming answer was kept"));
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+    }
+
+    private static OllamaClient.ChatStreamDelta streamDelta(String content, boolean done) {
+        return new OllamaClient.ChatStreamDelta(content, done ? "stop" : null, done, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {

@@ -1,0 +1,2 @@
+ALTER TABLE data_sources
+ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;

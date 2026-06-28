@@ -273,6 +273,7 @@ export function useCodeRagController({
       };
       let data = null;
       let sawStream = false;
+      let streamedText = '';
       const controller = new AbortController();
       askAbortRef.current = controller;
       const initialAnswer = {
@@ -302,6 +303,7 @@ export function useCodeRagController({
             if (eventName === 'delta') {
               sawStream = true;
               const text = eventData?.text || '';
+              streamedText += text;
               const update = (current) => ({ ...(current || {}), answer: `${current?.answer || ''}${text}`, repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
               setCodeAnswer(update);
               setPendingCodeTurn(update);
@@ -311,7 +313,10 @@ export function useCodeRagController({
               setPendingCodeTurn(update);
             } else if (eventName === 'replace') {
               sawStream = true;
-              const update = (current) => ({ ...(current || {}), answer: eventData?.answer || '', repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
+              if (streamedText) return;
+              const replacement = eventData?.answer || '';
+              streamedText = replacement;
+              const update = (current) => ({ ...(current || {}), answer: replacement, repositoryId: effectiveRepositoryId, streaming: true, status: 'streaming' });
               setCodeAnswer(update);
               setPendingCodeTurn(update);
             } else if (eventName === 'done') {
@@ -355,6 +360,9 @@ export function useCodeRagController({
         if (askAbortRef.current === controller) {
           askAbortRef.current = null;
         }
+      }
+      if (data && streamedText.trim()) {
+        data = { ...data, answer: streamedText.trim() };
       }
       const completed = data ? { ...data, question: submittedQuestion, repositoryId: effectiveRepositoryId, status: answerLifecycleStatus(data, sawStream) } : data;
       setCodeAnswer(completed);

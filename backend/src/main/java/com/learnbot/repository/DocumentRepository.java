@@ -69,10 +69,14 @@ public class DocumentRepository {
     }
 
     public UUID createSource(SourceType type, String name, String location, UUID spaceId, UUID createdBy) {
+        return createSource(type, name, location, spaceId, createdBy, Map.of());
+    }
+
+    public UUID createSource(SourceType type, String name, String location, UUID spaceId, UUID createdBy, Map<String, Object> metadata) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO data_sources (id, type, name, location, status, space_id, created_by)
-                VALUES (:id, :type, :name, :location, :status, :spaceId, :createdBy)
+                INSERT INTO data_sources (id, type, name, location, status, space_id, created_by, metadata)
+                VALUES (:id, :type, :name, :location, :status, :spaceId, :createdBy, CAST(:metadata AS jsonb))
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("type", type.name())
@@ -80,7 +84,8 @@ public class DocumentRepository {
                 .addValue("location", location)
                 .addValue("status", SourceStatus.INDEXING.name())
                 .addValue("spaceId", spaceId)
-                .addValue("createdBy", createdBy));
+                .addValue("createdBy", createdBy)
+                .addValue("metadata", toJson(metadata)));
         return id;
     }
 
@@ -141,7 +146,7 @@ public class DocumentRepository {
 
     public Optional<StoredSource> findSource(UUID sourceId) {
         List<StoredSource> sources = jdbc.query("""
-                SELECT id, type, name, location, status
+                SELECT id, type, name, location, status, metadata::text AS metadata
                 FROM data_sources
                 WHERE id = :sourceId
                 """, new MapSqlParameterSource().addValue("sourceId", sourceId), this::mapSource);
@@ -150,7 +155,7 @@ public class DocumentRepository {
 
     public Optional<StoredSource> findSourceByDocumentId(UUID documentId, List<UUID> spaceIds) {
         List<StoredSource> sources = jdbc.query("""
-                SELECT s.id, s.type, s.name, s.location, s.status
+                SELECT s.id, s.type, s.name, s.location, s.status, s.metadata::text AS metadata
                 FROM data_sources s
                 JOIN documents d ON d.source_id = s.id
                 WHERE d.id = :documentId
@@ -1793,7 +1798,8 @@ public class DocumentRepository {
                 SourceType.valueOf(rs.getString("type")),
                 rs.getString("name"),
                 rs.getString("location"),
-                SourceStatus.valueOf(rs.getString("status"))
+                SourceStatus.valueOf(rs.getString("status")),
+                fromJson(rs.getString("metadata"))
         );
     }
 
