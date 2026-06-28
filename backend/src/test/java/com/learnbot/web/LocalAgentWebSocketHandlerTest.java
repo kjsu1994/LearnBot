@@ -46,6 +46,9 @@ class LocalAgentWebSocketHandlerTest {
                     "agentId": "%s",
                     "version": "0.1.0",
                     "capabilities": ["file.read", "git.status"],
+                    "configuredTransport": "websocket",
+                    "activeTransport": "websocket",
+                    "webSocketFailureCount": 0,
                     "workspaces": [
                       { "workspaceId": "%s", "name": "api", "rootPath": "C:/work/api", "approved": true }
                     ]
@@ -59,6 +62,9 @@ class LocalAgentWebSocketHandlerTest {
         assertThat(status.state()).isEqualTo(LocalAgentConnectionState.CONNECTED);
         assertThat(status.agentId()).isEqualTo(agentId);
         assertThat(status.capabilities()).containsExactly("file.read", "git.status");
+        assertThat(status.configuredTransport()).isEqualTo("websocket");
+        assertThat(status.activeTransport()).isEqualTo("websocket");
+        assertThat(status.webSocketFailureCount()).isZero();
         assertThat(gatewayService.hasApprovedWorkspace(userId, workspaceId)).isTrue();
         verify(connectionRegistry).register(userId, agentId, session);
 

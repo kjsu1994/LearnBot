@@ -11,7 +11,11 @@ public record LocalAgentStatusSnapshot(
         OffsetDateTime connectedAt,
         OffsetDateTime lastSeenAt,
         List<String> capabilities,
-        List<LocalAgentWorkspaceSummary> workspaces
+        List<LocalAgentWorkspaceSummary> workspaces,
+        String configuredTransport,
+        String activeTransport,
+        int webSocketFailureCount,
+        OffsetDateTime nextWebSocketRetryAt
 ) {
     public LocalAgentStatusSnapshot {
         if (agentId == null) {

@@ -1,8 +1,11 @@
 package com.learnbot.web;
 
 import com.learnbot.dto.LocalAgentHeartbeatRequest;
+import com.learnbot.dto.LocalAgentApprovalDecision;
+import com.learnbot.dto.LocalAgentApprovalDecisionRequest;
 import com.learnbot.dto.LocalAgentPairingTokenRequest;
 import com.learnbot.dto.LocalAgentPairingTokenResponse;
+import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentReadOnlyToolRequest;
 import com.learnbot.dto.LocalAgentStatusResponse;
@@ -86,7 +89,11 @@ public class LocalAgentController {
                 request.capabilities() == null
                         ? List.of()
                         : request.capabilities().stream().map(LocalAgentToolName::wireName).toList(),
-                request.workspaces()
+                request.workspaces(),
+                request.configuredTransport(),
+                request.activeTransport(),
+                request.webSocketFailureCount(),
+                request.nextWebSocketRetryAt()
         );
         return gatewayService.status(userId);
     }
@@ -124,6 +131,24 @@ public class LocalAgentController {
         return toolGatewayService.findForUser(user.id(), requestId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/tools/{requestId}/approval")
+    LocalAgentToolExecutionResponse decideToolApproval(
+            @PathVariable UUID requestId,
+            @Valid @RequestBody LocalAgentApprovalDecisionRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        if (request.decision() == LocalAgentApprovalDecision.APPROVE) {
+            return toolGatewayService.approveHeld(user.id(), requestId);
+        }
+        return toolGatewayService.deny(user.id(), requestId);
+    }
+
+    @GetMapping("/tools/{requestId}/readiness")
+    LocalAgentPatchExecutionReadinessResponse toolReadiness(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.inspectPatchExecutionReadiness(user.id(), requestId);
     }
 
     @PostMapping("/tools/{requestId}/response")

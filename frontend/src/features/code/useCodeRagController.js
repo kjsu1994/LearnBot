@@ -41,6 +41,9 @@ export function useCodeRagController({
   const [codeAgentPatch, setCodeAgentPatch] = useState(null);
   const [codeAgentApplyResult, setCodeAgentApplyResult] = useState(null);
   const [codeAgentTestResult, setCodeAgentTestResult] = useState(null);
+  const [codeAgentMutationPolicy, setCodeAgentMutationPolicy] = useState(null);
+  const [codeAgentLocalPatchRequest, setCodeAgentLocalPatchRequest] = useState(null);
+  const [codeAgentLocalPatchReadiness, setCodeAgentLocalPatchReadiness] = useState(null);
   const [localAgentStatus, setLocalAgentStatus] = useState(null);
   const [localAgentTokens, setLocalAgentTokens] = useState([]);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
@@ -77,6 +80,7 @@ export function useCodeRagController({
       setLocalAgentTokens([]);
       return;
     }
+    refreshCodeAgentMutationPolicy();
     refreshLocalAgentStatus();
     refreshLocalAgentTokens();
   }, [activeSpaceId]);
@@ -105,6 +109,9 @@ export function useCodeRagController({
     setCodeAgentPatch(null);
     setCodeAgentApplyResult(null);
     setCodeAgentTestResult(null);
+    setCodeAgentMutationPolicy(null);
+    setCodeAgentLocalPatchRequest(null);
+    setCodeAgentLocalPatchReadiness(null);
     setLocalAgentStatus(null);
     setLocalAgentTokens([]);
     setCodeConversations([]);
@@ -573,6 +580,24 @@ export function useCodeRagController({
     }
   }
 
+  async function refreshCodeAgentMutationPolicy() {
+    try {
+      const policy = await request('/api/code-agent/mutation-policy');
+      setCodeAgentMutationPolicy(policy);
+      return policy;
+    } catch {
+      setCodeAgentMutationPolicy({
+        intendedExecutionTarget: 'USER_LOCAL_AGENT',
+        localAgentMutationEnabled: false,
+        serverLocalMutationEnabled: false,
+        futureLocalAgentTools: ['patch.apply', 'command.runAllowed', 'rollback.restore'],
+        warnings: ['Mutation policy is unavailable. Patch apply/test/rollback remain unavailable.'],
+        message: 'Patch proposals are available, but mutation execution is not available right now.',
+      });
+      return null;
+    }
+  }
+
   async function refreshLocalAgentTokens() {
     try {
       const tokens = await request('/api/local-agents/tokens');
@@ -611,6 +636,59 @@ export function useCodeRagController({
       setCodeAgentPatch(patch);
       setCodeAgentApplyResult(null);
       setCodeAgentTestResult(null);
+      setCodeAgentLocalPatchRequest(null);
+      setCodeAgentLocalPatchReadiness(null);
+    });
+  }
+
+  async function prepareCodeAgentLocalPatchRequest() {
+    const instruction = codeAgentInstruction.trim();
+    const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
+    const diff = codeAgentPatch?.files?.[0]?.diff || '';
+    const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
+    if (!instruction || !selectedRepositoryId || !targetFiles.length || !diff || !codeAgentPatch?.valid) return;
+    if (!localAgentStatus?.agentId || !approvedWorkspace?.workspaceId) return;
+    await run('code-agent-local-patch-request', async () => {
+      const result = await request('/api/code-agent/local-patch-request', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          agentId: localAgentStatus.agentId,
+          workspaceId: approvedWorkspace.workspaceId,
+          instruction,
+          diff,
+          targetFiles,
+        },
+      });
+      setCodeAgentLocalPatchRequest(result);
+      setCodeAgentLocalPatchReadiness(null);
+    });
+  }
+
+  async function decideCodeAgentLocalPatchApproval(decision) {
+    const requestId = codeAgentLocalPatchRequest?.requestId;
+    if (!requestId || !decision) return;
+    await run(`code-agent-local-patch-approval-${String(decision).toLowerCase()}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}/approval`, {
+        method: 'POST',
+        json: { decision },
+      });
+      setCodeAgentLocalPatchRequest(result);
+      if (result?.status === 'APPROVED_HELD') {
+        await refreshCodeAgentLocalPatchReadiness(result.requestId);
+      } else {
+        setCodeAgentLocalPatchReadiness(null);
+      }
+    });
+  }
+
+  async function refreshCodeAgentLocalPatchReadiness(requestId = codeAgentLocalPatchRequest?.requestId) {
+    if (!requestId) return null;
+    return await run(`code-agent-local-patch-readiness-${requestId}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}/readiness`);
+      setCodeAgentLocalPatchReadiness(result);
+      return result;
     });
   }
 
@@ -704,6 +782,9 @@ export function useCodeRagController({
     codeAgentPatch,
     codeAgentApplyResult,
     codeAgentTestResult,
+    codeAgentMutationPolicy,
+    codeAgentLocalPatchRequest,
+    codeAgentLocalPatchReadiness,
     localAgentStatus,
     localAgentTokens,
     codeConversations,
@@ -739,7 +820,11 @@ export function useCodeRagController({
     cancelCodeAsk,
     generateCodeAgentPlan,
     generateCodeAgentPatch,
+    prepareCodeAgentLocalPatchRequest,
+    decideCodeAgentLocalPatchApproval,
+    refreshCodeAgentLocalPatchReadiness,
     refreshLocalAgentStatus,
+    refreshCodeAgentMutationPolicy,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
     applyCodeAgentPatch,

@@ -2,6 +2,8 @@ package com.learnbot.web;
 
 import com.learnbot.dto.CodeAgentApplyRequest;
 import com.learnbot.dto.CodeAgentApplyResponse;
+import com.learnbot.dto.CodeAgentLocalPatchRequest;
+import com.learnbot.dto.CodeAgentMutationPolicyResponse;
 import com.learnbot.dto.CodeAgentPatchRequest;
 import com.learnbot.dto.CodeAgentPatchResponse;
 import com.learnbot.dto.CodeAgentPlanRequest;
@@ -10,14 +12,19 @@ import com.learnbot.dto.CodeAgentRollbackRequest;
 import com.learnbot.dto.CodeAgentRollbackResponse;
 import com.learnbot.dto.CodeAgentTestRequest;
 import com.learnbot.dto.CodeAgentTestResponse;
+import com.learnbot.dto.AgentExecutionTarget;
+import com.learnbot.dto.LocalAgentToolName;
+import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.CodeAgentApplyService;
+import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,12 +32,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/code-agent")
 public class CodeAgentController {
     private final CodeAgentService codeAgentService;
     private final CodeAgentApplyService codeAgentApplyService;
+    private final CodeAgentLocalPatchRequestService localPatchRequestService;
     private final CodeIndexingService indexingService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
@@ -39,6 +48,7 @@ public class CodeAgentController {
     public CodeAgentController(
             CodeAgentService codeAgentService,
             CodeAgentApplyService codeAgentApplyService,
+            CodeAgentLocalPatchRequestService localPatchRequestService,
             CodeIndexingService indexingService,
             AuthService authService,
             CurrentUserProvider currentUserProvider,
@@ -46,6 +56,7 @@ public class CodeAgentController {
     ) {
         this.codeAgentService = codeAgentService;
         this.codeAgentApplyService = codeAgentApplyService;
+        this.localPatchRequestService = localPatchRequestService;
         this.indexingService = indexingService;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
@@ -80,6 +91,44 @@ public class CodeAgentController {
                 selectedSpaceId,
                 authService.accessibleSpaceIds(user),
                 request.instruction(),
+                request.targetFiles()
+        );
+    }
+
+    @GetMapping("/mutation-policy")
+    CodeAgentMutationPolicyResponse mutationPolicy() {
+        boolean serverLocalEnabled = properties.getCode().isServerLocalMutationEnabled();
+        return new CodeAgentMutationPolicyResponse(
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                false,
+                serverLocalEnabled,
+                List.of(
+                        LocalAgentToolName.PATCH_APPLY,
+                        LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        LocalAgentToolName.ROLLBACK_RESTORE
+                ),
+                serverLocalEnabled
+                        ? List.of("Server-local mutation is enabled for prototype/admin/debug use only.")
+                        : List.of("Server-local mutation is disabled. Normal user-owned changes must wait for the Local Agent mutation path."),
+                "Patch proposals are available now. Applying patches, running tests, and rollback for user-owned workspaces are reserved for the USER_LOCAL_AGENT path and are not enabled yet."
+        );
+    }
+
+    @PostMapping("/local-patch-request")
+    LocalAgentToolExecutionResponse localPatchRequest(@Valid @RequestBody CodeAgentLocalPatchRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return localPatchRequestService.prepare(
+                request.repositoryId(),
+                selectedSpaceId,
+                user.id(),
+                request.agentId(),
+                request.workspaceId(),
+                request.instruction(),
+                request.diff(),
                 request.targetFiles()
         );
     }

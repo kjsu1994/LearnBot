@@ -51,7 +51,7 @@ public record LocalAgentToolResponse(
     private static boolean isFailure(LocalAgentToolStatus status) {
         return switch (status) {
             case FAILED, REJECTED, TIMED_OUT, DISCONNECTED -> true;
-            case PENDING, APPROVAL_REQUIRED, APPROVED, RUNNING, SUCCEEDED, CANCELLED -> false;
+            case PENDING, APPROVAL_REQUIRED, APPROVED, APPROVED_HELD, RUNNING, SUCCEEDED, CANCELLED -> false;
         };
     }
 }

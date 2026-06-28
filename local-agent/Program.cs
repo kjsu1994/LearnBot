@@ -121,10 +121,10 @@ internal sealed class LearnBotLocalAgent
                     }
                     else
                     {
-                        await SendHeartbeat(config);
                         if (transport == "polling")
                         {
                             activeTransport = "polling";
+                            await SendHeartbeat(config, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                             WriteRunState("running", "heartbeat", transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                         }
                         else if (shouldTryWebSocket)
@@ -133,6 +133,7 @@ internal sealed class LearnBotLocalAgent
                             var retryDelay = WebSocketRetryDelay(webSocketFailures);
                             nextWebSocketRetryAt = DateTimeOffset.UtcNow.Add(retryDelay);
                             activeTransport = "polling-fallback";
+                            await SendHeartbeat(config, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                             WriteRunState(
                                 "running",
                                 $"websocket unavailable; polling fallback; retry in {(int)retryDelay.TotalSeconds}s",
@@ -144,6 +145,7 @@ internal sealed class LearnBotLocalAgent
                         else
                         {
                             activeTransport = "polling-fallback";
+                            await SendHeartbeat(config, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                             WriteRunState(
                                 "running",
                                 "polling fallback; websocket retry scheduled",
@@ -402,10 +404,17 @@ internal sealed class LearnBotLocalAgent
         return 0;
     }
 
-    private async Task SendHeartbeat(AgentConfig config)
+    private async Task SendHeartbeat(
+        AgentConfig config,
+        string? configuredTransport = null,
+        string? activeTransport = null,
+        int? webSocketFailureCount = null,
+        DateTimeOffset? nextWebSocketRetryAt = null)
     {
         using var client = Client(config);
-        using var response = await client.PostAsync("/api/local-agents/heartbeat", Json(HeartbeatPayload(config)));
+        using var response = await client.PostAsync(
+            "/api/local-agents/heartbeat",
+            Json(HeartbeatPayload(config, configuredTransport, activeTransport, webSocketFailureCount, nextWebSocketRetryAt)));
         response.EnsureSuccessStatusCode();
     }
 
@@ -424,7 +433,7 @@ internal sealed class LearnBotLocalAgent
             socket.Options.SetRequestHeader("User-Agent", $"learnbot-local-agent/{Version}");
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await socket.ConnectAsync(new Uri(websocketUrl), timeout.Token);
-            await SendWebSocketEnvelope(socket, config.AgentId, "hello", null, HeartbeatPayload(config), timeout.Token);
+            await SendWebSocketEnvelope(socket, config.AgentId, "hello", null, HeartbeatPayload(config, transport, "websocket", 0, null), timeout.Token);
             var response = await ReceiveWebSocketText(socket, timeout.Token);
             if (string.IsNullOrWhiteSpace(response))
             {
@@ -539,19 +548,32 @@ internal sealed class LearnBotLocalAgent
         Console.WriteLine($"{toolName}: {result.Status}");
     }
 
-    private static object HeartbeatPayload(AgentConfig config) => new
+    private static object HeartbeatPayload(
+        AgentConfig config,
+        string? configuredTransport = null,
+        string? activeTransport = null,
+        int? webSocketFailureCount = null,
+        DateTimeOffset? nextWebSocketRetryAt = null)
     {
-        agentId = config.AgentId,
-        version = config.Version,
-        capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff" },
-        workspaces = config.Workspaces.Select(workspace => new
+        var state = LoadRunState();
+        return new
         {
-            workspace.WorkspaceId,
-            workspace.Name,
-            rootPath = workspace.Path,
-            workspace.Approved
-        })
-    };
+            agentId = config.AgentId,
+            version = config.Version,
+            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff" },
+            workspaces = config.Workspaces.Select(workspace => new
+            {
+                workspace.WorkspaceId,
+                workspace.Name,
+                rootPath = workspace.Path,
+                workspace.Approved
+            }),
+            configuredTransport = NormalizeTransport(configuredTransport ?? state?.ConfiguredTransport ?? config.Transport),
+            activeTransport = activeTransport ?? state?.ActiveTransport,
+            webSocketFailureCount = webSocketFailureCount ?? state?.WebSocketFailureCount ?? 0,
+            nextWebSocketRetryAt = nextWebSocketRetryAt ?? state?.NextWebSocketRetryAt
+        };
+    }
 
     private static async Task SendWebSocketEnvelope(
         ClientWebSocket socket,

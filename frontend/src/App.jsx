@@ -207,6 +207,9 @@ export default function App() {
     codeAgentPatch,
     codeAgentApplyResult,
     codeAgentTestResult,
+    codeAgentMutationPolicy,
+    codeAgentLocalPatchRequest,
+    codeAgentLocalPatchReadiness,
     localAgentStatus,
     localAgentTokens,
     codeConversations,
@@ -242,6 +245,9 @@ export default function App() {
     cancelCodeAsk,
     generateCodeAgentPlan,
     generateCodeAgentPatch,
+    prepareCodeAgentLocalPatchRequest,
+    decideCodeAgentLocalPatchApproval,
+    refreshCodeAgentLocalPatchReadiness,
     refreshLocalAgentStatus,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
@@ -992,6 +998,9 @@ export default function App() {
             codeAgentPatch={codeAgentPatch}
             codeAgentApplyResult={codeAgentApplyResult}
             codeAgentTestResult={codeAgentTestResult}
+            codeAgentMutationPolicy={codeAgentMutationPolicy}
+            codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
+            codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
             localAgentStatus={localAgentStatus}
             localAgentTokens={localAgentTokens}
             codeConversations={codeConversations}
@@ -1028,6 +1037,9 @@ export default function App() {
             cancelCodeAsk={cancelCodeAsk}
             generateCodeAgentPlan={generateCodeAgentPlan}
             generateCodeAgentPatch={generateCodeAgentPatch}
+            prepareCodeAgentLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
+            decideCodeAgentLocalPatchApproval={decideCodeAgentLocalPatchApproval}
+            refreshCodeAgentLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
             refreshLocalAgentStatus={refreshLocalAgentStatus}
             refreshLocalAgentTokens={refreshLocalAgentTokens}
             revokeLocalAgentToken={revokeLocalAgentToken}

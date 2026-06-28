@@ -96,6 +96,33 @@ public class LocalAgentToolExecutionRepository {
         return executions.stream().findFirst();
     }
 
+    public Optional<LocalAgentToolExecution> updateApprovalDecision(
+            UUID id,
+            UUID userId,
+            LocalAgentApprovalState approvalState,
+            LocalAgentToolStatus status,
+            String warning
+    ) {
+        int updated = jdbc.update("""
+                UPDATE local_agent_tool_executions
+                SET approval_state = :approvalState,
+                    status = :status,
+                    request_warnings = request_warnings || CAST(:warning AS jsonb),
+                    finished_at = CASE WHEN :finished THEN COALESCE(finished_at, now()) ELSE finished_at END
+                WHERE id = :id
+                  AND user_id = :userId
+                  AND approval_state = 'REQUIRED'
+                  AND status = 'APPROVAL_REQUIRED'
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("userId", userId)
+                .addValue("approvalState", approvalState.name())
+                .addValue("status", status.name())
+                .addValue("warning", toJson(List.of(warning)))
+                .addValue("finished", status == LocalAgentToolStatus.REJECTED));
+        return updated == 0 ? Optional.empty() : find(id);
+    }
+
     public void complete(LocalAgentToolResponse response) {
         jdbc.update("""
                 UPDATE local_agent_tool_executions
@@ -123,9 +150,13 @@ public class LocalAgentToolExecutionRepository {
     }
 
     private LocalAgentToolStatus initialStatus(LocalAgentToolRequest request) {
-        return request.approvalState() == LocalAgentApprovalState.APPROVED
-                ? LocalAgentToolStatus.APPROVED
-                : LocalAgentToolStatus.PENDING;
+        return switch (request.approvalState()) {
+            case APPROVED -> LocalAgentToolStatus.APPROVED;
+            case REQUIRED -> LocalAgentToolStatus.APPROVAL_REQUIRED;
+            case DENIED -> LocalAgentToolStatus.REJECTED;
+            case EXPIRED -> LocalAgentToolStatus.CANCELLED;
+            case NOT_REQUIRED -> LocalAgentToolStatus.PENDING;
+        };
     }
 
     private LocalAgentToolExecution mapExecution(ResultSet rs, int rowNum) throws SQLException {

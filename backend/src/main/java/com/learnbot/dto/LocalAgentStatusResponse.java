@@ -12,6 +12,10 @@ public record LocalAgentStatusResponse(
         OffsetDateTime lastSeenAt,
         List<String> capabilities,
         List<LocalAgentWorkspaceSummary> workspaces,
+        String configuredTransport,
+        String activeTransport,
+        int webSocketFailureCount,
+        OffsetDateTime nextWebSocketRetryAt,
         String message
 ) {
     public static LocalAgentStatusResponse disconnected() {
@@ -23,6 +27,10 @@ public record LocalAgentStatusResponse(
                 null,
                 List.of(),
                 List.of(),
+                null,
+                null,
+                0,
+                null,
                 "No Local Agent is connected. User-owned file changes require a per-user Local Agent."
         );
     }

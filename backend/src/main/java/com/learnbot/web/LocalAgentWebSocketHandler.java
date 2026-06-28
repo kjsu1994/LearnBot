@@ -90,7 +90,11 @@ public class LocalAgentWebSocketHandler extends TextWebSocketHandler {
                 request.capabilities() == null
                         ? List.of()
                         : request.capabilities().stream().map(LocalAgentToolName::wireName).toList(),
-                request.workspaces() == null ? List.of() : request.workspaces()
+                request.workspaces() == null ? List.of() : request.workspaces(),
+                request.configuredTransport(),
+                request.activeTransport(),
+                request.webSocketFailureCount(),
+                request.nextWebSocketRetryAt()
         );
         connectionRegistry.register(userId, agentId, session);
         send(session, "tool.ack", envelope.path("messageId").asText(null), null, Map.of("accepted", true));

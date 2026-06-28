@@ -34,6 +34,20 @@ public class LocalAgentGatewayService {
             List<String> capabilities,
             List<LocalAgentWorkspaceSummary> workspaces
     ) {
+        registerHeartbeat(userId, agentId, version, capabilities, workspaces, null, null, null, null);
+    }
+
+    public void registerHeartbeat(
+            UUID userId,
+            UUID agentId,
+            String version,
+            List<String> capabilities,
+            List<LocalAgentWorkspaceSummary> workspaces,
+            String configuredTransport,
+            String activeTransport,
+            Integer webSocketFailureCount,
+            OffsetDateTime nextWebSocketRetryAt
+    ) {
         OffsetDateTime now = OffsetDateTime.now();
         LocalAgentStatusSnapshot current = agentsByUser.get(userId);
         OffsetDateTime connectedAt = current != null && current.agentId().equals(agentId)
@@ -46,7 +60,11 @@ public class LocalAgentGatewayService {
                 connectedAt,
                 now,
                 capabilities,
-                workspaces
+                workspaces,
+                normalizeTransport(configuredTransport),
+                normalizeTransport(activeTransport),
+                webSocketFailureCount == null ? 0 : Math.max(0, webSocketFailureCount),
+                nextWebSocketRetryAt
         ));
     }
 
@@ -91,10 +109,19 @@ public class LocalAgentGatewayService {
                 snapshot.workspaces().stream()
                         .sorted(Comparator.comparing(workspace -> workspace.name() == null ? "" : workspace.name()))
                         .toList(),
+                snapshot.configuredTransport(),
+                snapshot.activeTransport(),
+                snapshot.webSocketFailureCount(),
+                snapshot.nextWebSocketRetryAt(),
                 state == LocalAgentConnectionState.CONNECTED
                         ? "Local Agent is connected."
                         : "Local Agent heartbeat is stale. Side-effectful local tools should wait for reconnect."
         );
+    }
+
+    private String normalizeTransport(String transport) {
+        if (transport == null || transport.isBlank()) return null;
+        return transport.trim().toLowerCase();
     }
 
     private boolean isStale(LocalAgentStatusSnapshot snapshot) {

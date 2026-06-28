@@ -4,6 +4,7 @@ public enum LocalAgentToolStatus {
     PENDING,
     APPROVAL_REQUIRED,
     APPROVED,
+    APPROVED_HELD,
     RUNNING,
     SUCCEEDED,
     FAILED,

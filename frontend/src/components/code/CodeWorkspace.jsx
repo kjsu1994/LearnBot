@@ -102,6 +102,9 @@ function CodeWorkspace(props) {
     codeAgentPatch,
     codeAgentApplyResult,
     codeAgentTestResult,
+    codeAgentMutationPolicy,
+    codeAgentLocalPatchRequest,
+    codeAgentLocalPatchReadiness,
     localAgentStatus,
     codeConversations = [],
     codeConversationId = '',
@@ -119,6 +122,9 @@ function CodeWorkspace(props) {
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
     generateCodeAgentPatch = () => {},
+    prepareCodeAgentLocalPatchRequest = () => {},
+    decideCodeAgentLocalPatchApproval = () => {},
+    refreshCodeAgentLocalPatchReadiness = () => {},
     refreshLocalAgentStatus = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
@@ -208,12 +214,18 @@ function CodeWorkspace(props) {
           patch={codeAgentPatch}
           applyResult={codeAgentApplyResult}
           testResult={codeAgentTestResult}
+          mutationPolicy={codeAgentMutationPolicy}
+          localPatchRequest={codeAgentLocalPatchRequest}
+          localPatchReadiness={codeAgentLocalPatchReadiness}
           localAgentStatus={localAgentStatus}
           localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
           loading={loading}
           onPlan={generateCodeAgentPlan}
           onPatch={generateCodeAgentPatch}
+          onPrepareLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
+          onLocalPatchApproval={decideCodeAgentLocalPatchApproval}
+          onRefreshLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
           onRefreshLocalAgent={refreshLocalAgentStatus}
           onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
           onRevokeLocalAgentToken={props.revokeLocalAgentToken}
@@ -277,12 +289,18 @@ function CodeAgentPanel({
   patch,
   applyResult,
   testResult,
+  mutationPolicy,
+  localPatchRequest,
+  localPatchReadiness,
   localAgentStatus,
   localAgentTokens = [],
   selectedRepositoryId = '',
   loading = () => false,
   onPlan = (event) => event.preventDefault(),
   onPatch = () => {},
+  onPrepareLocalPatchRequest = () => {},
+  onLocalPatchApproval = () => {},
+  onRefreshLocalPatchReadiness = () => {},
   onRefreshLocalAgent = () => {},
   onRefreshLocalAgentTokens = () => {},
   onRevokeLocalAgentToken = () => {},
@@ -297,6 +315,25 @@ function CodeAgentPanel({
   const canRollback = false;
   const activeTokenCount = localAgentTokens.filter((token) => token.active).length;
   const tokenRefreshLoading = loading('local-agent-tokens');
+  const configuredTransport = localAgentStatus?.configuredTransport;
+  const activeTransport = localAgentStatus?.activeTransport;
+  const transportLabel = activeTransport || configuredTransport;
+  const retryAt = localAgentStatus?.nextWebSocketRetryAt;
+  const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
+  const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
+  const canPrepareLocalPatchRequest = Boolean(
+    patch?.valid
+    && localAgentStatus?.state === 'CONNECTED'
+    && localAgentStatus?.agentId
+    && approvedWorkspace?.workspaceId
+    && !loading('code-agent-local-patch-request')
+  );
+  const canDecideLocalPatchRequest = localPatchRequest?.status === 'APPROVAL_REQUIRED';
+  const canRefreshReadiness = localPatchRequest?.status === 'APPROVED_HELD'
+    && !loading(`code-agent-local-patch-readiness-${localPatchRequest.requestId}`);
+  const visibleReadiness = localPatchReadiness?.requestId === localPatchRequest?.requestId
+    ? localPatchReadiness
+    : null;
   return (
     <section className="panel code-agent-panel">
       <div className="panel-title">
@@ -312,9 +349,24 @@ function CodeAgentPanel({
           <Badge variant={localAgentStatus?.state === 'CONNECTED' ? 'outline' : 'destructive'}>{localAgentStatus?.state || 'DISCONNECTED'}</Badge>
         </div>
         <small>{localAgentStatus?.message || 'No Local Agent is connected. User-owned file changes require a per-user Local Agent.'}</small>
+        {transportLabel && (
+          <small>
+            transport: {configuredTransport && activeTransport && configuredTransport !== activeTransport
+              ? `${configuredTransport} -> ${activeTransport}`
+              : transportLabel}
+            {localAgentStatus?.webSocketFailureCount ? `, websocket failures ${localAgentStatus.webSocketFailureCount}` : ''}
+            {retryAt ? `, next retry ${formatDate(retryAt)}` : ''}
+          </small>
+        )}
         {!!localAgentStatus?.workspaces?.length && (
           <small>{localAgentStatus.workspaces.filter((workspace) => workspace.approved).length}/{localAgentStatus.workspaces.length} approved workspaces</small>
         )}
+        <small>
+          mutation target: {mutationTarget}
+          {mutationPolicy?.localAgentMutationEnabled ? ', enabled' : ', apply/test/rollback disabled'}
+          {mutationPolicy?.serverLocalMutationEnabled ? ', server-local prototype enabled' : ''}
+        </small>
+        {mutationPolicy?.message && <small>{mutationPolicy.message}</small>}
         <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
           <RefreshCw size={14} />
           refresh
@@ -420,6 +472,79 @@ function CodeAgentPanel({
               <span>Diff proposals are available here, but applying files, running tests, and rollback are reserved for the per-user Local Agent path. Server-local execution is prototype/admin-debug only.</span>
             </div>
           </div>
+          <div className="action-row">
+            <button type="button" className="ghost-button" disabled={!canPrepareLocalPatchRequest} onClick={onPrepareLocalPatchRequest}>
+              {loading('code-agent-local-patch-request') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+              Prepare Local Agent review
+            </button>
+          </div>
+          {localPatchRequest && (
+            <div className="code-agent-result compact-result">
+              <div className="result-heading">
+                <strong>Prepared Local Agent request</strong>
+                <Badge variant="secondary">{localPatchRequest.status || 'APPROVAL_REQUIRED'}</Badge>
+              </div>
+              <small>request: {localPatchRequest.requestId}</small>
+              <small>tool: {localPatchRequest.toolName} / approval: {localPatchRequest.approvalState}</small>
+              {localPatchRequest.status === 'APPROVED_HELD' && (
+                <small>Approved for later execution. No files are modified until Local Agent patch execution is enabled.</small>
+              )}
+              {!!localPatchRequest.input?.targetFiles?.length && <small>targets: {localPatchRequest.input.targetFiles.join(', ')}</small>}
+              {!!localPatchRequest.input?.expectedFiles?.length && (
+                <small>expected hashes: {localPatchRequest.input.expectedFiles.map((file) => `${file.path}:${String(file.sha256 || '').slice(0, 12)}`).join(', ')}</small>
+              )}
+              {localPatchRequest.input?.staleIndexPolicy && <small>stale index: {localPatchRequest.input.staleIndexPolicy}</small>}
+              {localPatchRequest.input?.requiresSnapshot && <small>snapshot required before file writes</small>}
+              <WarningList warnings={localPatchRequest.requestWarnings} />
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={!canDecideLocalPatchRequest || loading('code-agent-local-patch-approval-approve')}
+                  onClick={() => onLocalPatchApproval('APPROVE')}
+                >
+                  {loading('code-agent-local-patch-approval-approve') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                  Approve and hold
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={!canDecideLocalPatchRequest || loading('code-agent-local-patch-approval-deny')}
+                  onClick={() => onLocalPatchApproval('DENY')}
+                >
+                  {loading('code-agent-local-patch-approval-deny') ? <Loader2 className="spin" size={16} /> : <X size={16} />}
+                  Deny request
+                </button>
+              </div>
+              {localPatchRequest.status === 'APPROVED_HELD' && (
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!canRefreshReadiness}
+                    onClick={() => onRefreshLocalPatchReadiness(localPatchRequest.requestId)}
+                  >
+                    {loading(`code-agent-local-patch-readiness-${localPatchRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                    Check execution readiness
+                  </button>
+                </div>
+              )}
+              {visibleReadiness && (
+                <div className="failure-list">
+                  <div className="failure-item">
+                    <strong>Execution readiness: {visibleReadiness.readyToRelease ? 'ready' : 'blocked'}</strong>
+                    <span>{visibleReadiness.message}</span>
+                  </div>
+                  {(visibleReadiness.checks || []).map((check) => (
+                    <div className="failure-item" key={check.key}>
+                      <strong>{check.passed ? 'pass' : 'blocked'} · {check.key}</strong>
+                      <span>{check.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="action-row" hidden>
             <button type="button" disabled={!canApply} onClick={onApply}>
               {loading('code-agent-apply') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
