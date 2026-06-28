@@ -6,6 +6,7 @@ import com.learnbot.dto.LocalAgentApprovalDecisionRequest;
 import com.learnbot.dto.LocalAgentPairingTokenRequest;
 import com.learnbot.dto.LocalAgentPairingTokenResponse;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
+import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentReadOnlyToolRequest;
 import com.learnbot.dto.LocalAgentStatusResponse;
@@ -155,6 +156,12 @@ public class LocalAgentController {
     LocalAgentQueuedToolRequest enqueuePatchDryRun(@PathVariable UUID requestId) {
         var user = currentUserProvider.currentUser();
         return toolGatewayService.enqueuePatchDryRun(user.id(), requestId);
+    }
+
+    @PostMapping("/tools/{requestId}/release")
+    LocalAgentPatchReleaseBoundaryResponse releasePatchExecution(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.inspectPatchReleaseBoundary(user.id(), requestId);
     }
 
     @PostMapping("/tools/{requestId}/response")

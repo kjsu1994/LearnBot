@@ -320,6 +320,27 @@ function formatReadinessCheck(check) {
   return `${check.passed ? 'pass' : 'blocked'} / ${check.key}: ${check.message}`;
 }
 
+function formatObservationLinkage(value) {
+  const linkage = value?.observationLinkage;
+  if (!linkage?.status) {
+    return null;
+  }
+  const parts = [`observation linkage: ${linkage.status}`];
+  if (linkage.releaseAttemptLinked !== undefined) {
+    parts.push(`release-attempt linked: ${String(linkage.releaseAttemptLinked)}`);
+  }
+  if (linkage.sourceOnlyFallback !== undefined) {
+    parts.push(`source-only fallback: ${String(linkage.sourceOnlyFallback)}`);
+  }
+  if (linkage.releaseAttemptId) {
+    parts.push(`attempt ${String(linkage.releaseAttemptId).slice(0, 8)}`);
+  }
+  if (linkage.sourceRequestId) {
+    parts.push(`source ${String(linkage.sourceRequestId).slice(0, 8)}`);
+  }
+  return parts.join(' / ');
+}
+
 function compareRepositoryObservation(source = {}, observationResult = {}) {
   if (observationResult?.output?.repositoryVerification) {
     return observationResult.output.repositoryVerification;
@@ -456,6 +477,149 @@ function CodeAgentPanel({
   const readinessPatchRelease = visibleReadiness?.patchReleaseReadiness || null;
   const readinessPatchExecutionGate = visibleReadiness?.patchExecutionGate || null;
   const readinessReleaseAttemptModel = visibleReadiness?.releaseAttemptModel || readinessPatchExecutionGate?.releaseAttemptModel || null;
+  const readinessFreshObservationRequestPlan = Array.isArray(readinessReleaseAttemptModel?.latestAttempt?.freshObservationRequestPlan)
+    ? readinessReleaseAttemptModel.latestAttempt.freshObservationRequestPlan
+    : [];
+  const readinessFreshObservationEvidenceStatus = Array.isArray(readinessReleaseAttemptModel?.latestAttempt?.freshObservationEvidenceStatus)
+    ? readinessReleaseAttemptModel.latestAttempt.freshObservationEvidenceStatus
+    : [];
+  const readinessFreshObservationEvidenceCompleteness = readinessReleaseAttemptModel?.latestAttempt?.freshObservationEvidenceCompleteness || null;
+  const readinessReleaseAttemptFinalReadiness = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptFinalReadiness || null;
+  const readinessLocalAgentMutationExecutionSequencePlan = Array.isArray(readinessReleaseAttemptModel?.latestAttempt?.localAgentMutationExecutionSequencePlan)
+    ? readinessReleaseAttemptModel.latestAttempt.localAgentMutationExecutionSequencePlan
+    : [];
+  const readinessPostMutationResultContract = readinessReleaseAttemptModel?.latestAttempt?.postMutationResultContract || null;
+  const readinessPostMutationExpectedOutcomes = Array.isArray(readinessPostMutationResultContract?.expectedOutcomes)
+    ? readinessPostMutationResultContract.expectedOutcomes
+    : [];
+  const readinessMutationResultIntakeBoundary =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationResultIntakeBoundary || null;
+  const readinessMutationResultIntakeRequirements = Array.isArray(readinessMutationResultIntakeBoundary?.requirements)
+    ? readinessMutationResultIntakeBoundary.requirements
+    : [];
+  const readinessMutationResultIntakeAcceptedStatuses = Array.isArray(readinessMutationResultIntakeBoundary?.acceptedTerminalStatuses)
+    ? readinessMutationResultIntakeBoundary.acceptedTerminalStatuses
+    : [];
+  const readinessMutationResultAggregationPlan =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationResultAggregationPlan || null;
+  const readinessMutationResultAggregationSteps = Array.isArray(readinessMutationResultAggregationPlan?.steps)
+    ? readinessMutationResultAggregationPlan.steps
+    : [];
+  const readinessFinalMutationReportContract = readinessReleaseAttemptModel?.latestAttempt?.finalMutationReportContract || null;
+  const readinessFinalMutationReportSections = Array.isArray(readinessFinalMutationReportContract?.requiredSections)
+    ? readinessFinalMutationReportContract.requiredSections
+    : [];
+  const readinessFinalMutationReportGuardrails = Array.isArray(readinessFinalMutationReportContract?.answerQualityGuardrails)
+    ? readinessFinalMutationReportContract.answerQualityGuardrails
+    : [];
+  const readinessFinalMutationReportFinalizationBoundary =
+    readinessReleaseAttemptModel?.latestAttempt?.finalMutationReportFinalizationBoundary || null;
+  const readinessFinalMutationReportFinalizationRequirements = Array.isArray(
+    readinessFinalMutationReportFinalizationBoundary?.requirements
+  )
+    ? readinessFinalMutationReportFinalizationBoundary.requirements
+    : [];
+  const readinessFinalAnswerPublicationBoundary =
+    readinessReleaseAttemptModel?.latestAttempt?.finalAnswerPublicationBoundary || null;
+  const readinessFinalAnswerPublicationRequirements = Array.isArray(
+    readinessFinalAnswerPublicationBoundary?.requirements
+  )
+    ? readinessFinalAnswerPublicationBoundary.requirements
+    : [];
+  const readinessFinalAnswerPublicationGuardrails = Array.isArray(
+    readinessFinalAnswerPublicationBoundary?.answerQualityGuardrails
+  )
+    ? readinessFinalAnswerPublicationBoundary.answerQualityGuardrails
+    : [];
+  const readinessReleaseEnablementChecklist = readinessReleaseAttemptModel?.latestAttempt?.releaseEnablementChecklist || null;
+  const readinessReleaseEnablementChecklistItems = Array.isArray(readinessReleaseEnablementChecklist?.items)
+    ? readinessReleaseEnablementChecklist.items
+    : [];
+  const readinessMutationDispatchEnvelopeContract =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchEnvelopeContract || null;
+  const readinessMutationDispatchOrderedToolSequence = Array.isArray(
+    readinessMutationDispatchEnvelopeContract?.orderedToolSequence
+  )
+    ? readinessMutationDispatchEnvelopeContract.orderedToolSequence
+    : [];
+  const readinessMutationDispatchRequiredApprovals = Array.isArray(
+    readinessMutationDispatchEnvelopeContract?.requiredApprovals
+  )
+    ? readinessMutationDispatchEnvelopeContract.requiredApprovals
+    : [];
+  const readinessMutationDispatchPreflightBoundary =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchPreflightBoundary || null;
+  const readinessMutationDispatchPreflightCapabilityChecks = Array.isArray(
+    readinessMutationDispatchPreflightBoundary?.capabilityChecks
+  )
+    ? readinessMutationDispatchPreflightBoundary.capabilityChecks
+    : [];
+  const readinessMutationDispatchDecisionModel =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchDecisionModel || null;
+  const readinessMutationDispatchDecisionInputs = Array.isArray(
+    readinessMutationDispatchDecisionModel?.readinessInputs
+  )
+    ? readinessMutationDispatchDecisionModel.readinessInputs
+    : [];
+  const readinessMutationRequestBlueprint =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRequestBlueprint || null;
+  const readinessMutationRequestBlueprintToolRequests = Array.isArray(
+    readinessMutationRequestBlueprint?.orderedToolRequests
+  )
+    ? readinessMutationRequestBlueprint.orderedToolRequests
+    : [];
+  const readinessMutationRequestBlueprintApprovalStates = Array.isArray(
+    readinessMutationRequestBlueprint?.approvalStates
+  )
+    ? readinessMutationRequestBlueprint.approvalStates
+    : [];
+  const readinessMutationRequestCreationGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRequestCreationGate || null;
+  const readinessMutationRequestCreationGatePolicyChecks = Array.isArray(
+    readinessMutationRequestCreationGate?.policyChecks
+  )
+    ? readinessMutationRequestCreationGate.policyChecks
+    : [];
+  const readinessMutationRequestPushGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRequestPushGate || null;
+  const readinessMutationRequestPushGatePolicyChecks = Array.isArray(
+    readinessMutationRequestPushGate?.policyChecks
+  )
+    ? readinessMutationRequestPushGate.policyChecks
+    : [];
+  const readinessMutationRequestClaimGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRequestClaimGate || null;
+  const readinessMutationRequestClaimGatePolicyChecks = Array.isArray(
+    readinessMutationRequestClaimGate?.policyChecks
+  )
+    ? readinessMutationRequestClaimGate.policyChecks
+    : [];
+  const readinessMutationCompletionSummary = readinessReleaseAttemptModel?.latestAttempt?.mutationCompletionSummary || null;
+  const readinessMutationCompletionSummaryItems = Array.isArray(readinessMutationCompletionSummary?.items)
+    ? readinessMutationCompletionSummary.items
+    : [];
+  const readinessReleaseBoundaryVisibility = localPatchRequest?.status === 'APPROVED_HELD'
+    ? {
+        status: 'RELEASE_REFUSAL_ONLY_VISIBLE',
+        actionMode: 'REFUSAL_ONLY',
+        endpoint: `/api/local-agents/tools/${localPatchRequest.requestId}/release`,
+        releaseGateEnabled: false,
+        requestCreationEnabled: false,
+        pushEnabled: false,
+        claimEnabled: false,
+        writeHelperEnabled: false,
+        claimable: false,
+        mutationAllowed: false,
+        applyEnabled: false,
+        testEnabled: false,
+        rollbackRestoreEnabled: false,
+        ragFreshnessUpdateEnabled: false,
+      }
+    : null;
+  const readinessFreshObservationEnqueueBoundary = readinessReleaseAttemptModel?.latestAttempt?.evidence?.freshObservationEnqueueBoundary || null;
+  const readinessFreshObservationBoundaryRequests = Array.isArray(readinessFreshObservationEnqueueBoundary?.plannedRequests)
+    ? readinessFreshObservationEnqueueBoundary.plannedRequests
+    : [];
   const expectedDryRunRefusal = isExpectedDryRunRefusal(visibleDryRun);
   const dryRunSnapshotObservation = visibleDryRun?.output?.snapshotObservation;
   const dryRunRollbackObservation = visibleDryRun?.output?.rollbackObservation;
@@ -756,6 +920,17 @@ function CodeAgentPanel({
                     {loading(`code-agent-local-patch-dry-run-${localPatchRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
                     Queue Local Agent dry-run
                   </button>
+                  {readinessReleaseBoundaryVisibility && (
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled
+                      title="Release is currently a refusal-only audit boundary. It does not create or push a Local Agent mutation request."
+                    >
+                      <Play size={16} />
+                      Release Local Agent patch disabled
+                    </button>
+                  )}
                 </div>
               )}
               {localPatchDryRunRequest && (
@@ -833,6 +1008,7 @@ function CodeAgentPanel({
                     <div className="failure-item">
                       <strong>Recorded repository verification: {readinessRepositoryVerification.status || 'UNVERIFIED'}</strong>
                       {readinessRepositoryVerification.message && <span>{readinessRepositoryVerification.message}</span>}
+                      {formatObservationLinkage(readinessRepositoryVerification) && <span>{formatObservationLinkage(readinessRepositoryVerification)}</span>}
                       {(readinessRepositoryVerification.checks || [])
                         .filter((check) => check.status !== 'SKIPPED')
                         .map((check) => (
@@ -894,15 +1070,1056 @@ function CodeAgentPanel({
                           {readinessReleaseAttemptModel.requiredEvidence?.length ? ` / evidence ${readinessReleaseAttemptModel.requiredEvidence.length}` : ''}
                         </span>
                       )}
+                      {!!readinessFreshObservationRequestPlan.length && (
+                        <>
+                          <span>fresh observation request plan: audit-only / no enqueue / no claim</span>
+                          {readinessFreshObservationRequestPlan.map((item) => (
+                            <span key={`${item.key}-${item.releaseAttemptId || item.toolName}`}>
+                              {item.key}: {item.status || 'PLANNED_DISABLED'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
+                              {item.enqueueEnabled !== undefined ? ` / enqueue ${String(item.enqueueEnabled)}` : ''}
+                              {item.claimableAfterEnqueue !== undefined ? ` / claimable ${String(item.claimableAfterEnqueue)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.dryRunOnly !== undefined ? ` / dry-run ${String(item.dryRunOnly)}` : ''}
+                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
+                              {item.sourceRequestId ? ` / source ${String(item.sourceRequestId).slice(0, 8)}` : ''}
+                            </span>
+                          ))}
+                        </>
+                      )}
+                      {!!readinessFreshObservationEvidenceStatus.length && (
+                        <>
+                          <span>fresh observation evidence status: audit-only / no request creation / no push</span>
+                          {readinessFreshObservationEvidenceStatus.map((item) => (
+                            <span key={`evidence-${item.key}-${item.releaseAttemptId || item.status}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.linked !== undefined ? ` / linked ${String(item.linked)}` : ''}
+                              {item.sourceOnlyFallback !== undefined ? ` / fallback ${String(item.sourceOnlyFallback)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
+                            </span>
+                          ))}
+                        </>
+                      )}
+                      {readinessFreshObservationEvidenceCompleteness && (
+                        <>
+                          <span>
+                            fresh observation evidence completeness: {readinessFreshObservationEvidenceCompleteness.status || 'UNKNOWN'}
+                            {readinessFreshObservationEvidenceCompleteness.complete !== undefined ? ` / complete ${String(readinessFreshObservationEvidenceCompleteness.complete)}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.linkedCount !== undefined ? ` / linked ${readinessFreshObservationEvidenceCompleteness.linkedCount}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.missingCount !== undefined ? ` / missing ${readinessFreshObservationEvidenceCompleteness.missingCount}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackCount !== undefined ? ` / fallback ${readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackCount}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.blockingCount !== undefined ? ` / blocking ${readinessFreshObservationEvidenceCompleteness.blockingCount}` : ''}
+                          </span>
+                          <span>
+                            release gate: {String(readinessFreshObservationEvidenceCompleteness.releaseGateEnabled)}
+                            {readinessFreshObservationEvidenceCompleteness.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFreshObservationEvidenceCompleteness.requestCreationEnabled)}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.pushEnabled !== undefined ? ` / push ${String(readinessFreshObservationEvidenceCompleteness.pushEnabled)}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.claimable !== undefined ? ` / claimable ${String(readinessFreshObservationEvidenceCompleteness.claimable)}` : ''}
+                            {readinessFreshObservationEvidenceCompleteness.mutationAllowed !== undefined ? ` / mutation ${String(readinessFreshObservationEvidenceCompleteness.mutationAllowed)}` : ''}
+                          </span>
+                          {!!readinessFreshObservationEvidenceCompleteness.blockingKeys?.length && (
+                            <span>blocking evidence: {readinessFreshObservationEvidenceCompleteness.blockingKeys.join(', ')}</span>
+                          )}
+                          {!!readinessFreshObservationEvidenceCompleteness.missingKeys?.length && (
+                            <span>missing evidence: {readinessFreshObservationEvidenceCompleteness.missingKeys.join(', ')}</span>
+                          )}
+                          {!!readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackKeys?.length && (
+                            <span>fallback-only evidence: {readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackKeys.join(', ')}</span>
+                          )}
+                          {readinessFreshObservationEvidenceCompleteness.message && (
+                            <span>{readinessFreshObservationEvidenceCompleteness.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessReleaseAttemptFinalReadiness && (
+                        <>
+                          <span>
+                            release attempt final readiness: {readinessReleaseAttemptFinalReadiness.status || 'UNKNOWN'}
+                            {readinessReleaseAttemptFinalReadiness.ready !== undefined ? ` / ready ${String(readinessReleaseAttemptFinalReadiness.ready)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.freshnessStatus ? ` / freshness ${readinessReleaseAttemptFinalReadiness.freshnessStatus}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.stale !== undefined ? ` / stale ${String(readinessReleaseAttemptFinalReadiness.stale)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.evidenceComplete !== undefined ? ` / evidence complete ${String(readinessReleaseAttemptFinalReadiness.evidenceComplete)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.patchPreconditionsPassed !== undefined ? ` / patch preconditions ${String(readinessReleaseAttemptFinalReadiness.patchPreconditionsPassed)}` : ''}
+                          </span>
+                          <span>
+                            final release gate: {String(readinessReleaseAttemptFinalReadiness.releaseGateEnabled)}
+                            {readinessReleaseAttemptFinalReadiness.claimEnabled !== undefined ? ` / claim ${String(readinessReleaseAttemptFinalReadiness.claimEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessReleaseAttemptFinalReadiness.writeHelperEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessReleaseAttemptFinalReadiness.requestCreationEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.pushEnabled !== undefined ? ` / push ${String(readinessReleaseAttemptFinalReadiness.pushEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.claimable !== undefined ? ` / claimable ${String(readinessReleaseAttemptFinalReadiness.claimable)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.mutationAllowed !== undefined ? ` / mutation ${String(readinessReleaseAttemptFinalReadiness.mutationAllowed)}` : ''}
+                          </span>
+                          <span>
+                            execution disabled:
+                            {readinessReleaseAttemptFinalReadiness.applyEnabled !== undefined ? ` apply ${String(readinessReleaseAttemptFinalReadiness.applyEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.testEnabled !== undefined ? ` / test ${String(readinessReleaseAttemptFinalReadiness.testEnabled)}` : ''}
+                            {readinessReleaseAttemptFinalReadiness.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessReleaseAttemptFinalReadiness.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {!!readinessReleaseAttemptFinalReadiness.blockingReasons?.length && (
+                            <span>final blocking reasons: {readinessReleaseAttemptFinalReadiness.blockingReasons.join(', ')}</span>
+                          )}
+                          {readinessReleaseAttemptFinalReadiness.message && (
+                            <span>{readinessReleaseAttemptFinalReadiness.message}</span>
+                          )}
+                        </>
+                      )}
+                      {!!readinessLocalAgentMutationExecutionSequencePlan.length && (
+                        <>
+                          <span>local agent mutation execution sequence: audit-only / no request creation / no push</span>
+                          {readinessLocalAgentMutationExecutionSequencePlan.map((item) => (
+                            <span key={`mutation-sequence-${item.order || item.key}-${item.releaseAttemptId || item.toolName}`}>
+                              {item.order !== undefined ? `${item.order}. ` : ''}{item.key}: {item.status || 'PLANNED_DISABLED'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
+                              {item.executionTarget ? ` / ${item.executionTarget}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimableAfterRelease !== undefined ? ` / claim after release ${String(item.claimableAfterRelease)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.applyEnabled !== undefined ? ` / apply ${String(item.applyEnabled)}` : ''}
+                              {item.testEnabled !== undefined ? ` / test ${String(item.testEnabled)}` : ''}
+                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
+                            </span>
+                          ))}
+                        </>
+                      )}
+                      {readinessPostMutationResultContract && (
+                        <>
+                          <span>
+                            post-mutation result contract: {readinessPostMutationResultContract.status || 'CONTRACT_DISABLED'}
+                            {readinessPostMutationResultContract.schema ? ` / ${readinessPostMutationResultContract.schema}` : ''}
+                            {readinessPostMutationResultContract.executionTarget ? ` / ${readinessPostMutationResultContract.executionTarget}` : ''}
+                            {readinessPostMutationResultContract.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessPostMutationResultContract.releaseGateEnabled)}` : ''}
+                            {readinessPostMutationResultContract.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessPostMutationResultContract.requestCreationEnabled)}` : ''}
+                            {readinessPostMutationResultContract.pushEnabled !== undefined ? ` / push ${String(readinessPostMutationResultContract.pushEnabled)}` : ''}
+                            {readinessPostMutationResultContract.claimable !== undefined ? ` / claimable ${String(readinessPostMutationResultContract.claimable)}` : ''}
+                            {readinessPostMutationResultContract.mutationAllowed !== undefined ? ` / mutation ${String(readinessPostMutationResultContract.mutationAllowed)}` : ''}
+                            {readinessPostMutationResultContract.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessPostMutationResultContract.ragFreshnessUpdateEnabled)}` : ''}
+                          </span>
+                          {readinessPostMutationExpectedOutcomes.map((item) => (
+                            <span key={`post-mutation-${item.key}-${item.toolName || item.status}`}>
+                              {item.key}: {item.status || 'EXPECTED_DISABLED'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
+                              {item.requiredForSuccess !== undefined ? ` / required for success ${String(item.requiredForSuccess)}` : ''}
+                              {item.resultRequired !== undefined ? ` / result required ${String(item.resultRequired)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.applyEnabled !== undefined ? ` / apply ${String(item.applyEnabled)}` : ''}
+                              {item.testEnabled !== undefined ? ` / test ${String(item.testEnabled)}` : ''}
+                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                            </span>
+                          ))}
+                          {readinessPostMutationResultContract.message && (
+                            <span>{readinessPostMutationResultContract.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationResultIntakeBoundary && (
+                        <>
+                          <span>
+                            mutation result intake boundary: {readinessMutationResultIntakeBoundary.status || 'BLOCKED_INTAKE_DISABLED'}
+                            {readinessMutationResultIntakeBoundary.schema ? ` / ${readinessMutationResultIntakeBoundary.schema}` : ''}
+                            {readinessMutationResultIntakeBoundary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationResultIntakeBoundary.prerequisitesPassed)}` : ''}
+                            {readinessMutationResultIntakeBoundary.executionTarget ? ` / ${readinessMutationResultIntakeBoundary.executionTarget}` : ''}
+                            {readinessMutationResultIntakeBoundary.postMutationResultSchema ? ` / source ${readinessMutationResultIntakeBoundary.postMutationResultSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation result intake disabled:
+                            {readinessMutationResultIntakeBoundary.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationResultIntakeBoundary.releaseGateEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationResultIntakeBoundary.requestCreationEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.pushEnabled !== undefined ? ` / push ${String(readinessMutationResultIntakeBoundary.pushEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.claimEnabled !== undefined ? ` / claim ${String(readinessMutationResultIntakeBoundary.claimEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationResultIntakeBoundary.writeHelperEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.claimable !== undefined ? ` / claimable ${String(readinessMutationResultIntakeBoundary.claimable)}` : ''}
+                            {readinessMutationResultIntakeBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationResultIntakeBoundary.mutationAllowed)}` : ''}
+                            {readinessMutationResultIntakeBoundary.applyEnabled !== undefined ? ` / apply ${String(readinessMutationResultIntakeBoundary.applyEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.testEnabled !== undefined ? ` / test ${String(readinessMutationResultIntakeBoundary.testEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationResultIntakeBoundary.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationResultIntakeBoundary.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationResultIntakeBoundary.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationResultIntakeBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationResultIntakeBoundary.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessMutationResultIntakeBoundary.requiredOutcomeKeys?.length && (
+                            <span>mutation result required outcomes: {readinessMutationResultIntakeBoundary.requiredOutcomeKeys.join(', ')}</span>
+                          )}
+                          {!!readinessMutationResultIntakeAcceptedStatuses.length && (
+                            <span>mutation result accepted terminal statuses: {readinessMutationResultIntakeAcceptedStatuses.join(', ')}</span>
+                          )}
+                          {readinessMutationResultIntakeRequirements.map((item) => (
+                            <span key={`mutation-result-intake-${item.key}-${item.status || item.passed}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationResultIntakeBoundary.blockingKeys?.length && (
+                            <span>mutation result intake blocking keys: {readinessMutationResultIntakeBoundary.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationResultIntakeBoundary.message && (
+                            <span>{readinessMutationResultIntakeBoundary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationResultAggregationPlan && (
+                        <>
+                          <span>
+                            mutation result aggregation plan: {readinessMutationResultAggregationPlan.status || 'BLOCKED_AGGREGATION_DISABLED'}
+                            {readinessMutationResultAggregationPlan.schema ? ` / ${readinessMutationResultAggregationPlan.schema}` : ''}
+                            {readinessMutationResultAggregationPlan.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationResultAggregationPlan.prerequisitesPassed)}` : ''}
+                            {readinessMutationResultAggregationPlan.executionTarget ? ` / ${readinessMutationResultAggregationPlan.executionTarget}` : ''}
+                            {readinessMutationResultAggregationPlan.postMutationResultSchema ? ` / source ${readinessMutationResultAggregationPlan.postMutationResultSchema}` : ''}
+                            {readinessMutationResultAggregationPlan.finalMutationReportSchema ? ` / target ${readinessMutationResultAggregationPlan.finalMutationReportSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation result aggregation disabled:
+                            {readinessMutationResultAggregationPlan.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationResultAggregationPlan.releaseGateEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationResultAggregationPlan.requestCreationEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.pushEnabled !== undefined ? ` / push ${String(readinessMutationResultAggregationPlan.pushEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.claimEnabled !== undefined ? ` / claim ${String(readinessMutationResultAggregationPlan.claimEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationResultAggregationPlan.writeHelperEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.claimable !== undefined ? ` / claimable ${String(readinessMutationResultAggregationPlan.claimable)}` : ''}
+                            {readinessMutationResultAggregationPlan.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationResultAggregationPlan.mutationAllowed)}` : ''}
+                            {readinessMutationResultAggregationPlan.applyEnabled !== undefined ? ` / apply ${String(readinessMutationResultAggregationPlan.applyEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.testEnabled !== undefined ? ` / test ${String(readinessMutationResultAggregationPlan.testEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationResultAggregationPlan.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationResultAggregationPlan.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationResultAggregationPlan.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationResultAggregationPlan.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationResultAggregationPlan.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessMutationResultAggregationPlan.sourceOutcomeKeys?.length && (
+                            <span>aggregation source outcomes: {readinessMutationResultAggregationPlan.sourceOutcomeKeys.join(', ')}</span>
+                          )}
+                          {!!readinessMutationResultAggregationPlan.targetReportSections?.length && (
+                            <span>aggregation target sections: {readinessMutationResultAggregationPlan.targetReportSections.join(', ')}</span>
+                          )}
+                          {readinessMutationResultAggregationSteps.map((item) => (
+                            <span key={`mutation-result-aggregation-${item.order}-${item.targetSectionKey}`}>
+                              {item.order}. {item.targetSectionKey}: {item.status || 'PLANNED_DISABLED'}
+                              {item.sourceOutcomeKey ? ` / source ${item.sourceOutcomeKey}` : ''}
+                              {item.required !== undefined ? ` / required ${String(item.required)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationResultAggregationPlan.blockingKeys?.length && (
+                            <span>mutation result aggregation blocking keys: {readinessMutationResultAggregationPlan.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationResultAggregationPlan.message && (
+                            <span>{readinessMutationResultAggregationPlan.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessFinalMutationReportContract && (
+                        <>
+                          <span>
+                            final mutation report contract: {readinessFinalMutationReportContract.status || 'CONTRACT_DISABLED'}
+                            {readinessFinalMutationReportContract.schema ? ` / ${readinessFinalMutationReportContract.schema}` : ''}
+                            {readinessFinalMutationReportContract.executionTarget ? ` / ${readinessFinalMutationReportContract.executionTarget}` : ''}
+                            {readinessFinalMutationReportContract.postMutationResultSchema ? ` / source ${readinessFinalMutationReportContract.postMutationResultSchema}` : ''}
+                            {readinessFinalMutationReportContract.rollbackReadinessStatus ? ` / rollback ${readinessFinalMutationReportContract.rollbackReadinessStatus}` : ''}
+                          </span>
+                          <span>
+                            final report disabled:
+                            {readinessFinalMutationReportContract.releaseGateEnabled !== undefined ? ` release gate ${String(readinessFinalMutationReportContract.releaseGateEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFinalMutationReportContract.requestCreationEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.pushEnabled !== undefined ? ` / push ${String(readinessFinalMutationReportContract.pushEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.claimable !== undefined ? ` / claimable ${String(readinessFinalMutationReportContract.claimable)}` : ''}
+                            {readinessFinalMutationReportContract.mutationAllowed !== undefined ? ` / mutation ${String(readinessFinalMutationReportContract.mutationAllowed)}` : ''}
+                            {readinessFinalMutationReportContract.applyEnabled !== undefined ? ` / apply ${String(readinessFinalMutationReportContract.applyEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.testEnabled !== undefined ? ` / test ${String(readinessFinalMutationReportContract.testEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessFinalMutationReportContract.rollbackRestoreEnabled)}` : ''}
+                            {readinessFinalMutationReportContract.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessFinalMutationReportContract.ragFreshnessUpdateEnabled)}` : ''}
+                          </span>
+                          {!!readinessFinalMutationReportContract.expectedOutcomeKeys?.length && (
+                            <span>final report source outcomes: {readinessFinalMutationReportContract.expectedOutcomeKeys.join(', ')}</span>
+                          )}
+                          {readinessFinalMutationReportSections.map((item) => (
+                            <span key={`final-report-${item.key}-${item.sourceOutcomeKey || item.status}`}>
+                              {item.key}: {item.status || 'REQUIRED_DISABLED'}
+                              {item.sourceOutcomeKey ? ` / source ${item.sourceOutcomeKey}` : ''}
+                              {item.required !== undefined ? ` / required ${String(item.required)}` : ''}
+                              {item.resultRequired !== undefined ? ` / result required ${String(item.resultRequired)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {readinessFinalMutationReportGuardrails.map((item, index) => (
+                            <span key={`final-report-guardrail-${index}`}>final report guardrail: {item}</span>
+                          ))}
+                          {readinessFinalMutationReportContract.message && (
+                            <span>{readinessFinalMutationReportContract.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessFinalMutationReportFinalizationBoundary && (
+                        <>
+                          <span>
+                            final mutation report finalization boundary: {readinessFinalMutationReportFinalizationBoundary.status || 'BLOCKED_FINALIZATION_DISABLED'}
+                            {readinessFinalMutationReportFinalizationBoundary.schema ? ` / ${readinessFinalMutationReportFinalizationBoundary.schema}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessFinalMutationReportFinalizationBoundary.prerequisitesPassed)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.executionTarget ? ` / ${readinessFinalMutationReportFinalizationBoundary.executionTarget}` : ''}
+                          </span>
+                          <span>
+                            final answer generation disabled:
+                            {readinessFinalMutationReportFinalizationBoundary.releaseGateEnabled !== undefined ? ` release gate ${String(readinessFinalMutationReportFinalizationBoundary.releaseGateEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFinalMutationReportFinalizationBoundary.requestCreationEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.pushEnabled !== undefined ? ` / push ${String(readinessFinalMutationReportFinalizationBoundary.pushEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.claimEnabled !== undefined ? ` / claim ${String(readinessFinalMutationReportFinalizationBoundary.claimEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessFinalMutationReportFinalizationBoundary.writeHelperEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.claimable !== undefined ? ` / claimable ${String(readinessFinalMutationReportFinalizationBoundary.claimable)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessFinalMutationReportFinalizationBoundary.mutationAllowed)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.applyEnabled !== undefined ? ` / apply ${String(readinessFinalMutationReportFinalizationBoundary.applyEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.testEnabled !== undefined ? ` / test ${String(readinessFinalMutationReportFinalizationBoundary.testEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessFinalMutationReportFinalizationBoundary.rollbackRestoreEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessFinalMutationReportFinalizationBoundary.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessFinalMutationReportFinalizationBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessFinalMutationReportFinalizationBoundary.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessFinalMutationReportFinalizationRequirements.map((item) => (
+                            <span key={`final-report-finalization-${item.key}-${item.status || item.passed}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessFinalMutationReportFinalizationBoundary.blockingKeys?.length && (
+                            <span>final report finalization blocking keys: {readinessFinalMutationReportFinalizationBoundary.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessFinalMutationReportFinalizationBoundary.message && (
+                            <span>{readinessFinalMutationReportFinalizationBoundary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessFinalAnswerPublicationBoundary && (
+                        <>
+                          <span>
+                            final answer publication boundary: {readinessFinalAnswerPublicationBoundary.status || 'BLOCKED_PUBLICATION_DISABLED'}
+                            {readinessFinalAnswerPublicationBoundary.schema ? ` / ${readinessFinalAnswerPublicationBoundary.schema}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessFinalAnswerPublicationBoundary.prerequisitesPassed)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.executionTarget ? ` / ${readinessFinalAnswerPublicationBoundary.executionTarget}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.finalMutationReportSchema ? ` / report ${readinessFinalAnswerPublicationBoundary.finalMutationReportSchema}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.aggregationPlanSchema ? ` / aggregation ${readinessFinalAnswerPublicationBoundary.aggregationPlanSchema}` : ''}
+                          </span>
+                          <span>
+                            final answer publication disabled:
+                            {readinessFinalAnswerPublicationBoundary.releaseGateEnabled !== undefined ? ` release gate ${String(readinessFinalAnswerPublicationBoundary.releaseGateEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFinalAnswerPublicationBoundary.requestCreationEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.pushEnabled !== undefined ? ` / push ${String(readinessFinalAnswerPublicationBoundary.pushEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.claimEnabled !== undefined ? ` / claim ${String(readinessFinalAnswerPublicationBoundary.claimEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessFinalAnswerPublicationBoundary.writeHelperEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.claimable !== undefined ? ` / claimable ${String(readinessFinalAnswerPublicationBoundary.claimable)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessFinalAnswerPublicationBoundary.mutationAllowed)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.applyEnabled !== undefined ? ` / apply ${String(readinessFinalAnswerPublicationBoundary.applyEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.testEnabled !== undefined ? ` / test ${String(readinessFinalAnswerPublicationBoundary.testEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessFinalAnswerPublicationBoundary.rollbackRestoreEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessFinalAnswerPublicationBoundary.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessFinalAnswerPublicationBoundary.mutationResultAggregationEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.publicationEnabled !== undefined ? ` / publication ${String(readinessFinalAnswerPublicationBoundary.publicationEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessFinalAnswerPublicationBoundary.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessFinalAnswerPublicationBoundary.requiredReportSections?.length && (
+                            <span>publication required report sections: {readinessFinalAnswerPublicationBoundary.requiredReportSections.join(', ')}</span>
+                          )}
+                          {readinessFinalAnswerPublicationGuardrails.map((item, index) => (
+                            <span key={`final-answer-publication-guardrail-${index}`}>publication guardrail: {item}</span>
+                          ))}
+                          {readinessFinalAnswerPublicationRequirements.map((item) => (
+                            <span key={`final-answer-publication-${item.key}-${item.status || item.passed}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessFinalAnswerPublicationBoundary.blockingKeys?.length && (
+                            <span>final answer publication blocking keys: {readinessFinalAnswerPublicationBoundary.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessFinalAnswerPublicationBoundary.message && (
+                            <span>{readinessFinalAnswerPublicationBoundary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessReleaseEnablementChecklist && (
+                        <>
+                          <span>
+                            release enablement checklist: {readinessReleaseEnablementChecklist.status || 'BLOCKED_ENABLEMENT_DISABLED'}
+                            {readinessReleaseEnablementChecklist.schema ? ` / ${readinessReleaseEnablementChecklist.schema}` : ''}
+                            {readinessReleaseEnablementChecklist.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessReleaseEnablementChecklist.prerequisitesPassed)}` : ''}
+                            {readinessReleaseEnablementChecklist.executionTarget ? ` / ${readinessReleaseEnablementChecklist.executionTarget}` : ''}
+                            {readinessReleaseEnablementChecklist.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessReleaseEnablementChecklist.releaseGateEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.claimEnabled !== undefined ? ` / claim ${String(readinessReleaseEnablementChecklist.claimEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessReleaseEnablementChecklist.writeHelperEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessReleaseEnablementChecklist.requestCreationEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.pushEnabled !== undefined ? ` / push ${String(readinessReleaseEnablementChecklist.pushEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.claimable !== undefined ? ` / claimable ${String(readinessReleaseEnablementChecklist.claimable)}` : ''}
+                            {readinessReleaseEnablementChecklist.mutationAllowed !== undefined ? ` / mutation ${String(readinessReleaseEnablementChecklist.mutationAllowed)}` : ''}
+                          </span>
+                          <span>
+                            release execution disabled:
+                            {readinessReleaseEnablementChecklist.applyEnabled !== undefined ? ` apply ${String(readinessReleaseEnablementChecklist.applyEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.testEnabled !== undefined ? ` / test ${String(readinessReleaseEnablementChecklist.testEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessReleaseEnablementChecklist.rollbackRestoreEnabled)}` : ''}
+                            {readinessReleaseEnablementChecklist.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessReleaseEnablementChecklist.ragFreshnessUpdateEnabled)}` : ''}
+                          </span>
+                          {readinessReleaseEnablementChecklistItems.map((item) => (
+                            <span key={`release-enablement-${item.key}-${item.status || item.passed}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessReleaseEnablementChecklist.blockingKeys?.length && (
+                            <span>release enablement blocking keys: {readinessReleaseEnablementChecklist.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessReleaseEnablementChecklist.message && (
+                            <span>{readinessReleaseEnablementChecklist.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationDispatchEnvelopeContract && (
+                        <>
+                          <span>
+                            mutation dispatch envelope contract: {readinessMutationDispatchEnvelopeContract.status || 'BLOCKED_DISPATCH_DISABLED'}
+                            {readinessMutationDispatchEnvelopeContract.schema ? ` / ${readinessMutationDispatchEnvelopeContract.schema}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationDispatchEnvelopeContract.prerequisitesPassed)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.executionTarget ? ` / ${readinessMutationDispatchEnvelopeContract.executionTarget}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.dispatchMode ? ` / ${readinessMutationDispatchEnvelopeContract.dispatchMode}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch ids:
+                            {readinessMutationDispatchEnvelopeContract.sourceRequestId ? ` source ${readinessMutationDispatchEnvelopeContract.sourceRequestId}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.releaseAttemptId ? ` / release ${readinessMutationDispatchEnvelopeContract.releaseAttemptId}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.sessionId ? ` / session ${readinessMutationDispatchEnvelopeContract.sessionId}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.agentId ? ` / agent ${readinessMutationDispatchEnvelopeContract.agentId}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.workspaceId ? ` / workspace ${readinessMutationDispatchEnvelopeContract.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch disabled:
+                            {readinessMutationDispatchEnvelopeContract.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationDispatchEnvelopeContract.releaseGateEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchEnvelopeContract.requestCreationEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchEnvelopeContract.pushEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchEnvelopeContract.claimEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchEnvelopeContract.writeHelperEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchEnvelopeContract.claimable)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchEnvelopeContract.mutationAllowed)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchEnvelopeContract.applyEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchEnvelopeContract.testEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchEnvelopeContract.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchEnvelopeContract.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchEnvelopeContract.publicationEnabled)}` : ''}
+                            {readinessMutationDispatchEnvelopeContract.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchEnvelopeContract.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessMutationDispatchEnvelopeContract.expectedOutcomeKeys?.length && (
+                            <span>mutation dispatch expected outcomes: {readinessMutationDispatchEnvelopeContract.expectedOutcomeKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationDispatchOrderedToolSequence.map((item) => (
+                            <span key={`mutation-dispatch-tool-${item.order || item.key}-${item.toolName}`}>
+                              {item.order !== undefined ? `${item.order}. ` : ''}{item.key}: {item.toolName || 'tool pending'}
+                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
+                            </span>
+                          ))}
+                          {readinessMutationDispatchRequiredApprovals.map((item) => (
+                            <span key={`mutation-dispatch-approval-${item.key}-${item.toolName}`}>
+                              approval {item.key}: {item.approvalState || 'UNKNOWN'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                            </span>
+                          ))}
+                          {readinessMutationDispatchEnvelopeContract.rollbackObligation && (
+                            <span>
+                              rollback obligation:
+                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.status ? ` ${readinessMutationDispatchEnvelopeContract.rollbackObligation.status}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.toolName ? ` / ${readinessMutationDispatchEnvelopeContract.rollbackObligation.toolName}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.required !== undefined ? ` / required ${String(readinessMutationDispatchEnvelopeContract.rollbackObligation.required)}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchEnvelopeContract.rollbackObligation.rollbackRestoreEnabled)}` : ''}
+                            </span>
+                          )}
+                          {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation && (
+                            <span>
+                              RAG freshness obligation:
+                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.status ? ` ${readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.status}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.required !== undefined ? ` / required ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.required)}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.ragFreshnessUpdateEnabled)}` : ''}
+                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.message ? ` / ${readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.message}` : ''}
+                            </span>
+                          )}
+                          {!!readinessMutationDispatchEnvelopeContract.blockingKeys?.length && (
+                            <span>mutation dispatch blocking keys: {readinessMutationDispatchEnvelopeContract.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationDispatchEnvelopeContract.message && (
+                            <span>{readinessMutationDispatchEnvelopeContract.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationDispatchPreflightBoundary && (
+                        <>
+                          <span>
+                            mutation dispatch preflight boundary: {readinessMutationDispatchPreflightBoundary.status || 'BLOCKED_PREFLIGHT_DISABLED'}
+                            {readinessMutationDispatchPreflightBoundary.schema ? ` / ${readinessMutationDispatchPreflightBoundary.schema}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationDispatchPreflightBoundary.prerequisitesPassed)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.executionTarget ? ` / ${readinessMutationDispatchPreflightBoundary.executionTarget}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.dispatchEnvelopeStatus ? ` / envelope ${readinessMutationDispatchPreflightBoundary.dispatchEnvelopeStatus}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.dispatchEnvelopePrerequisitesPassed !== undefined ? ` / envelope prerequisites ${String(readinessMutationDispatchPreflightBoundary.dispatchEnvelopePrerequisitesPassed)}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch preflight agent:
+                            {readinessMutationDispatchPreflightBoundary.connectionState ? ` ${readinessMutationDispatchPreflightBoundary.connectionState}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.agentConnected !== undefined ? ` / connected ${String(readinessMutationDispatchPreflightBoundary.agentConnected)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.agentMatches !== undefined ? ` / matches ${String(readinessMutationDispatchPreflightBoundary.agentMatches)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.requestedAgentId ? ` / requested ${readinessMutationDispatchPreflightBoundary.requestedAgentId}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.connectedAgentId ? ` / connected id ${readinessMutationDispatchPreflightBoundary.connectedAgentId}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.agentVersion ? ` / version ${readinessMutationDispatchPreflightBoundary.agentVersion}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch preflight workspace:
+                            {readinessMutationDispatchPreflightBoundary.workspaceId ? ` ${readinessMutationDispatchPreflightBoundary.workspaceId}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.approvedWorkspaceReady !== undefined ? ` / approved ready ${String(readinessMutationDispatchPreflightBoundary.approvedWorkspaceReady)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.workspaceApproved !== undefined ? ` / approved ${String(readinessMutationDispatchPreflightBoundary.workspaceApproved)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.workspaceName ? ` / ${readinessMutationDispatchPreflightBoundary.workspaceName}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.workspaceIdentityStatus ? ` / identity ${readinessMutationDispatchPreflightBoundary.workspaceIdentityStatus}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.workspaceIdentityVerified !== undefined ? ` / verified ${String(readinessMutationDispatchPreflightBoundary.workspaceIdentityVerified)}` : ''}
+                          </span>
+                          {!!readinessMutationDispatchPreflightBoundary.requiredCapabilities?.length && (
+                            <span>mutation dispatch required capabilities: {readinessMutationDispatchPreflightBoundary.requiredCapabilities.join(', ')}</span>
+                          )}
+                          {!!readinessMutationDispatchPreflightBoundary.advertisedCapabilities?.length && (
+                            <span>mutation dispatch advertised capabilities: {readinessMutationDispatchPreflightBoundary.advertisedCapabilities.join(', ')}</span>
+                          )}
+                          {readinessMutationDispatchPreflightCapabilityChecks.map((item) => (
+                            <span key={`mutation-dispatch-preflight-capability-${item.toolName}`}>
+                              capability {item.toolName}: {item.available !== undefined ? `available ${String(item.available)}` : 'availability unknown'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationDispatchPreflightBoundary.missingCapabilities?.length && (
+                            <span>mutation dispatch missing capabilities: {readinessMutationDispatchPreflightBoundary.missingCapabilities.join(', ')}</span>
+                          )}
+                          <span>
+                            mutation dispatch preflight disabled:
+                            {readinessMutationDispatchPreflightBoundary.dispatchPreflightEnabled !== undefined ? ` dispatch preflight ${String(readinessMutationDispatchPreflightBoundary.dispatchPreflightEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationDispatchPreflightBoundary.releaseGateEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchPreflightBoundary.requestCreationEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchPreflightBoundary.pushEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchPreflightBoundary.claimEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchPreflightBoundary.writeHelperEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchPreflightBoundary.claimable)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchPreflightBoundary.mutationAllowed)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchPreflightBoundary.applyEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchPreflightBoundary.testEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchPreflightBoundary.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchPreflightBoundary.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchPreflightBoundary.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchPreflightBoundary.publicationEnabled)}` : ''}
+                            {readinessMutationDispatchPreflightBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchPreflightBoundary.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessMutationDispatchPreflightBoundary.blockingKeys?.length && (
+                            <span>mutation dispatch preflight blocking keys: {readinessMutationDispatchPreflightBoundary.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationDispatchPreflightBoundary.message && (
+                            <span>{readinessMutationDispatchPreflightBoundary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationDispatchDecisionModel && (
+                        <>
+                          <span>
+                            mutation dispatch decision model: {readinessMutationDispatchDecisionModel.status || 'BLOCKED_DISPATCH_DISABLED'}
+                            {readinessMutationDispatchDecisionModel.schema ? ` / ${readinessMutationDispatchDecisionModel.schema}` : ''}
+                            {readinessMutationDispatchDecisionModel.decision ? ` / decision ${readinessMutationDispatchDecisionModel.decision}` : ''}
+                            {readinessMutationDispatchDecisionModel.readinessInputsPassed !== undefined ? ` / readiness inputs ${String(readinessMutationDispatchDecisionModel.readinessInputsPassed)}` : ''}
+                            {readinessMutationDispatchDecisionModel.executionTarget ? ` / ${readinessMutationDispatchDecisionModel.executionTarget}` : ''}
+                            {readinessMutationDispatchDecisionModel.dispatchEnvelopeStatus ? ` / envelope ${readinessMutationDispatchDecisionModel.dispatchEnvelopeStatus}` : ''}
+                            {readinessMutationDispatchDecisionModel.dispatchPreflightStatus ? ` / preflight ${readinessMutationDispatchDecisionModel.dispatchPreflightStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch decision ids:
+                            {readinessMutationDispatchDecisionModel.sourceRequestId ? ` source ${readinessMutationDispatchDecisionModel.sourceRequestId}` : ''}
+                            {readinessMutationDispatchDecisionModel.releaseAttemptId ? ` / release ${String(readinessMutationDispatchDecisionModel.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationDispatchDecisionModel.sessionId ? ` / session ${readinessMutationDispatchDecisionModel.sessionId}` : ''}
+                            {readinessMutationDispatchDecisionModel.agentId ? ` / agent ${readinessMutationDispatchDecisionModel.agentId}` : ''}
+                            {readinessMutationDispatchDecisionModel.workspaceId ? ` / workspace ${readinessMutationDispatchDecisionModel.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation dispatch decision disabled:
+                            {readinessMutationDispatchDecisionModel.dispatchDecisionEnabled !== undefined ? ` dispatch decision ${String(readinessMutationDispatchDecisionModel.dispatchDecisionEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationDispatchDecisionModel.releaseGateEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchDecisionModel.requestCreationEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchDecisionModel.pushEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchDecisionModel.claimEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchDecisionModel.writeHelperEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchDecisionModel.claimable)}` : ''}
+                            {readinessMutationDispatchDecisionModel.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchDecisionModel.mutationAllowed)}` : ''}
+                            {readinessMutationDispatchDecisionModel.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchDecisionModel.applyEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchDecisionModel.testEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchDecisionModel.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchDecisionModel.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchDecisionModel.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchDecisionModel.publicationEnabled)}` : ''}
+                            {readinessMutationDispatchDecisionModel.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchDecisionModel.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationDispatchDecisionInputs.map((item) => (
+                            <span key={`mutation-dispatch-decision-input-${item.key}`}>
+                              decision input {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.dispatchDecisionEnabled !== undefined ? ` / dispatch decision ${String(item.dispatchDecisionEnabled)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationDispatchDecisionModel.blockingKeys?.length && (
+                            <span>mutation dispatch decision blocking keys: {readinessMutationDispatchDecisionModel.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationDispatchDecisionModel.userVisibleRefusalMessage && (
+                            <span>dispatch refusal: {readinessMutationDispatchDecisionModel.userVisibleRefusalMessage}</span>
+                          )}
+                          {readinessMutationDispatchDecisionModel.message && (
+                            <span>{readinessMutationDispatchDecisionModel.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRequestBlueprint && (
+                        <>
+                          <span>
+                            mutation request blueprint: {readinessMutationRequestBlueprint.status || 'BLOCKED_REQUEST_BLUEPRINT_DISABLED'}
+                            {readinessMutationRequestBlueprint.schema ? ` / ${readinessMutationRequestBlueprint.schema}` : ''}
+                            {readinessMutationRequestBlueprint.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestBlueprint.prerequisitesPassed)}` : ''}
+                            {readinessMutationRequestBlueprint.executionTarget ? ` / ${readinessMutationRequestBlueprint.executionTarget}` : ''}
+                            {readinessMutationRequestBlueprint.requestCreationMode ? ` / ${readinessMutationRequestBlueprint.requestCreationMode}` : ''}
+                            {readinessMutationRequestBlueprint.sourceDecisionStatus ? ` / decision ${readinessMutationRequestBlueprint.sourceDecisionStatus}` : ''}
+                            {readinessMutationRequestBlueprint.sourceEnvelopeStatus ? ` / envelope ${readinessMutationRequestBlueprint.sourceEnvelopeStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation request blueprint ids:
+                            {readinessMutationRequestBlueprint.sourceRequestId ? ` source ${readinessMutationRequestBlueprint.sourceRequestId}` : ''}
+                            {readinessMutationRequestBlueprint.releaseAttemptId ? ` / release ${String(readinessMutationRequestBlueprint.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRequestBlueprint.sessionId ? ` / session ${readinessMutationRequestBlueprint.sessionId}` : ''}
+                            {readinessMutationRequestBlueprint.agentId ? ` / agent ${readinessMutationRequestBlueprint.agentId}` : ''}
+                            {readinessMutationRequestBlueprint.workspaceId ? ` / workspace ${readinessMutationRequestBlueprint.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation request blueprint disabled:
+                            {readinessMutationRequestBlueprint.requestBlueprintEnabled !== undefined ? ` request blueprint ${String(readinessMutationRequestBlueprint.requestBlueprintEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.dispatchDecisionEnabled !== undefined ? ` / dispatch decision ${String(readinessMutationRequestBlueprint.dispatchDecisionEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestBlueprint.releaseGateEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestBlueprint.requestCreationEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestBlueprint.pushEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestBlueprint.claimEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestBlueprint.writeHelperEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestBlueprint.claimable)}` : ''}
+                            {readinessMutationRequestBlueprint.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestBlueprint.mutationAllowed)}` : ''}
+                            {readinessMutationRequestBlueprint.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestBlueprint.applyEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestBlueprint.testEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestBlueprint.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestBlueprint.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestBlueprint.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestBlueprint.publicationEnabled)}` : ''}
+                            {readinessMutationRequestBlueprint.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestBlueprint.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {!!readinessMutationRequestBlueprint.expectedInputKeys?.length && (
+                            <span>mutation request expected inputs: {readinessMutationRequestBlueprint.expectedInputKeys.join(', ')}</span>
+                          )}
+                          {!!readinessMutationRequestBlueprint.expectedOutputKeys?.length && (
+                            <span>mutation request expected outputs: {readinessMutationRequestBlueprint.expectedOutputKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRequestBlueprintToolRequests.map((item) => (
+                            <span key={`mutation-request-blueprint-tool-${item.order || item.key}-${item.toolName}`}>
+                              {item.order !== undefined ? `${item.order}. ` : ''}{item.key}: {item.toolName || 'tool pending'}
+                              {item.status ? ` / ${item.status}` : ''}
+                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
+                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
+                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.expectedOutputKeys?.length ? ` / outputs ${item.expectedOutputKeys.join(', ')}` : ''}
+                            </span>
+                          ))}
+                          {readinessMutationRequestBlueprintApprovalStates.map((item) => (
+                            <span key={`mutation-request-blueprint-approval-${item.key}-${item.toolName}`}>
+                              blueprint approval {item.key}: {item.approvalState || 'UNKNOWN'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRequestBlueprint.blockingKeys?.length && (
+                            <span>mutation request blueprint blocking keys: {readinessMutationRequestBlueprint.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRequestBlueprint.message && (
+                            <span>{readinessMutationRequestBlueprint.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRequestCreationGate && (
+                        <>
+                          <span>
+                            mutation request creation gate: {readinessMutationRequestCreationGate.status || 'BLOCKED_CREATION_DISABLED'}
+                            {readinessMutationRequestCreationGate.schema ? ` / ${readinessMutationRequestCreationGate.schema}` : ''}
+                            {readinessMutationRequestCreationGate.blueprintReady !== undefined ? ` / blueprint ready ${String(readinessMutationRequestCreationGate.blueprintReady)}` : ''}
+                            {readinessMutationRequestCreationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestCreationGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationRequestCreationGate.executionTarget ? ` / ${readinessMutationRequestCreationGate.executionTarget}` : ''}
+                            {readinessMutationRequestCreationGate.releaseGateState ? ` / release gate ${readinessMutationRequestCreationGate.releaseGateState}` : ''}
+                            {readinessMutationRequestCreationGate.requestCreationPolicy ? ` / policy ${readinessMutationRequestCreationGate.requestCreationPolicy}` : ''}
+                          </span>
+                          <span>
+                            mutation request creation gate ids:
+                            {readinessMutationRequestCreationGate.sourceRequestId ? ` source ${readinessMutationRequestCreationGate.sourceRequestId}` : ''}
+                            {readinessMutationRequestCreationGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestCreationGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRequestCreationGate.sessionId ? ` / session ${readinessMutationRequestCreationGate.sessionId}` : ''}
+                            {readinessMutationRequestCreationGate.agentId ? ` / agent ${readinessMutationRequestCreationGate.agentId}` : ''}
+                            {readinessMutationRequestCreationGate.workspaceId ? ` / workspace ${readinessMutationRequestCreationGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation request creation counts:
+                            {readinessMutationRequestCreationGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestCreationGate.expectedRequestCount)}` : ''}
+                            {readinessMutationRequestCreationGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestCreationGate.persistedRequestCount)}` : ''}
+                            {readinessMutationRequestCreationGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestCreationGate.pushedRequestCount)}` : ''}
+                            {readinessMutationRequestCreationGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestCreationGate.claimableRequestCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation request creation disabled:
+                            {readinessMutationRequestCreationGate.requestCreationGateEnabled !== undefined ? ` creation gate ${String(readinessMutationRequestCreationGate.requestCreationGateEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestCreationGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestCreationGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestCreationGate.pushEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestCreationGate.claimEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestCreationGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestCreationGate.claimable)}` : ''}
+                            {readinessMutationRequestCreationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestCreationGate.mutationAllowed)}` : ''}
+                            {readinessMutationRequestCreationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestCreationGate.applyEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestCreationGate.testEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestCreationGate.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestCreationGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestCreationGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestCreationGate.publicationEnabled)}` : ''}
+                            {readinessMutationRequestCreationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestCreationGate.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationRequestCreationGatePolicyChecks.map((item) => (
+                            <span key={`mutation-request-creation-policy-${item.key}`}>
+                              creation policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRequestCreationGate.blockingKeys?.length && (
+                            <span>mutation request creation blocking keys: {readinessMutationRequestCreationGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRequestCreationGate.message && (
+                            <span>{readinessMutationRequestCreationGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRequestPushGate && (
+                        <>
+                          <span>
+                            mutation request push gate: {readinessMutationRequestPushGate.status || 'BLOCKED_PUSH_DISABLED'}
+                            {readinessMutationRequestPushGate.schema ? ` / ${readinessMutationRequestPushGate.schema}` : ''}
+                            {readinessMutationRequestPushGate.creationGateReady !== undefined ? ` / creation gate ready ${String(readinessMutationRequestPushGate.creationGateReady)}` : ''}
+                            {readinessMutationRequestPushGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestPushGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationRequestPushGate.executionTarget ? ` / ${readinessMutationRequestPushGate.executionTarget}` : ''}
+                            {readinessMutationRequestPushGate.transportPushPolicy ? ` / transport ${readinessMutationRequestPushGate.transportPushPolicy}` : ''}
+                            {readinessMutationRequestPushGate.pusherInvocationEnabled !== undefined ? ` / pusher ${String(readinessMutationRequestPushGate.pusherInvocationEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.sourceCreationGateStatus ? ` / creation status ${readinessMutationRequestPushGate.sourceCreationGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation request push gate ids:
+                            {readinessMutationRequestPushGate.sourceRequestId ? ` source ${readinessMutationRequestPushGate.sourceRequestId}` : ''}
+                            {readinessMutationRequestPushGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestPushGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRequestPushGate.sessionId ? ` / session ${readinessMutationRequestPushGate.sessionId}` : ''}
+                            {readinessMutationRequestPushGate.agentId ? ` / agent ${readinessMutationRequestPushGate.agentId}` : ''}
+                            {readinessMutationRequestPushGate.workspaceId ? ` / workspace ${readinessMutationRequestPushGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation request push counts:
+                            {readinessMutationRequestPushGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestPushGate.expectedRequestCount)}` : ''}
+                            {readinessMutationRequestPushGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestPushGate.persistedRequestCount)}` : ''}
+                            {readinessMutationRequestPushGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestPushGate.pushedRequestCount)}` : ''}
+                            {readinessMutationRequestPushGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestPushGate.claimableRequestCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation request push disabled:
+                            {readinessMutationRequestPushGate.pushGateEnabled !== undefined ? ` push gate ${String(readinessMutationRequestPushGate.pushGateEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestPushGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestPushGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestPushGate.pushEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestPushGate.claimEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestPushGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestPushGate.claimable)}` : ''}
+                            {readinessMutationRequestPushGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestPushGate.mutationAllowed)}` : ''}
+                            {readinessMutationRequestPushGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestPushGate.applyEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestPushGate.testEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestPushGate.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestPushGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestPushGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestPushGate.publicationEnabled)}` : ''}
+                            {readinessMutationRequestPushGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestPushGate.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationRequestPushGatePolicyChecks.map((item) => (
+                            <span key={`mutation-request-push-policy-${item.key}`}>
+                              push policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRequestPushGate.blockingKeys?.length && (
+                            <span>mutation request push blocking keys: {readinessMutationRequestPushGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRequestPushGate.message && (
+                            <span>{readinessMutationRequestPushGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRequestClaimGate && (
+                        <>
+                          <span>
+                            mutation request claim gate: {readinessMutationRequestClaimGate.status || 'BLOCKED_CLAIM_DISABLED'}
+                            {readinessMutationRequestClaimGate.schema ? ` / ${readinessMutationRequestClaimGate.schema}` : ''}
+                            {readinessMutationRequestClaimGate.pushGateReady !== undefined ? ` / push gate ready ${String(readinessMutationRequestClaimGate.pushGateReady)}` : ''}
+                            {readinessMutationRequestClaimGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestClaimGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationRequestClaimGate.executionTarget ? ` / ${readinessMutationRequestClaimGate.executionTarget}` : ''}
+                            {readinessMutationRequestClaimGate.claimPolicy ? ` / policy ${readinessMutationRequestClaimGate.claimPolicy}` : ''}
+                            {readinessMutationRequestClaimGate.claimNextInvocationEnabled !== undefined ? ` / claimNext ${String(readinessMutationRequestClaimGate.claimNextInvocationEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.sourcePushGateStatus ? ` / push status ${readinessMutationRequestClaimGate.sourcePushGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation request claim gate ids:
+                            {readinessMutationRequestClaimGate.sourceRequestId ? ` source ${readinessMutationRequestClaimGate.sourceRequestId}` : ''}
+                            {readinessMutationRequestClaimGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestClaimGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRequestClaimGate.sessionId ? ` / session ${readinessMutationRequestClaimGate.sessionId}` : ''}
+                            {readinessMutationRequestClaimGate.agentId ? ` / agent ${readinessMutationRequestClaimGate.agentId}` : ''}
+                            {readinessMutationRequestClaimGate.workspaceId ? ` / workspace ${readinessMutationRequestClaimGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation request claim counts:
+                            {readinessMutationRequestClaimGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestClaimGate.expectedRequestCount)}` : ''}
+                            {readinessMutationRequestClaimGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestClaimGate.persistedRequestCount)}` : ''}
+                            {readinessMutationRequestClaimGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestClaimGate.pushedRequestCount)}` : ''}
+                            {readinessMutationRequestClaimGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestClaimGate.claimableRequestCount)}` : ''}
+                            {readinessMutationRequestClaimGate.runningRequestCount !== undefined ? ` / running ${String(readinessMutationRequestClaimGate.runningRequestCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation request claim disabled:
+                            {readinessMutationRequestClaimGate.claimGateEnabled !== undefined ? ` claim gate ${String(readinessMutationRequestClaimGate.claimGateEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestClaimGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestClaimGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestClaimGate.pushEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestClaimGate.claimEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestClaimGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestClaimGate.claimable)}` : ''}
+                            {readinessMutationRequestClaimGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestClaimGate.mutationAllowed)}` : ''}
+                            {readinessMutationRequestClaimGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestClaimGate.applyEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestClaimGate.testEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestClaimGate.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestClaimGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestClaimGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestClaimGate.publicationEnabled)}` : ''}
+                            {readinessMutationRequestClaimGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestClaimGate.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationRequestClaimGatePolicyChecks.map((item) => (
+                            <span key={`mutation-request-claim-policy-${item.key}`}>
+                              claim policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.running !== undefined ? ` / running ${String(item.running)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRequestClaimGate.blockingKeys?.length && (
+                            <span>mutation request claim blocking keys: {readinessMutationRequestClaimGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRequestClaimGate.message && (
+                            <span>{readinessMutationRequestClaimGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationCompletionSummary && (
+                        <>
+                          <span>
+                            mutation completion summary: {readinessMutationCompletionSummary.status || 'BLOCKED_COMPLETION_DISABLED'}
+                            {readinessMutationCompletionSummary.schema ? ` / ${readinessMutationCompletionSummary.schema}` : ''}
+                            {readinessMutationCompletionSummary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationCompletionSummary.prerequisitesPassed)}` : ''}
+                            {readinessMutationCompletionSummary.executionTarget ? ` / ${readinessMutationCompletionSummary.executionTarget}` : ''}
+                          </span>
+                          <span>
+                            mutation completion disabled:
+                            {readinessMutationCompletionSummary.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationCompletionSummary.releaseGateEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationCompletionSummary.requestCreationEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.pushEnabled !== undefined ? ` / push ${String(readinessMutationCompletionSummary.pushEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.claimEnabled !== undefined ? ` / claim ${String(readinessMutationCompletionSummary.claimEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationCompletionSummary.writeHelperEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.claimable !== undefined ? ` / claimable ${String(readinessMutationCompletionSummary.claimable)}` : ''}
+                            {readinessMutationCompletionSummary.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationCompletionSummary.mutationAllowed)}` : ''}
+                            {readinessMutationCompletionSummary.applyEnabled !== undefined ? ` / apply ${String(readinessMutationCompletionSummary.applyEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.testEnabled !== undefined ? ` / test ${String(readinessMutationCompletionSummary.testEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationCompletionSummary.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationCompletionSummary.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationCompletionSummary.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationCompletionSummary.publicationEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationCompletionSummary.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationCompletionSummaryItems.map((item) => (
+                            <span key={`mutation-completion-${item.key}-${item.status || item.passed}`}>
+                              {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationCompletionSummary.blockingKeys?.length && (
+                            <span>mutation completion blocking keys: {readinessMutationCompletionSummary.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationCompletionSummary.message && (
+                            <span>{readinessMutationCompletionSummary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessReleaseBoundaryVisibility && (
+                        <>
+                          <span>
+                            release action boundary: {readinessReleaseBoundaryVisibility.status}
+                            {' / '}
+                            {readinessReleaseBoundaryVisibility.actionMode}
+                            {' / endpoint '}
+                            {readinessReleaseBoundaryVisibility.endpoint}
+                          </span>
+                          <span>
+                            release action disabled:
+                            {' release gate '}
+                            {String(readinessReleaseBoundaryVisibility.releaseGateEnabled)}
+                            {' / request creation '}
+                            {String(readinessReleaseBoundaryVisibility.requestCreationEnabled)}
+                            {' / push '}
+                            {String(readinessReleaseBoundaryVisibility.pushEnabled)}
+                            {' / claim '}
+                            {String(readinessReleaseBoundaryVisibility.claimEnabled)}
+                            {' / write helper '}
+                            {String(readinessReleaseBoundaryVisibility.writeHelperEnabled)}
+                            {' / claimable '}
+                            {String(readinessReleaseBoundaryVisibility.claimable)}
+                            {' / mutation '}
+                            {String(readinessReleaseBoundaryVisibility.mutationAllowed)}
+                          </span>
+                          <span>
+                            release execution remains disabled:
+                            {' apply '}
+                            {String(readinessReleaseBoundaryVisibility.applyEnabled)}
+                            {' / test '}
+                            {String(readinessReleaseBoundaryVisibility.testEnabled)}
+                            {' / rollback restore '}
+                            {String(readinessReleaseBoundaryVisibility.rollbackRestoreEnabled)}
+                            {' / rag freshness '}
+                            {String(readinessReleaseBoundaryVisibility.ragFreshnessUpdateEnabled)}
+                          </span>
+                          <span>No release control is enabled; the future release endpoint is visible only as an audit/refusal boundary.</span>
+                        </>
+                      )}
+                      {readinessFreshObservationEnqueueBoundary && (
+                        <>
+                          <span>
+                            fresh observation enqueue boundary: {readinessFreshObservationEnqueueBoundary.status || 'DISABLED'}
+                            {readinessFreshObservationEnqueueBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFreshObservationEnqueueBoundary.requestCreationEnabled)}` : ''}
+                            {readinessFreshObservationEnqueueBoundary.pushEnabled !== undefined ? ` / push ${String(readinessFreshObservationEnqueueBoundary.pushEnabled)}` : ''}
+                            {readinessFreshObservationEnqueueBoundary.enqueueEnabled !== undefined ? ` / enqueue ${String(readinessFreshObservationEnqueueBoundary.enqueueEnabled)}` : ''}
+                            {readinessFreshObservationEnqueueBoundary.claimableAfterEnqueue !== undefined ? ` / claimable ${String(readinessFreshObservationEnqueueBoundary.claimableAfterEnqueue)}` : ''}
+                            {readinessFreshObservationEnqueueBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessFreshObservationEnqueueBoundary.mutationAllowed)}` : ''}
+                          </span>
+                          {readinessFreshObservationBoundaryRequests.map((item) => (
+                            <span key={`boundary-${item.key}-${item.releaseAttemptId || item.toolName}`}>
+                              boundary planned {item.key}: {item.status || 'TEMPLATE_DISABLED'}
+                              {item.toolName ? ` / ${item.toolName}` : ''}
+                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
+                              {item.enqueueEnabled !== undefined ? ` / enqueue ${String(item.enqueueEnabled)}` : ''}
+                              {item.claimableAfterEnqueue !== undefined ? ` / claimable ${String(item.claimableAfterEnqueue)}` : ''}
+                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
+                            </span>
+                          ))}
+                        </>
+                      )}
                       {(readinessPatchExecutionGate.requiredBeforeEnablement || []).slice(0, 5).map((item) => (
                         <span key={item}>{item}</span>
                       ))}
                     </div>
                   )}
-                  {(readinessSnapshotManifestCheck || readinessRollbackPreconditionsCheck) && (
+                  {(readinessSnapshot || readinessSnapshotManifestCheck || readinessRollbackPreconditionsCheck) && (
                     <div className="failure-item">
                       <strong>Snapshot readiness: {readinessSnapshot?.status || (readinessSnapshotManifestCheck?.passed && readinessRollbackPreconditionsCheck?.passed ? 'observed' : 'blocked')}</strong>
                       {readinessSnapshot?.message && <span>{readinessSnapshot.message}</span>}
+                      {formatObservationLinkage(readinessSnapshot) && <span>{formatObservationLinkage(readinessSnapshot)}</span>}
                       {readinessSnapshot && (
                         <span>
                           snapshot created: {String(readinessSnapshot.snapshotCreated)}
@@ -935,6 +2152,7 @@ function CodeAgentPanel({
                     <div className="failure-item">
                       <strong>Rollback manifest readiness: {readinessRollback.status || 'UNKNOWN'}</strong>
                       {readinessRollback.message && <span>{readinessRollback.message}</span>}
+                      {formatObservationLinkage(readinessRollback) && <span>{formatObservationLinkage(readinessRollback)}</span>}
                       <span>
                         blocking release: {String(readinessRollback.blocking)}
                         {readinessRollback.fileCount !== undefined ? ` / files ${readinessRollback.fileCount}` : ''}

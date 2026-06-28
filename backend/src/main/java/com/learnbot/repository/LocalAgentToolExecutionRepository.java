@@ -112,6 +112,28 @@ public class LocalAgentToolExecutionRepository {
         return results.stream().findFirst();
     }
 
+    public Optional<Map<String, Object>> findLatestRepositoryVerificationForReleaseAttempt(
+            UUID userId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId
+    ) {
+        List<Map<String, Object>> results = jdbc.query("""
+                SELECT output -> 'repositoryVerification' AS repository_verification
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'sourceRequestId' = :sourceRequestId
+                  AND input ->> 'releaseAttemptId' = :releaseAttemptId
+                  AND output ? 'repositoryVerification'
+                ORDER BY finished_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("sourceRequestId", sourceRequestId.toString())
+                .addValue("releaseAttemptId", releaseAttemptId.toString()),
+                (rs, rowNum) -> fromJson(rs.getString("repository_verification"), new TypeReference<Map<String, Object>>() {}));
+        return results.stream().findFirst();
+    }
+
     public Optional<Map<String, Object>> findLatestPatchDryRunOutputForSourceRequest(UUID userId, UUID sourceRequestId) {
         List<Map<String, Object>> results = jdbc.query("""
                 SELECT output
@@ -125,6 +147,29 @@ public class LocalAgentToolExecutionRepository {
                 """, new MapSqlParameterSource()
                 .addValue("userId", userId)
                 .addValue("sourceRequestId", sourceRequestId.toString()),
+                (rs, rowNum) -> fromJson(rs.getString("output"), new TypeReference<Map<String, Object>>() {}));
+        return results.stream().findFirst();
+    }
+
+    public Optional<Map<String, Object>> findLatestPatchDryRunOutputForReleaseAttempt(
+            UUID userId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId
+    ) {
+        List<Map<String, Object>> results = jdbc.query("""
+                SELECT output
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'sourceRequestId' = :sourceRequestId
+                  AND input ->> 'releaseAttemptId' = :releaseAttemptId
+                  AND tool_name = 'patch.apply'
+                  AND output ->> 'dryRun' = 'true'
+                ORDER BY finished_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("sourceRequestId", sourceRequestId.toString())
+                .addValue("releaseAttemptId", releaseAttemptId.toString()),
                 (rs, rowNum) -> fromJson(rs.getString("output"), new TypeReference<Map<String, Object>>() {}));
         return results.stream().findFirst();
     }

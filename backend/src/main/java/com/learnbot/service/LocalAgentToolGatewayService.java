@@ -4,6 +4,7 @@ import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.LocalAgentConnectionState;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessCheck;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
+import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptEvidenceRequirement;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
 import com.learnbot.dto.LocalAgentApprovalState;
@@ -14,17 +15,21 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.dto.LocalAgentWorkspaceSummary;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class LocalAgentToolGatewayService {
@@ -170,12 +175,13 @@ public class LocalAgentToolGatewayService {
                 "The connected Local Agent must advertise rollback.restore capability before patch execution can be released."
         ));
 
+        Optional<LocalAgentPatchReleaseAttempt> latestReleaseAttempt = Optional
+                .ofNullable(releaseAttemptRepository.findLatestForSourceRequest(userId, execution.id()))
+                .flatMap(item -> item);
         Map<String, Object> input = execution.input();
-        Map<String, Object> repositoryVerification = repository
-                .findLatestRepositoryVerificationForSourceRequest(userId, execution.id())
+        Map<String, Object> repositoryVerification = latestRepositoryVerification(userId, execution.id(), latestReleaseAttempt)
                 .orElse(null);
-        Map<String, Object> latestPatchDryRunOutput = repository
-                .findLatestPatchDryRunOutputForSourceRequest(userId, execution.id())
+        Map<String, Object> latestPatchDryRunOutput = latestPatchDryRunOutput(userId, execution.id(), latestReleaseAttempt)
                 .orElse(null);
         Map<String, Object> snapshotReadiness = snapshotReadiness(latestPatchDryRunOutput);
         Map<String, Object> rollbackReadiness = rollbackReadiness(latestPatchDryRunOutput);
@@ -258,10 +264,15 @@ public class LocalAgentToolGatewayService {
                 rollbackReadiness,
                 workspaceVerification
         );
-        Optional<LocalAgentPatchReleaseAttempt> latestReleaseAttempt = Optional
-                .ofNullable(releaseAttemptRepository.findLatestForSourceRequest(userId, execution.id()))
-                .flatMap(item -> item);
-        LocalAgentPatchReleaseAttemptModel releaseAttemptModel = releaseAttemptModel(latestReleaseAttempt);
+        LocalAgentPatchReleaseAttemptModel releaseAttemptModel = releaseAttemptModel(
+                latestReleaseAttempt,
+                repositoryVerification,
+                latestPatchDryRunOutput,
+                patchReleaseReadiness,
+                rollbackReadiness,
+                status,
+                workspaceVerification
+        );
         Map<String, Object> patchExecutionGate = patchExecutionGate(patchReleaseReadiness, latestPatchDryRunOutput, releaseAttemptModel);
         return new LocalAgentPatchExecutionReadinessResponse(
                 execution.id(),
@@ -279,6 +290,134 @@ public class LocalAgentToolGatewayService {
                 repositoryVerification,
                 workspaceVerification
         );
+    }
+
+    private Optional<Map<String, Object>> latestRepositoryVerification(
+            UUID userId,
+            UUID sourceRequestId,
+            Optional<LocalAgentPatchReleaseAttempt> latestReleaseAttempt
+    ) {
+        if (latestReleaseAttempt.isPresent()) {
+            LocalAgentPatchReleaseAttempt attempt = latestReleaseAttempt.get();
+            Optional<Map<String, Object>> linked = Optional
+                    .ofNullable(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, sourceRequestId, attempt.id()))
+                    .flatMap(item -> item);
+            if (linked.isPresent()) {
+                return linked.map(item -> withObservationLinkage(item, sourceRequestId, attempt.id(), "RELEASE_ATTEMPT_LINKED"));
+            }
+        }
+        return Optional
+                .ofNullable(repository.findLatestRepositoryVerificationForSourceRequest(userId, sourceRequestId))
+                .flatMap(item -> item)
+                .map(item -> withObservationLinkage(
+                        item,
+                        sourceRequestId,
+                        latestReleaseAttempt.map(LocalAgentPatchReleaseAttempt::id).orElse(null),
+                        latestReleaseAttempt.isPresent() ? "SOURCE_ONLY_FALLBACK" : "SOURCE_ONLY"
+                ));
+    }
+
+    private Optional<Map<String, Object>> latestPatchDryRunOutput(
+            UUID userId,
+            UUID sourceRequestId,
+            Optional<LocalAgentPatchReleaseAttempt> latestReleaseAttempt
+    ) {
+        if (latestReleaseAttempt.isPresent()) {
+            LocalAgentPatchReleaseAttempt attempt = latestReleaseAttempt.get();
+            Optional<Map<String, Object>> linked = Optional
+                    .ofNullable(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, sourceRequestId, attempt.id()))
+                    .flatMap(item -> item);
+            if (linked.isPresent()) {
+                return linked.map(item -> withObservationLinkage(item, sourceRequestId, attempt.id(), "RELEASE_ATTEMPT_LINKED"));
+            }
+        }
+        return Optional
+                .ofNullable(repository.findLatestPatchDryRunOutputForSourceRequest(userId, sourceRequestId))
+                .flatMap(item -> item)
+                .map(item -> withObservationLinkage(
+                        item,
+                        sourceRequestId,
+                        latestReleaseAttempt.map(LocalAgentPatchReleaseAttempt::id).orElse(null),
+                        latestReleaseAttempt.isPresent() ? "SOURCE_ONLY_FALLBACK" : "SOURCE_ONLY"
+                ));
+    }
+
+    private Map<String, Object> withObservationLinkage(
+            Map<String, Object> observation,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            String status
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(observation);
+        Map<String, Object> linkage = new LinkedHashMap<>();
+        linkage.put("status", status);
+        linkage.put("sourceRequestId", sourceRequestId);
+        linkage.put("releaseAttemptId", releaseAttemptId);
+        linkage.put("releaseAttemptLinked", "RELEASE_ATTEMPT_LINKED".equals(status));
+        linkage.put("sourceOnlyFallback", "SOURCE_ONLY_FALLBACK".equals(status));
+        result.put("observationLinkage", linkage);
+        return result;
+    }
+
+    @Transactional
+    public LocalAgentPatchReleaseBoundaryResponse inspectPatchReleaseBoundary(UUID userId, UUID requestId) {
+        LocalAgentPatchExecutionReadinessResponse readiness = inspectPatchExecutionReadiness(userId, requestId);
+        boolean preconditionsPassed = Boolean.TRUE.equals(readiness.patchExecutionGate().get("preconditionsPassed"));
+        if (preconditionsPassed) {
+            createDisabledReleaseAttemptIfMissing(userId, requestId, readiness);
+            readiness = inspectPatchExecutionReadiness(userId, requestId);
+        }
+        Map<String, Object> latestAttempt = readiness.releaseAttemptModel().latestAttempt();
+        Map<String, Object> releaseEnablementChecklist = latestAttempt.get("releaseEnablementChecklist") instanceof Map<?, ?> checklist
+                ? copyMap(checklist)
+                : Map.of();
+        List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed);
+        return new LocalAgentPatchReleaseBoundaryResponse(
+                requestId,
+                preconditionsPassed ? "RELEASE_REFUSED_GATE_DISABLED" : "RELEASE_REFUSED_PRECONDITIONS_BLOCKED",
+                "REFUSAL_ONLY",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                blockingReasons,
+                preconditionsPassed
+                        ? "Release action is modeled, but the release gate is disabled so the held patch remains non-claimable."
+                        : "Release action is modeled, but readiness prerequisites are blocked and the release gate is disabled.",
+                readiness.patchExecutionGate(),
+                releaseEnablementChecklist,
+                readiness.releaseAttemptModel()
+        );
+    }
+
+    private List<String> releaseBoundaryBlockingReasons(
+            LocalAgentPatchExecutionReadinessResponse readiness,
+            Map<String, Object> releaseEnablementChecklist,
+            boolean preconditionsPassed
+    ) {
+        List<String> reasons = new ArrayList<>();
+        if (!preconditionsPassed) {
+            reasons.add("patch execution preconditions are incomplete");
+        }
+        if (releaseEnablementChecklist.get("blockingKeys") instanceof List<?> blockingKeys && !blockingKeys.isEmpty()) {
+            reasons.add("release enablement checklist is blocked: " + blockingKeys.stream()
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(", ")));
+        }
+        if (readiness.releaseAttemptModel().latestAttempt().isEmpty()) {
+            reasons.add("no disabled release attempt envelope exists yet");
+        }
+        reasons.add("release gate is disabled");
+        reasons.add("held patch request remains non-claimable");
+        reasons.add("Local Agent request creation and push remain disabled");
+        return reasons;
     }
 
     @Transactional
@@ -315,16 +454,21 @@ public class LocalAgentToolGatewayService {
         LocalAgentToolExecution source = repository.find(requestId)
                 .filter(candidate -> candidate.userId().equals(userId))
                 .orElseThrow(() -> new IllegalArgumentException("Local Agent patch request was not found."));
+        UUID attemptId = UUID.randomUUID();
         releaseAttemptRepository.createDisabled(
-                UUID.randomUUID(),
+                attemptId,
                 source,
                 readiness.releaseAttemptModel().staleWindowSeconds(),
-                disabledReleaseAttemptEvidence(readiness),
+                disabledReleaseAttemptEvidence(readiness, source, attemptId),
                 List.of("Patch execution release is disabled; attempt remains non-claimable.")
         );
     }
 
-    private Map<String, Object> disabledReleaseAttemptEvidence(LocalAgentPatchExecutionReadinessResponse readiness) {
+    private Map<String, Object> disabledReleaseAttemptEvidence(
+            LocalAgentPatchExecutionReadinessResponse readiness,
+            LocalAgentToolExecution source,
+            UUID attemptId
+    ) {
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("sourceRequestId", readiness.requestId());
         evidence.put("repositoryVerification", readiness.repositoryVerification());
@@ -341,9 +485,107 @@ public class LocalAgentToolGatewayService {
                 "mutationEnabled", false
         ));
         evidence.put("preReleaseRevalidation", readiness.patchExecutionGate().get("preReleaseRevalidation"));
+        evidence.put("freshObservationEnqueueEnabled", false);
+        evidence.put("freshObservationRequestTemplates", disabledFreshObservationRequestTemplates(source, attemptId));
+        evidence.put("freshObservationEnqueueBoundary", disabledFreshObservationEnqueueBoundary(source, attemptId));
         evidence.put("claimable", false);
         evidence.put("message", "Disabled release attempt envelope captured visible readiness evidence without making the held patch claimable.");
         return evidence;
+    }
+
+    private Map<String, Object> disabledFreshObservationEnqueueBoundary(LocalAgentToolExecution source, UUID attemptId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "DISABLED_RELEASE_GATE");
+        result.put("enqueueEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimableAfterEnqueue", false);
+        result.put("mutationAllowed", false);
+        result.put("sourceRequestId", source.id());
+        result.put("releaseAttemptId", attemptId);
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("plannedRequests", disabledFreshObservationRequestTemplates(source, attemptId));
+        result.put("requiredBeforeEnablement", List.of(
+                "Enable the explicit patch execution release gate.",
+                "Create fresh read-only git.status observations after the release attempt exists.",
+                "Create fresh non-mutating patch.apply dry-run observations after repository verification.",
+                "Keep the approved-held patch request non-claimable until linked fresh evidence passes.",
+                "Never enqueue patch mutation, test, or rollback restore from this boundary while disabled."
+        ));
+        result.put("message", "Fresh observation enqueue boundary is modeled for audit only; no Local Agent tool request is created or pushed while the release gate is disabled.");
+        return result;
+    }
+
+    private List<Map<String, Object>> disabledFreshObservationRequestTemplates(LocalAgentToolExecution source, UUID attemptId) {
+        return List.of(
+                freshObservationRequestTemplate(
+                        "repositoryVerification",
+                        source,
+                        attemptId,
+                        LocalAgentToolName.GIT_STATUS,
+                        LocalAgentApprovalState.NOT_REQUIRED,
+                        freshRepositoryVerificationInput(source, attemptId),
+                        List.of("Fresh release-attempt repository observation template only. Enqueue is disabled.")
+                ),
+                freshObservationRequestTemplate(
+                        "patchDryRun",
+                        source,
+                        attemptId,
+                        LocalAgentToolName.PATCH_APPLY,
+                        LocalAgentApprovalState.APPROVED,
+                        freshPatchDryRunInput(source, attemptId),
+                        List.of("Fresh release-attempt patch dry-run template only. Mutation and enqueue remain disabled.")
+                )
+        );
+    }
+
+    private Map<String, Object> freshRepositoryVerificationInput(LocalAgentToolExecution source, UUID attemptId) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        if (source.input().get("sourceRepository") instanceof Map<?, ?> sourceRepository) {
+            input.put("sourceRepository", copyMap(sourceRepository));
+        }
+        input.put("sourceRequestId", source.id().toString());
+        input.put("releaseAttemptId", attemptId.toString());
+        input.put("freshObservationOnly", true);
+        return input;
+    }
+
+    private Map<String, Object> freshPatchDryRunInput(LocalAgentToolExecution source, UUID attemptId) {
+        Map<String, Object> input = new LinkedHashMap<>(source.input());
+        input.put("dryRunOnly", true);
+        input.put("mutationAllowed", false);
+        input.put("sourceRequestId", source.id().toString());
+        input.put("releaseAttemptId", attemptId.toString());
+        input.put("freshObservationOnly", true);
+        return input;
+    }
+
+    private Map<String, Object> freshObservationRequestTemplate(
+            String key,
+            LocalAgentToolExecution source,
+            UUID attemptId,
+            LocalAgentToolName toolName,
+            LocalAgentApprovalState approvalState,
+            Map<String, Object> input,
+            List<String> warnings
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", "TEMPLATE_DISABLED");
+        result.put("enqueueEnabled", false);
+        result.put("claimableAfterEnqueue", false);
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("toolName", toolName.wireName());
+        result.put("approvalState", approvalState.name());
+        result.put("sessionId", source.sessionId());
+        result.put("userId", source.userId());
+        result.put("agentId", source.agentId());
+        result.put("workspaceId", source.workspaceId());
+        result.put("sourceRequestId", source.id());
+        result.put("releaseAttemptId", attemptId);
+        result.put("input", input);
+        result.put("warnings", warnings);
+        return result;
     }
 
     @Transactional
@@ -501,9 +743,25 @@ public class LocalAgentToolGatewayService {
         return result;
     }
 
-    private LocalAgentPatchReleaseAttemptModel releaseAttemptModel(Optional<LocalAgentPatchReleaseAttempt> latestAttempt) {
+    private LocalAgentPatchReleaseAttemptModel releaseAttemptModel(
+            Optional<LocalAgentPatchReleaseAttempt> latestAttempt,
+            Map<String, Object> repositoryVerification,
+            Map<String, Object> latestPatchDryRunOutput,
+            Map<String, Object> patchReleaseReadiness,
+            Map<String, Object> rollbackReadiness,
+            LocalAgentStatusResponse status,
+            Map<String, Object> workspaceVerification
+    ) {
         Map<String, Object> latestAttemptMap = latestAttempt
-                .map(this::releaseAttemptSummary)
+                .map(attempt -> releaseAttemptSummary(
+                        attempt,
+                        repositoryVerification,
+                        latestPatchDryRunOutput,
+                        patchReleaseReadiness,
+                        rollbackReadiness,
+                        status,
+                        workspaceVerification
+                ))
                 .orElse(Map.of());
         return new LocalAgentPatchReleaseAttemptModel(
                 "learnbot.local-agent.patch-release-attempt.v1",
@@ -527,7 +785,15 @@ public class LocalAgentToolGatewayService {
         );
     }
 
-    private Map<String, Object> releaseAttemptSummary(LocalAgentPatchReleaseAttempt attempt) {
+    private Map<String, Object> releaseAttemptSummary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> repositoryVerification,
+            Map<String, Object> latestPatchDryRunOutput,
+            Map<String, Object> patchReleaseReadiness,
+            Map<String, Object> rollbackReadiness,
+            LocalAgentStatusResponse status,
+            Map<String, Object> workspaceVerification
+    ) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", attempt.id());
         result.put("sourceRequestId", attempt.sourceRequestId());
@@ -539,7 +805,2245 @@ public class LocalAgentToolGatewayService {
         result.put("createdAt", attempt.createdAt());
         result.put("updatedAt", attempt.updatedAt());
         result.put("releasedAt", attempt.releasedAt());
+        result.put("expiresAt", releaseAttemptExpiresAt(attempt));
+        result.put("ageSeconds", releaseAttemptAgeSeconds(attempt));
+        result.put("freshnessStatus", releaseAttemptFreshnessStatus(attempt));
+        result.put("stale", "STALE".equals(releaseAttemptFreshnessStatus(attempt)));
+        result.put("freshObservationRequirements", releaseAttemptFreshObservationRequirements(attempt));
+        result.put("freshObservationRequestPlan", releaseAttemptFreshObservationRequestPlan(attempt));
+        List<Map<String, Object>> freshObservationEvidenceStatus = releaseAttemptFreshObservationEvidenceStatus(
+                attempt,
+                repositoryVerification,
+                latestPatchDryRunOutput
+        );
+        result.put("freshObservationEvidenceStatus", freshObservationEvidenceStatus);
+        Map<String, Object> freshObservationEvidenceCompleteness = releaseAttemptFreshObservationEvidenceCompleteness(
+                attempt,
+                freshObservationEvidenceStatus
+        );
+        result.put("freshObservationEvidenceCompleteness", freshObservationEvidenceCompleteness);
+        Map<String, Object> releaseAttemptFinalReadiness = releaseAttemptFinalReadiness(
+                attempt,
+                freshObservationEvidenceCompleteness,
+                patchReleaseReadiness
+        );
+        result.put("releaseAttemptFinalReadiness", releaseAttemptFinalReadiness);
+        List<Map<String, Object>> mutationSequencePlan = releaseAttemptMutationExecutionSequencePlan(attempt);
+        result.put("localAgentMutationExecutionSequencePlan", mutationSequencePlan);
+        Map<String, Object> postMutationResultContract = releaseAttemptPostMutationResultContract(attempt);
+        result.put("postMutationResultContract", postMutationResultContract);
+        Map<String, Object> mutationResultIntakeBoundary = releaseAttemptMutationResultIntakeBoundary(
+                attempt,
+                postMutationResultContract
+        );
+        result.put("mutationResultIntakeBoundary", mutationResultIntakeBoundary);
+        Map<String, Object> finalMutationReportContract = releaseAttemptFinalMutationReportContract(
+                attempt,
+                postMutationResultContract,
+                rollbackReadiness
+        );
+        result.put("finalMutationReportContract", finalMutationReportContract);
+        Map<String, Object> mutationResultAggregationPlan = releaseAttemptMutationResultAggregationPlan(
+                attempt,
+                postMutationResultContract,
+                finalMutationReportContract
+        );
+        result.put("mutationResultAggregationPlan", mutationResultAggregationPlan);
+        Map<String, Object> finalMutationReportFinalizationBoundary = releaseAttemptFinalMutationReportFinalizationBoundary(
+                attempt,
+                releaseAttemptFinalReadiness,
+                postMutationResultContract,
+                finalMutationReportContract
+        );
+        result.put("finalMutationReportFinalizationBoundary", finalMutationReportFinalizationBoundary);
+        Map<String, Object> finalAnswerPublicationBoundary = releaseAttemptFinalAnswerPublicationBoundary(
+                attempt,
+                releaseAttemptFinalReadiness,
+                finalMutationReportContract,
+                mutationResultAggregationPlan
+        );
+        result.put("finalAnswerPublicationBoundary", finalAnswerPublicationBoundary);
+        Map<String, Object> releaseEnablementChecklist = releaseAttemptEnablementChecklist(
+                attempt,
+                releaseAttemptFinalReadiness,
+                mutationSequencePlan,
+                postMutationResultContract,
+                rollbackReadiness
+        );
+        result.put("releaseEnablementChecklist", releaseEnablementChecklist);
+        Map<String, Object> mutationDispatchEnvelopeContract = releaseAttemptMutationDispatchEnvelopeContract(
+                attempt,
+                mutationSequencePlan,
+                postMutationResultContract,
+                rollbackReadiness
+        );
+        result.put("mutationDispatchEnvelopeContract", mutationDispatchEnvelopeContract);
+        Map<String, Object> mutationDispatchPreflightBoundary = releaseAttemptMutationDispatchPreflightBoundary(
+                attempt,
+                status,
+                workspaceVerification,
+                mutationDispatchEnvelopeContract
+        );
+        result.put("mutationDispatchPreflightBoundary", mutationDispatchPreflightBoundary);
+        Map<String, Object> mutationDispatchDecisionModel = releaseAttemptMutationDispatchDecisionModel(
+                attempt,
+                mutationDispatchEnvelopeContract,
+                mutationDispatchPreflightBoundary
+        );
+        result.put("mutationDispatchDecisionModel", mutationDispatchDecisionModel);
+        Map<String, Object> mutationRequestBlueprint = releaseAttemptMutationRequestBlueprint(
+                attempt,
+                mutationDispatchEnvelopeContract,
+                mutationDispatchDecisionModel,
+                postMutationResultContract
+        );
+        result.put("mutationRequestBlueprint", mutationRequestBlueprint);
+        Map<String, Object> mutationRequestCreationGate = releaseAttemptMutationRequestCreationGate(
+                attempt,
+                mutationRequestBlueprint
+        );
+        result.put("mutationRequestCreationGate", mutationRequestCreationGate);
+        Map<String, Object> mutationRequestPushGate = releaseAttemptMutationRequestPushGate(
+                attempt,
+                mutationRequestCreationGate
+        );
+        result.put("mutationRequestPushGate", mutationRequestPushGate);
+        Map<String, Object> mutationRequestClaimGate = releaseAttemptMutationRequestClaimGate(
+                attempt,
+                mutationRequestPushGate
+        );
+        result.put("mutationRequestClaimGate", mutationRequestClaimGate);
+        result.put("mutationCompletionSummary", releaseAttemptMutationCompletionSummary(
+                attempt,
+                releaseAttemptFinalReadiness,
+                mutationSequencePlan,
+                mutationResultIntakeBoundary,
+                mutationResultAggregationPlan,
+                finalMutationReportContract,
+                finalMutationReportFinalizationBoundary,
+                finalAnswerPublicationBoundary,
+                releaseEnablementChecklist,
+                rollbackReadiness,
+                postMutationResultContract,
+                mutationDispatchEnvelopeContract,
+                mutationDispatchPreflightBoundary,
+                mutationDispatchDecisionModel,
+                mutationRequestBlueprint,
+                mutationRequestCreationGate,
+                mutationRequestPushGate,
+                mutationRequestClaimGate
+        ));
         return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationDispatchDecisionModel(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationDispatchEnvelopeContract,
+            Map<String, Object> mutationDispatchPreflightBoundary
+    ) {
+        List<Map<String, Object>> readinessInputs = List.of(
+                mutationDispatchDecisionInput(
+                        "mutationDispatchEnvelopeContract",
+                        "READY_DISPATCH_DISABLED".equals(mutationDispatchEnvelopeContract.get("status")),
+                        String.valueOf(mutationDispatchEnvelopeContract.getOrDefault("status", "UNKNOWN")),
+                        "The future dispatch envelope must define ordered tools, approvals, rollback, and freshness obligations."
+                ),
+                mutationDispatchDecisionInput(
+                        "mutationDispatchPreflightBoundary",
+                        "READY_PREFLIGHT_DISABLED".equals(mutationDispatchPreflightBoundary.get("status")),
+                        String.valueOf(mutationDispatchPreflightBoundary.getOrDefault("status", "UNKNOWN")),
+                        "The future dispatch preflight must confirm the selected Local Agent, approved workspace, required capabilities, and envelope readiness."
+                ),
+                mutationDispatchDecisionInput(
+                        "releaseGateEnabled",
+                        false,
+                        "DISABLED",
+                        "The backend release gate is still disabled, so no held patch can become claimable."
+                ),
+                mutationDispatchDecisionInput(
+                        "dispatchDecisionEnabled",
+                        false,
+                        "DISABLED",
+                        "The final dispatch decision switch is still disabled, so no Local Agent mutation request can be created."
+                )
+        );
+        boolean readinessInputsPassed = readinessInputs.stream()
+                .filter(item -> !"releaseGateEnabled".equals(item.get("key")) && !"dispatchDecisionEnabled".equals(item.get("key")))
+                .allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        List<String> blockingKeys = new ArrayList<>(readinessInputs.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        if (!blockingKeys.contains("releaseGateEnabled")) {
+            blockingKeys.add("releaseGateEnabled");
+        }
+        if (!blockingKeys.contains("dispatchDecisionEnabled")) {
+            blockingKeys.add("dispatchDecisionEnabled");
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-dispatch-decision.v1");
+        result.put("status", readinessInputsPassed ? "REFUSED_DISPATCH_DISABLED" : "BLOCKED_DISPATCH_DISABLED");
+        result.put("decision", "REFUSE_DISPATCH");
+        result.put("readinessInputsPassed", readinessInputsPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("envelopeStatus", mutationDispatchEnvelopeContract.getOrDefault("status", "UNKNOWN"));
+        result.put("preflightStatus", mutationDispatchPreflightBoundary.getOrDefault("status", "UNKNOWN"));
+        result.put("dispatchDecisionEnabled", false);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("readinessInputs", readinessInputs);
+        result.put("blockingKeys", blockingKeys);
+        result.put("userVisibleRefusalMessage", readinessInputsPassed
+                ? "Local Agent mutation dispatch is modeled and preflight-ready, but execution is disabled until the release gate and dispatch decision switch are explicitly enabled."
+                : "Local Agent mutation dispatch is disabled because required readiness inputs are incomplete.");
+        result.put("message", readinessInputsPassed
+                ? "Dispatch decision refuses mutation dispatch by policy: release gate, request creation, push, claim, and mutation remain disabled."
+                : "Dispatch decision cannot proceed because dispatch readiness inputs are incomplete and dispatch remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationDispatchDecisionInput(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("dispatchDecisionEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRequestBlueprint(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationDispatchEnvelopeContract,
+            Map<String, Object> mutationDispatchDecisionModel,
+            Map<String, Object> postMutationResultContract
+    ) {
+        boolean decisionRefused = "REFUSED_DISPATCH_DISABLED".equals(mutationDispatchDecisionModel.get("status"))
+                && "REFUSE_DISPATCH".equals(mutationDispatchDecisionModel.get("decision"));
+        List<Map<String, Object>> orderedToolRequests = mutationDispatchBlueprintToolRequests(
+                mutationDispatchEnvelopeContract,
+                postMutationResultContract
+        );
+        List<String> blockingKeys = new ArrayList<>();
+        Object decisionBlockingKeys = mutationDispatchDecisionModel.get("blockingKeys");
+        if (decisionBlockingKeys instanceof List<?> keys) {
+            keys.stream().map(String::valueOf).forEach(blockingKeys::add);
+        } else {
+            blockingKeys.add("mutationDispatchDecisionModel");
+        }
+        for (String key : List.of("requestCreationEnabled", "pushEnabled", "claimEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-request-blueprint.v1");
+        result.put("status", decisionRefused ? "REFUSED_REQUEST_CREATION_DISABLED" : "BLOCKED_REQUEST_BLUEPRINT_DISABLED");
+        result.put("prerequisitesPassed", decisionRefused);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceDecisionSchema", mutationDispatchDecisionModel.get("schema"));
+        result.put("sourceDecisionStatus", mutationDispatchDecisionModel.get("status"));
+        result.put("sourceDecision", mutationDispatchDecisionModel.get("decision"));
+        result.put("sourceEnvelopeSchema", mutationDispatchEnvelopeContract.get("schema"));
+        result.put("sourceEnvelopeStatus", mutationDispatchEnvelopeContract.get("status"));
+        result.put("requestCreationMode", "BLUEPRINT_ONLY_DISABLED");
+        result.put("orderedToolRequests", orderedToolRequests);
+        result.put("expectedInputKeys", List.of(
+                "sourceRequestId",
+                "releaseAttemptId",
+                "sessionId",
+                "userId",
+                "agentId",
+                "workspaceId",
+                "toolName",
+                "approvalState",
+                "input"
+        ));
+        result.put("expectedOutputKeys", postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("approvalStates", orderedToolRequests.stream()
+                .map(item -> Map.of(
+                        "key", item.get("key"),
+                        "toolName", item.get("toolName"),
+                        "approvalState", item.get("approvalState")
+                ))
+                .toList());
+        result.put("releaseGateEnabled", false);
+        result.put("dispatchDecisionEnabled", false);
+        result.put("requestBlueprintEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", decisionRefused
+                ? "Local Agent mutation request blueprint is derived from the dispatch refusal, but request creation, push, claim, and mutation remain disabled."
+                : "Local Agent mutation request blueprint is blocked because dispatch decision readiness is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRequestCreationGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRequestBlueprint
+    ) {
+        boolean blueprintReady = "REFUSED_REQUEST_CREATION_DISABLED".equals(mutationRequestBlueprint.get("status"))
+                && Boolean.TRUE.equals(mutationRequestBlueprint.get("prerequisitesPassed"));
+        Object orderedToolRequestsValue = mutationRequestBlueprint.get("orderedToolRequests");
+        int expectedRequestCount = orderedToolRequestsValue instanceof List<?> orderedToolRequests
+                ? orderedToolRequests.size()
+                : 0;
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationRequestCreationPolicyCheck(
+                        "mutationRequestBlueprint",
+                        blueprintReady,
+                        String.valueOf(mutationRequestBlueprint.getOrDefault("status", "UNKNOWN")),
+                        "A disabled request blueprint must be present before creation can be considered."
+                ),
+                mutationRequestCreationPolicyCheck(
+                        "releaseGateEnabled",
+                        false,
+                        "DISABLED",
+                        "The release gate remains disabled, so no held patch can become claimable."
+                ),
+                mutationRequestCreationPolicyCheck(
+                        "requestCreationPolicy",
+                        false,
+                        "DISABLED",
+                        "The backend request creation policy is disabled for Local Agent mutation execution."
+                ),
+                mutationRequestCreationPolicyCheck(
+                        "requestPersistence",
+                        false,
+                        "DISABLED",
+                        "No Local Agent mutation tool execution row may be inserted while this gate is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("requestCreationEnabled", "pushEnabled", "claimEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-request-creation-gate.v1");
+        result.put("status", blueprintReady ? "REFUSED_CREATION_DISABLED" : "BLOCKED_CREATION_DISABLED");
+        result.put("blueprintReady", blueprintReady);
+        result.put("prerequisitesPassed", blueprintReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceBlueprintSchema", mutationRequestBlueprint.get("schema"));
+        result.put("sourceBlueprintStatus", mutationRequestBlueprint.get("status"));
+        result.put("releaseGateState", "DISABLED");
+        result.put("requestCreationPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("expectedRequestCount", expectedRequestCount);
+        result.put("persistedRequestCount", 0);
+        result.put("pushedRequestCount", 0);
+        result.put("claimableRequestCount", 0);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", blueprintReady
+                ? "Local Agent mutation request creation is explicitly refused: no execution rows are created, pushed, or made claimable while creation is disabled."
+                : "Local Agent mutation request creation is blocked because the disabled request blueprint is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRequestPushGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRequestCreationGate
+    ) {
+        boolean creationGateReady = "REFUSED_CREATION_DISABLED".equals(mutationRequestCreationGate.get("status"))
+                && Boolean.TRUE.equals(mutationRequestCreationGate.get("prerequisitesPassed"));
+        int expectedRequestCount = numericValue(mutationRequestCreationGate.get("expectedRequestCount"));
+        int persistedRequestCount = numericValue(mutationRequestCreationGate.get("persistedRequestCount"));
+        int pushedRequestCount = numericValue(mutationRequestCreationGate.get("pushedRequestCount"));
+        int claimableRequestCount = numericValue(mutationRequestCreationGate.get("claimableRequestCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationRequestPushPolicyCheck(
+                        "mutationRequestCreationGate",
+                        creationGateReady,
+                        String.valueOf(mutationRequestCreationGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled creation gate must refuse persistence before push can be considered."
+                ),
+                mutationRequestPushPolicyCheck(
+                        "transportPushPolicy",
+                        false,
+                        "DISABLED",
+                        "Local Agent transport push is disabled for mutation requests."
+                ),
+                mutationRequestPushPolicyCheck(
+                        "pusherInvocation",
+                        false,
+                        "DISABLED",
+                        "LocalAgentToolPusher must not be called for disabled mutation requests."
+                ),
+                mutationRequestPushPolicyCheck(
+                        "claimableTransition",
+                        false,
+                        "DISABLED",
+                        "No pushed mutation request can become claimable while push is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("pushEnabled", "requestCreationEnabled", "claimEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-request-push-gate.v1");
+        result.put("status", creationGateReady ? "REFUSED_PUSH_DISABLED" : "BLOCKED_PUSH_DISABLED");
+        result.put("creationGateReady", creationGateReady);
+        result.put("prerequisitesPassed", creationGateReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceCreationGateSchema", mutationRequestCreationGate.get("schema"));
+        result.put("sourceCreationGateStatus", mutationRequestCreationGate.get("status"));
+        result.put("transportPushPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("pusherInvocationEnabled", false);
+        result.put("expectedRequestCount", expectedRequestCount);
+        result.put("persistedRequestCount", persistedRequestCount);
+        result.put("pushedRequestCount", pushedRequestCount);
+        result.put("claimableRequestCount", claimableRequestCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushGateEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", creationGateReady
+                ? "Local Agent mutation request push is explicitly refused: no transport push, claim transition, or mutation is enabled."
+                : "Local Agent mutation request push is blocked because the disabled request creation gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationRequestPushPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRequestClaimGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRequestPushGate
+    ) {
+        boolean pushGateReady = "REFUSED_PUSH_DISABLED".equals(mutationRequestPushGate.get("status"))
+                && Boolean.TRUE.equals(mutationRequestPushGate.get("prerequisitesPassed"));
+        int expectedRequestCount = numericValue(mutationRequestPushGate.get("expectedRequestCount"));
+        int persistedRequestCount = numericValue(mutationRequestPushGate.get("persistedRequestCount"));
+        int pushedRequestCount = numericValue(mutationRequestPushGate.get("pushedRequestCount"));
+        int claimableRequestCount = numericValue(mutationRequestPushGate.get("claimableRequestCount"));
+        int runningRequestCount = 0;
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationRequestClaimPolicyCheck(
+                        "mutationRequestPushGate",
+                        pushGateReady,
+                        String.valueOf(mutationRequestPushGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled push gate must refuse transport push before claim can be considered."
+                ),
+                mutationRequestClaimPolicyCheck(
+                        "claimPolicy",
+                        false,
+                        "DISABLED",
+                        "Local Agent mutation request claim is disabled."
+                ),
+                mutationRequestClaimPolicyCheck(
+                        "claimNextInvocation",
+                        false,
+                        "DISABLED",
+                        "repository.claimNext must not run for disabled mutation requests."
+                ),
+                mutationRequestClaimPolicyCheck(
+                        "runningTransition",
+                        false,
+                        "DISABLED",
+                        "No mutation request can move to RUNNING while claim is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("claimEnabled", "pushEnabled", "requestCreationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-request-claim-gate.v1");
+        result.put("status", pushGateReady ? "REFUSED_CLAIM_DISABLED" : "BLOCKED_CLAIM_DISABLED");
+        result.put("pushGateReady", pushGateReady);
+        result.put("prerequisitesPassed", pushGateReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourcePushGateSchema", mutationRequestPushGate.get("schema"));
+        result.put("sourcePushGateStatus", mutationRequestPushGate.get("status"));
+        result.put("claimPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("claimNextInvocationEnabled", false);
+        result.put("expectedRequestCount", expectedRequestCount);
+        result.put("persistedRequestCount", persistedRequestCount);
+        result.put("pushedRequestCount", pushedRequestCount);
+        result.put("claimableRequestCount", claimableRequestCount);
+        result.put("runningRequestCount", runningRequestCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimGateEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", pushGateReady
+                ? "Local Agent mutation request claim is explicitly refused: no claimNext call, claimable transition, running transition, or mutation is enabled."
+                : "Local Agent mutation request claim is blocked because the disabled request push gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationRequestClaimPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("claimable", false);
+        result.put("running", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private int numericValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private Map<String, Object> mutationRequestCreationPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private List<Map<String, Object>> mutationDispatchBlueprintToolRequests(
+            Map<String, Object> mutationDispatchEnvelopeContract,
+            Map<String, Object> postMutationResultContract
+    ) {
+        Object orderedToolSequence = mutationDispatchEnvelopeContract.get("orderedToolSequence");
+        if (!(orderedToolSequence instanceof List<?> sequence)) {
+            return List.of();
+        }
+        List<String> expectedOutputKeys = postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList();
+        return sequence.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(item -> mutationDispatchBlueprintToolRequest(item, expectedOutputKeys))
+                .toList();
+    }
+
+    private Map<String, Object> mutationDispatchBlueprintToolRequest(
+            Map<?, ?> sequenceItem,
+            List<String> expectedOutputKeys
+    ) {
+        String key = String.valueOf(sequenceItem.get("key"));
+        String toolName = String.valueOf(sequenceItem.get("toolName"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("order", sequenceItem.get("order"));
+        result.put("key", key);
+        result.put("status", "REQUEST_BLUEPRINT_DISABLED");
+        result.put("toolName", toolName);
+        result.put("approvalState", sequenceItem.get("approvalState"));
+        result.put("sideEffectful", sequenceItem.get("sideEffectful"));
+        result.put("rollbackFallback", sequenceItem.get("rollbackFallback"));
+        result.put("expectedInput", mutationDispatchBlueprintExpectedInput(key, toolName));
+        result.put("expectedOutputKeys", mutationDispatchBlueprintExpectedOutputKeys(key, expectedOutputKeys));
+        result.put("releaseGateEnabled", false);
+        result.put("dispatchDecisionEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        return result;
+    }
+
+    private Map<String, Object> mutationDispatchBlueprintExpectedInput(String key, String toolName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("toolName", toolName);
+        result.put("sourceRequestIdRequired", true);
+        result.put("releaseAttemptIdRequired", true);
+        result.put("workspaceIdRequired", true);
+        result.put("approvalStateRequired", true);
+        result.put("mutationAllowed", false);
+        if ("patchApply".equals(key)) {
+            result.put("dryRunOnly", false);
+            result.put("requiresApprovedPatch", true);
+        }
+        if ("allowlistedVerification".equals(key)) {
+            result.put("requiresAllowlistedCommand", true);
+        }
+        if ("rollbackFallback".equals(key)) {
+            result.put("requiresExplicitRollbackApproval", true);
+        }
+        return result;
+    }
+
+    private List<String> mutationDispatchBlueprintExpectedOutputKeys(String key, List<String> expectedOutputKeys) {
+        return switch (key) {
+            case "patchApply" -> expectedOutputKeys.contains("patchApplyOutcome")
+                    ? List.of("patchApplyOutcome")
+                    : List.of();
+            case "allowlistedVerification" -> expectedOutputKeys.contains("allowlistedVerificationOutcome")
+                    ? List.of("allowlistedVerificationOutcome")
+                    : List.of();
+            case "postWriteObservation" -> expectedOutputKeys.contains("postWriteRepositoryObservation")
+                    ? List.of("postWriteRepositoryObservation", "ragFreshnessMarker")
+                    : List.of("ragFreshnessMarker");
+            case "rollbackFallback" -> expectedOutputKeys.contains("rollbackFallbackOutcome")
+                    ? List.of("rollbackFallbackOutcome")
+                    : List.of();
+            default -> List.of();
+        };
+    }
+
+    private Map<String, Object> releaseAttemptMutationDispatchPreflightBoundary(
+            LocalAgentPatchReleaseAttempt attempt,
+            LocalAgentStatusResponse status,
+            Map<String, Object> workspaceVerification,
+            Map<String, Object> mutationDispatchEnvelopeContract
+    ) {
+        List<String> capabilities = status.capabilities() == null ? List.of() : status.capabilities();
+        List<LocalAgentToolName> requiredTools = List.of(
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                LocalAgentToolName.GIT_STATUS,
+                LocalAgentToolName.ROLLBACK_RESTORE
+        );
+        List<Map<String, Object>> capabilityChecks = requiredTools.stream()
+                .map(tool -> mutationDispatchCapabilityCheck(tool, capabilities.contains(tool.wireName())))
+                .toList();
+        List<String> missingCapabilities = capabilityChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("toolName")))
+                .toList();
+        boolean agentConnected = status.state() == LocalAgentConnectionState.CONNECTED;
+        boolean agentMatches = agentConnected && attempt.agentId() != null && attempt.agentId().equals(status.agentId());
+        LocalAgentWorkspaceSummary workspace = approvedWorkspaceFromStatus(status, attempt.workspaceId());
+        boolean approvedWorkspaceReady = workspace != null;
+        boolean workspaceIdentityVerified = workspaceRepositoryVerified(workspaceVerification);
+        boolean capabilitiesCovered = missingCapabilities.isEmpty();
+        boolean dispatchEnvelopeReady = "READY_DISPATCH_DISABLED".equals(mutationDispatchEnvelopeContract.get("status"))
+                && Boolean.TRUE.equals(mutationDispatchEnvelopeContract.get("prerequisitesPassed"));
+        boolean prerequisitesPassed = agentMatches
+                && approvedWorkspaceReady
+                && workspaceIdentityVerified
+                && capabilitiesCovered
+                && dispatchEnvelopeReady;
+
+        List<String> blockingKeys = new ArrayList<>();
+        if (!agentMatches) {
+            blockingKeys.add(agentConnected ? "agentMismatch" : "agentConnected");
+        }
+        if (!approvedWorkspaceReady) {
+            blockingKeys.add("approvedWorkspaceReady");
+        }
+        if (!workspaceIdentityVerified) {
+            blockingKeys.add("workspaceIdentityVerified");
+        }
+        if (!capabilitiesCovered) {
+            blockingKeys.add("requiredToolCapabilities");
+        }
+        if (!dispatchEnvelopeReady) {
+            blockingKeys.add("mutationDispatchEnvelopeContract");
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-dispatch-preflight-boundary.v1");
+        result.put("status", prerequisitesPassed ? "READY_PREFLIGHT_DISABLED" : "BLOCKED_PREFLIGHT_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("requestedAgentId", attempt.agentId());
+        result.put("connectedAgentId", status.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("connectionState", status.state().name());
+        result.put("agentConnected", agentConnected);
+        result.put("agentMatches", agentMatches);
+        result.put("agentVersion", status.version());
+        result.put("configuredTransport", status.configuredTransport());
+        result.put("activeTransport", status.activeTransport());
+        result.put("lastSeenAt", status.lastSeenAt());
+        result.put("approvedWorkspaceReady", approvedWorkspaceReady);
+        if (workspace != null) {
+            result.put("workspaceName", workspace.name());
+            result.put("workspaceRootPath", workspace.rootPath());
+            result.put("workspaceApproved", workspace.approved());
+        }
+        result.put("workspaceIdentityStatus", workspaceVerification == null
+                ? "MISSING"
+                : workspaceVerification.getOrDefault("status", "UNKNOWN"));
+        result.put("workspaceIdentityVerified", workspaceIdentityVerified);
+        result.put("requiredCapabilities", requiredTools.stream().map(LocalAgentToolName::wireName).toList());
+        result.put("advertisedCapabilities", capabilities.stream().sorted().toList());
+        result.put("capabilityChecks", capabilityChecks);
+        result.put("missingCapabilities", missingCapabilities);
+        result.put("capabilitiesCovered", capabilitiesCovered);
+        result.put("dispatchEnvelopeStatus", mutationDispatchEnvelopeContract.getOrDefault("status", "UNKNOWN"));
+        result.put("dispatchEnvelopePrerequisitesPassed", Boolean.TRUE.equals(mutationDispatchEnvelopeContract.get("prerequisitesPassed")));
+        result.put("dispatchPreflightEnabled", false);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", prerequisitesPassed
+                ? "Local Agent mutation dispatch preflight prerequisites are visible, but dispatch, request creation, push, claim, and mutation remain disabled."
+                : "Local Agent mutation dispatch preflight prerequisites are incomplete, and dispatch remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationDispatchCapabilityCheck(LocalAgentToolName tool, boolean available) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("toolName", tool.wireName());
+        result.put("available", available);
+        result.put("passed", available);
+        result.put("blocking", !available);
+        result.put("sideEffectful", tool.isSideEffectful());
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        return result;
+    }
+
+    private LocalAgentWorkspaceSummary approvedWorkspaceFromStatus(LocalAgentStatusResponse status, UUID workspaceId) {
+        if (workspaceId == null || status.workspaces() == null) {
+            return null;
+        }
+        return status.workspaces().stream()
+                .filter(workspace -> workspaceId.equals(workspace.workspaceId()) && workspace.approved())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Map<String, Object> releaseAttemptMutationDispatchEnvelopeContract(
+            LocalAgentPatchReleaseAttempt attempt,
+            List<Map<String, Object>> mutationSequencePlan,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> rollbackReadiness
+    ) {
+        List<Map<String, Object>> expectedOutcomes = postMutationResultContractExpectedOutcomes(postMutationResultContract);
+        boolean sequenceModeled = mutationSequencePlan.size() == 4 && mutationSequencePlan.stream()
+                .allMatch(item -> "PLANNED_DISABLED".equals(item.get("status")));
+        boolean resultContractModeled = expectedOutcomes.size() == 5;
+        boolean rollbackModeled = rollbackReadiness != null && "RESTORE_VALIDATED".equals(rollbackReadiness.get("status"));
+        boolean freshnessModeled = hasPostMutationOutcome(postMutationResultContract, "ragFreshnessMarker")
+                && Boolean.FALSE.equals(postMutationResultContract.get("ragFreshnessUpdateEnabled"));
+        boolean prerequisitesPassed = sequenceModeled && resultContractModeled && rollbackModeled && freshnessModeled;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-dispatch-envelope.v1");
+        result.put("status", prerequisitesPassed ? "READY_DISPATCH_DISABLED" : "BLOCKED_DISPATCH_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("dispatchMode", "LOCAL_AGENT_TOOL_SEQUENCE");
+        result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
+        result.put("expectedOutcomeKeys", expectedOutcomes.stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("orderedToolSequence", mutationSequencePlan.stream()
+                .map(item -> Map.of(
+                        "order", item.get("order"),
+                        "key", item.get("key"),
+                        "toolName", item.get("toolName"),
+                        "approvalState", item.get("approvalState"),
+                        "sideEffectful", item.get("sideEffectful"),
+                        "rollbackFallback", item.get("rollbackFallback")
+                ))
+                .toList());
+        result.put("requiredApprovals", mutationSequencePlan.stream()
+                .map(item -> Map.of(
+                        "key", item.get("key"),
+                        "toolName", item.get("toolName"),
+                        "approvalState", item.get("approvalState"),
+                        "sideEffectful", item.get("sideEffectful")
+                ))
+                .toList());
+        result.put("rollbackObligation", Map.of(
+                "required", true,
+                "status", rollbackReadiness == null ? "MISSING" : rollbackReadiness.getOrDefault("status", "UNKNOWN"),
+                "toolName", LocalAgentToolName.ROLLBACK_RESTORE.wireName(),
+                "rollbackRestoreEnabled", false
+        ));
+        result.put("ragFreshnessObligation", Map.of(
+                "required", true,
+                "status", freshnessModeled ? "MODELED_UPDATE_DISABLED" : "MISSING",
+                "ragFreshnessUpdateEnabled", false,
+                "message", "Local file changes must produce a partial reindex marker or explicit stale-index warning before final reporting."
+        ));
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        List<String> blockingKeys = new ArrayList<>();
+        if (!sequenceModeled) {
+            blockingKeys.add("mutationExecutionSequencePlan");
+        }
+        if (!resultContractModeled) {
+            blockingKeys.add("postMutationResultContract");
+        }
+        if (!rollbackModeled) {
+            blockingKeys.add("rollbackReadiness");
+        }
+        if (!freshnessModeled) {
+            blockingKeys.add("ragFreshnessRequirement");
+        }
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", prerequisitesPassed
+                ? "Local Agent mutation dispatch envelope is modeled, but request creation, push, claim, and mutation remain disabled."
+                : "Local Agent mutation dispatch envelope prerequisites are incomplete, and dispatch remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationCompletionSummary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> finalReadiness,
+            List<Map<String, Object>> mutationSequencePlan,
+            Map<String, Object> mutationResultIntakeBoundary,
+            Map<String, Object> mutationResultAggregationPlan,
+            Map<String, Object> finalMutationReportContract,
+            Map<String, Object> finalMutationReportFinalizationBoundary,
+            Map<String, Object> finalAnswerPublicationBoundary,
+            Map<String, Object> releaseEnablementChecklist,
+            Map<String, Object> rollbackReadiness,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> mutationDispatchEnvelopeContract,
+            Map<String, Object> mutationDispatchPreflightBoundary,
+            Map<String, Object> mutationDispatchDecisionModel,
+            Map<String, Object> mutationRequestBlueprint,
+            Map<String, Object> mutationRequestCreationGate,
+            Map<String, Object> mutationRequestPushGate,
+            Map<String, Object> mutationRequestClaimGate
+    ) {
+        List<Map<String, Object>> items = new ArrayList<>();
+        items.add(mutationCompletionSummaryItem(
+                "releaseAttemptReadiness",
+                Boolean.TRUE.equals(finalReadiness.get("ready")),
+                String.valueOf(finalReadiness.getOrDefault("status", "UNKNOWN")),
+                "Latest release attempt must be fresh, complete, and based on passing patch preconditions."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationExecutionSequencePlan",
+                mutationSequencePlan.size() == 4 && mutationSequencePlan.stream()
+                        .allMatch(item -> "PLANNED_DISABLED".equals(item.get("status"))),
+                "PLANNED_DISABLED",
+                "Future Local Agent mutation steps must be modeled before completion can be summarized."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationResultIntakeBoundary",
+                "READY_INTAKE_DISABLED".equals(mutationResultIntakeBoundary.get("status")),
+                String.valueOf(mutationResultIntakeBoundary.getOrDefault("status", "UNKNOWN")),
+                "Future Local Agent mutation result envelopes must have an intake boundary."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationResultAggregationPlan",
+                "READY_AGGREGATION_DISABLED".equals(mutationResultAggregationPlan.get("status")),
+                String.valueOf(mutationResultAggregationPlan.getOrDefault("status", "UNKNOWN")),
+                "Accepted mutation outcomes must have an aggregation plan for the final mutation report."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "finalMutationReportContract",
+                finalMutationReportContractRequiredSections(finalMutationReportContract).size() == 7,
+                String.valueOf(finalMutationReportContract.getOrDefault("status", "UNKNOWN")),
+                "The final report contract must preserve changed files, verification, rollback, freshness, residual risk, and evidence."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "finalMutationReportFinalizationBoundary",
+                "READY_FINALIZATION_DISABLED".equals(finalMutationReportFinalizationBoundary.get("status")),
+                String.valueOf(finalMutationReportFinalizationBoundary.getOrDefault("status", "UNKNOWN")),
+                "Final report finalization must be ready before the final answer can be considered complete."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "finalAnswerPublicationBoundary",
+                "READY_PUBLICATION_DISABLED".equals(finalAnswerPublicationBoundary.get("status")),
+                String.valueOf(finalAnswerPublicationBoundary.getOrDefault("status", "UNKNOWN")),
+                "Final answer publication requirements must be ready while publication remains disabled."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "releaseEnablementChecklist",
+                "READY_ENABLEMENT_DISABLED".equals(releaseEnablementChecklist.get("status")),
+                String.valueOf(releaseEnablementChecklist.getOrDefault("status", "UNKNOWN")),
+                "Release enablement must summarize readiness, rollback, and freshness without making a request claimable."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationDispatchEnvelopeContract",
+                "READY_DISPATCH_DISABLED".equals(mutationDispatchEnvelopeContract.get("status")),
+                String.valueOf(mutationDispatchEnvelopeContract.getOrDefault("status", "UNKNOWN")),
+                "Future Local Agent mutation dispatch must define source ids, ordered tools, approvals, result contract, rollback, and freshness obligations."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationDispatchPreflightBoundary",
+                "READY_PREFLIGHT_DISABLED".equals(mutationDispatchPreflightBoundary.get("status")),
+                String.valueOf(mutationDispatchPreflightBoundary.getOrDefault("status", "UNKNOWN")),
+                "Future dispatch must confirm the selected Local Agent, approved workspace, required tool capabilities, and envelope readiness."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationDispatchDecisionModel",
+                "REFUSED_DISPATCH_DISABLED".equals(mutationDispatchDecisionModel.get("status")),
+                String.valueOf(mutationDispatchDecisionModel.getOrDefault("status", "UNKNOWN")),
+                "Future dispatch must produce an explicit disabled refusal decision before request creation can be considered."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRequestBlueprint",
+                "REFUSED_REQUEST_CREATION_DISABLED".equals(mutationRequestBlueprint.get("status")),
+                String.valueOf(mutationRequestBlueprint.getOrDefault("status", "UNKNOWN")),
+                "Future request creation must have a disabled blueprint before any Local Agent mutation request can be created."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRequestCreationGate",
+                "REFUSED_CREATION_DISABLED".equals(mutationRequestCreationGate.get("status")),
+                String.valueOf(mutationRequestCreationGate.getOrDefault("status", "UNKNOWN")),
+                "Future request creation must pass through a disabled creation gate that refuses persistence, push, claim, and mutation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRequestPushGate",
+                "REFUSED_PUSH_DISABLED".equals(mutationRequestPushGate.get("status")),
+                String.valueOf(mutationRequestPushGate.getOrDefault("status", "UNKNOWN")),
+                "Future request push must pass through a disabled push gate that refuses transport push, claim, and mutation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRequestClaimGate",
+                "REFUSED_CLAIM_DISABLED".equals(mutationRequestClaimGate.get("status")),
+                String.valueOf(mutationRequestClaimGate.getOrDefault("status", "UNKNOWN")),
+                "Future request claim must pass through a disabled claim gate that refuses claimNext, running transition, and mutation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "rollbackReadiness",
+                rollbackReadiness != null && "RESTORE_VALIDATED".equals(rollbackReadiness.get("status")),
+                rollbackReadiness == null ? "MISSING" : String.valueOf(rollbackReadiness.getOrDefault("status", "UNKNOWN")),
+                "Rollback readiness must be visible before a future mutation can be reported as safely complete."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "ragFreshnessRequirement",
+                hasPostMutationOutcome(postMutationResultContract, "ragFreshnessMarker")
+                        && Boolean.FALSE.equals(postMutationResultContract.get("ragFreshnessUpdateEnabled")),
+                "MODELED_UPDATE_DISABLED",
+                "Completion must include an explicit RAG freshness marker while freshness updates remain disabled."
+        ));
+
+        boolean prerequisitesPassed = items.stream().allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-completion-summary.v1");
+        result.put("status", prerequisitesPassed ? "READY_COMPLETION_DISABLED" : "BLOCKED_COMPLETION_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("items", items);
+        result.put("blockingKeys", items.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("message", prerequisitesPassed
+                ? "Local Agent mutation completion prerequisites are modeled, but execution, aggregation, publication, and final-answer generation remain disabled."
+                : "Local Agent mutation completion prerequisites are incomplete, and execution, aggregation, publication, and final-answer generation remain disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationCompletionSummaryItem(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptEnablementChecklist(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> finalReadiness,
+            List<Map<String, Object>> mutationSequencePlan,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> rollbackReadiness
+    ) {
+        List<Map<String, Object>> items = new ArrayList<>();
+        items.add(releaseEnablementChecklistItem(
+                "finalReadiness",
+                Boolean.TRUE.equals(finalReadiness.get("ready")),
+                String.valueOf(finalReadiness.getOrDefault("status", "UNKNOWN")),
+                "Final readiness must be fresh, complete, and based on passing patch preconditions."
+        ));
+        items.add(releaseEnablementChecklistItem(
+                "localAgentMutationExecutionSequence",
+                mutationSequencePlan.size() == 4 && mutationSequencePlan.stream()
+                        .allMatch(item -> "PLANNED_DISABLED".equals(item.get("status"))),
+                "PLANNED_DISABLED",
+                "Future Local Agent patch apply, allowlisted verification, post-write observation, and rollback fallback steps must be modeled."
+        ));
+        items.add(releaseEnablementChecklistItem(
+                "postMutationResultContract",
+                postMutationResultContractExpectedOutcomes(postMutationResultContract).size() == 5,
+                String.valueOf(postMutationResultContract.getOrDefault("status", "UNKNOWN")),
+                "Future Local Agent results must include patch apply, verification, post-write observation, rollback fallback, and RAG freshness outcomes."
+        ));
+        items.add(releaseEnablementChecklistItem(
+                "rollbackReadiness",
+                rollbackReadiness != null && "RESTORE_VALIDATED".equals(rollbackReadiness.get("status")),
+                rollbackReadiness == null ? "MISSING" : String.valueOf(rollbackReadiness.getOrDefault("status", "UNKNOWN")),
+                "Rollback manifest must be structurally valid before any future release can make the held patch claimable."
+        ));
+        items.add(releaseEnablementChecklistItem(
+                "ragFreshnessRequirement",
+                hasPostMutationOutcome(postMutationResultContract, "ragFreshnessMarker")
+                        && Boolean.FALSE.equals(postMutationResultContract.get("ragFreshnessUpdateEnabled")),
+                "MODELED_UPDATE_DISABLED",
+                "Future patch writes must mark code RAG freshness for partial reindex or explicit stale-index warning."
+        ));
+
+        boolean prerequisitesPassed = items.stream().allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.release-enablement-checklist.v1");
+        result.put("status", prerequisitesPassed ? "READY_ENABLEMENT_DISABLED" : "BLOCKED_ENABLEMENT_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("releaseGateEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("items", items);
+        result.put("blockingKeys", items.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("message", prerequisitesPassed
+                ? "All modeled release enablement prerequisites are visible, but the release gate is disabled so no Local Agent mutation can be claimed."
+                : "Release enablement prerequisites are incomplete or not fresh, and the release gate is disabled so no Local Agent mutation can be claimed.");
+        return result;
+    }
+
+    private Map<String, Object> releaseEnablementChecklistItem(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private List<Map<String, Object>> postMutationResultContractExpectedOutcomes(Map<String, Object> contract) {
+        if (contract.get("expectedOutcomes") instanceof List<?> outcomes) {
+            return outcomes.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> copyMap((Map<?, ?>) item))
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private boolean hasPostMutationOutcome(Map<String, Object> contract, String key) {
+        return postMutationResultContractExpectedOutcomes(contract).stream()
+                .anyMatch(item -> key.equals(item.get("key")));
+    }
+
+    private Map<String, Object> releaseAttemptMutationResultIntakeBoundary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> postMutationResultContract
+    ) {
+        List<Map<String, Object>> expectedOutcomes = postMutationResultContractExpectedOutcomes(postMutationResultContract);
+        List<String> requiredOutcomeKeys = expectedOutcomes.stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList();
+        List<Map<String, Object>> requirements = List.of(
+                mutationResultIntakeRequirement(
+                        "sourceRequestLink",
+                        true,
+                        "REQUIRED_DISABLED",
+                        "Future mutation result envelopes must include the approved-held source request id."
+                ),
+                mutationResultIntakeRequirement(
+                        "releaseAttemptLink",
+                        true,
+                        "REQUIRED_DISABLED",
+                        "Future mutation result envelopes must include the release attempt id that made the held request claimable."
+                ),
+                mutationResultIntakeRequirement(
+                        "expectedOutcomeKeys",
+                        expectedOutcomes.size() == 5,
+                        String.valueOf(postMutationResultContract.getOrDefault("status", "UNKNOWN")),
+                        "Future mutation result envelopes must cover patch apply, verification, post-write observation, rollback fallback, and RAG freshness."
+                ),
+                mutationResultIntakeRequirement(
+                        "mutationAppliedProof",
+                        hasPostMutationOutcome(postMutationResultContract, "patchApplyOutcome"),
+                        "PATCH_APPLY_RESULT_REQUIRED",
+                        "Final completion must require patch.apply output with mutationApplied=true before claiming files changed."
+                ),
+                mutationResultIntakeRequirement(
+                        "verificationAndRollbackDisclosure",
+                        hasPostMutationOutcome(postMutationResultContract, "allowlistedVerificationOutcome")
+                                && hasPostMutationOutcome(postMutationResultContract, "rollbackFallbackOutcome"),
+                        "VERIFICATION_AND_ROLLBACK_REQUIRED",
+                        "Verification failure, skipped verification, rollback execution, and rollback refusal must remain visible in final reporting."
+                ),
+                mutationResultIntakeRequirement(
+                        "ragFreshnessDisclosure",
+                        hasPostMutationOutcome(postMutationResultContract, "ragFreshnessMarker"),
+                        "RAG_FRESHNESS_REQUIRED",
+                        "Local file changes must produce an explicit RAG freshness marker or stale-index warning before final reporting."
+                )
+        );
+        boolean prerequisitesPassed = requirements.stream().allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-result-intake-boundary.v1");
+        result.put("status", prerequisitesPassed ? "READY_INTAKE_DISABLED" : "BLOCKED_INTAKE_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
+        result.put("requiredOutcomeKeys", requiredOutcomeKeys);
+        result.put("acceptedTerminalStatuses", List.of(
+                LocalAgentToolStatus.SUCCEEDED.name(),
+                LocalAgentToolStatus.FAILED.name(),
+                LocalAgentToolStatus.REJECTED.name(),
+                LocalAgentToolStatus.TIMED_OUT.name(),
+                LocalAgentToolStatus.DISCONNECTED.name()
+        ));
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("requirements", requirements);
+        result.put("blockingKeys", requirements.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("message", prerequisitesPassed
+                ? "Future Local Agent mutation result intake requirements are modeled, but result aggregation and final-answer generation remain disabled."
+                : "Future Local Agent mutation result intake requirements are incomplete, and result aggregation remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationResultIntakeRequirement(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptFinalMutationReportContract(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> rollbackReadiness
+    ) {
+        List<String> expectedOutcomeKeys = postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.final-mutation-report.v1");
+        result.put("status", "CONTRACT_DISABLED");
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
+        result.put("expectedOutcomeKeys", expectedOutcomeKeys);
+        result.put("rollbackReadinessStatus", rollbackReadiness == null ? "UNKNOWN" : rollbackReadiness.getOrDefault("status", "UNKNOWN"));
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("message", "Future final mutation report is modeled for audit only; no Local Agent mutation, verification, rollback, RAG freshness update, or final-answer generation is enabled.");
+        result.put("requiredSections", List.of(
+                finalMutationReportSection(
+                        "changedFiles",
+                        "patchApplyOutcome",
+                        "Changed file paths, before/after hashes, and mutationApplied=true from the guarded Local Agent patch apply result."
+                ),
+                finalMutationReportSection(
+                        "verificationOutcome",
+                        "allowlistedVerificationOutcome",
+                        "Allowlisted test/build command status, command label, exit code, duration, and failure summary if verification fails."
+                ),
+                finalMutationReportSection(
+                        "postWriteRepositoryObservation",
+                        "postWriteRepositoryObservation",
+                        "Read-only git.status repository identity and working-tree state after patch writes and verification."
+                ),
+                finalMutationReportSection(
+                        "rollbackState",
+                        "rollbackFallbackOutcome",
+                        "Snapshot manifest id, rollback readiness, rollback execution result when used, and whether manual recovery remains required."
+                ),
+                finalMutationReportSection(
+                        "ragFreshnessState",
+                        "ragFreshnessMarker",
+                        "Partial reindex marker or explicit stale-index warning after user-local file changes."
+                ),
+                finalMutationReportSection(
+                        "residualRisks",
+                        null,
+                        "Remaining risks, skipped checks, failed checks, disconnected-agent conditions, and user follow-up required before trusting the change."
+                ),
+                finalMutationReportSection(
+                        "evidenceAndCitations",
+                        null,
+                        "Original code evidence, patch validation evidence, Local Agent observation ids, and citations that support the final answer."
+                )
+        ));
+        result.put("answerQualityGuardrails", List.of(
+                "Final answer must not claim files changed unless patchApplyOutcome reports mutationApplied=true.",
+                "Final answer must report failed or skipped verification instead of hiding it.",
+                "Final answer must include RAG freshness state when local files changed.",
+                "Final answer must include rollback state and residual risk when apply or verification fails."
+        ));
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationResultAggregationPlan(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> finalMutationReportContract
+    ) {
+        List<String> outcomeKeys = postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList();
+        List<Map<String, Object>> requiredSections = finalMutationReportContractRequiredSections(finalMutationReportContract);
+        List<Map<String, Object>> steps = List.of(
+                mutationResultAggregationStep(
+                        1,
+                        "changedFiles",
+                        "patchApplyOutcome",
+                        "Require mutationApplied=true, changed file paths, and before/after hashes before reporting files changed."
+                ),
+                mutationResultAggregationStep(
+                        2,
+                        "verificationOutcome",
+                        "allowlistedVerificationOutcome",
+                        "Carry allowlisted verification status, skipped checks, failure summary, command label, exit code, and duration into the final report."
+                ),
+                mutationResultAggregationStep(
+                        3,
+                        "postWriteRepositoryObservation",
+                        "postWriteRepositoryObservation",
+                        "Carry post-write git status and repository identity observations into the final report."
+                ),
+                mutationResultAggregationStep(
+                        4,
+                        "rollbackState",
+                        "rollbackFallbackOutcome",
+                        "Carry rollback readiness, restore result, rollback refusal, and manual recovery requirements into the final report."
+                ),
+                mutationResultAggregationStep(
+                        5,
+                        "ragFreshnessState",
+                        "ragFreshnessMarker",
+                        "Carry partial reindex marker or stale-index warning into the final report."
+                ),
+                mutationResultAggregationStep(
+                        6,
+                        "residualRisks",
+                        null,
+                        "Derive residual risks from failed apply, failed or skipped verification, rollback refusal, stale index, disconnected agent, and missing observations."
+                ),
+                mutationResultAggregationStep(
+                        7,
+                        "evidenceAndCitations",
+                        null,
+                        "Attach source evidence, patch validation evidence, Local Agent observation ids, and citations used to support the final answer."
+                )
+        );
+        boolean prerequisitesPassed = outcomeKeys.size() == 5 && requiredSections.size() == 7 && steps.size() == 7;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-result-aggregation-plan.v1");
+        result.put("status", prerequisitesPassed ? "READY_AGGREGATION_DISABLED" : "BLOCKED_AGGREGATION_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
+        result.put("finalMutationReportSchema", finalMutationReportContract.get("schema"));
+        result.put("sourceOutcomeKeys", outcomeKeys);
+        result.put("targetReportSections", requiredSections.stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("steps", steps);
+        result.put("blockingKeys", prerequisitesPassed ? List.of() : List.of("aggregationPrerequisites"));
+        result.put("message", prerequisitesPassed
+                ? "Future Local Agent mutation result aggregation is modeled, but aggregation and final-answer generation remain disabled."
+                : "Future Local Agent mutation result aggregation prerequisites are incomplete, and aggregation remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationResultAggregationStep(
+            int order,
+            String targetSectionKey,
+            String sourceOutcomeKey,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("order", order);
+        result.put("targetSectionKey", targetSectionKey);
+        result.put("status", "PLANNED_DISABLED");
+        result.put("required", true);
+        result.put("message", message);
+        if (sourceOutcomeKey != null) {
+            result.put("sourceOutcomeKey", sourceOutcomeKey);
+        }
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        return result;
+    }
+
+    private Map<String, Object> finalMutationReportSection(String key, String sourceOutcomeKey, String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", "REQUIRED_DISABLED");
+        result.put("required", true);
+        result.put("resultRequired", true);
+        if (sourceOutcomeKey != null) {
+            result.put("sourceOutcomeKey", sourceOutcomeKey);
+        }
+        result.put("message", message);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptFinalMutationReportFinalizationBoundary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> finalReadiness,
+            Map<String, Object> postMutationResultContract,
+            Map<String, Object> finalMutationReportContract
+    ) {
+        List<Map<String, Object>> requiredSections = finalMutationReportContractRequiredSections(finalMutationReportContract);
+        List<String> guardrails = finalMutationReportContractGuardrails(finalMutationReportContract);
+        List<Map<String, Object>> requirements = List.of(
+                finalizationRequirement(
+                        "releaseAttemptReady",
+                        Boolean.TRUE.equals(finalReadiness.get("ready")),
+                        String.valueOf(finalReadiness.getOrDefault("status", "UNKNOWN")),
+                        "Release attempt must be fresh, complete, and based on passing patch preconditions."
+                ),
+                finalizationRequirement(
+                        "postMutationOutcomesModeled",
+                        postMutationResultContractExpectedOutcomes(postMutationResultContract).size() == 5,
+                        String.valueOf(postMutationResultContract.getOrDefault("status", "UNKNOWN")),
+                        "Patch apply, verification, post-write observation, rollback fallback, and RAG freshness outcomes must be available."
+                ),
+                finalizationRequirement(
+                        "finalReportSectionsModeled",
+                        requiredSections.size() == 7,
+                        String.valueOf(finalMutationReportContract.getOrDefault("status", "UNKNOWN")),
+                        "Final report must include changed files, verification, repository observation, rollback, RAG freshness, residual risk, and evidence sections."
+                ),
+                finalizationRequirement(
+                        "answerQualityGuardrailsModeled",
+                        guardrails.size() >= 4,
+                        "GUARDRAILS_MODELED",
+                        "Final answer quality guardrails must prevent false completion, hidden verification failures, missing freshness state, and missing rollback risk."
+                )
+        );
+        boolean prerequisitesPassed = requirements.stream().allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.finalization-boundary.v1");
+        result.put("status", prerequisitesPassed ? "READY_FINALIZATION_DISABLED" : "BLOCKED_FINALIZATION_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("requirements", requirements);
+        result.put("blockingKeys", requirements.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("message", prerequisitesPassed
+                ? "Final report prerequisites are modeled, but final-answer generation remains disabled until real Local Agent mutation observations are available."
+                : "Final report prerequisites are incomplete, and final-answer generation remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptFinalAnswerPublicationBoundary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> finalReadiness,
+            Map<String, Object> finalMutationReportContract,
+            Object aggregationPlan
+    ) {
+        Map<String, Object> aggregation = aggregationPlan instanceof Map<?, ?> map ? copyMap(map) : Map.of();
+        List<Map<String, Object>> requiredSections = finalMutationReportContractRequiredSections(finalMutationReportContract);
+        List<String> guardrails = finalMutationReportContractGuardrails(finalMutationReportContract);
+        List<Map<String, Object>> requirements = List.of(
+                publicationRequirement(
+                        "releaseAttemptReady",
+                        Boolean.TRUE.equals(finalReadiness.get("ready")),
+                        String.valueOf(finalReadiness.getOrDefault("status", "UNKNOWN")),
+                        "Publication requires fresh, complete, passing release-attempt readiness."
+                ),
+                publicationRequirement(
+                        "aggregationPlanModeled",
+                        "READY_AGGREGATION_DISABLED".equals(aggregation.get("status")),
+                        String.valueOf(aggregation.getOrDefault("status", "UNKNOWN")),
+                        "Publication requires an aggregation plan from Local Agent mutation outcomes to final report sections."
+                ),
+                publicationRequirement(
+                        "finalReportContractModeled",
+                        requiredSections.size() == 7,
+                        String.valueOf(finalMutationReportContract.getOrDefault("status", "UNKNOWN")),
+                        "Publication requires changed files, verification, repository observation, rollback, RAG freshness, residual risk, and evidence sections."
+                ),
+                publicationRequirement(
+                        "answerQualityGuardrailsModeled",
+                        guardrails.size() >= 4,
+                        "GUARDRAILS_MODELED",
+                        "Publication must preserve guardrails against false completion, hidden verification failures, missing freshness state, and missing rollback risk."
+                )
+        );
+        boolean prerequisitesPassed = requirements.stream().allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.final-answer-publication-boundary.v1");
+        result.put("status", prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED");
+        result.put("prerequisitesPassed", prerequisitesPassed);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("finalMutationReportSchema", finalMutationReportContract.get("schema"));
+        result.put("aggregationPlanSchema", aggregation.get("schema"));
+        result.put("requiredReportSections", requiredSections.stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("answerQualityGuardrails", guardrails);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("requirements", requirements);
+        result.put("blockingKeys", requirements.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("message", prerequisitesPassed
+                ? "Final answer publication requirements are modeled, but publication and final-answer generation remain disabled."
+                : "Final answer publication requirements are incomplete, and publication remains disabled.");
+        return result;
+    }
+
+    private Map<String, Object> publicationRequirement(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> finalizationRequirement(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private List<Map<String, Object>> finalMutationReportContractRequiredSections(Map<String, Object> contract) {
+        if (contract.get("requiredSections") instanceof List<?> sections) {
+            return sections.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> copyMap((Map<?, ?>) item))
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<String> finalMutationReportContractGuardrails(Map<String, Object> contract) {
+        if (contract.get("answerQualityGuardrails") instanceof List<?> guardrails) {
+            return guardrails.stream()
+                    .map(String::valueOf)
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private Map<String, Object> releaseAttemptPostMutationResultContract(LocalAgentPatchReleaseAttempt attempt) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.post-mutation-result.v1");
+        result.put("status", "CONTRACT_DISABLED");
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("message", "Future post-mutation result envelope is modeled for audit only; no Local Agent mutation, verification, rollback, or RAG freshness update is enabled.");
+        result.put("expectedOutcomes", List.of(
+                releaseAttemptPostMutationOutcome(
+                        "patchApplyOutcome",
+                        LocalAgentToolName.PATCH_APPLY,
+                        "Patch application result, changed files, write hashes, and mutationApplied=true after guarded release.",
+                        true,
+                        false,
+                        true
+                ),
+                releaseAttemptPostMutationOutcome(
+                        "allowlistedVerificationOutcome",
+                        LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        "Allowlisted test or build result after patch application.",
+                        true,
+                        false,
+                        true
+                ),
+                releaseAttemptPostMutationOutcome(
+                        "postWriteRepositoryObservation",
+                        LocalAgentToolName.GIT_STATUS,
+                        "Read-only repository identity and working-tree observation after writes and verification.",
+                        false,
+                        false,
+                        true
+                ),
+                releaseAttemptPostMutationOutcome(
+                        "rollbackFallbackOutcome",
+                        LocalAgentToolName.ROLLBACK_RESTORE,
+                        "Rollback restore result if apply or verification fails and explicit rollback approval is present.",
+                        true,
+                        true,
+                        false
+                ),
+                releaseAttemptPostMutationOutcome(
+                        "ragFreshnessMarker",
+                        null,
+                        "Server-side marker that local files changed and code RAG requires partial reindex or stale-index warning.",
+                        false,
+                        false,
+                        true
+                )
+        ));
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptPostMutationOutcome(
+            String key,
+            LocalAgentToolName toolName,
+            String message,
+            boolean sideEffectful,
+            boolean rollbackFallback,
+            boolean requiredForSuccess
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", "EXPECTED_DISABLED");
+        if (toolName != null) {
+            result.put("toolName", toolName.wireName());
+        }
+        result.put("message", message);
+        result.put("sideEffectful", sideEffectful);
+        result.put("rollbackFallback", rollbackFallback);
+        result.put("requiredForSuccess", requiredForSuccess);
+        result.put("resultRequired", true);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        return result;
+    }
+
+    private List<Map<String, Object>> releaseAttemptMutationExecutionSequencePlan(LocalAgentPatchReleaseAttempt attempt) {
+        return List.of(
+                releaseAttemptMutationExecutionStep(
+                        1,
+                        "patchApply",
+                        "Apply the approved patch in the user's Local Agent workspace after release makes the held request claimable.",
+                        attempt,
+                        LocalAgentToolName.PATCH_APPLY,
+                        LocalAgentApprovalState.APPROVED,
+                        true,
+                        false
+                ),
+                releaseAttemptMutationExecutionStep(
+                        2,
+                        "allowlistedVerification",
+                        "Run user-approved allowlisted test or build commands after patch application.",
+                        attempt,
+                        LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        LocalAgentApprovalState.APPROVED,
+                        true,
+                        false
+                ),
+                releaseAttemptMutationExecutionStep(
+                        3,
+                        "postWriteObservation",
+                        "Record read-only repository status after writes and verification complete.",
+                        attempt,
+                        LocalAgentToolName.GIT_STATUS,
+                        LocalAgentApprovalState.NOT_REQUIRED,
+                        false,
+                        false
+                ),
+                releaseAttemptMutationExecutionStep(
+                        4,
+                        "rollbackFallback",
+                        "Restore the managed snapshot only after explicit rollback approval if apply or verification fails.",
+                        attempt,
+                        LocalAgentToolName.ROLLBACK_RESTORE,
+                        LocalAgentApprovalState.REQUIRED,
+                        true,
+                        true
+                )
+        );
+    }
+
+    private Map<String, Object> releaseAttemptMutationExecutionStep(
+            int order,
+            String key,
+            String message,
+            LocalAgentPatchReleaseAttempt attempt,
+            LocalAgentToolName toolName,
+            LocalAgentApprovalState approvalState,
+            boolean sideEffectful,
+            boolean rollbackFallback
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("order", order);
+        result.put("key", key);
+        result.put("status", "PLANNED_DISABLED");
+        result.put("message", message);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("toolName", toolName.wireName());
+        result.put("approvalState", approvalState.name());
+        result.put("sideEffectful", sideEffectful);
+        result.put("rollbackFallback", rollbackFallback);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimableAfterRelease", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptFinalReadiness(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> evidenceCompleteness,
+            Map<String, Object> patchReleaseReadiness
+    ) {
+        String freshnessStatus = releaseAttemptFreshnessStatus(attempt);
+        boolean stale = "STALE".equals(freshnessStatus);
+        boolean evidenceComplete = Boolean.TRUE.equals(evidenceCompleteness.get("complete"));
+        boolean preconditionsPassed = Boolean.TRUE.equals(patchReleaseReadiness.get("preconditionsPassed"));
+        boolean readyButDisabled = !stale && evidenceComplete && preconditionsPassed;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", readyButDisabled ? "READY_RELEASE_DISABLED" : "BLOCKED_RELEASE_DISABLED");
+        result.put("ready", readyButDisabled);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("freshnessStatus", freshnessStatus);
+        result.put("stale", stale);
+        result.put("evidenceComplete", evidenceComplete);
+        result.put("patchPreconditionsPassed", preconditionsPassed);
+        result.put("evidenceCompletenessStatus", evidenceCompleteness.get("status"));
+        result.put("patchReleaseStatus", patchReleaseReadiness.get("status"));
+        result.put("releaseGateEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("blockingReasons", releaseAttemptFinalBlockingReasons(stale, evidenceComplete, preconditionsPassed));
+        result.put("message", readyButDisabled
+                ? "Fresh evidence and pre-apply prerequisites are visible, but the release gate is disabled so the held patch remains non-claimable."
+                : "The release attempt is blocked by stale, incomplete, or failed readiness evidence, and the release gate is disabled so the held patch remains non-claimable.");
+        return result;
+    }
+
+    private List<String> releaseAttemptFinalBlockingReasons(
+            boolean stale,
+            boolean evidenceComplete,
+            boolean preconditionsPassed
+    ) {
+        List<String> reasons = new ArrayList<>();
+        if (stale) {
+            reasons.add("release attempt evidence is stale");
+        }
+        if (!evidenceComplete) {
+            reasons.add("fresh observation evidence is incomplete");
+        }
+        if (!preconditionsPassed) {
+            reasons.add("patch release prerequisites are incomplete");
+        }
+        reasons.add("release gate is disabled");
+        reasons.add("held patch request remains non-claimable");
+        return reasons;
+    }
+
+    private Map<String, Object> releaseAttemptFreshObservationEvidenceCompleteness(
+            LocalAgentPatchReleaseAttempt attempt,
+            List<Map<String, Object>> evidenceStatus
+    ) {
+        List<String> linkedKeys = new ArrayList<>();
+        List<String> missingKeys = new ArrayList<>();
+        List<String> sourceOnlyFallbackKeys = new ArrayList<>();
+        List<String> blockingKeys = new ArrayList<>();
+        for (Map<String, Object> item : evidenceStatus) {
+            String key = String.valueOf(item.get("key"));
+            String status = String.valueOf(item.get("status"));
+            if ("RELEASE_ATTEMPT_LINKED".equals(status)) {
+                linkedKeys.add(key);
+            } else if ("MISSING".equals(status)) {
+                missingKeys.add(key);
+            } else if ("SOURCE_ONLY_FALLBACK".equals(status)) {
+                sourceOnlyFallbackKeys.add(key);
+            }
+            if (Boolean.TRUE.equals(item.get("blocking"))) {
+                blockingKeys.add(key);
+            }
+        }
+
+        boolean complete = !evidenceStatus.isEmpty() && linkedKeys.size() == evidenceStatus.size();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", complete ? "ALL_LINKED_RELEASE_DISABLED" : "INCOMPLETE_RELEASE_DISABLED");
+        result.put("complete", complete);
+        result.put("requiredCount", evidenceStatus.size());
+        result.put("linkedCount", linkedKeys.size());
+        result.put("missingCount", missingKeys.size());
+        result.put("sourceOnlyFallbackCount", sourceOnlyFallbackKeys.size());
+        result.put("blockingCount", blockingKeys.size());
+        result.put("linkedKeys", linkedKeys);
+        result.put("missingKeys", missingKeys);
+        result.put("sourceOnlyFallbackKeys", sourceOnlyFallbackKeys);
+        result.put("blockingKeys", blockingKeys);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", complete
+                ? "All required fresh observations are linked to this release attempt, but the release gate is disabled so the held patch remains non-claimable."
+                : "Required fresh observations are missing or source-only fallback, and the release gate is disabled so the held patch remains non-claimable.");
+        return result;
+    }
+
+    private List<Map<String, Object>> releaseAttemptFreshObservationEvidenceStatus(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> repositoryVerification,
+            Map<String, Object> latestPatchDryRunOutput
+    ) {
+        return List.of(
+                releaseAttemptFreshObservationEvidenceStatus(
+                        "repositoryVerification",
+                        "Fresh read-only git.status repository verification linked to this release attempt.",
+                        attempt,
+                        repositoryVerification
+                ),
+                releaseAttemptFreshObservationEvidenceStatus(
+                        "patchDryRun",
+                        "Fresh non-mutating patch.apply dry-run linked to this release attempt.",
+                        attempt,
+                        latestPatchDryRunOutput
+                )
+        );
+    }
+
+    private Map<String, Object> releaseAttemptFreshObservationEvidenceStatus(
+            String key,
+            String message,
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> observation
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("requiredAfter", attempt.createdAt());
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("message", message);
+        if (observation == null) {
+            result.put("status", "MISSING");
+            result.put("linked", false);
+            result.put("sourceOnlyFallback", false);
+            result.put("blocking", true);
+            return result;
+        }
+        Map<String, Object> linkage = observationLinkage(observation);
+        String status = String.valueOf(linkage.getOrDefault("status", "SOURCE_ONLY"));
+        result.put("status", status);
+        result.put("linked", Boolean.TRUE.equals(linkage.get("releaseAttemptLinked")));
+        result.put("sourceOnlyFallback", Boolean.TRUE.equals(linkage.get("sourceOnlyFallback")));
+        result.put("blocking", !"RELEASE_ATTEMPT_LINKED".equals(status));
+        return result;
+    }
+
+    private Map<String, Object> observationLinkage(Map<String, Object> observation) {
+        if (observation.get("observationLinkage") instanceof Map<?, ?> linkage) {
+            return copyMap(linkage);
+        }
+        return Map.of("status", "SOURCE_ONLY");
+    }
+
+    private List<Map<String, Object>> releaseAttemptFreshObservationRequirements(LocalAgentPatchReleaseAttempt attempt) {
+        OffsetDateTime createdAt = attempt.createdAt();
+        return List.of(
+                freshObservationRequirement(
+                        "repositoryVerificationAfterAttempt",
+                        "Fresh read-only git.status repository verification must complete after this release attempt is created.",
+                        createdAt
+                ),
+                freshObservationRequirement(
+                        "patchDryRunAfterAttempt",
+                        "Fresh patch.apply dry-run must complete after this release attempt is created.",
+                        createdAt
+                ),
+                freshObservationRequirement(
+                        "snapshotCreatedAfterFreshDryRun",
+                        "A managed Local Agent snapshot must be created by the fresh dry-run before patch writes are considered.",
+                        createdAt
+                ),
+                freshObservationRequirement(
+                        "rollbackValidatedAfterFreshSnapshot",
+                        "Rollback manifest validation must be derived from the fresh created snapshot.",
+                        createdAt
+                ),
+                freshObservationRequirement(
+                        "userReleaseApprovalAfterFreshEvidence",
+                        "User release approval must happen after fresh evidence is visible.",
+                        createdAt
+                )
+        );
+    }
+
+    private Map<String, Object> freshObservationRequirement(String key, String message, OffsetDateTime requiredAfter) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", "REQUIRED_AFTER_RELEASE_ATTEMPT");
+        result.put("required", true);
+        result.put("passed", false);
+        result.put("requiredAfter", requiredAfter);
+        result.put("message", message);
+        return result;
+    }
+
+    private List<Map<String, Object>> releaseAttemptFreshObservationRequestPlan(LocalAgentPatchReleaseAttempt attempt) {
+        return List.of(
+                freshObservationRequestPlan(
+                        "repositoryVerification",
+                        LocalAgentToolName.GIT_STATUS,
+                        LocalAgentApprovalState.NOT_REQUIRED,
+                        false,
+                        false,
+                        false,
+                        "Queue a read-only git.status observation linked to this release attempt before any claimable transition is considered.",
+                        attempt
+                ),
+                freshObservationRequestPlan(
+                        "patchDryRun",
+                        LocalAgentToolName.PATCH_APPLY,
+                        LocalAgentApprovalState.APPROVED,
+                        true,
+                        false,
+                        true,
+                        "Queue a non-mutating patch.apply dry-run linked to this release attempt before any patch write is considered.",
+                        attempt
+                )
+        );
+    }
+
+    private Map<String, Object> freshObservationRequestPlan(
+            String key,
+            LocalAgentToolName toolName,
+            LocalAgentApprovalState approvalState,
+            boolean dryRunOnly,
+            boolean mutationAllowed,
+            boolean requiresSnapshot,
+            String message,
+            LocalAgentPatchReleaseAttempt attempt
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", "PLANNED_DISABLED");
+        result.put("enqueueEnabled", false);
+        result.put("claimableAfterEnqueue", false);
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("toolName", toolName.wireName());
+        result.put("approvalState", approvalState.name());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("releaseAttemptId", attempt.id());
+        result.put("requiredAfter", attempt.createdAt());
+        result.put("dryRunOnly", dryRunOnly);
+        result.put("mutationAllowed", mutationAllowed);
+        result.put("requiresSnapshot", requiresSnapshot);
+        result.put("message", message);
+        return result;
+    }
+
+    private OffsetDateTime releaseAttemptExpiresAt(LocalAgentPatchReleaseAttempt attempt) {
+        return attempt.createdAt() == null ? null : attempt.createdAt().plusSeconds(attempt.staleWindowSeconds());
+    }
+
+    private Long releaseAttemptAgeSeconds(LocalAgentPatchReleaseAttempt attempt) {
+        if (attempt.createdAt() == null) {
+            return null;
+        }
+        return Math.max(0, Duration.between(attempt.createdAt(), OffsetDateTime.now()).getSeconds());
+    }
+
+    private String releaseAttemptFreshnessStatus(LocalAgentPatchReleaseAttempt attempt) {
+        OffsetDateTime expiresAt = releaseAttemptExpiresAt(attempt);
+        if (expiresAt == null) {
+            return "UNKNOWN";
+        }
+        return OffsetDateTime.now().isAfter(expiresAt) ? "STALE" : "FRESH";
     }
 
     private LocalAgentPatchReleaseAttemptEvidenceRequirement releaseAttemptEvidence(String key, String description, boolean required) {
@@ -683,6 +3187,9 @@ public class LocalAgentToolGatewayService {
         result.put("preflightPassed", dryRunOutput.get("preflightPassed"));
         result.put("mutationApplied", dryRunOutput.get("mutationApplied"));
         result.put("snapshotCreated", snapshotCreated);
+        if (dryRunOutput.get("observationLinkage") != null) {
+            result.put("observationLinkage", dryRunOutput.get("observationLinkage"));
+        }
 
         if (!(dryRunOutput.get("snapshotObservation") instanceof Map<?, ?> snapshot)
                 || !(snapshot.get("manifestPreview") instanceof Map<?, ?> manifest)) {
@@ -748,6 +3255,9 @@ public class LocalAgentToolGatewayService {
             result.put("status", "PREVIEW_ONLY");
             result.put("message", "Rollback validation requires an actual created snapshot, not preview-only manifest evidence.");
             result.put("blocking", true);
+            if (dryRunOutput.get("observationLinkage") != null) {
+                result.put("observationLinkage", dryRunOutput.get("observationLinkage"));
+            }
             return result;
         }
         if (!(dryRunOutput.get("snapshotObservation") instanceof Map<?, ?> snapshot)
@@ -800,6 +3310,9 @@ public class LocalAgentToolGatewayService {
         result.put("status", "RESTORE_VALIDATED");
         result.put("blocking", false);
         result.put("message", "Created snapshot manifest contains restorable workspace-relative targets and managed snapshot-relative sources. rollback.restore remains disabled.");
+        if (dryRunOutput.get("observationLinkage") != null) {
+            result.put("observationLinkage", dryRunOutput.get("observationLinkage"));
+        }
         result.put("fileCount", fileChecks.size());
         result.put("requiresUserApproval", true);
         result.put("fileChecks", fileChecks);
