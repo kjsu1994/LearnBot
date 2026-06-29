@@ -67,6 +67,14 @@ public class LocalAgentToolGatewayService {
             new LocalAgentFinalAnswerDeliveryGateBuilder();
     private final LocalAgentFinalAnswerDeliveryReceiptGateBuilder deliveryReceiptGateBuilder =
             new LocalAgentFinalAnswerDeliveryReceiptGateBuilder();
+    private final LocalAgentWriteHelperSafetyGateBuilder writeHelperSafetyGateBuilder =
+            new LocalAgentWriteHelperSafetyGateBuilder();
+    private final LocalAgentMutationExecutionReadinessBoundaryBuilder mutationExecutionReadinessBoundaryBuilder =
+            new LocalAgentMutationExecutionReadinessBoundaryBuilder();
+    private final LocalAgentMutationToolRunnerBoundaryBuilder mutationToolRunnerBoundaryBuilder =
+            new LocalAgentMutationToolRunnerBoundaryBuilder();
+    private final LocalAgentMutationResultCompletionBoundaryBuilder mutationResultCompletionBoundaryBuilder =
+            new LocalAgentMutationResultCompletionBoundaryBuilder();
 
     public LocalAgentToolGatewayService(
             LocalAgentToolExecutionRepository repository,
@@ -620,19 +628,7 @@ public class LocalAgentToolGatewayService {
 
     @Transactional
     public LocalAgentQueuedToolRequest enqueuePatchDryRun(UUID userId, UUID requestId) {
-        LocalAgentToolExecution execution = repository.find(requestId)
-                .filter(candidate -> candidate.userId().equals(userId))
-                .orElseThrow(() -> new IllegalArgumentException("Local Agent patch request was not found."));
-        if (execution.toolName() != LocalAgentToolName.PATCH_APPLY) {
-            throw new IllegalArgumentException("Dry-run dispatch is available only for patch.apply requests.");
-        }
-        if (execution.executionTarget() != AgentExecutionTarget.USER_LOCAL_AGENT) {
-            throw new IllegalArgumentException("Dry-run dispatch requires USER_LOCAL_AGENT target.");
-        }
-        if (execution.approvalState() != LocalAgentApprovalState.APPROVED
-                || execution.status() != LocalAgentToolStatus.APPROVED_HELD) {
-            throw new IllegalArgumentException("Patch dry-run requires an approved-held request.");
-        }
+        LocalAgentToolExecution execution = approvedHeldPatchSource(userId, requestId, "Dry-run dispatch");
 
         Map<String, Object> dryRunInput = new LinkedHashMap<>(execution.input());
         dryRunInput.put("dryRunOnly", true);
@@ -655,6 +651,82 @@ public class LocalAgentToolGatewayService {
                 warnings
         );
         return enqueue(dryRunRequest);
+    }
+
+    @Transactional
+    public List<LocalAgentQueuedToolRequest> enqueueReleaseAttemptFreshObservations(UUID userId, UUID requestId) {
+        LocalAgentToolExecution source = approvedHeldPatchSource(userId, requestId, "Fresh observation dispatch");
+        LocalAgentPatchReleaseAttempt attempt = disabledReleaseAttemptForFreshObservation(userId, source);
+        if (!source.id().equals(attempt.sourceRequestId())
+                || !source.sessionId().equals(attempt.sessionId())
+                || !source.userId().equals(attempt.userId())
+                || !source.agentId().equals(attempt.agentId())
+                || !source.workspaceId().equals(attempt.workspaceId())) {
+            throw new IllegalStateException("Release attempt does not match the approved-held patch request.");
+        }
+        if (!gatewayService.isConnected(source.userId(), source.agentId())) {
+            throw new IllegalStateException("Local Agent is not connected.");
+        }
+        if (source.workspaceId() != null && !gatewayService.hasApprovedWorkspace(source.userId(), source.workspaceId())) {
+            throw new IllegalStateException("Workspace is not approved by the Local Agent.");
+        }
+
+        LocalAgentToolRequest repositoryObservationRequest = new LocalAgentToolRequest(
+                source.sessionId(),
+                source.userId(),
+                source.agentId(),
+                source.workspaceId(),
+                source.executionTarget(),
+                LocalAgentToolName.GIT_STATUS,
+                freshRepositoryVerificationInput(source, attempt.id()),
+                LocalAgentApprovalState.NOT_REQUIRED,
+                null,
+                List.of("Fresh release-attempt git.status observation. Read-only; the source patch request stays held.")
+        );
+        List<String> patchWarnings = new ArrayList<>(source.requestWarnings());
+        patchWarnings.add("Fresh release-attempt patch dry-run observation. dryRunOnly=true, mutationAllowed=false, and the source request stays held.");
+        LocalAgentToolRequest patchDryRunRequest = new LocalAgentToolRequest(
+                source.sessionId(),
+                source.userId(),
+                source.agentId(),
+                source.workspaceId(),
+                source.executionTarget(),
+                LocalAgentToolName.PATCH_APPLY,
+                freshPatchDryRunInput(source, attempt.id()),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                patchWarnings
+        );
+
+        List<LocalAgentToolRequest> requests = List.of(repositoryObservationRequest, patchDryRunRequest);
+        List<LocalAgentQueuedToolRequest> queued = new ArrayList<>();
+        for (LocalAgentToolRequest request : requests) {
+            LocalAgentToolExecution execution = repository.create(UUID.randomUUID(), request);
+            queued.add(toQueuedRequest(execution));
+        }
+        queued.forEach(toolPusher::sendToolRequest);
+        return List.copyOf(queued);
+    }
+
+    private LocalAgentPatchReleaseAttempt disabledReleaseAttemptForFreshObservation(
+            UUID userId,
+            LocalAgentToolExecution source
+    ) {
+        Optional<LocalAgentPatchReleaseAttempt> existing = latestDisabledNonClaimableAttempt(userId, source.id());
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        inspectPatchReleaseBoundary(userId, source.id());
+        return latestDisabledNonClaimableAttempt(userId, source.id())
+                .orElseThrow(() -> new IllegalStateException("A disabled non-claimable release attempt is required before fresh observations can be queued."));
+    }
+
+    private Optional<LocalAgentPatchReleaseAttempt> latestDisabledNonClaimableAttempt(UUID userId, UUID requestId) {
+        return Optional
+                .ofNullable(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId))
+                .flatMap(item -> item)
+                .filter(candidate -> LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS.equals(candidate.status()))
+                .filter(candidate -> !candidate.claimable());
     }
 
     @Transactional
@@ -858,6 +930,11 @@ public class LocalAgentToolGatewayService {
                 patchReleaseReadiness
         );
         result.put("releaseAttemptFinalReadiness", releaseAttemptFinalReadiness);
+        result.put("releaseAttemptDisplaySummary", releaseAttemptDisplaySummary(
+                attempt,
+                freshObservationEvidenceCompleteness,
+                releaseAttemptFinalReadiness
+        ));
         List<Map<String, Object>> mutationSequencePlan = releaseAttemptMutationExecutionSequencePlan(attempt);
         result.put("localAgentMutationExecutionSequencePlan", mutationSequencePlan);
         Map<String, Object> postMutationResultContract = releaseAttemptPostMutationResultContract(attempt);
@@ -948,6 +1025,11 @@ public class LocalAgentToolGatewayService {
                 mutationRequestClaimGate
         );
         result.put("mutationExecutionGate", mutationExecutionGate);
+        Map<String, Object> mutationWriteHelperSafetyGate = writeHelperSafetyGateBuilder.build(
+                attempt,
+                mutationExecutionGate
+        );
+        result.put("mutationWriteHelperSafetyGate", mutationWriteHelperSafetyGate);
         Map<String, Object> mutationPostExecutionObservationGate = postExecutionObservationGateBuilder.build(
                 attempt,
                 mutationExecutionGate
@@ -1023,7 +1105,7 @@ public class LocalAgentToolGatewayService {
                 mutationFinalAnswerDeliveryGate
         );
         result.put("mutationFinalAnswerDeliveryReceiptGate", mutationFinalAnswerDeliveryReceiptGate);
-        result.put("mutationCompletionSummary", releaseAttemptMutationCompletionSummary(
+        Map<String, Object> mutationCompletionSummary = releaseAttemptMutationCompletionSummary(
                 attempt,
                 releaseAttemptFinalReadiness,
                 mutationSequencePlan,
@@ -1043,6 +1125,7 @@ public class LocalAgentToolGatewayService {
                 mutationRequestPushGate,
                 mutationRequestClaimGate,
                 mutationExecutionGate,
+                mutationWriteHelperSafetyGate,
                 mutationPostExecutionObservationGate,
                 mutationObservationAcceptanceGate,
                 mutationResultIntakePersistenceGate,
@@ -1058,6 +1141,30 @@ public class LocalAgentToolGatewayService {
                 mutationFinalResponseHandoffGate,
                 mutationFinalAnswerDeliveryGate,
                 mutationFinalAnswerDeliveryReceiptGate
+        );
+        result.put("mutationCompletionSummary", mutationCompletionSummary);
+        Map<String, Object> mutationHandoffSummary = releaseAttemptMutationHandoffSummary(
+                attempt,
+                mutationCompletionSummary
+        );
+        result.put("mutationHandoffSummary", mutationHandoffSummary);
+        Map<String, Object> mutationExecutionReadinessBoundary = mutationExecutionReadinessBoundaryBuilder.build(
+                attempt,
+                mutationHandoffSummary,
+                mutationExecutionGate,
+                mutationWriteHelperSafetyGate
+        );
+        result.put("mutationExecutionReadinessBoundary", mutationExecutionReadinessBoundary);
+        Map<String, Object> mutationToolRunnerBoundary = mutationToolRunnerBoundaryBuilder.build(
+                attempt,
+                mutationExecutionReadinessBoundary,
+                mutationExecutionGate
+        );
+        result.put("mutationToolRunnerBoundary", mutationToolRunnerBoundary);
+        result.put("mutationResultCompletionBoundary", mutationResultCompletionBoundaryBuilder.build(
+                attempt,
+                mutationToolRunnerBoundary,
+                mutationPostExecutionObservationGate
         ));
         return result;
     }
@@ -2074,6 +2181,7 @@ public class LocalAgentToolGatewayService {
             Map<String, Object> mutationRequestPushGate,
             Map<String, Object> mutationRequestClaimGate,
             Map<String, Object> mutationExecutionGate,
+            Map<String, Object> mutationWriteHelperSafetyGate,
             Map<String, Object> mutationPostExecutionObservationGate,
             Map<String, Object> mutationObservationAcceptanceGate,
             Map<String, Object> mutationResultIntakePersistenceGate,
@@ -2187,6 +2295,12 @@ public class LocalAgentToolGatewayService {
                 "REFUSED_EXECUTION_DISABLED".equals(mutationExecutionGate.get("status")),
                 String.valueOf(mutationExecutionGate.getOrDefault("status", "UNKNOWN")),
                 "Future mutation execution must pass through a disabled execution gate that refuses tool runner, write helper, apply, test, rollback, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationWriteHelperSafetyGate",
+                "REFUSED_WRITE_HELPER_DISABLED".equals(mutationWriteHelperSafetyGate.get("status")),
+                String.valueOf(mutationWriteHelperSafetyGate.getOrDefault("status", "UNKNOWN")),
+                "Future Local Agent patch writes must pass through a disabled write-helper safety gate that requires workspace containment, snapshot, hash recheck, atomic rewrite, and rollback readiness."
         ));
         items.add(mutationCompletionSummaryItem(
                 "mutationPostExecutionObservationGate",
@@ -2362,6 +2476,88 @@ public class LocalAgentToolGatewayService {
         result.put("deliveryHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
         result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationHandoffSummary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> completionSummary
+    ) {
+        boolean completionReady = "READY_COMPLETION_DISABLED".equals(completionSummary.get("status"))
+                && Boolean.TRUE.equals(completionSummary.get("prerequisitesPassed"));
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = completionSummary.get("blockingKeys") instanceof List<?>
+                ? ((List<?>) completionSummary.get("blockingKeys")).stream().map(String::valueOf).toList()
+                : List.of("mutationCompletionSummary");
+        Map<String, Object> disabledControls = new LinkedHashMap<>();
+        disabledControls.put("releaseGateEnabled", false);
+        disabledControls.put("requestCreationEnabled", false);
+        disabledControls.put("pushEnabled", false);
+        disabledControls.put("claimEnabled", false);
+        disabledControls.put("writeHelperEnabled", false);
+        disabledControls.put("applyEnabled", false);
+        disabledControls.put("testEnabled", false);
+        disabledControls.put("rollbackRestoreEnabled", false);
+        disabledControls.put("ragFreshnessUpdateEnabled", false);
+        disabledControls.put("mutationResultAggregationEnabled", false);
+        disabledControls.put("publicationEnabled", false);
+        disabledControls.put("finalAnswerGenerationEnabled", false);
+        disabledControls.put("finalAnswerCompletionEnabled", false);
+        disabledControls.put("finalAnswerDeliveryEnabled", false);
+        disabledControls.put("finalAnswerPersistenceEnabled", false);
+        disabledControls.put("conversationTurnSaveEnabled", false);
+        disabledControls.put("userVisibleCompletionEnabled", false);
+        disabledControls.put("finalResponseHandoffEnabled", false);
+        disabledControls.put("deliveryHandoffEnabled", false);
+        disabledControls.put("deliveryReceiptEnabled", false);
+        disabledControls.put("claimable", false);
+        disabledControls.put("mutationAllowed", false);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-handoff-summary.v1");
+        result.put("status", completionReady ? "READY_HANDOFF_DISABLED" : "BLOCKED_HANDOFF_DISABLED");
+        result.put("prerequisitesPassed", completionReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceCompletionSummaryStatus", completionSummary.get("status"));
+        result.put("sourceCompletionSummarySchema", completionSummary.get("schema"));
+        result.put("sourceCompletionPrerequisitesPassed", completionSummary.get("prerequisitesPassed"));
+        result.put("disabledControls", disabledControls);
+        result.put("blockingKeys", completionReady ? List.of("releaseGateEnabled", "requestCreationEnabled", "pushEnabled", "claimEnabled", "mutationAllowed") : blockingKeys);
+        result.put("handoffStages", List.of(
+                mutationHandoffStage("dispatchDecision", "mutationDispatchDecisionModel", completionReady),
+                mutationHandoffStage("requestCreation", "mutationRequestCreationGate", completionReady),
+                mutationHandoffStage("transportPush", "mutationRequestPushGate", completionReady),
+                mutationHandoffStage("agentClaim", "mutationRequestClaimGate", completionReady),
+                mutationHandoffStage("toolExecution", "mutationExecutionGate", completionReady),
+                mutationHandoffStage("resultIntake", "mutationResultIntakePersistenceGate", completionReady),
+                mutationHandoffStage("finalResponse", "mutationFinalResponseHandoffGate", completionReady),
+                mutationHandoffStage("deliveryReceipt", "mutationFinalAnswerDeliveryReceiptGate", completionReady)
+        ));
+        result.put("message", completionReady
+                ? "Local Agent mutation handoff prerequisites are modeled, but release, request creation, push, claim, execution, result handling, final response, delivery, and mutation remain disabled."
+                : "Local Agent mutation handoff is blocked by incomplete disabled readiness inputs, and all handoff controls remain disabled.");
+        return result;
+    }
+
+    private Map<String, Object> mutationHandoffStage(String key, String sourceGateKey, boolean ready) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("sourceGateKey", sourceGateKey);
+        result.put("status", ready ? "MODELED_DISABLED" : "BLOCKED_DISABLED");
+        result.put("passed", ready);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("resultIntakeEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
         return result;
     }
 
@@ -3221,6 +3417,49 @@ public class LocalAgentToolGatewayService {
         return reasons;
     }
 
+    private Map<String, Object> releaseAttemptDisplaySummary(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> evidenceCompleteness,
+            Map<String, Object> finalReadiness
+    ) {
+        boolean linkedEvidenceComplete = "ALL_LINKED_RELEASE_DISABLED".equals(evidenceCompleteness.get("status"));
+        boolean releaseReadyButDisabled = "READY_RELEASE_DISABLED".equals(finalReadiness.get("status"));
+        Map<String, Object> disabledFlags = new LinkedHashMap<>();
+        disabledFlags.put("releaseGateEnabled", false);
+        disabledFlags.put("requestCreationEnabled", false);
+        disabledFlags.put("pushEnabled", false);
+        disabledFlags.put("claimEnabled", false);
+        disabledFlags.put("writeHelperEnabled", false);
+        disabledFlags.put("applyEnabled", false);
+        disabledFlags.put("testEnabled", false);
+        disabledFlags.put("rollbackRestoreEnabled", false);
+        disabledFlags.put("ragFreshnessUpdateEnabled", false);
+        disabledFlags.put("finalAnswerGenerationEnabled", false);
+        disabledFlags.put("mutationAllowed", false);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", releaseReadyButDisabled ? "READY_BUT_DISABLED_DISPLAY" : "BLOCKED_DISABLED_DISPLAY");
+        result.put("show", linkedEvidenceComplete || releaseReadyButDisabled);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("linkedEvidenceComplete", linkedEvidenceComplete);
+        result.put("releaseReadyButDisabled", releaseReadyButDisabled);
+        result.put("evidenceStatus", evidenceCompleteness.get("status"));
+        result.put("releaseReadinessStatus", finalReadiness.get("status"));
+        result.put("patchPreconditionsPassed", finalReadiness.get("patchPreconditionsPassed"));
+        result.put("evidenceComplete", finalReadiness.get("evidenceComplete"));
+        result.put("linkedCount", evidenceCompleteness.get("linkedCount"));
+        result.put("missingCount", evidenceCompleteness.get("missingCount"));
+        result.put("sourceOnlyFallbackCount", evidenceCompleteness.get("sourceOnlyFallbackCount"));
+        result.put("blockingCount", evidenceCompleteness.get("blockingCount"));
+        result.put("disabledFlags", disabledFlags);
+        result.put("blockingReasons", finalReadiness.get("blockingReasons"));
+        result.put("message", releaseReadyButDisabled
+                ? "Linked release evidence is complete and preconditions are ready, but every release and mutation control remains disabled."
+                : "Release evidence is not executable; release and mutation controls remain disabled.");
+        return result;
+    }
+
     private Map<String, Object> releaseAttemptFreshObservationEvidenceCompleteness(
             LocalAgentPatchReleaseAttempt attempt,
             List<Map<String, Object>> evidenceStatus
@@ -3899,6 +4138,23 @@ public class LocalAgentToolGatewayService {
         }
         if (!execution.toolName().isSideEffectful()) {
             throw new IllegalArgumentException("Only side-effectful Local Agent tools can be approved or denied.");
+        }
+        return execution;
+    }
+
+    private LocalAgentToolExecution approvedHeldPatchSource(UUID userId, UUID requestId, String action) {
+        LocalAgentToolExecution execution = repository.find(requestId)
+                .filter(candidate -> candidate.userId().equals(userId))
+                .orElseThrow(() -> new IllegalArgumentException("Local Agent patch request was not found."));
+        if (execution.toolName() != LocalAgentToolName.PATCH_APPLY) {
+            throw new IllegalArgumentException(action + " is available only for patch.apply requests.");
+        }
+        if (execution.executionTarget() != AgentExecutionTarget.USER_LOCAL_AGENT) {
+            throw new IllegalArgumentException(action + " requires USER_LOCAL_AGENT target.");
+        }
+        if (execution.approvalState() != LocalAgentApprovalState.APPROVED
+                || execution.status() != LocalAgentToolStatus.APPROVED_HELD) {
+            throw new IllegalArgumentException("Patch dry-run requires an approved-held request.");
         }
         return execution;
     }

@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import { buildMutationFinalAnswerUserVisibleCompletionGateView } from './mutationFinalAnswerUserVisibleCompletionGate.js';
+
+const view = buildMutationFinalAnswerUserVisibleCompletionGateView({
+  schema: 'learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1',
+  status: 'REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED',
+  finalAnswerConversationSaveReady: true,
+  prerequisitesPassed: true,
+  executionTarget: 'USER_LOCAL_AGENT',
+  userVisibleCompletionPolicy: 'DISABLED_AUDIT_ONLY',
+  finalResponseHandoffEnabled: false,
+  sourceFinalAnswerConversationSaveGateStatus: 'REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED',
+  sourceFinalAnswerConversationSaveGateSchema: 'learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1',
+  sourceRequestId: 'request-123',
+  releaseAttemptId: 'attempt-1234567890',
+  sessionId: 'session-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
+  expectedResultCount: 4,
+  completedResultCount: 0,
+  acceptedResultCount: 0,
+  rejectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  userVisibleCompletionEnabled: false,
+  conversationTurnSaveEnabled: false,
+  finalAnswerPersistenceEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerGenerationEnabled: false,
+  publicationEnabled: false,
+  mutationResultAggregationEnabled: false,
+  ragFreshnessUpdateEnabled: false,
+  rollbackFallbackExecutionEnabled: false,
+  intakePersistenceEnabled: false,
+  acceptedObservationPersistenceEnabled: false,
+  postExecutionObservationEnabled: false,
+  completedResultPersistenceEnabled: false,
+  observationAcceptanceEnabled: false,
+  releaseGateEnabled: false,
+  requestCreationEnabled: false,
+  pushEnabled: false,
+  claimEnabled: false,
+  executionEnabled: false,
+  writeHelperEnabled: false,
+  claimable: false,
+  mutationAllowed: false,
+  applyEnabled: false,
+  testEnabled: false,
+  rollbackRestoreEnabled: false,
+  policyChecks: [
+    {
+      key: 'mutationFinalAnswerConversationSaveGate',
+      status: 'REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED',
+      passed: true,
+      blocking: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      message: 'A disabled final-answer conversation-save gate must refuse conversation save before user-visible completion can be considered.',
+    },
+    {
+      key: 'userVisibleCompletionPolicy',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      message: 'Mutation final-answer user-visible completion and final-response handoff are disabled.',
+    },
+  ],
+  blockingKeys: [
+    'userVisibleCompletionPolicy',
+    'userVisibleCompletion',
+    'finalResponseHandoff',
+    'conversationTurnSave',
+    'userVisibleCompletionEnabled',
+    'finalResponseHandoffEnabled',
+    'conversationTurnSaveEnabled',
+    'finalAnswerPersistenceEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerGenerationEnabled',
+    'mutationAllowed',
+  ],
+  message: 'Local Agent mutation final-answer user-visible completion is explicitly refused: no user-visible completion is marked and no final response is handed off.',
+});
+
+assert.equal(view.show, true);
+assert.equal(
+  view.headerText,
+  'mutation final-answer user-visible completion gate: REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED / learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1 / final answer conversation-save ready true / prerequisites true / USER_LOCAL_AGENT / policy DISABLED_AUDIT_ONLY / final response handoff false / final answer conversation-save status REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED / learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1'
+);
+assert.equal(
+  view.idsText,
+  'mutation final-answer user-visible completion ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+);
+assert.equal(
+  view.countsText,
+  'mutation final-answer user-visible completion counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.disabledText,
+  'mutation final-answer user-visible completion disabled: user-visible completion false / final response handoff false / conversation save false / persistence false / delivery false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+);
+assert.deepEqual(view.policyLines, [
+  'final-answer user-visible completion policy mutationFinalAnswerConversationSaveGate: REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / A disabled final-answer conversation-save gate must refuse conversation save before user-visible completion can be considered.',
+  'final-answer user-visible completion policy userVisibleCompletionPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / Mutation final-answer user-visible completion and final-response handoff are disabled.',
+]);
+assert.equal(
+  view.blockingText,
+  'mutation final-answer user-visible completion blocking keys: userVisibleCompletionPolicy, userVisibleCompletion, finalResponseHandoff, conversationTurnSave, userVisibleCompletionEnabled, finalResponseHandoffEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerDeliveryEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+);
+assert.match(view.message, /explicitly refused/);
+
+const hidden = buildMutationFinalAnswerUserVisibleCompletionGateView(null);
+assert.equal(hidden.show, false);
+assert.deepEqual(hidden.policyLines, []);

@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentConnectionState;
+import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentStatusResponse;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
@@ -649,6 +650,7 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestPushGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUSH_DISABLED", true, 4);
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
         assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
+        assertMutationWriteHelperSafetyGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_WRITE_HELPER_DISABLED", true, 4);
         assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
         assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
         assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
@@ -816,6 +818,25 @@ class LocalAgentToolGatewayServiceTest {
                 true,
                 true
         );
+        @SuppressWarnings("unchecked")
+        Map<String, Object> evidenceCompleteness = (Map<String, Object>) readiness.releaseAttemptModel().latestAttempt()
+                .get("freshObservationEvidenceCompleteness");
+        assertThat(evidenceCompleteness.get("linkedKeys")).asList()
+                .containsExactly("repositoryVerification", "patchDryRun");
+        assertThat(evidenceCompleteness.get("missingKeys")).asList().isEmpty();
+        assertThat(evidenceCompleteness.get("sourceOnlyFallbackKeys")).asList().isEmpty();
+        assertThat(evidenceCompleteness.get("blockingKeys")).asList().isEmpty();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalReadiness = (Map<String, Object>) readiness.releaseAttemptModel().latestAttempt()
+                .get("releaseAttemptFinalReadiness");
+        assertThat(finalReadiness)
+                .containsEntry("evidenceCompletenessStatus", "ALL_LINKED_RELEASE_DISABLED")
+                .containsEntry("patchReleaseStatus", "PRECONDITIONS_READY_RELEASE_DISABLED")
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false);
+        assertThat(finalReadiness.get("blockingReasons")).asList()
+                .containsExactly("release gate is disabled", "held patch request remains non-claimable");
+        assertReleaseAttemptDisplaySummary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertLocalAgentMutationExecutionSequencePlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertPostMutationResultContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertMutationDispatchEnvelopeContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "READY_DISPATCH_DISABLED", true);
@@ -826,6 +847,7 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestPushGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUSH_DISABLED", true, 4);
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
         assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
+        assertMutationWriteHelperSafetyGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_WRITE_HELPER_DISABLED", true, 4);
         assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
         assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
         assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
@@ -872,11 +894,84 @@ class LocalAgentToolGatewayServiceTest {
                 "READY_COMPLETION_DISABLED",
                 true
         );
+        assertMutationHandoffSummary(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "READY_HANDOFF_DISABLED",
+                true,
+                "releaseGateEnabled",
+                "requestCreationEnabled",
+                "pushEnabled",
+                "claimEnabled",
+                "mutationAllowed"
+        );
+        assertMutationExecutionReadinessBoundary(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "REFUSED_EXECUTION_READINESS_DISABLED",
+                true,
+                "runtimeExecutionSwitch",
+                "sideEffectTransport",
+                "releaseGateEnabled",
+                "requestCreationEnabled",
+                "pushEnabled",
+                "claimEnabled",
+                "executionEnabled",
+                "writeHelperEnabled",
+                "applyEnabled",
+                "testEnabled",
+                "rollbackRestoreEnabled",
+                "resultIntakeEnabled",
+                "mutationAllowed"
+        );
+        assertMutationToolRunnerBoundary(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "REFUSED_TOOL_RUNNER_DISABLED",
+                true,
+                "toolRunnerPolicy",
+                "requestRunningTransition",
+                "resultCompletionTransition",
+                "requestCreationEnabled",
+                "pushEnabled",
+                "claimEnabled",
+                "runningTransitionEnabled",
+                "toolRunnerEnabled",
+                "writeHelperEnabled",
+                "applyEnabled",
+                "testEnabled",
+                "rollbackRestoreEnabled",
+                "resultIntakeEnabled",
+                "mutationAllowed"
+        );
+        assertMutationResultCompletionBoundary(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "REFUSED_RESULT_COMPLETION_DISABLED",
+                true,
+                "completedResultTransition",
+                "resultEnvelopePersistence",
+                "observationCapture",
+                "toolRunnerEnabled",
+                "completedResultTransitionEnabled",
+                "completedResultPersistenceEnabled",
+                "postExecutionObservationEnabled",
+                "resultIntakeEnabled",
+                "mutationAllowed"
+        );
         assertThat(readiness.patchExecutionGate())
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("claimEnabled", false)
                 .containsEntry("writeHelperEnabled", false)
                 .containsEntry("mutationEnabled", false);
+        verify(repository).findLatestRepositoryVerificationForReleaseAttempt(userId, requestId, attemptId);
+        verify(repository, never()).findLatestRepositoryVerificationForSourceRequest(userId, requestId);
+        verify(repository).findLatestPatchDryRunOutputForReleaseAttempt(userId, requestId, attemptId);
+        verify(repository, never()).findLatestPatchDryRunOutputForSourceRequest(userId, requestId);
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).claimNext(any(), any());
@@ -1025,6 +1120,14 @@ class LocalAgentToolGatewayServiceTest {
                 attemptId,
                 requestId,
                 "BLOCKED_EXECUTION_DISABLED",
+                false,
+                4
+        );
+        assertMutationWriteHelperSafetyGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_WRITE_HELPER_DISABLED",
                 false,
                 4
         );
@@ -1194,6 +1297,7 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationRequestPushGate",
                 "mutationRequestClaimGate",
                 "mutationExecutionGate",
+                "mutationWriteHelperSafetyGate",
                 "mutationPostExecutionObservationGate",
                 "mutationObservationAcceptanceGate",
                 "mutationResultIntakePersistenceGate",
@@ -1589,6 +1693,227 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void enqueueReleaseAttemptFreshObservationsQueuesLinkedReadOnlyAndDryRunWithoutReleasingSource() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId);
+        LocalAgentToolExecution source = execution(
+                sourceRequestId,
+                sourceRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        );
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(source));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, sourceRequestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                sourceRequestId,
+                sourceRequest.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+        when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation ->
+                execution(invocation.getArgument(0), invocation.getArgument(1)));
+
+        List<LocalAgentQueuedToolRequest> queued = service.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId);
+
+        assertThat(queued).hasSize(2);
+        assertThat(queued)
+                .extracting(item -> item.request().toolName())
+                .containsExactly(LocalAgentToolName.GIT_STATUS, LocalAgentToolName.PATCH_APPLY);
+        assertThat(queued)
+                .extracting(LocalAgentQueuedToolRequest::requestId)
+                .doesNotContain(sourceRequestId)
+                .doesNotHaveDuplicates();
+
+        var requestCaptor = forClass(LocalAgentToolRequest.class);
+        verify(repository, org.mockito.Mockito.times(2)).create(any(UUID.class), requestCaptor.capture());
+        List<LocalAgentToolRequest> createdRequests = requestCaptor.getAllValues();
+        LocalAgentToolRequest repositoryObservation = createdRequests.get(0);
+        assertThat(repositoryObservation.toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
+        assertThat(repositoryObservation.approvalState()).isEqualTo(LocalAgentApprovalState.NOT_REQUIRED);
+        assertThat(repositoryObservation.input())
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", attemptId.toString())
+                .containsEntry("freshObservationOnly", true);
+        assertThat(repositoryObservation.input()).containsKey("sourceRepository");
+        assertThat(repositoryObservation.warnings()).anyMatch(warning -> warning.contains("Read-only"));
+
+        LocalAgentToolRequest patchDryRun = createdRequests.get(1);
+        assertThat(patchDryRun.toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+        assertThat(patchDryRun.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+        assertThat(patchDryRun.input())
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", attemptId.toString())
+                .containsEntry("freshObservationOnly", true);
+        assertThat(patchDryRun.warnings()).anyMatch(warning -> warning.contains("source request stays held"));
+
+        verify(toolPusher, org.mockito.Mockito.times(2)).sendToolRequest(any(LocalAgentQueuedToolRequest.class));
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(repository, never()).updateApprovalDecision(
+                eq(sourceRequestId),
+                eq(userId),
+                any(LocalAgentApprovalState.class),
+                any(LocalAgentToolStatus.class),
+                any(String.class)
+        );
+    }
+
+    @Test
+    void enqueueReleaseAttemptFreshObservationsCreatesDisabledAttemptThenQueuesLinkedRequests() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId);
+        LocalAgentToolExecution source = execution(
+                sourceRequestId,
+                sourceRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        );
+        AtomicReference<LocalAgentPatchReleaseAttempt> attempt = new AtomicReference<>();
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(source));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, sourceRequestId)).thenAnswer(invocation ->
+                java.util.Optional.ofNullable(attempt.get()));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(repository.findLatestRepositoryVerificationForSourceRequest(userId, sourceRequestId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Observed local repository identity matches available indexed metadata.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForSourceRequest(userId, sourceRequestId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        doAnswer(invocation -> {
+            UUID attemptId = invocation.getArgument(0);
+            LocalAgentToolExecution attemptSource = invocation.getArgument(1);
+            Integer staleWindowSeconds = invocation.getArgument(2);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> evidence = invocation.getArgument(3);
+            @SuppressWarnings("unchecked")
+            List<String> failureReasons = invocation.getArgument(4);
+            attempt.set(new LocalAgentPatchReleaseAttempt(
+                    attemptId,
+                    attemptSource.id(),
+                    attemptSource.sessionId(),
+                    attemptSource.userId(),
+                    attemptSource.agentId(),
+                    attemptSource.workspaceId(),
+                    LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                    false,
+                    staleWindowSeconds,
+                    evidence,
+                    failureReasons,
+                    OffsetDateTime.now(),
+                    OffsetDateTime.now(),
+                    null
+            ));
+            return null;
+        }).when(releaseAttemptRepository).createDisabled(any(), any(), anyInt(), any(), any());
+        when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation ->
+                execution(invocation.getArgument(0), invocation.getArgument(1)));
+
+        List<LocalAgentQueuedToolRequest> queued = service.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId);
+
+        assertThat(attempt.get()).isNotNull();
+        assertThat(attempt.get().claimable()).isFalse();
+        assertThat(attempt.get().status()).isEqualTo(LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS);
+        assertThat(queued).hasSize(2);
+        assertThat(queued)
+                .extracting(item -> item.request().toolName())
+                .containsExactly(LocalAgentToolName.GIT_STATUS, LocalAgentToolName.PATCH_APPLY);
+
+        var requestCaptor = forClass(LocalAgentToolRequest.class);
+        verify(repository, org.mockito.Mockito.times(2)).create(any(UUID.class), requestCaptor.capture());
+        List<LocalAgentToolRequest> createdRequests = requestCaptor.getAllValues();
+        assertThat(createdRequests).allSatisfy(item -> assertThat(item.input())
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", attempt.get().id().toString())
+                .containsEntry("freshObservationOnly", true));
+        assertThat(createdRequests.get(0).toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
+        assertThat(createdRequests.get(1).toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+        assertThat(createdRequests.get(1).input())
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false);
+        verify(releaseAttemptRepository).createDisabled(any(), eq(source), eq(120), any(), any());
+        verify(toolPusher, org.mockito.Mockito.times(2)).sendToolRequest(any(LocalAgentQueuedToolRequest.class));
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+    }
+
+    @Test
+    void enqueueReleaseAttemptFreshObservationsRequiresDisabledNonClaimableAttempt() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId);
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(execution(
+                sourceRequestId,
+                sourceRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        )));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, sourceRequestId)).thenReturn(java.util.Optional.empty());
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.DISCONNECTED,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                List.of(),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is not connected."
+        ));
+
+        assertThatThrownBy(() -> service.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("disabled non-claimable release attempt");
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).claimNext(any(), any());
+    }
+
+    @Test
     void completeAddsRepositoryVerificationToGitStatusObservationOnly() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
@@ -1847,6 +2172,51 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(finalReadiness.get("blockingReasons")).isInstanceOf(List.class);
         assertThat(finalReadiness.get("blockingReasons").toString())
                 .contains("release gate is disabled", "non-claimable");
+    }
+
+    private void assertReleaseAttemptDisplaySummary(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId
+    ) {
+        assertThat(latestAttempt.get("releaseAttemptDisplaySummary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("releaseAttemptDisplaySummary");
+        assertThat(summary)
+                .containsEntry("status", "READY_BUT_DISABLED_DISPLAY")
+                .containsEntry("show", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("linkedEvidenceComplete", true)
+                .containsEntry("releaseReadyButDisabled", true)
+                .containsEntry("evidenceStatus", "ALL_LINKED_RELEASE_DISABLED")
+                .containsEntry("releaseReadinessStatus", "READY_RELEASE_DISABLED")
+                .containsEntry("patchPreconditionsPassed", true)
+                .containsEntry("evidenceComplete", true)
+                .containsEntry("linkedCount", 2)
+                .containsEntry("missingCount", 0)
+                .containsEntry("sourceOnlyFallbackCount", 0)
+                .containsEntry("blockingCount", 0);
+        assertThat(summary.get("blockingReasons")).asList()
+                .containsExactly("release gate is disabled", "held patch request remains non-claimable");
+        assertThat(summary.get("message").toString())
+                .contains("Linked release evidence is complete", "remains disabled");
+
+        assertThat(summary.get("disabledFlags")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> disabledFlags = (Map<String, Object>) summary.get("disabledFlags");
+        assertThat(disabledFlags)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("mutationAllowed", false);
     }
 
     private void assertLocalAgentMutationExecutionSequencePlan(
@@ -2675,6 +3045,86 @@ class LocalAgentToolGatewayServiceTest {
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
                 "mutationAllowed"
+        );
+    }
+
+    private void assertMutationWriteHelperSafetyGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean executionGateReady,
+            int expectedRequestCount
+    ) {
+        assertThat(latestAttempt.get("mutationWriteHelperSafetyGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationWriteHelperSafetyGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-write-helper-safety-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("executionGateReady", executionGateReady)
+                .containsEntry("prerequisitesPassed", executionGateReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("writeHelperPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedRequestCount", expectedRequestCount)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationExecutionGate",
+                        "writeHelperPolicy",
+                        "workspaceContainment",
+                        "snapshotManifest",
+                        "hashRecheck",
+                        "atomicRewrite",
+                        "rollbackContract"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "writeHelperPolicy",
+                "workspaceContainment",
+                "snapshotManifest",
+                "hashRecheck",
+                "atomicRewrite",
+                "rollbackContract",
+                "writeHelperEnabled",
+                "applyEnabled",
+                "mutationAllowed",
+                "rollbackRestoreEnabled",
+                "requestCreationEnabled",
+                "pushEnabled",
+                "claimEnabled"
         );
     }
 
@@ -4498,6 +4948,7 @@ class LocalAgentToolGatewayServiceTest {
                         "mutationRequestPushGate",
                         "mutationRequestClaimGate",
                         "mutationExecutionGate",
+                        "mutationWriteHelperSafetyGate",
                         "mutationPostExecutionObservationGate",
                         "mutationObservationAcceptanceGate",
                         "mutationResultIntakePersistenceGate",
@@ -4537,6 +4988,326 @@ class LocalAgentToolGatewayServiceTest {
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) summary.get("blockingKeys");
         assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
+    }
+
+    private void assertMutationHandoffSummary(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean prerequisitesPassed,
+            String... expectedBlockingKeys
+    ) {
+        assertThat(latestAttempt.get("mutationHandoffSummary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("mutationHandoffSummary");
+        assertThat(summary)
+                .containsEntry("schema", "learnbot.local-agent.mutation-handoff-summary.v1")
+                .containsEntry("status", status)
+                .containsEntry("prerequisitesPassed", prerequisitesPassed)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceCompletionSummaryStatus", prerequisitesPassed ? "READY_COMPLETION_DISABLED" : "BLOCKED_COMPLETION_DISABLED")
+                .containsEntry("sourceCompletionSummarySchema", "learnbot.local-agent.mutation-completion-summary.v1")
+                .containsEntry("sourceCompletionPrerequisitesPassed", prerequisitesPassed);
+        assertThat(summary.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = (List<String>) summary.get("blockingKeys");
+        assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
+
+        assertThat(summary.get("disabledControls")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> disabledControls = (Map<String, Object>) summary.get("disabledControls");
+        assertThat(disabledControls)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false);
+
+        assertThat(summary.get("handoffStages")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> stages = (List<Map<String, Object>>) summary.get("handoffStages");
+        assertThat(stages)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "dispatchDecision",
+                        "requestCreation",
+                        "transportPush",
+                        "agentClaim",
+                        "toolExecution",
+                        "resultIntake",
+                        "finalResponse",
+                        "deliveryReceipt"
+                );
+        assertThat(stages).allSatisfy(stage -> assertThat(stage)
+                .containsEntry("status", prerequisitesPassed ? "MODELED_DISABLED" : "BLOCKED_DISABLED")
+                .containsEntry("passed", prerequisitesPassed)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false));
+    }
+
+    private void assertMutationExecutionReadinessBoundary(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean prerequisitesPassed,
+            String... expectedBlockingKeys
+    ) {
+        assertThat(latestAttempt.get("mutationExecutionReadinessBoundary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationExecutionReadinessBoundary");
+        assertThat(boundary)
+                .containsEntry("schema", "learnbot.local-agent.mutation-execution-readiness-boundary.v1")
+                .containsEntry("status", status)
+                .containsEntry("prerequisitesPassed", prerequisitesPassed)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceHandoffSummarySchema", "learnbot.local-agent.mutation-handoff-summary.v1")
+                .containsEntry("sourceHandoffSummaryStatus", prerequisitesPassed ? "READY_HANDOFF_DISABLED" : "BLOCKED_HANDOFF_DISABLED")
+                .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
+                .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
+                .containsEntry("sourceWriteHelperSafetyGateSchema", "learnbot.local-agent.mutation-write-helper-safety-gate.v1")
+                .containsEntry("sourceWriteHelperSafetyGateStatus", "REFUSED_WRITE_HELPER_DISABLED")
+                .containsEntry("expectedRequestCount", 4)
+                .containsEntry("completedRequestCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false);
+        assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
+        assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
+
+        assertThat(boundary.get("readinessChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> checks = (List<Map<String, Object>>) boundary.get("readinessChecks");
+        assertThat(checks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationHandoffSummary",
+                        "mutationExecutionGate",
+                        "mutationWriteHelperSafetyGate",
+                        "runtimeExecutionSwitch",
+                        "sideEffectTransport"
+                );
+        assertThat(checks).allSatisfy(check -> assertThat(check)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("resultIntakeEnabled", false));
+    }
+
+    private void assertMutationToolRunnerBoundary(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean prerequisitesPassed,
+            String... expectedBlockingKeys
+    ) {
+        assertThat(latestAttempt.get("mutationToolRunnerBoundary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationToolRunnerBoundary");
+        assertThat(boundary)
+                .containsEntry("schema", "learnbot.local-agent.mutation-tool-runner-boundary.v1")
+                .containsEntry("status", status)
+                .containsEntry("prerequisitesPassed", prerequisitesPassed)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceExecutionReadinessBoundarySchema", "learnbot.local-agent.mutation-execution-readiness-boundary.v1")
+                .containsEntry("sourceExecutionReadinessBoundaryStatus", prerequisitesPassed ? "REFUSED_EXECUTION_READINESS_DISABLED" : "BLOCKED_EXECUTION_READINESS_DISABLED")
+                .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
+                .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
+                .containsEntry("toolRunnerPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedRequestCount", 4)
+                .containsEntry("runningRequestCount", 0)
+                .containsEntry("completedRequestCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("runningTransitionEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false);
+        assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
+        assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
+
+        assertThat(boundary.get("runnerChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> checks = (List<Map<String, Object>>) boundary.get("runnerChecks");
+        assertThat(checks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationExecutionReadinessBoundary",
+                        "mutationExecutionGate",
+                        "toolRunnerPolicy",
+                        "requestRunningTransition",
+                        "resultCompletionTransition"
+                );
+        assertThat(checks).allSatisfy(check -> assertThat(check)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("runningTransitionEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("resultIntakeEnabled", false));
+    }
+
+    private void assertMutationResultCompletionBoundary(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean prerequisitesPassed,
+            String... expectedBlockingKeys
+    ) {
+        assertThat(latestAttempt.get("mutationResultCompletionBoundary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationResultCompletionBoundary");
+        assertThat(boundary)
+                .containsEntry("schema", "learnbot.local-agent.mutation-result-completion-boundary.v1")
+                .containsEntry("status", status)
+                .containsEntry("prerequisitesPassed", prerequisitesPassed)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceToolRunnerBoundarySchema", "learnbot.local-agent.mutation-tool-runner-boundary.v1")
+                .containsEntry("sourceToolRunnerBoundaryStatus", prerequisitesPassed ? "REFUSED_TOOL_RUNNER_DISABLED" : "BLOCKED_TOOL_RUNNER_DISABLED")
+                .containsEntry("sourcePostExecutionObservationGateSchema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1")
+                .containsEntry("sourcePostExecutionObservationGateStatus", "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED")
+                .containsEntry("completionPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedResultCount", 4)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("runningTransitionEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("completedResultTransitionEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false);
+        assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
+        assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
+
+        assertThat(boundary.get("resultChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> checks = (List<Map<String, Object>>) boundary.get("resultChecks");
+        assertThat(checks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationToolRunnerBoundary",
+                        "mutationPostExecutionObservationGate",
+                        "completedResultTransition",
+                        "resultEnvelopePersistence",
+                        "observationCapture"
+                );
+        assertThat(checks).allSatisfy(check -> assertThat(check)
+                .containsEntry("toolRunnerEnabled", false)
+                .containsEntry("completedResultTransitionEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false));
     }
 
     private void assertDisabledFreshObservationRequestTemplates(

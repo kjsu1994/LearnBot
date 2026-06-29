@@ -253,6 +253,7 @@ export default function App() {
     decideCodeAgentLocalPatchApproval,
     refreshCodeAgentLocalPatchReadiness,
     queueCodeAgentLocalPatchDryRun,
+    queueCodeAgentReleaseFreshObservations,
     refreshCodeAgentLocalPatchDryRunResult,
     queueCodeAgentLocalRepositoryObservation,
     refreshCodeAgentLocalRepositoryObservationResult,
@@ -1053,6 +1054,7 @@ export default function App() {
             decideCodeAgentLocalPatchApproval={decideCodeAgentLocalPatchApproval}
             refreshCodeAgentLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
             queueCodeAgentLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
+            queueCodeAgentReleaseFreshObservations={queueCodeAgentReleaseFreshObservations}
             refreshCodeAgentLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
             queueCodeAgentLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
             refreshCodeAgentLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}

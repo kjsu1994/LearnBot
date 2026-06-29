@@ -158,6 +158,12 @@ public class LocalAgentController {
         return toolGatewayService.enqueuePatchDryRun(user.id(), requestId);
     }
 
+    @PostMapping("/tools/{requestId}/fresh-observations")
+    List<LocalAgentQueuedToolRequest> enqueueReleaseAttemptFreshObservations(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.enqueueReleaseAttemptFreshObservations(user.id(), requestId);
+    }
+
     @PostMapping("/tools/{requestId}/release")
     LocalAgentPatchReleaseBoundaryResponse releasePatchExecution(@PathVariable UUID requestId) {
         var user = currentUserProvider.currentUser();

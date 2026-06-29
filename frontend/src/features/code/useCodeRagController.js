@@ -724,11 +724,30 @@ export function useCodeRagController({
     });
   }
 
+  async function queueCodeAgentReleaseFreshObservations(requestId = codeAgentLocalPatchRequest?.requestId) {
+    if (!requestId) return null;
+    return await run(`code-agent-local-release-fresh-observations-${requestId}`, async () => {
+      const result = await request(`/api/local-agents/tools/${requestId}/fresh-observations`, {
+        method: 'POST',
+      });
+      const requests = Array.isArray(result) ? result : [];
+      const repositoryObservation = requests.find((item) => item?.request?.toolName === 'git.status') || null;
+      const patchDryRun = requests.find((item) => item?.request?.toolName === 'patch.apply') || null;
+      setCodeAgentLocalRepositoryObservationRequest(repositoryObservation);
+      setCodeAgentLocalRepositoryObservationResult(null);
+      setCodeAgentLocalPatchDryRunRequest(patchDryRun);
+      setCodeAgentLocalPatchDryRunResult(null);
+      await refreshCodeAgentLocalPatchReadiness(requestId);
+      return result;
+    });
+  }
+
   async function refreshCodeAgentLocalPatchDryRunResult(requestId = codeAgentLocalPatchDryRunRequest?.requestId) {
     if (!requestId) return null;
     return await run(`code-agent-local-patch-dry-run-result-${requestId}`, async () => {
       const result = await request(`/api/local-agents/tools/${requestId}`);
       setCodeAgentLocalPatchDryRunResult(result);
+      await refreshReadinessForLinkedReleaseObservation(result);
       return result;
     });
   }
@@ -761,8 +780,17 @@ export function useCodeRagController({
     return await run(`code-agent-local-repository-observation-result-${requestId}`, async () => {
       const result = await request(`/api/local-agents/tools/${requestId}`);
       setCodeAgentLocalRepositoryObservationResult(result);
+      await refreshReadinessForLinkedReleaseObservation(result);
       return result;
     });
+  }
+
+  async function refreshReadinessForLinkedReleaseObservation(result) {
+    const sourceRequestId = result?.input?.sourceRequestId;
+    if (!sourceRequestId || !result?.input?.releaseAttemptId || !result?.input?.freshObservationOnly) {
+      return null;
+    }
+    return await refreshCodeAgentLocalPatchReadiness(sourceRequestId);
   }
 
   async function applyCodeAgentPatch() {
@@ -901,6 +929,7 @@ export function useCodeRagController({
     decideCodeAgentLocalPatchApproval,
     refreshCodeAgentLocalPatchReadiness,
     queueCodeAgentLocalPatchDryRun,
+    queueCodeAgentReleaseFreshObservations,
     refreshCodeAgentLocalPatchDryRunResult,
     queueCodeAgentLocalRepositoryObservation,
     refreshCodeAgentLocalRepositoryObservationResult,
