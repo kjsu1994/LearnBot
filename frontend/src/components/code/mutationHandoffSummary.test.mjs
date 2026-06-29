@@ -17,8 +17,16 @@ const view = buildMutationHandoffSummaryView({
     testEnabled: false,
     rollbackRestoreEnabled: false,
     ragFreshnessUpdateEnabled: false,
+    mutationResultAggregationEnabled: false,
+    publicationEnabled: false,
     finalAnswerGenerationEnabled: false,
+    finalAnswerCompletionEnabled: false,
+    finalAnswerDeliveryEnabled: false,
+    finalAnswerPersistenceEnabled: false,
+    conversationTurnSaveEnabled: false,
+    userVisibleCompletionEnabled: false,
     finalResponseHandoffEnabled: false,
+    deliveryHandoffEnabled: false,
     deliveryReceiptEnabled: false,
     claimable: false,
     mutationAllowed: false,
@@ -30,6 +38,28 @@ const view = buildMutationHandoffSummaryView({
       status: 'MODELED_DISABLED',
       passed: true,
       requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      resultIntakeEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
+    {
+      key: 'finalResponse',
+      sourceGateKey: 'mutationFinalResponseHandoffGate',
+      status: 'MODELED_DISABLED',
+      passed: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      resultIntakeEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      claimable: false,
       mutationAllowed: false,
     },
     {
@@ -37,7 +67,14 @@ const view = buildMutationHandoffSummaryView({
       sourceGateKey: 'mutationFinalAnswerDeliveryReceiptGate',
       status: 'MODELED_DISABLED',
       passed: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      resultIntakeEnabled: false,
+      finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      claimable: false,
       mutationAllowed: false,
     },
   ],
@@ -52,11 +89,12 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation handoff disabled: release gate false / request creation false / push false / claim false / write helper false / apply false / test false / rollback restore false / rag freshness false / final answer false / final response handoff false / receipt false / claimable false / mutation false'
+  'mutation handoff disabled: release gate false / request creation false / push false / claim false / write helper false / apply false / test false / rollback restore false / rag freshness false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / claimable false / mutation false'
 );
 assert.deepEqual(view.stageLines, [
-  'handoff dispatchDecision: MODELED_DISABLED / source mutationDispatchDecisionModel / passed true / request creation false / mutation false',
-  'handoff deliveryReceipt: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / receipt false / mutation false',
+  'handoff dispatchDecision: MODELED_DISABLED / source mutationDispatchDecisionModel / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
+  'handoff finalResponse: MODELED_DISABLED / source mutationFinalResponseHandoffGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
+  'handoff deliveryReceipt: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,
@@ -67,3 +105,19 @@ assert.match(view.message, /handoff controls remain disabled/);
 const hidden = buildMutationHandoffSummaryView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.stageLines, []);
+
+const blocked = buildMutationHandoffSummaryView({
+  status: 'BLOCKED_HANDOFF_DISABLED',
+  disabledControls: {
+    finalResponseHandoffEnabled: false,
+    deliveryHandoffEnabled: false,
+    deliveryReceiptEnabled: false,
+  },
+  blockingKeys: ['mutationCompletionSummary'],
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.disabledText,
+  'mutation handoff disabled: final response handoff false / delivery handoff false / receipt false'
+);
+assert.equal(blocked.blockingText, 'mutation handoff blocking keys: mutationCompletionSummary');

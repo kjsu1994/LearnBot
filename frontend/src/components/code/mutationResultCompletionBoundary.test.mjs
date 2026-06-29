@@ -46,6 +46,19 @@ const view = buildMutationResultCompletionBoundaryView({
       mutationAllowed: false,
     },
     {
+      key: 'mutationPostExecutionObservationGate',
+      status: 'REFUSED_POST_EXECUTION_OBSERVATION_DISABLED',
+      passed: true,
+      blocking: false,
+      toolRunnerEnabled: false,
+      completedResultTransitionEnabled: false,
+      completedResultPersistenceEnabled: false,
+      postExecutionObservationEnabled: false,
+      resultIntakeEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
+    {
       key: 'completedResultTransition',
       status: 'DISABLED',
       passed: false,
@@ -54,11 +67,41 @@ const view = buildMutationResultCompletionBoundaryView({
       completedResultPersistenceEnabled: false,
       mutationAllowed: false,
     },
+    {
+      key: 'resultEnvelopePersistence',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      toolRunnerEnabled: false,
+      completedResultTransitionEnabled: false,
+      completedResultPersistenceEnabled: false,
+      postExecutionObservationEnabled: false,
+      resultIntakeEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
+    {
+      key: 'observationCapture',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      toolRunnerEnabled: false,
+      completedResultTransitionEnabled: false,
+      completedResultPersistenceEnabled: false,
+      postExecutionObservationEnabled: false,
+      resultIntakeEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
   ],
   blockingKeys: [
     'completedResultTransition',
-    'completedResultPersistence',
-    'postExecutionObservation',
+    'resultEnvelopePersistence',
+    'observationCapture',
+    'toolRunnerEnabled',
+    'completedResultTransitionEnabled',
+    'completedResultPersistenceEnabled',
+    'postExecutionObservationEnabled',
     'resultIntakeEnabled',
     'mutationAllowed',
   ],
@@ -80,14 +123,32 @@ assert.equal(
 );
 assert.deepEqual(view.checkLines, [
   'result completion mutationToolRunnerBoundary: REFUSED_TOOL_RUNNER_DISABLED / passed true / blocking false / tool runner false / mutation false',
+  'result completion mutationPostExecutionObservationGate: REFUSED_POST_EXECUTION_OBSERVATION_DISABLED / passed true / blocking false / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
   'result completion completedResultTransition: DISABLED / passed false / blocking true / completed transition false / result persistence false / mutation false',
+  'result completion resultEnvelopePersistence: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
+  'result completion observationCapture: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation result completion blocking keys: completedResultTransition, completedResultPersistence, postExecutionObservation, resultIntakeEnabled, mutationAllowed'
+  'mutation result completion blocking keys: completedResultTransition, resultEnvelopePersistence, observationCapture, toolRunnerEnabled, completedResultTransitionEnabled, completedResultPersistenceEnabled, postExecutionObservationEnabled, resultIntakeEnabled, mutationAllowed'
 );
-assert.match(view.message, /completed-result transitions remain disabled/);
+assert.match(view.message, /completed-result transitions/);
 
 const hidden = buildMutationResultCompletionBoundaryView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.checkLines, []);
+
+const blocked = buildMutationResultCompletionBoundaryView({
+  status: 'BLOCKED_RESULT_COMPLETION_DISABLED',
+  resultChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation result completion is blocked by incomplete disabled tool-runner or post-execution observation inputs.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation result completion boundary: BLOCKED_RESULT_COMPLETION_DISABLED'
+);
+assert.deepEqual(blocked.checkLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

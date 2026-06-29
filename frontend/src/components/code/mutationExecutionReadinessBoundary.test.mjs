@@ -40,6 +40,42 @@ const view = buildMutationExecutionReadinessBoundaryView({
       mutationAllowed: false,
     },
     {
+      key: 'mutationExecutionGate',
+      status: 'REFUSED_EXECUTION_DISABLED',
+      passed: true,
+      blocking: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
+    },
+    {
+      key: 'mutationWriteHelperSafetyGate',
+      status: 'REFUSED_WRITE_HELPER_DISABLED',
+      passed: true,
+      blocking: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
+    },
+    {
       key: 'runtimeExecutionSwitch',
       status: 'DISABLED',
       passed: false,
@@ -47,6 +83,24 @@ const view = buildMutationExecutionReadinessBoundaryView({
       executionEnabled: false,
       toolRunnerEnabled: false,
       mutationAllowed: false,
+    },
+    {
+      key: 'sideEffectTransport',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
     },
   ],
   blockingKeys: [
@@ -82,7 +136,10 @@ assert.equal(
 );
 assert.deepEqual(view.checkLines, [
   'execution readiness mutationHandoffSummary: READY_HANDOFF_DISABLED / passed true / blocking false / execution false / mutation false',
+  'execution readiness mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'execution readiness mutationWriteHelperSafetyGate: REFUSED_WRITE_HELPER_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
   'execution readiness runtimeExecutionSwitch: DISABLED / passed false / blocking true / execution false / tool runner false / mutation false',
+  'execution readiness sideEffectTransport: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,
@@ -93,3 +150,18 @@ assert.match(view.message, /runtime execution remains disabled/);
 const hidden = buildMutationExecutionReadinessBoundaryView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.checkLines, []);
+
+const blocked = buildMutationExecutionReadinessBoundaryView({
+  status: 'BLOCKED_EXECUTION_READINESS_DISABLED',
+  readinessChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation execution readiness is blocked by incomplete disabled handoff, execution, or write-helper inputs.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation execution readiness: BLOCKED_EXECUTION_READINESS_DISABLED'
+);
+assert.deepEqual(blocked.checkLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

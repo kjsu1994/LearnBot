@@ -16,6 +16,8 @@ const DISABLED_CONTROL_LABELS = [
 
 const REQUIREMENT_CONTROL_LABELS = [
   ['releaseGateEnabled', 'release gate'],
+  ['requestCreationEnabled', 'request creation'],
+  ['pushEnabled', 'push'],
   ['claimable', 'claimable'],
   ['mutationAllowed', 'mutation'],
   ['mutationResultAggregationEnabled', 'result aggregation'],

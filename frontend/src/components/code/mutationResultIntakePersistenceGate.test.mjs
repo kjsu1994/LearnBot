@@ -83,6 +83,90 @@ const view = buildMutationResultIntakePersistenceGateView({
       finalAnswerGenerationEnabled: false,
       message: 'Accepted mutation result intake persistence is disabled.',
     },
+    {
+      key: 'acceptedObservationPersistence',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Accepted mutation observations must not be persisted while intake persistence is disabled.',
+    },
+    {
+      key: 'rollbackFallbackExecution',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Rollback fallback execution remains disabled until accepted mutation observations are persisted.',
+    },
+    {
+      key: 'ragFreshnessUpdate',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'RAG freshness updates remain disabled until accepted mutation observations are persisted.',
+    },
+    {
+      key: 'resultAggregation',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Mutation result aggregation remains disabled until accepted mutation observations are persisted.',
+    },
+    {
+      key: 'publication',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final answer publication remains disabled until accepted mutation observations are persisted.',
+    },
+    {
+      key: 'finalAnswerGeneration',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      intakePersistenceEnabled: false,
+      acceptedObservationPersistenceEnabled: false,
+      rollbackFallbackExecutionEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final-answer generation remains disabled until accepted mutation observations are persisted.',
+    },
   ],
   blockingKeys: [
     'intakePersistencePolicy',
@@ -92,6 +176,13 @@ const view = buildMutationResultIntakePersistenceGateView({
     'resultAggregation',
     'publication',
     'finalAnswerGeneration',
+    'intakePersistenceEnabled',
+    'acceptedObservationPersistenceEnabled',
+    'rollbackFallbackExecutionEnabled',
+    'ragFreshnessUpdateEnabled',
+    'mutationResultAggregationEnabled',
+    'publicationEnabled',
+    'finalAnswerGenerationEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled.',
@@ -117,12 +208,35 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'result intake persistence policy mutationObservationAcceptanceGate: REFUSED_OBSERVATION_ACCEPTANCE_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / A disabled observation acceptance gate must refuse accepted observation intake before persistence can be considered.',
   'result intake persistence policy intakePersistencePolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Accepted mutation result intake persistence is disabled.',
+  'result intake persistence policy acceptedObservationPersistence: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Accepted mutation observations must not be persisted while intake persistence is disabled.',
+  'result intake persistence policy rollbackFallbackExecution: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Rollback fallback execution remains disabled until accepted mutation observations are persisted.',
+  'result intake persistence policy ragFreshnessUpdate: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / RAG freshness updates remain disabled until accepted mutation observations are persisted.',
+  'result intake persistence policy resultAggregation: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Mutation result aggregation remains disabled until accepted mutation observations are persisted.',
+  'result intake persistence policy publication: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until accepted mutation observations are persisted.',
+  'result intake persistence policy finalAnswerGeneration: DISABLED / passed false / blocking true / intake persistence false / accepted observation persistence false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until accepted mutation observations are persisted.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation result intake persistence blocking keys: intakePersistencePolicy, acceptedObservationPersistence, rollbackFallbackExecution, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, mutationAllowed'
+  'mutation result intake persistence blocking keys: intakePersistencePolicy, acceptedObservationPersistence, rollbackFallbackExecution, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, intakePersistenceEnabled, acceptedObservationPersistenceEnabled, rollbackFallbackExecutionEnabled, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationResultIntakePersistenceGateView({
+  status: 'BLOCKED_INTAKE_PERSISTENCE_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation result intake persistence gate: BLOCKED_INTAKE_PERSISTENCE_DISABLED');
+assert.equal(blocked.countsText, 'mutation result intake persistence counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'result intake persistence policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationResultIntakePersistenceGateView(null);
 assert.equal(hidden.show, false);

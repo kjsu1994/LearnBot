@@ -92,6 +92,72 @@ const view = buildMutationFinalAnswerUserVisibleCompletionGateView({
       finalResponseHandoffEnabled: false,
       message: 'Mutation final-answer user-visible completion and final-response handoff are disabled.',
     },
+    {
+      key: 'userVisibleCompletion',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      message: 'No user-visible completion may be marked while user-visible completion is disabled.',
+    },
+    {
+      key: 'finalResponseHandoff',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      message: 'No final response may be handed off while user-visible completion is disabled.',
+    },
+    {
+      key: 'conversationTurnSave',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      message: 'No conversation turn may be saved while user-visible completion is disabled.',
+    },
   ],
   blockingKeys: [
     'userVisibleCompletionPolicy',
@@ -130,6 +196,9 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'final-answer user-visible completion policy mutationFinalAnswerConversationSaveGate: REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / A disabled final-answer conversation-save gate must refuse conversation save before user-visible completion can be considered.',
   'final-answer user-visible completion policy userVisibleCompletionPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / Mutation final-answer user-visible completion and final-response handoff are disabled.',
+  'final-answer user-visible completion policy userVisibleCompletion: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / No user-visible completion may be marked while user-visible completion is disabled.',
+  'final-answer user-visible completion policy finalResponseHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / No final response may be handed off while user-visible completion is disabled.',
+  'final-answer user-visible completion policy conversationTurnSave: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / No conversation turn may be saved while user-visible completion is disabled.',
 ]);
 assert.equal(
   view.blockingText,
@@ -140,3 +209,17 @@ assert.match(view.message, /explicitly refused/);
 const hidden = buildMutationFinalAnswerUserVisibleCompletionGateView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.policyLines, []);
+
+const blocked = buildMutationFinalAnswerUserVisibleCompletionGateView({
+  policyChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation final-answer user-visible completion is blocked because the disabled final-answer conversation-save gate is incomplete.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation final-answer user-visible completion gate: BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED'
+);
+assert.deepEqual(blocked.policyLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

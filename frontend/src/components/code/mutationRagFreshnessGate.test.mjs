@@ -78,6 +78,78 @@ const view = buildMutationRagFreshnessGateView({
       finalAnswerGenerationEnabled: false,
       message: 'RAG freshness updates are disabled.',
     },
+    {
+      key: 'ragFreshnessUpdate',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'No code or document index freshness update may run while RAG freshness is disabled.',
+    },
+    {
+      key: 'resultAggregation',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Mutation result aggregation remains disabled until RAG freshness state is modeled.',
+    },
+    {
+      key: 'publication',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final answer publication remains disabled until RAG freshness state is modeled.',
+    },
+    {
+      key: 'finalAnswerGeneration',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      ragFreshnessUpdateEnabled: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final-answer generation remains disabled until RAG freshness state is modeled.',
+    },
   ],
   blockingKeys: [
     'ragFreshnessPolicy',
@@ -114,12 +186,33 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'RAG freshness policy mutationRollbackFallbackGate: REFUSED_ROLLBACK_FALLBACK_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / A disabled rollback fallback gate must refuse rollback execution before RAG freshness can be considered.',
   'RAG freshness policy ragFreshnessPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / RAG freshness updates are disabled.',
+  'RAG freshness policy ragFreshnessUpdate: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / No code or document index freshness update may run while RAG freshness is disabled.',
+  'RAG freshness policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Mutation result aggregation remains disabled until RAG freshness state is modeled.',
+  'RAG freshness policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until RAG freshness state is modeled.',
+  'RAG freshness policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until RAG freshness state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
   'mutation RAG freshness blocking keys: ragFreshnessPolicy, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationRagFreshnessGateView({
+  status: 'BLOCKED_RAG_FRESHNESS_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation RAG freshness gate: BLOCKED_RAG_FRESHNESS_DISABLED');
+assert.equal(blocked.countsText, 'mutation RAG freshness counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'RAG freshness policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationRagFreshnessGateView(null);
 assert.equal(hidden.show, false);

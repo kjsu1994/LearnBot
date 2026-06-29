@@ -77,6 +77,23 @@ const view = buildMutationFinalAnswerGenerationGateView({
       finalAnswerGenerationEnabled: false,
       message: 'Mutation final-answer generation is disabled.',
     },
+    {
+      key: 'finalAnswerGeneration',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'No final answer may be generated while final-answer generation is disabled.',
+    },
   ],
   blockingKeys: [
     'finalAnswerGenerationPolicy',
@@ -107,12 +124,30 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'final-answer generation policy mutationPublicationGate: REFUSED_PUBLICATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / A disabled publication gate must refuse publication before final-answer generation can be considered.',
   'final-answer generation policy finalAnswerGenerationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / Mutation final-answer generation is disabled.',
+  'final-answer generation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / No final answer may be generated while final-answer generation is disabled.',
 ]);
 assert.equal(
   view.blockingText,
   'mutation final-answer generation blocking keys: finalAnswerGenerationPolicy, finalAnswerGeneration, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationFinalAnswerGenerationGateView({
+  status: 'BLOCKED_FINAL_ANSWER_GENERATION_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation final-answer generation gate: BLOCKED_FINAL_ANSWER_GENERATION_DISABLED');
+assert.equal(blocked.countsText, 'mutation final-answer generation counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'final-answer generation policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationFinalAnswerGenerationGateView(null);
 assert.equal(hidden.show, false);

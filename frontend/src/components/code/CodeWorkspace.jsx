@@ -26,6 +26,18 @@ import { buildMutationFinalAnswerUserVisibleCompletionGateView } from './mutatio
 import { buildMutationFinalResponseHandoffGateView } from './mutationFinalResponseHandoffGate.js';
 import { buildMutationFinalAnswerDeliveryGateView } from './mutationFinalAnswerDeliveryGate.js';
 import { buildMutationFinalAnswerDeliveryReceiptGateView } from './mutationFinalAnswerDeliveryReceiptGate.js';
+import { buildMutationCompletionSummaryView } from './mutationCompletionSummary.js';
+import { buildMutationDispatchEnvelopeContractView } from './mutationDispatchEnvelopeContract.js';
+import { buildMutationDispatchPreflightBoundaryView } from './mutationDispatchPreflightBoundary.js';
+import { buildMutationDispatchDecisionModelView } from './mutationDispatchDecisionModel.js';
+import { buildMutationRequestBlueprintView } from './mutationRequestBlueprint.js';
+import { buildMutationRequestCreationGateView } from './mutationRequestCreationGate.js';
+import { buildMutationRequestPushGateView } from './mutationRequestPushGate.js';
+import { buildMutationRequestClaimGateView } from './mutationRequestClaimGate.js';
+import { buildMutationExecutionGateView } from './mutationExecutionGate.js';
+import { buildMutationWriteHelperSafetyGateView } from './mutationWriteHelperSafetyGate.js';
+import { buildMutationPostExecutionObservationGateView } from './mutationPostExecutionObservationGate.js';
+import { buildMutationObservationAcceptanceGateView } from './mutationObservationAcceptanceGate.js';
 import { buildMutationToolRunnerBoundaryView } from './mutationToolRunnerBoundary.js';
 import { buildReleaseAttemptDisplaySummaryView } from './releaseAttemptDisplaySummary.js';
 
@@ -497,91 +509,59 @@ function CodeAgentPanel({
     : [];
   const readinessMutationDispatchEnvelopeContract =
     readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchEnvelopeContract || null;
-  const readinessMutationDispatchOrderedToolSequence = Array.isArray(
-    readinessMutationDispatchEnvelopeContract?.orderedToolSequence
-  )
-    ? readinessMutationDispatchEnvelopeContract.orderedToolSequence
-    : [];
-  const readinessMutationDispatchRequiredApprovals = Array.isArray(
-    readinessMutationDispatchEnvelopeContract?.requiredApprovals
-  )
-    ? readinessMutationDispatchEnvelopeContract.requiredApprovals
-    : [];
+  const readinessMutationDispatchEnvelopeContractView = buildMutationDispatchEnvelopeContractView(
+    readinessMutationDispatchEnvelopeContract
+  );
   const readinessMutationDispatchPreflightBoundary =
     readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchPreflightBoundary || null;
-  const readinessMutationDispatchPreflightCapabilityChecks = Array.isArray(
-    readinessMutationDispatchPreflightBoundary?.capabilityChecks
-  )
-    ? readinessMutationDispatchPreflightBoundary.capabilityChecks
-    : [];
+  const readinessMutationDispatchPreflightBoundaryView = buildMutationDispatchPreflightBoundaryView(
+    readinessMutationDispatchPreflightBoundary
+  );
   const readinessMutationDispatchDecisionModel =
     readinessReleaseAttemptModel?.latestAttempt?.mutationDispatchDecisionModel || null;
-  const readinessMutationDispatchDecisionInputs = Array.isArray(
-    readinessMutationDispatchDecisionModel?.readinessInputs
-  )
-    ? readinessMutationDispatchDecisionModel.readinessInputs
-    : [];
+  const readinessMutationDispatchDecisionModelView = buildMutationDispatchDecisionModelView(
+    readinessMutationDispatchDecisionModel
+  );
   const readinessMutationRequestBlueprint =
     readinessReleaseAttemptModel?.latestAttempt?.mutationRequestBlueprint || null;
-  const readinessMutationRequestBlueprintToolRequests = Array.isArray(
-    readinessMutationRequestBlueprint?.orderedToolRequests
-  )
-    ? readinessMutationRequestBlueprint.orderedToolRequests
-    : [];
-  const readinessMutationRequestBlueprintApprovalStates = Array.isArray(
-    readinessMutationRequestBlueprint?.approvalStates
-  )
-    ? readinessMutationRequestBlueprint.approvalStates
-    : [];
+  const readinessMutationRequestBlueprintView = buildMutationRequestBlueprintView(
+    readinessMutationRequestBlueprint
+  );
   const readinessMutationRequestCreationGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationRequestCreationGate || null;
-  const readinessMutationRequestCreationGatePolicyChecks = Array.isArray(
-    readinessMutationRequestCreationGate?.policyChecks
-  )
-    ? readinessMutationRequestCreationGate.policyChecks
-    : [];
+  const readinessMutationRequestCreationGateView = buildMutationRequestCreationGateView(
+    readinessMutationRequestCreationGate
+  );
   const readinessMutationRequestPushGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationRequestPushGate || null;
-  const readinessMutationRequestPushGatePolicyChecks = Array.isArray(
-    readinessMutationRequestPushGate?.policyChecks
-  )
-    ? readinessMutationRequestPushGate.policyChecks
-    : [];
+  const readinessMutationRequestPushGateView = buildMutationRequestPushGateView(
+    readinessMutationRequestPushGate
+  );
   const readinessMutationRequestClaimGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationRequestClaimGate || null;
-  const readinessMutationRequestClaimGatePolicyChecks = Array.isArray(
-    readinessMutationRequestClaimGate?.policyChecks
-  )
-    ? readinessMutationRequestClaimGate.policyChecks
-    : [];
+  const readinessMutationRequestClaimGateView = buildMutationRequestClaimGateView(
+    readinessMutationRequestClaimGate
+  );
   const readinessMutationExecutionGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationExecutionGate || null;
-  const readinessMutationExecutionGatePolicyChecks = Array.isArray(
-    readinessMutationExecutionGate?.policyChecks
-  )
-    ? readinessMutationExecutionGate.policyChecks
-    : [];
+  const readinessMutationExecutionGateView = buildMutationExecutionGateView(
+    readinessMutationExecutionGate
+  );
   const readinessMutationWriteHelperSafetyGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationWriteHelperSafetyGate || null;
-  const readinessMutationWriteHelperSafetyGatePolicyChecks = Array.isArray(
-    readinessMutationWriteHelperSafetyGate?.policyChecks
-  )
-    ? readinessMutationWriteHelperSafetyGate.policyChecks
-    : [];
+  const readinessMutationWriteHelperSafetyGateView = buildMutationWriteHelperSafetyGateView(
+    readinessMutationWriteHelperSafetyGate
+  );
   const readinessMutationPostExecutionObservationGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationPostExecutionObservationGate || null;
-  const readinessMutationPostExecutionObservationGatePolicyChecks = Array.isArray(
-    readinessMutationPostExecutionObservationGate?.policyChecks
-  )
-    ? readinessMutationPostExecutionObservationGate.policyChecks
-    : [];
+  const readinessMutationPostExecutionObservationGateView = buildMutationPostExecutionObservationGateView(
+    readinessMutationPostExecutionObservationGate
+  );
   const readinessMutationObservationAcceptanceGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationObservationAcceptanceGate || null;
-  const readinessMutationObservationAcceptanceGatePolicyChecks = Array.isArray(
-    readinessMutationObservationAcceptanceGate?.policyChecks
-  )
-    ? readinessMutationObservationAcceptanceGate.policyChecks
-    : [];
+  const readinessMutationObservationAcceptanceGateView = buildMutationObservationAcceptanceGateView(
+    readinessMutationObservationAcceptanceGate
+  );
   const readinessMutationResultIntakePersistenceGate =
     readinessReleaseAttemptModel?.latestAttempt?.mutationResultIntakePersistenceGate || null;
   const readinessMutationResultIntakePersistenceGateView = buildMutationResultIntakePersistenceGateView(
@@ -648,9 +628,7 @@ function CodeAgentPanel({
     readinessMutationFinalAnswerDeliveryReceiptGate
   );
   const readinessMutationCompletionSummary = readinessReleaseAttemptModel?.latestAttempt?.mutationCompletionSummary || null;
-  const readinessMutationCompletionSummaryItems = Array.isArray(readinessMutationCompletionSummary?.items)
-    ? readinessMutationCompletionSummary.items
-    : [];
+  const readinessMutationCompletionSummaryView = buildMutationCompletionSummaryView(readinessMutationCompletionSummary);
   const readinessMutationHandoffSummary = readinessReleaseAttemptModel?.latestAttempt?.mutationHandoffSummary || null;
   const readinessMutationHandoffSummaryView = buildMutationHandoffSummaryView(readinessMutationHandoffSummary);
   const readinessMutationExecutionReadinessBoundary =
@@ -1591,793 +1569,220 @@ function CodeAgentPanel({
                           )}
                         </>
                       )}
-                      {readinessMutationDispatchEnvelopeContract && (
+                      {readinessMutationDispatchEnvelopeContractView.show && (
                         <>
-                          <span>
-                            mutation dispatch envelope contract: {readinessMutationDispatchEnvelopeContract.status || 'BLOCKED_DISPATCH_DISABLED'}
-                            {readinessMutationDispatchEnvelopeContract.schema ? ` / ${readinessMutationDispatchEnvelopeContract.schema}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationDispatchEnvelopeContract.prerequisitesPassed)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.executionTarget ? ` / ${readinessMutationDispatchEnvelopeContract.executionTarget}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.dispatchMode ? ` / ${readinessMutationDispatchEnvelopeContract.dispatchMode}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch ids:
-                            {readinessMutationDispatchEnvelopeContract.sourceRequestId ? ` source ${readinessMutationDispatchEnvelopeContract.sourceRequestId}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.releaseAttemptId ? ` / release ${readinessMutationDispatchEnvelopeContract.releaseAttemptId}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.sessionId ? ` / session ${readinessMutationDispatchEnvelopeContract.sessionId}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.agentId ? ` / agent ${readinessMutationDispatchEnvelopeContract.agentId}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.workspaceId ? ` / workspace ${readinessMutationDispatchEnvelopeContract.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch disabled:
-                            {readinessMutationDispatchEnvelopeContract.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationDispatchEnvelopeContract.releaseGateEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchEnvelopeContract.requestCreationEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchEnvelopeContract.pushEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchEnvelopeContract.claimEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchEnvelopeContract.writeHelperEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchEnvelopeContract.claimable)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchEnvelopeContract.mutationAllowed)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchEnvelopeContract.applyEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchEnvelopeContract.testEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchEnvelopeContract.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchEnvelopeContract.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchEnvelopeContract.publicationEnabled)}` : ''}
-                            {readinessMutationDispatchEnvelopeContract.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchEnvelopeContract.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {!!readinessMutationDispatchEnvelopeContract.expectedOutcomeKeys?.length && (
-                            <span>mutation dispatch expected outcomes: {readinessMutationDispatchEnvelopeContract.expectedOutcomeKeys.join(', ')}</span>
+                          <span>{readinessMutationDispatchEnvelopeContractView.headerText}</span>
+                          <span>{readinessMutationDispatchEnvelopeContractView.idsText}</span>
+                          <span>{readinessMutationDispatchEnvelopeContractView.disabledText}</span>
+                          {readinessMutationDispatchEnvelopeContractView.expectedOutcomesText && (
+                            <span>{readinessMutationDispatchEnvelopeContractView.expectedOutcomesText}</span>
                           )}
-                          {readinessMutationDispatchOrderedToolSequence.map((item) => (
-                            <span key={`mutation-dispatch-tool-${item.order || item.key}-${item.toolName}`}>
-                              {item.order !== undefined ? `${item.order}. ` : ''}{item.key}: {item.toolName || 'tool pending'}
-                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
-                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
-                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
-                            </span>
+                          {readinessMutationDispatchEnvelopeContractView.toolLines.map((line) => (
+                            <span key={`mutation-dispatch-tool-${line}`}>{line}</span>
                           ))}
-                          {readinessMutationDispatchRequiredApprovals.map((item) => (
-                            <span key={`mutation-dispatch-approval-${item.key}-${item.toolName}`}>
-                              approval {item.key}: {item.approvalState || 'UNKNOWN'}
-                              {item.toolName ? ` / ${item.toolName}` : ''}
-                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
-                            </span>
+                          {readinessMutationDispatchEnvelopeContractView.approvalLines.map((line) => (
+                            <span key={`mutation-dispatch-approval-${line}`}>{line}</span>
                           ))}
-                          {readinessMutationDispatchEnvelopeContract.rollbackObligation && (
-                            <span>
-                              rollback obligation:
-                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.status ? ` ${readinessMutationDispatchEnvelopeContract.rollbackObligation.status}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.toolName ? ` / ${readinessMutationDispatchEnvelopeContract.rollbackObligation.toolName}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.required !== undefined ? ` / required ${String(readinessMutationDispatchEnvelopeContract.rollbackObligation.required)}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.rollbackObligation.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchEnvelopeContract.rollbackObligation.rollbackRestoreEnabled)}` : ''}
-                            </span>
+                          {readinessMutationDispatchEnvelopeContractView.rollbackText && (
+                            <span>{readinessMutationDispatchEnvelopeContractView.rollbackText}</span>
                           )}
-                          {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation && (
-                            <span>
-                              RAG freshness obligation:
-                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.status ? ` ${readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.status}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.required !== undefined ? ` / required ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.required)}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.ragFreshnessUpdateEnabled)}` : ''}
-                              {readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.message ? ` / ${readinessMutationDispatchEnvelopeContract.ragFreshnessObligation.message}` : ''}
-                            </span>
+                          {readinessMutationDispatchEnvelopeContractView.ragFreshnessText && (
+                            <span>{readinessMutationDispatchEnvelopeContractView.ragFreshnessText}</span>
                           )}
-                          {!!readinessMutationDispatchEnvelopeContract.blockingKeys?.length && (
-                            <span>mutation dispatch blocking keys: {readinessMutationDispatchEnvelopeContract.blockingKeys.join(', ')}</span>
+                          {readinessMutationDispatchEnvelopeContractView.blockingText && (
+                            <span>{readinessMutationDispatchEnvelopeContractView.blockingText}</span>
                           )}
-                          {readinessMutationDispatchEnvelopeContract.message && (
-                            <span>{readinessMutationDispatchEnvelopeContract.message}</span>
+                          {readinessMutationDispatchEnvelopeContractView.message && (
+                            <span>{readinessMutationDispatchEnvelopeContractView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationDispatchPreflightBoundary && (
+                      {readinessMutationDispatchPreflightBoundaryView.show && (
                         <>
-                          <span>
-                            mutation dispatch preflight boundary: {readinessMutationDispatchPreflightBoundary.status || 'BLOCKED_PREFLIGHT_DISABLED'}
-                            {readinessMutationDispatchPreflightBoundary.schema ? ` / ${readinessMutationDispatchPreflightBoundary.schema}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationDispatchPreflightBoundary.prerequisitesPassed)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.executionTarget ? ` / ${readinessMutationDispatchPreflightBoundary.executionTarget}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.dispatchEnvelopeStatus ? ` / envelope ${readinessMutationDispatchPreflightBoundary.dispatchEnvelopeStatus}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.dispatchEnvelopePrerequisitesPassed !== undefined ? ` / envelope prerequisites ${String(readinessMutationDispatchPreflightBoundary.dispatchEnvelopePrerequisitesPassed)}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch preflight agent:
-                            {readinessMutationDispatchPreflightBoundary.connectionState ? ` ${readinessMutationDispatchPreflightBoundary.connectionState}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.agentConnected !== undefined ? ` / connected ${String(readinessMutationDispatchPreflightBoundary.agentConnected)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.agentMatches !== undefined ? ` / matches ${String(readinessMutationDispatchPreflightBoundary.agentMatches)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.requestedAgentId ? ` / requested ${readinessMutationDispatchPreflightBoundary.requestedAgentId}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.connectedAgentId ? ` / connected id ${readinessMutationDispatchPreflightBoundary.connectedAgentId}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.agentVersion ? ` / version ${readinessMutationDispatchPreflightBoundary.agentVersion}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch preflight workspace:
-                            {readinessMutationDispatchPreflightBoundary.workspaceId ? ` ${readinessMutationDispatchPreflightBoundary.workspaceId}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.approvedWorkspaceReady !== undefined ? ` / approved ready ${String(readinessMutationDispatchPreflightBoundary.approvedWorkspaceReady)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.workspaceApproved !== undefined ? ` / approved ${String(readinessMutationDispatchPreflightBoundary.workspaceApproved)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.workspaceName ? ` / ${readinessMutationDispatchPreflightBoundary.workspaceName}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.workspaceIdentityStatus ? ` / identity ${readinessMutationDispatchPreflightBoundary.workspaceIdentityStatus}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.workspaceIdentityVerified !== undefined ? ` / verified ${String(readinessMutationDispatchPreflightBoundary.workspaceIdentityVerified)}` : ''}
-                          </span>
-                          {!!readinessMutationDispatchPreflightBoundary.requiredCapabilities?.length && (
-                            <span>mutation dispatch required capabilities: {readinessMutationDispatchPreflightBoundary.requiredCapabilities.join(', ')}</span>
+                          <span>{readinessMutationDispatchPreflightBoundaryView.headerText}</span>
+                          <span>{readinessMutationDispatchPreflightBoundaryView.agentText}</span>
+                          <span>{readinessMutationDispatchPreflightBoundaryView.workspaceText}</span>
+                          {readinessMutationDispatchPreflightBoundaryView.requiredCapabilitiesText && (
+                            <span>{readinessMutationDispatchPreflightBoundaryView.requiredCapabilitiesText}</span>
                           )}
-                          {!!readinessMutationDispatchPreflightBoundary.advertisedCapabilities?.length && (
-                            <span>mutation dispatch advertised capabilities: {readinessMutationDispatchPreflightBoundary.advertisedCapabilities.join(', ')}</span>
+                          {readinessMutationDispatchPreflightBoundaryView.advertisedCapabilitiesText && (
+                            <span>{readinessMutationDispatchPreflightBoundaryView.advertisedCapabilitiesText}</span>
                           )}
-                          {readinessMutationDispatchPreflightCapabilityChecks.map((item) => (
-                            <span key={`mutation-dispatch-preflight-capability-${item.toolName}`}>
-                              capability {item.toolName}: {item.available !== undefined ? `available ${String(item.available)}` : 'availability unknown'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                            </span>
+                          {readinessMutationDispatchPreflightBoundaryView.capabilityLines.map((line) => (
+                            <span key={`mutation-dispatch-preflight-capability-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationDispatchPreflightBoundary.missingCapabilities?.length && (
-                            <span>mutation dispatch missing capabilities: {readinessMutationDispatchPreflightBoundary.missingCapabilities.join(', ')}</span>
+                          {readinessMutationDispatchPreflightBoundaryView.missingCapabilitiesText && (
+                            <span>{readinessMutationDispatchPreflightBoundaryView.missingCapabilitiesText}</span>
                           )}
-                          <span>
-                            mutation dispatch preflight disabled:
-                            {readinessMutationDispatchPreflightBoundary.dispatchPreflightEnabled !== undefined ? ` dispatch preflight ${String(readinessMutationDispatchPreflightBoundary.dispatchPreflightEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationDispatchPreflightBoundary.releaseGateEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchPreflightBoundary.requestCreationEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchPreflightBoundary.pushEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchPreflightBoundary.claimEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchPreflightBoundary.writeHelperEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchPreflightBoundary.claimable)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchPreflightBoundary.mutationAllowed)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchPreflightBoundary.applyEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchPreflightBoundary.testEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchPreflightBoundary.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchPreflightBoundary.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchPreflightBoundary.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchPreflightBoundary.publicationEnabled)}` : ''}
-                            {readinessMutationDispatchPreflightBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchPreflightBoundary.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {!!readinessMutationDispatchPreflightBoundary.blockingKeys?.length && (
-                            <span>mutation dispatch preflight blocking keys: {readinessMutationDispatchPreflightBoundary.blockingKeys.join(', ')}</span>
+                          <span>{readinessMutationDispatchPreflightBoundaryView.disabledText}</span>
+                          {readinessMutationDispatchPreflightBoundaryView.blockingText && (
+                            <span>{readinessMutationDispatchPreflightBoundaryView.blockingText}</span>
                           )}
-                          {readinessMutationDispatchPreflightBoundary.message && (
-                            <span>{readinessMutationDispatchPreflightBoundary.message}</span>
+                          {readinessMutationDispatchPreflightBoundaryView.message && (
+                            <span>{readinessMutationDispatchPreflightBoundaryView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationDispatchDecisionModel && (
+                      {readinessMutationDispatchDecisionModelView.show && (
                         <>
-                          <span>
-                            mutation dispatch decision model: {readinessMutationDispatchDecisionModel.status || 'BLOCKED_DISPATCH_DISABLED'}
-                            {readinessMutationDispatchDecisionModel.schema ? ` / ${readinessMutationDispatchDecisionModel.schema}` : ''}
-                            {readinessMutationDispatchDecisionModel.decision ? ` / decision ${readinessMutationDispatchDecisionModel.decision}` : ''}
-                            {readinessMutationDispatchDecisionModel.readinessInputsPassed !== undefined ? ` / readiness inputs ${String(readinessMutationDispatchDecisionModel.readinessInputsPassed)}` : ''}
-                            {readinessMutationDispatchDecisionModel.executionTarget ? ` / ${readinessMutationDispatchDecisionModel.executionTarget}` : ''}
-                            {readinessMutationDispatchDecisionModel.dispatchEnvelopeStatus ? ` / envelope ${readinessMutationDispatchDecisionModel.dispatchEnvelopeStatus}` : ''}
-                            {readinessMutationDispatchDecisionModel.dispatchPreflightStatus ? ` / preflight ${readinessMutationDispatchDecisionModel.dispatchPreflightStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch decision ids:
-                            {readinessMutationDispatchDecisionModel.sourceRequestId ? ` source ${readinessMutationDispatchDecisionModel.sourceRequestId}` : ''}
-                            {readinessMutationDispatchDecisionModel.releaseAttemptId ? ` / release ${String(readinessMutationDispatchDecisionModel.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationDispatchDecisionModel.sessionId ? ` / session ${readinessMutationDispatchDecisionModel.sessionId}` : ''}
-                            {readinessMutationDispatchDecisionModel.agentId ? ` / agent ${readinessMutationDispatchDecisionModel.agentId}` : ''}
-                            {readinessMutationDispatchDecisionModel.workspaceId ? ` / workspace ${readinessMutationDispatchDecisionModel.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation dispatch decision disabled:
-                            {readinessMutationDispatchDecisionModel.dispatchDecisionEnabled !== undefined ? ` dispatch decision ${String(readinessMutationDispatchDecisionModel.dispatchDecisionEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationDispatchDecisionModel.releaseGateEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationDispatchDecisionModel.requestCreationEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.pushEnabled !== undefined ? ` / push ${String(readinessMutationDispatchDecisionModel.pushEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.claimEnabled !== undefined ? ` / claim ${String(readinessMutationDispatchDecisionModel.claimEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationDispatchDecisionModel.writeHelperEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.claimable !== undefined ? ` / claimable ${String(readinessMutationDispatchDecisionModel.claimable)}` : ''}
-                            {readinessMutationDispatchDecisionModel.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationDispatchDecisionModel.mutationAllowed)}` : ''}
-                            {readinessMutationDispatchDecisionModel.applyEnabled !== undefined ? ` / apply ${String(readinessMutationDispatchDecisionModel.applyEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.testEnabled !== undefined ? ` / test ${String(readinessMutationDispatchDecisionModel.testEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationDispatchDecisionModel.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationDispatchDecisionModel.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationDispatchDecisionModel.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationDispatchDecisionModel.publicationEnabled)}` : ''}
-                            {readinessMutationDispatchDecisionModel.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationDispatchDecisionModel.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationDispatchDecisionInputs.map((item) => (
-                            <span key={`mutation-dispatch-decision-input-${item.key}`}>
-                              decision input {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
-                              {item.dispatchDecisionEnabled !== undefined ? ` / dispatch decision ${String(item.dispatchDecisionEnabled)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationDispatchDecisionModelView.headerText}</span>
+                          <span>{readinessMutationDispatchDecisionModelView.idsText}</span>
+                          <span>{readinessMutationDispatchDecisionModelView.disabledText}</span>
+                          {readinessMutationDispatchDecisionModelView.inputLines.map((line) => (
+                            <span key={`mutation-dispatch-decision-input-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationDispatchDecisionModel.blockingKeys?.length && (
-                            <span>mutation dispatch decision blocking keys: {readinessMutationDispatchDecisionModel.blockingKeys.join(', ')}</span>
+                          {readinessMutationDispatchDecisionModelView.blockingText && (
+                            <span>{readinessMutationDispatchDecisionModelView.blockingText}</span>
                           )}
-                          {readinessMutationDispatchDecisionModel.userVisibleRefusalMessage && (
-                            <span>dispatch refusal: {readinessMutationDispatchDecisionModel.userVisibleRefusalMessage}</span>
+                          {readinessMutationDispatchDecisionModelView.refusalText && (
+                            <span>{readinessMutationDispatchDecisionModelView.refusalText}</span>
                           )}
-                          {readinessMutationDispatchDecisionModel.message && (
-                            <span>{readinessMutationDispatchDecisionModel.message}</span>
+                          {readinessMutationDispatchDecisionModelView.message && (
+                            <span>{readinessMutationDispatchDecisionModelView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationRequestBlueprint && (
+                      {readinessMutationRequestBlueprintView.show && (
                         <>
-                          <span>
-                            mutation request blueprint: {readinessMutationRequestBlueprint.status || 'BLOCKED_REQUEST_BLUEPRINT_DISABLED'}
-                            {readinessMutationRequestBlueprint.schema ? ` / ${readinessMutationRequestBlueprint.schema}` : ''}
-                            {readinessMutationRequestBlueprint.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestBlueprint.prerequisitesPassed)}` : ''}
-                            {readinessMutationRequestBlueprint.executionTarget ? ` / ${readinessMutationRequestBlueprint.executionTarget}` : ''}
-                            {readinessMutationRequestBlueprint.requestCreationMode ? ` / ${readinessMutationRequestBlueprint.requestCreationMode}` : ''}
-                            {readinessMutationRequestBlueprint.sourceDecisionStatus ? ` / decision ${readinessMutationRequestBlueprint.sourceDecisionStatus}` : ''}
-                            {readinessMutationRequestBlueprint.sourceEnvelopeStatus ? ` / envelope ${readinessMutationRequestBlueprint.sourceEnvelopeStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation request blueprint ids:
-                            {readinessMutationRequestBlueprint.sourceRequestId ? ` source ${readinessMutationRequestBlueprint.sourceRequestId}` : ''}
-                            {readinessMutationRequestBlueprint.releaseAttemptId ? ` / release ${String(readinessMutationRequestBlueprint.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationRequestBlueprint.sessionId ? ` / session ${readinessMutationRequestBlueprint.sessionId}` : ''}
-                            {readinessMutationRequestBlueprint.agentId ? ` / agent ${readinessMutationRequestBlueprint.agentId}` : ''}
-                            {readinessMutationRequestBlueprint.workspaceId ? ` / workspace ${readinessMutationRequestBlueprint.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation request blueprint disabled:
-                            {readinessMutationRequestBlueprint.requestBlueprintEnabled !== undefined ? ` request blueprint ${String(readinessMutationRequestBlueprint.requestBlueprintEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.dispatchDecisionEnabled !== undefined ? ` / dispatch decision ${String(readinessMutationRequestBlueprint.dispatchDecisionEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestBlueprint.releaseGateEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestBlueprint.requestCreationEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestBlueprint.pushEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestBlueprint.claimEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestBlueprint.writeHelperEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestBlueprint.claimable)}` : ''}
-                            {readinessMutationRequestBlueprint.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestBlueprint.mutationAllowed)}` : ''}
-                            {readinessMutationRequestBlueprint.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestBlueprint.applyEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestBlueprint.testEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestBlueprint.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestBlueprint.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestBlueprint.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestBlueprint.publicationEnabled)}` : ''}
-                            {readinessMutationRequestBlueprint.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestBlueprint.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {!!readinessMutationRequestBlueprint.expectedInputKeys?.length && (
-                            <span>mutation request expected inputs: {readinessMutationRequestBlueprint.expectedInputKeys.join(', ')}</span>
+                          <span>{readinessMutationRequestBlueprintView.headerText}</span>
+                          <span>{readinessMutationRequestBlueprintView.idsText}</span>
+                          <span>{readinessMutationRequestBlueprintView.disabledText}</span>
+                          {readinessMutationRequestBlueprintView.expectedInputsText && (
+                            <span>{readinessMutationRequestBlueprintView.expectedInputsText}</span>
                           )}
-                          {!!readinessMutationRequestBlueprint.expectedOutputKeys?.length && (
-                            <span>mutation request expected outputs: {readinessMutationRequestBlueprint.expectedOutputKeys.join(', ')}</span>
+                          {readinessMutationRequestBlueprintView.expectedOutputsText && (
+                            <span>{readinessMutationRequestBlueprintView.expectedOutputsText}</span>
                           )}
-                          {readinessMutationRequestBlueprintToolRequests.map((item) => (
-                            <span key={`mutation-request-blueprint-tool-${item.order || item.key}-${item.toolName}`}>
-                              {item.order !== undefined ? `${item.order}. ` : ''}{item.key}: {item.toolName || 'tool pending'}
-                              {item.status ? ` / ${item.status}` : ''}
-                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
-                              {item.sideEffectful !== undefined ? ` / side-effect ${String(item.sideEffectful)}` : ''}
-                              {item.rollbackFallback !== undefined ? ` / rollback fallback ${String(item.rollbackFallback)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.expectedOutputKeys?.length ? ` / outputs ${item.expectedOutputKeys.join(', ')}` : ''}
-                            </span>
+                          {readinessMutationRequestBlueprintView.toolLines.map((line) => (
+                            <span key={`mutation-request-blueprint-tool-${line}`}>{line}</span>
                           ))}
-                          {readinessMutationRequestBlueprintApprovalStates.map((item) => (
-                            <span key={`mutation-request-blueprint-approval-${item.key}-${item.toolName}`}>
-                              blueprint approval {item.key}: {item.approvalState || 'UNKNOWN'}
-                              {item.toolName ? ` / ${item.toolName}` : ''}
-                            </span>
+                          {readinessMutationRequestBlueprintView.approvalLines.map((line) => (
+                            <span key={`mutation-request-blueprint-approval-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationRequestBlueprint.blockingKeys?.length && (
-                            <span>mutation request blueprint blocking keys: {readinessMutationRequestBlueprint.blockingKeys.join(', ')}</span>
+                          {readinessMutationRequestBlueprintView.blockingText && (
+                            <span>{readinessMutationRequestBlueprintView.blockingText}</span>
                           )}
-                          {readinessMutationRequestBlueprint.message && (
-                            <span>{readinessMutationRequestBlueprint.message}</span>
+                          {readinessMutationRequestBlueprintView.message && (
+                            <span>{readinessMutationRequestBlueprintView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationRequestCreationGate && (
+                      {readinessMutationRequestCreationGateView.show && (
                         <>
-                          <span>
-                            mutation request creation gate: {readinessMutationRequestCreationGate.status || 'BLOCKED_CREATION_DISABLED'}
-                            {readinessMutationRequestCreationGate.schema ? ` / ${readinessMutationRequestCreationGate.schema}` : ''}
-                            {readinessMutationRequestCreationGate.blueprintReady !== undefined ? ` / blueprint ready ${String(readinessMutationRequestCreationGate.blueprintReady)}` : ''}
-                            {readinessMutationRequestCreationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestCreationGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationRequestCreationGate.executionTarget ? ` / ${readinessMutationRequestCreationGate.executionTarget}` : ''}
-                            {readinessMutationRequestCreationGate.releaseGateState ? ` / release gate ${readinessMutationRequestCreationGate.releaseGateState}` : ''}
-                            {readinessMutationRequestCreationGate.requestCreationPolicy ? ` / policy ${readinessMutationRequestCreationGate.requestCreationPolicy}` : ''}
-                          </span>
-                          <span>
-                            mutation request creation gate ids:
-                            {readinessMutationRequestCreationGate.sourceRequestId ? ` source ${readinessMutationRequestCreationGate.sourceRequestId}` : ''}
-                            {readinessMutationRequestCreationGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestCreationGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationRequestCreationGate.sessionId ? ` / session ${readinessMutationRequestCreationGate.sessionId}` : ''}
-                            {readinessMutationRequestCreationGate.agentId ? ` / agent ${readinessMutationRequestCreationGate.agentId}` : ''}
-                            {readinessMutationRequestCreationGate.workspaceId ? ` / workspace ${readinessMutationRequestCreationGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation request creation counts:
-                            {readinessMutationRequestCreationGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestCreationGate.expectedRequestCount)}` : ''}
-                            {readinessMutationRequestCreationGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestCreationGate.persistedRequestCount)}` : ''}
-                            {readinessMutationRequestCreationGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestCreationGate.pushedRequestCount)}` : ''}
-                            {readinessMutationRequestCreationGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestCreationGate.claimableRequestCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation request creation disabled:
-                            {readinessMutationRequestCreationGate.requestCreationGateEnabled !== undefined ? ` creation gate ${String(readinessMutationRequestCreationGate.requestCreationGateEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestCreationGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestCreationGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestCreationGate.pushEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestCreationGate.claimEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestCreationGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestCreationGate.claimable)}` : ''}
-                            {readinessMutationRequestCreationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestCreationGate.mutationAllowed)}` : ''}
-                            {readinessMutationRequestCreationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestCreationGate.applyEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestCreationGate.testEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestCreationGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestCreationGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestCreationGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestCreationGate.publicationEnabled)}` : ''}
-                            {readinessMutationRequestCreationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestCreationGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationRequestCreationGatePolicyChecks.map((item) => (
-                            <span key={`mutation-request-creation-policy-${item.key}`}>
-                              creation policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationRequestCreationGateView.headerText}</span>
+                          <span>{readinessMutationRequestCreationGateView.idsText}</span>
+                          <span>{readinessMutationRequestCreationGateView.countsText}</span>
+                          <span>{readinessMutationRequestCreationGateView.disabledText}</span>
+                          {readinessMutationRequestCreationGateView.policyLines.map((line) => (
+                            <span key={`mutation-request-creation-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationRequestCreationGate.blockingKeys?.length && (
-                            <span>mutation request creation blocking keys: {readinessMutationRequestCreationGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationRequestCreationGateView.blockingText && (
+                            <span>{readinessMutationRequestCreationGateView.blockingText}</span>
                           )}
-                          {readinessMutationRequestCreationGate.message && (
-                            <span>{readinessMutationRequestCreationGate.message}</span>
+                          {readinessMutationRequestCreationGateView.message && (
+                            <span>{readinessMutationRequestCreationGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationRequestPushGate && (
+                      {readinessMutationRequestPushGateView.show && (
                         <>
-                          <span>
-                            mutation request push gate: {readinessMutationRequestPushGate.status || 'BLOCKED_PUSH_DISABLED'}
-                            {readinessMutationRequestPushGate.schema ? ` / ${readinessMutationRequestPushGate.schema}` : ''}
-                            {readinessMutationRequestPushGate.creationGateReady !== undefined ? ` / creation gate ready ${String(readinessMutationRequestPushGate.creationGateReady)}` : ''}
-                            {readinessMutationRequestPushGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestPushGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationRequestPushGate.executionTarget ? ` / ${readinessMutationRequestPushGate.executionTarget}` : ''}
-                            {readinessMutationRequestPushGate.transportPushPolicy ? ` / transport ${readinessMutationRequestPushGate.transportPushPolicy}` : ''}
-                            {readinessMutationRequestPushGate.pusherInvocationEnabled !== undefined ? ` / pusher ${String(readinessMutationRequestPushGate.pusherInvocationEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.sourceCreationGateStatus ? ` / creation status ${readinessMutationRequestPushGate.sourceCreationGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation request push gate ids:
-                            {readinessMutationRequestPushGate.sourceRequestId ? ` source ${readinessMutationRequestPushGate.sourceRequestId}` : ''}
-                            {readinessMutationRequestPushGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestPushGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationRequestPushGate.sessionId ? ` / session ${readinessMutationRequestPushGate.sessionId}` : ''}
-                            {readinessMutationRequestPushGate.agentId ? ` / agent ${readinessMutationRequestPushGate.agentId}` : ''}
-                            {readinessMutationRequestPushGate.workspaceId ? ` / workspace ${readinessMutationRequestPushGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation request push counts:
-                            {readinessMutationRequestPushGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestPushGate.expectedRequestCount)}` : ''}
-                            {readinessMutationRequestPushGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestPushGate.persistedRequestCount)}` : ''}
-                            {readinessMutationRequestPushGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestPushGate.pushedRequestCount)}` : ''}
-                            {readinessMutationRequestPushGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestPushGate.claimableRequestCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation request push disabled:
-                            {readinessMutationRequestPushGate.pushGateEnabled !== undefined ? ` push gate ${String(readinessMutationRequestPushGate.pushGateEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestPushGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestPushGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestPushGate.pushEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestPushGate.claimEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestPushGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestPushGate.claimable)}` : ''}
-                            {readinessMutationRequestPushGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestPushGate.mutationAllowed)}` : ''}
-                            {readinessMutationRequestPushGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestPushGate.applyEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestPushGate.testEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestPushGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestPushGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestPushGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestPushGate.publicationEnabled)}` : ''}
-                            {readinessMutationRequestPushGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestPushGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationRequestPushGatePolicyChecks.map((item) => (
-                            <span key={`mutation-request-push-policy-${item.key}`}>
-                              push policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationRequestPushGateView.headerText}</span>
+                          <span>{readinessMutationRequestPushGateView.idsText}</span>
+                          <span>{readinessMutationRequestPushGateView.countsText}</span>
+                          <span>{readinessMutationRequestPushGateView.disabledText}</span>
+                          {readinessMutationRequestPushGateView.policyLines.map((line) => (
+                            <span key={`mutation-request-push-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationRequestPushGate.blockingKeys?.length && (
-                            <span>mutation request push blocking keys: {readinessMutationRequestPushGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationRequestPushGateView.blockingText && (
+                            <span>{readinessMutationRequestPushGateView.blockingText}</span>
                           )}
-                          {readinessMutationRequestPushGate.message && (
-                            <span>{readinessMutationRequestPushGate.message}</span>
+                          {readinessMutationRequestPushGateView.message && (
+                            <span>{readinessMutationRequestPushGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationRequestClaimGate && (
+                      {readinessMutationRequestClaimGateView.show && (
                         <>
-                          <span>
-                            mutation request claim gate: {readinessMutationRequestClaimGate.status || 'BLOCKED_CLAIM_DISABLED'}
-                            {readinessMutationRequestClaimGate.schema ? ` / ${readinessMutationRequestClaimGate.schema}` : ''}
-                            {readinessMutationRequestClaimGate.pushGateReady !== undefined ? ` / push gate ready ${String(readinessMutationRequestClaimGate.pushGateReady)}` : ''}
-                            {readinessMutationRequestClaimGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRequestClaimGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationRequestClaimGate.executionTarget ? ` / ${readinessMutationRequestClaimGate.executionTarget}` : ''}
-                            {readinessMutationRequestClaimGate.claimPolicy ? ` / policy ${readinessMutationRequestClaimGate.claimPolicy}` : ''}
-                            {readinessMutationRequestClaimGate.claimNextInvocationEnabled !== undefined ? ` / claimNext ${String(readinessMutationRequestClaimGate.claimNextInvocationEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.sourcePushGateStatus ? ` / push status ${readinessMutationRequestClaimGate.sourcePushGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation request claim gate ids:
-                            {readinessMutationRequestClaimGate.sourceRequestId ? ` source ${readinessMutationRequestClaimGate.sourceRequestId}` : ''}
-                            {readinessMutationRequestClaimGate.releaseAttemptId ? ` / release ${String(readinessMutationRequestClaimGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationRequestClaimGate.sessionId ? ` / session ${readinessMutationRequestClaimGate.sessionId}` : ''}
-                            {readinessMutationRequestClaimGate.agentId ? ` / agent ${readinessMutationRequestClaimGate.agentId}` : ''}
-                            {readinessMutationRequestClaimGate.workspaceId ? ` / workspace ${readinessMutationRequestClaimGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation request claim counts:
-                            {readinessMutationRequestClaimGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationRequestClaimGate.expectedRequestCount)}` : ''}
-                            {readinessMutationRequestClaimGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationRequestClaimGate.persistedRequestCount)}` : ''}
-                            {readinessMutationRequestClaimGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationRequestClaimGate.pushedRequestCount)}` : ''}
-                            {readinessMutationRequestClaimGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationRequestClaimGate.claimableRequestCount)}` : ''}
-                            {readinessMutationRequestClaimGate.runningRequestCount !== undefined ? ` / running ${String(readinessMutationRequestClaimGate.runningRequestCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation request claim disabled:
-                            {readinessMutationRequestClaimGate.claimGateEnabled !== undefined ? ` claim gate ${String(readinessMutationRequestClaimGate.claimGateEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRequestClaimGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRequestClaimGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRequestClaimGate.pushEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRequestClaimGate.claimEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRequestClaimGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRequestClaimGate.claimable)}` : ''}
-                            {readinessMutationRequestClaimGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRequestClaimGate.mutationAllowed)}` : ''}
-                            {readinessMutationRequestClaimGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRequestClaimGate.applyEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRequestClaimGate.testEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRequestClaimGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRequestClaimGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRequestClaimGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRequestClaimGate.publicationEnabled)}` : ''}
-                            {readinessMutationRequestClaimGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRequestClaimGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationRequestClaimGatePolicyChecks.map((item) => (
-                            <span key={`mutation-request-claim-policy-${item.key}`}>
-                              claim policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.running !== undefined ? ` / running ${String(item.running)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationRequestClaimGateView.headerText}</span>
+                          <span>{readinessMutationRequestClaimGateView.idsText}</span>
+                          <span>{readinessMutationRequestClaimGateView.countsText}</span>
+                          <span>{readinessMutationRequestClaimGateView.disabledText}</span>
+                          {readinessMutationRequestClaimGateView.policyLines.map((line) => (
+                            <span key={`mutation-request-claim-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationRequestClaimGate.blockingKeys?.length && (
-                            <span>mutation request claim blocking keys: {readinessMutationRequestClaimGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationRequestClaimGateView.blockingText && (
+                            <span>{readinessMutationRequestClaimGateView.blockingText}</span>
                           )}
-                          {readinessMutationRequestClaimGate.message && (
-                            <span>{readinessMutationRequestClaimGate.message}</span>
+                          {readinessMutationRequestClaimGateView.message && (
+                            <span>{readinessMutationRequestClaimGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationExecutionGate && (
+                      {readinessMutationExecutionGateView.show && (
                         <>
-                          <span>
-                            mutation execution gate: {readinessMutationExecutionGate.status || 'BLOCKED_EXECUTION_DISABLED'}
-                            {readinessMutationExecutionGate.schema ? ` / ${readinessMutationExecutionGate.schema}` : ''}
-                            {readinessMutationExecutionGate.claimGateReady !== undefined ? ` / claim gate ready ${String(readinessMutationExecutionGate.claimGateReady)}` : ''}
-                            {readinessMutationExecutionGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationExecutionGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationExecutionGate.executionTarget ? ` / ${readinessMutationExecutionGate.executionTarget}` : ''}
-                            {readinessMutationExecutionGate.executionPolicy ? ` / policy ${readinessMutationExecutionGate.executionPolicy}` : ''}
-                            {readinessMutationExecutionGate.toolRunnerInvocationEnabled !== undefined ? ` / tool runner ${String(readinessMutationExecutionGate.toolRunnerInvocationEnabled)}` : ''}
-                            {readinessMutationExecutionGate.writeHelperInvocationEnabled !== undefined ? ` / write helper invocation ${String(readinessMutationExecutionGate.writeHelperInvocationEnabled)}` : ''}
-                            {readinessMutationExecutionGate.sourceClaimGateStatus ? ` / claim status ${readinessMutationExecutionGate.sourceClaimGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation execution gate ids:
-                            {readinessMutationExecutionGate.sourceRequestId ? ` source ${readinessMutationExecutionGate.sourceRequestId}` : ''}
-                            {readinessMutationExecutionGate.releaseAttemptId ? ` / release ${String(readinessMutationExecutionGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationExecutionGate.sessionId ? ` / session ${readinessMutationExecutionGate.sessionId}` : ''}
-                            {readinessMutationExecutionGate.agentId ? ` / agent ${readinessMutationExecutionGate.agentId}` : ''}
-                            {readinessMutationExecutionGate.workspaceId ? ` / workspace ${readinessMutationExecutionGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation execution counts:
-                            {readinessMutationExecutionGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationExecutionGate.expectedRequestCount)}` : ''}
-                            {readinessMutationExecutionGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationExecutionGate.persistedRequestCount)}` : ''}
-                            {readinessMutationExecutionGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationExecutionGate.pushedRequestCount)}` : ''}
-                            {readinessMutationExecutionGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationExecutionGate.claimableRequestCount)}` : ''}
-                            {readinessMutationExecutionGate.runningRequestCount !== undefined ? ` / running ${String(readinessMutationExecutionGate.runningRequestCount)}` : ''}
-                            {readinessMutationExecutionGate.completedRequestCount !== undefined ? ` / completed ${String(readinessMutationExecutionGate.completedRequestCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation execution disabled:
-                            {readinessMutationExecutionGate.executionGateEnabled !== undefined ? ` execution gate ${String(readinessMutationExecutionGate.executionGateEnabled)}` : ''}
-                            {readinessMutationExecutionGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationExecutionGate.executionEnabled)}` : ''}
-                            {readinessMutationExecutionGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationExecutionGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationExecutionGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationExecutionGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationExecutionGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationExecutionGate.pushEnabled)}` : ''}
-                            {readinessMutationExecutionGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationExecutionGate.claimEnabled)}` : ''}
-                            {readinessMutationExecutionGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationExecutionGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationExecutionGate.claimable !== undefined ? ` / claimable ${String(readinessMutationExecutionGate.claimable)}` : ''}
-                            {readinessMutationExecutionGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationExecutionGate.mutationAllowed)}` : ''}
-                            {readinessMutationExecutionGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationExecutionGate.applyEnabled)}` : ''}
-                            {readinessMutationExecutionGate.testEnabled !== undefined ? ` / test ${String(readinessMutationExecutionGate.testEnabled)}` : ''}
-                            {readinessMutationExecutionGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationExecutionGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationExecutionGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationExecutionGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationExecutionGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationExecutionGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationExecutionGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationExecutionGate.publicationEnabled)}` : ''}
-                            {readinessMutationExecutionGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationExecutionGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationExecutionGatePolicyChecks.map((item) => (
-                            <span key={`mutation-execution-policy-${item.key}`}>
-                              execution policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
-                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.running !== undefined ? ` / running ${String(item.running)}` : ''}
-                              {item.completed !== undefined ? ` / completed ${String(item.completed)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.applyEnabled !== undefined ? ` / apply ${String(item.applyEnabled)}` : ''}
-                              {item.testEnabled !== undefined ? ` / test ${String(item.testEnabled)}` : ''}
-                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
-                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
-                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
-                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
-                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationExecutionGateView.headerText}</span>
+                          <span>{readinessMutationExecutionGateView.idsText}</span>
+                          <span>{readinessMutationExecutionGateView.countsText}</span>
+                          <span>{readinessMutationExecutionGateView.disabledText}</span>
+                          {readinessMutationExecutionGateView.policyLines.map((line) => (
+                            <span key={`mutation-execution-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationExecutionGate.blockingKeys?.length && (
-                            <span>mutation execution blocking keys: {readinessMutationExecutionGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationExecutionGateView.blockingText && (
+                            <span>{readinessMutationExecutionGateView.blockingText}</span>
                           )}
-                          {readinessMutationExecutionGate.message && (
-                            <span>{readinessMutationExecutionGate.message}</span>
+                          {readinessMutationExecutionGateView.message && (
+                            <span>{readinessMutationExecutionGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationWriteHelperSafetyGate && (
+                      {readinessMutationWriteHelperSafetyGateView.show && (
                         <>
-                          <span>
-                            mutation write-helper safety gate: {readinessMutationWriteHelperSafetyGate.status || 'BLOCKED_WRITE_HELPER_DISABLED'}
-                            {readinessMutationWriteHelperSafetyGate.schema ? ` / ${readinessMutationWriteHelperSafetyGate.schema}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.executionGateReady !== undefined ? ` / execution gate ready ${String(readinessMutationWriteHelperSafetyGate.executionGateReady)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationWriteHelperSafetyGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.executionTarget ? ` / ${readinessMutationWriteHelperSafetyGate.executionTarget}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.writeHelperPolicy ? ` / policy ${readinessMutationWriteHelperSafetyGate.writeHelperPolicy}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.sourceExecutionGateStatus ? ` / execution status ${readinessMutationWriteHelperSafetyGate.sourceExecutionGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation write-helper safety ids:
-                            {readinessMutationWriteHelperSafetyGate.sourceRequestId ? ` source ${readinessMutationWriteHelperSafetyGate.sourceRequestId}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.releaseAttemptId ? ` / release ${String(readinessMutationWriteHelperSafetyGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.sessionId ? ` / session ${readinessMutationWriteHelperSafetyGate.sessionId}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.agentId ? ` / agent ${readinessMutationWriteHelperSafetyGate.agentId}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.workspaceId ? ` / workspace ${readinessMutationWriteHelperSafetyGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation write-helper safety counts:
-                            {readinessMutationWriteHelperSafetyGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationWriteHelperSafetyGate.expectedRequestCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation write-helper safety disabled:
-                            {readinessMutationWriteHelperSafetyGate.writeHelperEnabled !== undefined ? ` write helper ${String(readinessMutationWriteHelperSafetyGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationWriteHelperSafetyGate.applyEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationWriteHelperSafetyGate.mutationAllowed)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationWriteHelperSafetyGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationWriteHelperSafetyGate.executionEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationWriteHelperSafetyGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationWriteHelperSafetyGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationWriteHelperSafetyGate.pushEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationWriteHelperSafetyGate.claimEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.claimable !== undefined ? ` / claimable ${String(readinessMutationWriteHelperSafetyGate.claimable)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.testEnabled !== undefined ? ` / test ${String(readinessMutationWriteHelperSafetyGate.testEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationWriteHelperSafetyGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationWriteHelperSafetyGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationWriteHelperSafetyGate.publicationEnabled)}` : ''}
-                            {readinessMutationWriteHelperSafetyGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationWriteHelperSafetyGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationWriteHelperSafetyGatePolicyChecks.map((item) => (
-                            <span key={`mutation-write-helper-safety-policy-${item.key}`}>
-                              write-helper safety policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
-                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.applyEnabled !== undefined ? ` / apply ${String(item.applyEnabled)}` : ''}
-                              {item.testEnabled !== undefined ? ` / test ${String(item.testEnabled)}` : ''}
-                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationWriteHelperSafetyGateView.headerText}</span>
+                          <span>{readinessMutationWriteHelperSafetyGateView.idsText}</span>
+                          <span>{readinessMutationWriteHelperSafetyGateView.countsText}</span>
+                          <span>{readinessMutationWriteHelperSafetyGateView.disabledText}</span>
+                          {readinessMutationWriteHelperSafetyGateView.policyLines.map((line) => (
+                            <span key={`mutation-write-helper-safety-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationWriteHelperSafetyGate.blockingKeys?.length && (
-                            <span>mutation write-helper safety blocking keys: {readinessMutationWriteHelperSafetyGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationWriteHelperSafetyGateView.blockingText && (
+                            <span>{readinessMutationWriteHelperSafetyGateView.blockingText}</span>
                           )}
-                          {readinessMutationWriteHelperSafetyGate.message && (
-                            <span>{readinessMutationWriteHelperSafetyGate.message}</span>
+                          {readinessMutationWriteHelperSafetyGateView.message && (
+                            <span>{readinessMutationWriteHelperSafetyGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationPostExecutionObservationGate && (
+                      {readinessMutationPostExecutionObservationGateView.show && (
                         <>
-                          <span>
-                            mutation post-execution observation gate: {readinessMutationPostExecutionObservationGate.status || 'BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED'}
-                            {readinessMutationPostExecutionObservationGate.schema ? ` / ${readinessMutationPostExecutionObservationGate.schema}` : ''}
-                            {readinessMutationPostExecutionObservationGate.executionGateReady !== undefined ? ` / execution gate ready ${String(readinessMutationPostExecutionObservationGate.executionGateReady)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationPostExecutionObservationGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.executionTarget ? ` / ${readinessMutationPostExecutionObservationGate.executionTarget}` : ''}
-                            {readinessMutationPostExecutionObservationGate.observationPolicy ? ` / policy ${readinessMutationPostExecutionObservationGate.observationPolicy}` : ''}
-                            {readinessMutationPostExecutionObservationGate.sourceExecutionGateStatus ? ` / execution status ${readinessMutationPostExecutionObservationGate.sourceExecutionGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation post-execution observation ids:
-                            {readinessMutationPostExecutionObservationGate.sourceRequestId ? ` source ${readinessMutationPostExecutionObservationGate.sourceRequestId}` : ''}
-                            {readinessMutationPostExecutionObservationGate.releaseAttemptId ? ` / release ${String(readinessMutationPostExecutionObservationGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.sessionId ? ` / session ${readinessMutationPostExecutionObservationGate.sessionId}` : ''}
-                            {readinessMutationPostExecutionObservationGate.agentId ? ` / agent ${readinessMutationPostExecutionObservationGate.agentId}` : ''}
-                            {readinessMutationPostExecutionObservationGate.workspaceId ? ` / workspace ${readinessMutationPostExecutionObservationGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation post-execution observation counts:
-                            {readinessMutationPostExecutionObservationGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationPostExecutionObservationGate.expectedResultCount)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationPostExecutionObservationGate.completedResultCount)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationPostExecutionObservationGate.acceptedResultCount)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationPostExecutionObservationGate.rejectedResultCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation post-execution observation disabled:
-                            {readinessMutationPostExecutionObservationGate.postExecutionObservationEnabled !== undefined ? ` observation ${String(readinessMutationPostExecutionObservationGate.postExecutionObservationEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationPostExecutionObservationGate.completedResultPersistenceEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationPostExecutionObservationGate.rollbackFallbackExecutionEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationPostExecutionObservationGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationPostExecutionObservationGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationPostExecutionObservationGate.pushEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationPostExecutionObservationGate.claimEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationPostExecutionObservationGate.executionEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationPostExecutionObservationGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationPostExecutionObservationGate.claimable)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationPostExecutionObservationGate.mutationAllowed)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationPostExecutionObservationGate.applyEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationPostExecutionObservationGate.testEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationPostExecutionObservationGate.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationPostExecutionObservationGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationPostExecutionObservationGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationPostExecutionObservationGate.publicationEnabled)}` : ''}
-                            {readinessMutationPostExecutionObservationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationPostExecutionObservationGate.finalAnswerGenerationEnabled)}` : ''}
-                          </span>
-                          {readinessMutationPostExecutionObservationGatePolicyChecks.map((item) => (
-                            <span key={`mutation-post-execution-observation-policy-${item.key}`}>
-                              post-execution observation policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
-                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
-                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
-                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
-                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
-                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationPostExecutionObservationGateView.headerText}</span>
+                          <span>{readinessMutationPostExecutionObservationGateView.idsText}</span>
+                          <span>{readinessMutationPostExecutionObservationGateView.countsText}</span>
+                          <span>{readinessMutationPostExecutionObservationGateView.disabledText}</span>
+                          {readinessMutationPostExecutionObservationGateView.policyLines.map((line) => (
+                            <span key={`mutation-post-execution-observation-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationPostExecutionObservationGate.blockingKeys?.length && (
-                            <span>mutation post-execution observation blocking keys: {readinessMutationPostExecutionObservationGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationPostExecutionObservationGateView.blockingText && (
+                            <span>{readinessMutationPostExecutionObservationGateView.blockingText}</span>
                           )}
-                          {readinessMutationPostExecutionObservationGate.message && (
-                            <span>{readinessMutationPostExecutionObservationGate.message}</span>
+                          {readinessMutationPostExecutionObservationGateView.message && (
+                            <span>{readinessMutationPostExecutionObservationGateView.message}</span>
                           )}
                         </>
                       )}
-                      {readinessMutationObservationAcceptanceGate && (
+                      {readinessMutationObservationAcceptanceGateView.show && (
                         <>
-                          <span>
-                            mutation observation acceptance gate: {readinessMutationObservationAcceptanceGate.status || 'BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED'}
-                            {readinessMutationObservationAcceptanceGate.schema ? ` / ${readinessMutationObservationAcceptanceGate.schema}` : ''}
-                            {readinessMutationObservationAcceptanceGate.postExecutionObservationReady !== undefined ? ` / post-execution observation ready ${String(readinessMutationObservationAcceptanceGate.postExecutionObservationReady)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationObservationAcceptanceGate.prerequisitesPassed)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.executionTarget ? ` / ${readinessMutationObservationAcceptanceGate.executionTarget}` : ''}
-                            {readinessMutationObservationAcceptanceGate.acceptancePolicy ? ` / policy ${readinessMutationObservationAcceptanceGate.acceptancePolicy}` : ''}
-                            {readinessMutationObservationAcceptanceGate.sourcePostExecutionObservationGateStatus ? ` / observation status ${readinessMutationObservationAcceptanceGate.sourcePostExecutionObservationGateStatus}` : ''}
-                          </span>
-                          <span>
-                            mutation observation acceptance ids:
-                            {readinessMutationObservationAcceptanceGate.sourceRequestId ? ` source ${readinessMutationObservationAcceptanceGate.sourceRequestId}` : ''}
-                            {readinessMutationObservationAcceptanceGate.releaseAttemptId ? ` / release ${String(readinessMutationObservationAcceptanceGate.releaseAttemptId).slice(0, 8)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.sessionId ? ` / session ${readinessMutationObservationAcceptanceGate.sessionId}` : ''}
-                            {readinessMutationObservationAcceptanceGate.agentId ? ` / agent ${readinessMutationObservationAcceptanceGate.agentId}` : ''}
-                            {readinessMutationObservationAcceptanceGate.workspaceId ? ` / workspace ${readinessMutationObservationAcceptanceGate.workspaceId}` : ''}
-                          </span>
-                          <span>
-                            mutation observation acceptance counts:
-                            {readinessMutationObservationAcceptanceGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationObservationAcceptanceGate.expectedResultCount)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationObservationAcceptanceGate.completedResultCount)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationObservationAcceptanceGate.acceptedResultCount)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationObservationAcceptanceGate.rejectedResultCount)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationObservationAcceptanceGate.intakePersistedResultCount)}` : ''}
-                          </span>
-                          <span>
-                            mutation observation acceptance disabled:
-                            {readinessMutationObservationAcceptanceGate.observationAcceptanceEnabled !== undefined ? ` acceptance ${String(readinessMutationObservationAcceptanceGate.observationAcceptanceEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationObservationAcceptanceGate.intakePersistenceEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationObservationAcceptanceGate.rollbackFallbackExecutionEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationObservationAcceptanceGate.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationObservationAcceptanceGate.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationObservationAcceptanceGate.publicationEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationObservationAcceptanceGate.finalAnswerGenerationEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationObservationAcceptanceGate.postExecutionObservationEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationObservationAcceptanceGate.completedResultPersistenceEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationObservationAcceptanceGate.releaseGateEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationObservationAcceptanceGate.requestCreationEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationObservationAcceptanceGate.pushEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationObservationAcceptanceGate.claimEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationObservationAcceptanceGate.executionEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationObservationAcceptanceGate.writeHelperEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.claimable !== undefined ? ` / claimable ${String(readinessMutationObservationAcceptanceGate.claimable)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationObservationAcceptanceGate.mutationAllowed)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationObservationAcceptanceGate.applyEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.testEnabled !== undefined ? ` / test ${String(readinessMutationObservationAcceptanceGate.testEnabled)}` : ''}
-                            {readinessMutationObservationAcceptanceGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationObservationAcceptanceGate.rollbackRestoreEnabled)}` : ''}
-                          </span>
-                          {readinessMutationObservationAcceptanceGatePolicyChecks.map((item) => (
-                            <span key={`mutation-observation-acceptance-policy-${item.key}`}>
-                              observation acceptance policy {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
-                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
-                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(item.observationAcceptanceEnabled)}` : ''}
-                              {item.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(item.intakePersistenceEnabled)}` : ''}
-                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
-                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
-                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
-                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
-                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
-                            </span>
+                          <span>{readinessMutationObservationAcceptanceGateView.headerText}</span>
+                          <span>{readinessMutationObservationAcceptanceGateView.idsText}</span>
+                          <span>{readinessMutationObservationAcceptanceGateView.countsText}</span>
+                          <span>{readinessMutationObservationAcceptanceGateView.disabledText}</span>
+                          {readinessMutationObservationAcceptanceGateView.policyLines.map((line) => (
+                            <span key={`mutation-observation-acceptance-policy-${line}`}>{line}</span>
                           ))}
-                          {!!readinessMutationObservationAcceptanceGate.blockingKeys?.length && (
-                            <span>mutation observation acceptance blocking keys: {readinessMutationObservationAcceptanceGate.blockingKeys.join(', ')}</span>
+                          {readinessMutationObservationAcceptanceGateView.blockingText && (
+                            <span>{readinessMutationObservationAcceptanceGateView.blockingText}</span>
                           )}
-                          {readinessMutationObservationAcceptanceGate.message && (
-                            <span>{readinessMutationObservationAcceptanceGate.message}</span>
+                          {readinessMutationObservationAcceptanceGateView.message && (
+                            <span>{readinessMutationObservationAcceptanceGateView.message}</span>
                           )}
                         </>
                       )}
@@ -2608,68 +2013,20 @@ function CodeAgentPanel({
                           )}
                         </>
                       )}
-                      {readinessMutationCompletionSummary && (
+                      {readinessMutationCompletionSummaryView.show && (
                         <>
-                          <span>
-                            mutation completion summary: {readinessMutationCompletionSummary.status || 'BLOCKED_COMPLETION_DISABLED'}
-                            {readinessMutationCompletionSummary.schema ? ` / ${readinessMutationCompletionSummary.schema}` : ''}
-                            {readinessMutationCompletionSummary.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationCompletionSummary.prerequisitesPassed)}` : ''}
-                            {readinessMutationCompletionSummary.executionTarget ? ` / ${readinessMutationCompletionSummary.executionTarget}` : ''}
-                          </span>
-                          <span>
-                            mutation completion disabled:
-                            {readinessMutationCompletionSummary.releaseGateEnabled !== undefined ? ` release gate ${String(readinessMutationCompletionSummary.releaseGateEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationCompletionSummary.requestCreationEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.pushEnabled !== undefined ? ` / push ${String(readinessMutationCompletionSummary.pushEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.claimEnabled !== undefined ? ` / claim ${String(readinessMutationCompletionSummary.claimEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationCompletionSummary.writeHelperEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.claimable !== undefined ? ` / claimable ${String(readinessMutationCompletionSummary.claimable)}` : ''}
-                            {readinessMutationCompletionSummary.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationCompletionSummary.mutationAllowed)}` : ''}
-                            {readinessMutationCompletionSummary.applyEnabled !== undefined ? ` / apply ${String(readinessMutationCompletionSummary.applyEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.testEnabled !== undefined ? ` / test ${String(readinessMutationCompletionSummary.testEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationCompletionSummary.rollbackRestoreEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationCompletionSummary.ragFreshnessUpdateEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationCompletionSummary.mutationResultAggregationEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationCompletionSummary.publicationEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationCompletionSummary.finalAnswerGenerationEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationCompletionSummary.finalAnswerCompletionEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationCompletionSummary.finalAnswerDeliveryEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationCompletionSummary.finalAnswerPersistenceEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationCompletionSummary.conversationTurnSaveEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationCompletionSummary.userVisibleCompletionEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationCompletionSummary.finalResponseHandoffEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationCompletionSummary.deliveryHandoffEnabled)}` : ''}
-                            {readinessMutationCompletionSummary.deliveryReceiptEnabled !== undefined ? ` / receipt ${String(readinessMutationCompletionSummary.deliveryReceiptEnabled)}` : ''}
-                          </span>
-                          {readinessMutationCompletionSummaryItems.map((item) => (
-                            <span key={`mutation-completion-${item.key}-${item.status || item.passed}`}>
-                              {item.key}: {item.status || 'UNKNOWN'}
-                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.releaseGateEnabled !== undefined ? ` / release gate ${String(item.releaseGateEnabled)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
-                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
-                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
-                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
-                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
-                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
-                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
-                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
-                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
-                              {item.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(item.deliveryHandoffEnabled)}` : ''}
-                              {item.deliveryReceiptEnabled !== undefined ? ` / receipt ${String(item.deliveryReceiptEnabled)}` : ''}
-                              {item.message ? ` / ${item.message}` : ''}
+                          <span>{readinessMutationCompletionSummaryView.headerText}</span>
+                          <span>{readinessMutationCompletionSummaryView.disabledText}</span>
+                          {readinessMutationCompletionSummaryView.itemLines.map((line) => (
+                            <span key={`mutation-completion-${line}`}>
+                              {line}
                             </span>
                           ))}
-                          {!!readinessMutationCompletionSummary.blockingKeys?.length && (
-                            <span>mutation completion blocking keys: {readinessMutationCompletionSummary.blockingKeys.join(', ')}</span>
+                          {readinessMutationCompletionSummaryView.blockingText && (
+                            <span>{readinessMutationCompletionSummaryView.blockingText}</span>
                           )}
-                          {readinessMutationCompletionSummary.message && (
-                            <span>{readinessMutationCompletionSummary.message}</span>
+                          {readinessMutationCompletionSummaryView.message && (
+                            <span>{readinessMutationCompletionSummaryView.message}</span>
                           )}
                         </>
                       )}

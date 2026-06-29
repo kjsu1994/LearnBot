@@ -98,6 +98,78 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       deliveryHandoffEnabled: false,
       message: 'Mutation final-answer delivery receipt and acknowledgement are disabled.',
     },
+    {
+      key: 'deliveryReceipt',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No delivery receipt may be recorded while delivery receipt is disabled.',
+    },
+    {
+      key: 'finalAnswerDelivery',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No final answer may be delivered while delivery receipt is disabled.',
+    },
+    {
+      key: 'deliveryHandoff',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No delivery handoff may run while delivery receipt is disabled.',
+    },
   ],
   blockingKeys: [
     'deliveryReceiptPolicy',
@@ -138,6 +210,9 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'final-answer delivery receipt policy mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-answer delivery gate must refuse delivery before delivery receipt can be considered.',
   'final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery receipt and acknowledgement are disabled.',
+  'final-answer delivery receipt policy deliveryReceipt: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery receipt may be recorded while delivery receipt is disabled.',
+  'final-answer delivery receipt policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while delivery receipt is disabled.',
+  'final-answer delivery receipt policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while delivery receipt is disabled.',
 ]);
 assert.equal(
   view.blockingText,
@@ -148,3 +223,17 @@ assert.match(view.message, /explicitly refused/);
 const hidden = buildMutationFinalAnswerDeliveryReceiptGateView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.policyLines, []);
+
+const blocked = buildMutationFinalAnswerDeliveryReceiptGateView({
+  policyChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation final-answer delivery receipt is blocked because the disabled final-answer delivery gate is incomplete.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation final-answer delivery receipt gate: BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED'
+);
+assert.deepEqual(blocked.policyLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

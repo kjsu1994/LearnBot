@@ -79,6 +79,42 @@ const view = buildMutationFinalAnswerCompletionGateView({
       finalAnswerCompletionEnabled: false,
       message: 'Mutation final-answer completion and delivery are disabled.',
     },
+    {
+      key: 'finalAnswerCompletion',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      message: 'No final answer may be completed while final-answer completion is disabled.',
+    },
+    {
+      key: 'finalAnswerDelivery',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      message: 'No final answer may be delivered while final-answer delivery is disabled.',
+    },
   ],
   blockingKeys: [
     'finalAnswerCompletionPolicy',
@@ -112,12 +148,31 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'final-answer completion policy mutationFinalAnswerGenerationGate: REFUSED_FINAL_ANSWER_GENERATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / A disabled final-answer generation gate must refuse generation before final-answer completion can be considered.',
   'final-answer completion policy finalAnswerCompletionPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / Mutation final-answer completion and delivery are disabled.',
+  'final-answer completion policy finalAnswerCompletion: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / No final answer may be completed while final-answer completion is disabled.',
+  'final-answer completion policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / No final answer may be delivered while final-answer delivery is disabled.',
 ]);
 assert.equal(
   view.blockingText,
   'mutation final-answer completion blocking keys: finalAnswerCompletionPolicy, finalAnswerCompletion, finalAnswerDelivery, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationFinalAnswerCompletionGateView({
+  status: 'BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation final-answer completion gate: BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED');
+assert.equal(blocked.countsText, 'mutation final-answer completion counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'final-answer completion policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationFinalAnswerCompletionGateView(null);
 assert.equal(hidden.show, false);

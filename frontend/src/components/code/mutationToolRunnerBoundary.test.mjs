@@ -42,6 +42,25 @@ const view = buildMutationToolRunnerBoundaryView({
       mutationAllowed: false,
     },
     {
+      key: 'mutationExecutionGate',
+      status: 'REFUSED_EXECUTION_DISABLED',
+      passed: true,
+      blocking: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      runningTransitionEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
+    },
+    {
       key: 'toolRunnerPolicy',
       status: 'DISABLED',
       passed: false,
@@ -49,6 +68,44 @@ const view = buildMutationToolRunnerBoundaryView({
       runningTransitionEnabled: false,
       toolRunnerEnabled: false,
       mutationAllowed: false,
+    },
+    {
+      key: 'requestRunningTransition',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      runningTransitionEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
+    },
+    {
+      key: 'resultCompletionTransition',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      runningTransitionEnabled: false,
+      executionEnabled: false,
+      toolRunnerEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      resultIntakeEnabled: false,
     },
   ],
   blockingKeys: [
@@ -85,7 +142,10 @@ assert.equal(
 );
 assert.deepEqual(view.checkLines, [
   'tool runner mutationExecutionReadinessBoundary: REFUSED_EXECUTION_READINESS_DISABLED / passed true / blocking false / tool runner false / mutation false',
+  'tool runner mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
   'tool runner toolRunnerPolicy: DISABLED / passed false / blocking true / running transition false / tool runner false / mutation false',
+  'tool runner requestRunningTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'tool runner resultCompletionTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,
@@ -96,3 +156,18 @@ assert.match(view.message, /runner invocation remains disabled/);
 const hidden = buildMutationToolRunnerBoundaryView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.checkLines, []);
+
+const blocked = buildMutationToolRunnerBoundaryView({
+  status: 'BLOCKED_TOOL_RUNNER_DISABLED',
+  runnerChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation tool-runner boundary is blocked by incomplete disabled execution readiness or execution gate inputs.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation tool runner boundary: BLOCKED_TOOL_RUNNER_DISABLED'
+);
+assert.deepEqual(blocked.checkLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

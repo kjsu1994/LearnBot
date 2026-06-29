@@ -95,6 +95,75 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       deliveryHandoffEnabled: false,
       message: 'Mutation final-answer delivery and delivery handoff are disabled.',
     },
+    {
+      key: 'finalAnswerDelivery',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No final answer may be delivered while final-answer delivery is disabled.',
+    },
+    {
+      key: 'deliveryHandoff',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No delivery handoff may run while final-answer delivery is disabled.',
+    },
+    {
+      key: 'finalResponseHandoff',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No final response may be handed off while final-answer delivery is disabled.',
+    },
   ],
   blockingKeys: [
     'finalAnswerDeliveryPolicy',
@@ -134,6 +203,9 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'final-answer delivery policy mutationFinalResponseHandoffGate: REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-response handoff gate must refuse handoff before final-answer delivery can be considered.',
   'final-answer delivery policy finalAnswerDeliveryPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery and delivery handoff are disabled.',
+  'final-answer delivery policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while final-answer delivery is disabled.',
+  'final-answer delivery policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while final-answer delivery is disabled.',
+  'final-answer delivery policy finalResponseHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final response may be handed off while final-answer delivery is disabled.',
 ]);
 assert.equal(
   view.blockingText,
@@ -144,3 +216,17 @@ assert.match(view.message, /explicitly refused/);
 const hidden = buildMutationFinalAnswerDeliveryGateView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.policyLines, []);
+
+const blocked = buildMutationFinalAnswerDeliveryGateView({
+  policyChecks: null,
+  blockingKeys: null,
+  message: 'Local Agent mutation final-answer delivery is blocked because the disabled final-response handoff gate is incomplete.',
+});
+assert.equal(blocked.show, true);
+assert.equal(
+  blocked.headerText,
+  'mutation final-answer delivery gate: BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED'
+);
+assert.deepEqual(blocked.policyLines, []);
+assert.equal(blocked.blockingText, '');
+assert.match(blocked.message, /blocked/);

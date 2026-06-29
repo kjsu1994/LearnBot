@@ -77,6 +77,40 @@ const view = buildMutationPublicationGateView({
       finalAnswerGenerationEnabled: false,
       message: 'Mutation publication is disabled.',
     },
+    {
+      key: 'publication',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'No mutation publication may run while publication is disabled.',
+    },
+    {
+      key: 'finalAnswerGeneration',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final-answer generation remains disabled until publication state is modeled.',
+    },
   ],
   blockingKeys: [
     'publicationPolicy',
@@ -109,12 +143,31 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'publication policy mutationResultAggregationGate: REFUSED_RESULT_AGGREGATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / A disabled result aggregation gate must refuse aggregation before publication can be considered.',
   'publication policy publicationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Mutation publication is disabled.',
+  'publication policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / No mutation publication may run while publication is disabled.',
+  'publication policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until publication state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
   'mutation publication blocking keys: publicationPolicy, publication, finalAnswerGeneration, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationPublicationGateView({
+  status: 'BLOCKED_PUBLICATION_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation publication gate: BLOCKED_PUBLICATION_DISABLED');
+assert.equal(blocked.countsText, 'mutation publication counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'publication policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationPublicationGateView(null);
 assert.equal(hidden.show, false);

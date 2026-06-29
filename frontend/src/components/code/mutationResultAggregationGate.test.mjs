@@ -76,6 +76,57 @@ const view = buildMutationResultAggregationGateView({
       finalAnswerGenerationEnabled: false,
       message: 'Mutation result aggregation is disabled.',
     },
+    {
+      key: 'resultAggregation',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'No mutation result aggregation may run while aggregation is disabled.',
+    },
+    {
+      key: 'publication',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final answer publication remains disabled until aggregation state is modeled.',
+    },
+    {
+      key: 'finalAnswerGeneration',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      message: 'Final-answer generation remains disabled until aggregation state is modeled.',
+    },
   ],
   blockingKeys: [
     'resultAggregationPolicy',
@@ -110,12 +161,32 @@ assert.equal(
 assert.deepEqual(view.policyLines, [
   'result aggregation policy mutationRagFreshnessGate: REFUSED_RAG_FRESHNESS_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / A disabled RAG freshness gate must refuse freshness updates before result aggregation can be considered.',
   'result aggregation policy resultAggregationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Mutation result aggregation is disabled.',
+  'result aggregation policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / No mutation result aggregation may run while aggregation is disabled.',
+  'result aggregation policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until aggregation state is modeled.',
+  'result aggregation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until aggregation state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
   'mutation result aggregation blocking keys: resultAggregationPolicy, resultAggregation, publication, finalAnswerGeneration, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
+
+const blocked = buildMutationResultAggregationGateView({
+  status: 'BLOCKED_RESULT_AGGREGATION_DISABLED',
+  expectedResultCount: 0,
+  intakePersistedResultCount: 0,
+  policyChecks: [
+    {
+      key: 'unknownPolicy',
+    },
+  ],
+});
+
+assert.equal(blocked.headerText, 'mutation result aggregation gate: BLOCKED_RESULT_AGGREGATION_DISABLED');
+assert.equal(blocked.countsText, 'mutation result aggregation counts: expected 0 / intake persisted 0');
+assert.deepEqual(blocked.policyLines, [
+  'result aggregation policy unknownPolicy: UNKNOWN',
+]);
 
 const hidden = buildMutationResultAggregationGateView(null);
 assert.equal(hidden.show, false);
