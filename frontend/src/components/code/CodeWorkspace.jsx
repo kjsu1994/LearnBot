@@ -594,6 +594,118 @@ function CodeAgentPanel({
   )
     ? readinessMutationRequestClaimGate.policyChecks
     : [];
+  const readinessMutationExecutionGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationExecutionGate || null;
+  const readinessMutationExecutionGatePolicyChecks = Array.isArray(
+    readinessMutationExecutionGate?.policyChecks
+  )
+    ? readinessMutationExecutionGate.policyChecks
+    : [];
+  const readinessMutationPostExecutionObservationGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationPostExecutionObservationGate || null;
+  const readinessMutationPostExecutionObservationGatePolicyChecks = Array.isArray(
+    readinessMutationPostExecutionObservationGate?.policyChecks
+  )
+    ? readinessMutationPostExecutionObservationGate.policyChecks
+    : [];
+  const readinessMutationObservationAcceptanceGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationObservationAcceptanceGate || null;
+  const readinessMutationObservationAcceptanceGatePolicyChecks = Array.isArray(
+    readinessMutationObservationAcceptanceGate?.policyChecks
+  )
+    ? readinessMutationObservationAcceptanceGate.policyChecks
+    : [];
+  const readinessMutationResultIntakePersistenceGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationResultIntakePersistenceGate || null;
+  const readinessMutationResultIntakePersistenceGatePolicyChecks = Array.isArray(
+    readinessMutationResultIntakePersistenceGate?.policyChecks
+  )
+    ? readinessMutationResultIntakePersistenceGate.policyChecks
+    : [];
+  const readinessMutationRollbackFallbackGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRollbackFallbackGate || null;
+  const readinessMutationRollbackFallbackGatePolicyChecks = Array.isArray(
+    readinessMutationRollbackFallbackGate?.policyChecks
+  )
+    ? readinessMutationRollbackFallbackGate.policyChecks
+    : [];
+  const readinessMutationRagFreshnessGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationRagFreshnessGate || null;
+  const readinessMutationRagFreshnessGatePolicyChecks = Array.isArray(
+    readinessMutationRagFreshnessGate?.policyChecks
+  )
+    ? readinessMutationRagFreshnessGate.policyChecks
+    : [];
+  const readinessMutationResultAggregationGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationResultAggregationGate || null;
+  const readinessMutationResultAggregationGatePolicyChecks = Array.isArray(
+    readinessMutationResultAggregationGate?.policyChecks
+  )
+    ? readinessMutationResultAggregationGate.policyChecks
+    : [];
+  const readinessMutationPublicationGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationPublicationGate || null;
+  const readinessMutationPublicationGatePolicyChecks = Array.isArray(
+    readinessMutationPublicationGate?.policyChecks
+  )
+    ? readinessMutationPublicationGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerGenerationGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerGenerationGate || null;
+  const readinessMutationFinalAnswerGenerationGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerGenerationGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerGenerationGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerCompletionGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerCompletionGate || null;
+  const readinessMutationFinalAnswerCompletionGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerCompletionGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerCompletionGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerPersistenceGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerPersistenceGate || null;
+  const readinessMutationFinalAnswerPersistenceGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerPersistenceGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerPersistenceGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerConversationSaveGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerConversationSaveGate || null;
+  const readinessMutationFinalAnswerConversationSaveGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerConversationSaveGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerConversationSaveGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerUserVisibleCompletionGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerUserVisibleCompletionGate || null;
+  const readinessMutationFinalAnswerUserVisibleCompletionGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerUserVisibleCompletionGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerUserVisibleCompletionGate.policyChecks
+    : [];
+  const readinessMutationFinalResponseHandoffGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalResponseHandoffGate || null;
+  const readinessMutationFinalResponseHandoffGatePolicyChecks = Array.isArray(
+    readinessMutationFinalResponseHandoffGate?.policyChecks
+  )
+    ? readinessMutationFinalResponseHandoffGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerDeliveryGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerDeliveryGate || null;
+  const readinessMutationFinalAnswerDeliveryGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerDeliveryGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerDeliveryGate.policyChecks
+    : [];
+  const readinessMutationFinalAnswerDeliveryReceiptGate =
+    readinessReleaseAttemptModel?.latestAttempt?.mutationFinalAnswerDeliveryReceiptGate || null;
+  const readinessMutationFinalAnswerDeliveryReceiptGatePolicyChecks = Array.isArray(
+    readinessMutationFinalAnswerDeliveryReceiptGate?.policyChecks
+  )
+    ? readinessMutationFinalAnswerDeliveryReceiptGate.policyChecks
+    : [];
   const readinessMutationCompletionSummary = readinessReleaseAttemptModel?.latestAttempt?.mutationCompletionSummary || null;
   const readinessMutationCompletionSummaryItems = Array.isArray(readinessMutationCompletionSummary?.items)
     ? readinessMutationCompletionSummary.items
@@ -1999,6 +2111,1343 @@ function CodeAgentPanel({
                           )}
                         </>
                       )}
+                      {readinessMutationExecutionGate && (
+                        <>
+                          <span>
+                            mutation execution gate: {readinessMutationExecutionGate.status || 'BLOCKED_EXECUTION_DISABLED'}
+                            {readinessMutationExecutionGate.schema ? ` / ${readinessMutationExecutionGate.schema}` : ''}
+                            {readinessMutationExecutionGate.claimGateReady !== undefined ? ` / claim gate ready ${String(readinessMutationExecutionGate.claimGateReady)}` : ''}
+                            {readinessMutationExecutionGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationExecutionGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationExecutionGate.executionTarget ? ` / ${readinessMutationExecutionGate.executionTarget}` : ''}
+                            {readinessMutationExecutionGate.executionPolicy ? ` / policy ${readinessMutationExecutionGate.executionPolicy}` : ''}
+                            {readinessMutationExecutionGate.toolRunnerInvocationEnabled !== undefined ? ` / tool runner ${String(readinessMutationExecutionGate.toolRunnerInvocationEnabled)}` : ''}
+                            {readinessMutationExecutionGate.writeHelperInvocationEnabled !== undefined ? ` / write helper invocation ${String(readinessMutationExecutionGate.writeHelperInvocationEnabled)}` : ''}
+                            {readinessMutationExecutionGate.sourceClaimGateStatus ? ` / claim status ${readinessMutationExecutionGate.sourceClaimGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation execution gate ids:
+                            {readinessMutationExecutionGate.sourceRequestId ? ` source ${readinessMutationExecutionGate.sourceRequestId}` : ''}
+                            {readinessMutationExecutionGate.releaseAttemptId ? ` / release ${String(readinessMutationExecutionGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationExecutionGate.sessionId ? ` / session ${readinessMutationExecutionGate.sessionId}` : ''}
+                            {readinessMutationExecutionGate.agentId ? ` / agent ${readinessMutationExecutionGate.agentId}` : ''}
+                            {readinessMutationExecutionGate.workspaceId ? ` / workspace ${readinessMutationExecutionGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation execution counts:
+                            {readinessMutationExecutionGate.expectedRequestCount !== undefined ? ` expected ${String(readinessMutationExecutionGate.expectedRequestCount)}` : ''}
+                            {readinessMutationExecutionGate.persistedRequestCount !== undefined ? ` / persisted ${String(readinessMutationExecutionGate.persistedRequestCount)}` : ''}
+                            {readinessMutationExecutionGate.pushedRequestCount !== undefined ? ` / pushed ${String(readinessMutationExecutionGate.pushedRequestCount)}` : ''}
+                            {readinessMutationExecutionGate.claimableRequestCount !== undefined ? ` / claimable ${String(readinessMutationExecutionGate.claimableRequestCount)}` : ''}
+                            {readinessMutationExecutionGate.runningRequestCount !== undefined ? ` / running ${String(readinessMutationExecutionGate.runningRequestCount)}` : ''}
+                            {readinessMutationExecutionGate.completedRequestCount !== undefined ? ` / completed ${String(readinessMutationExecutionGate.completedRequestCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation execution disabled:
+                            {readinessMutationExecutionGate.executionGateEnabled !== undefined ? ` execution gate ${String(readinessMutationExecutionGate.executionGateEnabled)}` : ''}
+                            {readinessMutationExecutionGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationExecutionGate.executionEnabled)}` : ''}
+                            {readinessMutationExecutionGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationExecutionGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationExecutionGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationExecutionGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationExecutionGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationExecutionGate.pushEnabled)}` : ''}
+                            {readinessMutationExecutionGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationExecutionGate.claimEnabled)}` : ''}
+                            {readinessMutationExecutionGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationExecutionGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationExecutionGate.claimable !== undefined ? ` / claimable ${String(readinessMutationExecutionGate.claimable)}` : ''}
+                            {readinessMutationExecutionGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationExecutionGate.mutationAllowed)}` : ''}
+                            {readinessMutationExecutionGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationExecutionGate.applyEnabled)}` : ''}
+                            {readinessMutationExecutionGate.testEnabled !== undefined ? ` / test ${String(readinessMutationExecutionGate.testEnabled)}` : ''}
+                            {readinessMutationExecutionGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationExecutionGate.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationExecutionGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationExecutionGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationExecutionGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationExecutionGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationExecutionGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationExecutionGate.publicationEnabled)}` : ''}
+                            {readinessMutationExecutionGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationExecutionGate.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationExecutionGatePolicyChecks.map((item) => (
+                            <span key={`mutation-execution-policy-${item.key}`}>
+                              execution policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.running !== undefined ? ` / running ${String(item.running)}` : ''}
+                              {item.completed !== undefined ? ` / completed ${String(item.completed)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.applyEnabled !== undefined ? ` / apply ${String(item.applyEnabled)}` : ''}
+                              {item.testEnabled !== undefined ? ` / test ${String(item.testEnabled)}` : ''}
+                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationExecutionGate.blockingKeys?.length && (
+                            <span>mutation execution blocking keys: {readinessMutationExecutionGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationExecutionGate.message && (
+                            <span>{readinessMutationExecutionGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationPostExecutionObservationGate && (
+                        <>
+                          <span>
+                            mutation post-execution observation gate: {readinessMutationPostExecutionObservationGate.status || 'BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED'}
+                            {readinessMutationPostExecutionObservationGate.schema ? ` / ${readinessMutationPostExecutionObservationGate.schema}` : ''}
+                            {readinessMutationPostExecutionObservationGate.executionGateReady !== undefined ? ` / execution gate ready ${String(readinessMutationPostExecutionObservationGate.executionGateReady)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationPostExecutionObservationGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.executionTarget ? ` / ${readinessMutationPostExecutionObservationGate.executionTarget}` : ''}
+                            {readinessMutationPostExecutionObservationGate.observationPolicy ? ` / policy ${readinessMutationPostExecutionObservationGate.observationPolicy}` : ''}
+                            {readinessMutationPostExecutionObservationGate.sourceExecutionGateStatus ? ` / execution status ${readinessMutationPostExecutionObservationGate.sourceExecutionGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation post-execution observation ids:
+                            {readinessMutationPostExecutionObservationGate.sourceRequestId ? ` source ${readinessMutationPostExecutionObservationGate.sourceRequestId}` : ''}
+                            {readinessMutationPostExecutionObservationGate.releaseAttemptId ? ` / release ${String(readinessMutationPostExecutionObservationGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.sessionId ? ` / session ${readinessMutationPostExecutionObservationGate.sessionId}` : ''}
+                            {readinessMutationPostExecutionObservationGate.agentId ? ` / agent ${readinessMutationPostExecutionObservationGate.agentId}` : ''}
+                            {readinessMutationPostExecutionObservationGate.workspaceId ? ` / workspace ${readinessMutationPostExecutionObservationGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation post-execution observation counts:
+                            {readinessMutationPostExecutionObservationGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationPostExecutionObservationGate.expectedResultCount)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationPostExecutionObservationGate.completedResultCount)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationPostExecutionObservationGate.acceptedResultCount)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationPostExecutionObservationGate.rejectedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation post-execution observation disabled:
+                            {readinessMutationPostExecutionObservationGate.postExecutionObservationEnabled !== undefined ? ` observation ${String(readinessMutationPostExecutionObservationGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationPostExecutionObservationGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationPostExecutionObservationGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationPostExecutionObservationGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationPostExecutionObservationGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationPostExecutionObservationGate.pushEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationPostExecutionObservationGate.claimEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationPostExecutionObservationGate.executionEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationPostExecutionObservationGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationPostExecutionObservationGate.claimable)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationPostExecutionObservationGate.mutationAllowed)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationPostExecutionObservationGate.applyEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationPostExecutionObservationGate.testEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationPostExecutionObservationGate.rollbackRestoreEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationPostExecutionObservationGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationPostExecutionObservationGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationPostExecutionObservationGate.publicationEnabled)}` : ''}
+                            {readinessMutationPostExecutionObservationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationPostExecutionObservationGate.finalAnswerGenerationEnabled)}` : ''}
+                          </span>
+                          {readinessMutationPostExecutionObservationGatePolicyChecks.map((item) => (
+                            <span key={`mutation-post-execution-observation-policy-${item.key}`}>
+                              post-execution observation policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationPostExecutionObservationGate.blockingKeys?.length && (
+                            <span>mutation post-execution observation blocking keys: {readinessMutationPostExecutionObservationGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationPostExecutionObservationGate.message && (
+                            <span>{readinessMutationPostExecutionObservationGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationObservationAcceptanceGate && (
+                        <>
+                          <span>
+                            mutation observation acceptance gate: {readinessMutationObservationAcceptanceGate.status || 'BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED'}
+                            {readinessMutationObservationAcceptanceGate.schema ? ` / ${readinessMutationObservationAcceptanceGate.schema}` : ''}
+                            {readinessMutationObservationAcceptanceGate.postExecutionObservationReady !== undefined ? ` / post-execution observation ready ${String(readinessMutationObservationAcceptanceGate.postExecutionObservationReady)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationObservationAcceptanceGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.executionTarget ? ` / ${readinessMutationObservationAcceptanceGate.executionTarget}` : ''}
+                            {readinessMutationObservationAcceptanceGate.acceptancePolicy ? ` / policy ${readinessMutationObservationAcceptanceGate.acceptancePolicy}` : ''}
+                            {readinessMutationObservationAcceptanceGate.sourcePostExecutionObservationGateStatus ? ` / observation status ${readinessMutationObservationAcceptanceGate.sourcePostExecutionObservationGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation observation acceptance ids:
+                            {readinessMutationObservationAcceptanceGate.sourceRequestId ? ` source ${readinessMutationObservationAcceptanceGate.sourceRequestId}` : ''}
+                            {readinessMutationObservationAcceptanceGate.releaseAttemptId ? ` / release ${String(readinessMutationObservationAcceptanceGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.sessionId ? ` / session ${readinessMutationObservationAcceptanceGate.sessionId}` : ''}
+                            {readinessMutationObservationAcceptanceGate.agentId ? ` / agent ${readinessMutationObservationAcceptanceGate.agentId}` : ''}
+                            {readinessMutationObservationAcceptanceGate.workspaceId ? ` / workspace ${readinessMutationObservationAcceptanceGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation observation acceptance counts:
+                            {readinessMutationObservationAcceptanceGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationObservationAcceptanceGate.expectedResultCount)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationObservationAcceptanceGate.completedResultCount)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationObservationAcceptanceGate.acceptedResultCount)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationObservationAcceptanceGate.rejectedResultCount)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationObservationAcceptanceGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation observation acceptance disabled:
+                            {readinessMutationObservationAcceptanceGate.observationAcceptanceEnabled !== undefined ? ` acceptance ${String(readinessMutationObservationAcceptanceGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationObservationAcceptanceGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationObservationAcceptanceGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationObservationAcceptanceGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationObservationAcceptanceGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationObservationAcceptanceGate.publicationEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationObservationAcceptanceGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationObservationAcceptanceGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationObservationAcceptanceGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationObservationAcceptanceGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationObservationAcceptanceGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationObservationAcceptanceGate.pushEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationObservationAcceptanceGate.claimEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationObservationAcceptanceGate.executionEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationObservationAcceptanceGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.claimable !== undefined ? ` / claimable ${String(readinessMutationObservationAcceptanceGate.claimable)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationObservationAcceptanceGate.mutationAllowed)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationObservationAcceptanceGate.applyEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.testEnabled !== undefined ? ` / test ${String(readinessMutationObservationAcceptanceGate.testEnabled)}` : ''}
+                            {readinessMutationObservationAcceptanceGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationObservationAcceptanceGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationObservationAcceptanceGatePolicyChecks.map((item) => (
+                            <span key={`mutation-observation-acceptance-policy-${item.key}`}>
+                              observation acceptance policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(item.observationAcceptanceEnabled)}` : ''}
+                              {item.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(item.intakePersistenceEnabled)}` : ''}
+                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationObservationAcceptanceGate.blockingKeys?.length && (
+                            <span>mutation observation acceptance blocking keys: {readinessMutationObservationAcceptanceGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationObservationAcceptanceGate.message && (
+                            <span>{readinessMutationObservationAcceptanceGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationResultIntakePersistenceGate && (
+                        <>
+                          <span>
+                            mutation result intake persistence gate: {readinessMutationResultIntakePersistenceGate.status || 'BLOCKED_INTAKE_PERSISTENCE_DISABLED'}
+                            {readinessMutationResultIntakePersistenceGate.schema ? ` / ${readinessMutationResultIntakePersistenceGate.schema}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.observationAcceptanceReady !== undefined ? ` / observation acceptance ready ${String(readinessMutationResultIntakePersistenceGate.observationAcceptanceReady)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationResultIntakePersistenceGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.executionTarget ? ` / ${readinessMutationResultIntakePersistenceGate.executionTarget}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.intakePersistencePolicy ? ` / policy ${readinessMutationResultIntakePersistenceGate.intakePersistencePolicy}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.sourceObservationAcceptanceGateStatus ? ` / acceptance status ${readinessMutationResultIntakePersistenceGate.sourceObservationAcceptanceGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation result intake persistence ids:
+                            {readinessMutationResultIntakePersistenceGate.sourceRequestId ? ` source ${readinessMutationResultIntakePersistenceGate.sourceRequestId}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.releaseAttemptId ? ` / release ${String(readinessMutationResultIntakePersistenceGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.sessionId ? ` / session ${readinessMutationResultIntakePersistenceGate.sessionId}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.agentId ? ` / agent ${readinessMutationResultIntakePersistenceGate.agentId}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.workspaceId ? ` / workspace ${readinessMutationResultIntakePersistenceGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation result intake persistence counts:
+                            {readinessMutationResultIntakePersistenceGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationResultIntakePersistenceGate.expectedResultCount)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationResultIntakePersistenceGate.completedResultCount)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationResultIntakePersistenceGate.acceptedResultCount)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationResultIntakePersistenceGate.rejectedResultCount)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationResultIntakePersistenceGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation result intake persistence disabled:
+                            {readinessMutationResultIntakePersistenceGate.intakePersistenceEnabled !== undefined ? ` intake persistence ${String(readinessMutationResultIntakePersistenceGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationResultIntakePersistenceGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationResultIntakePersistenceGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationResultIntakePersistenceGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationResultIntakePersistenceGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationResultIntakePersistenceGate.publicationEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationResultIntakePersistenceGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationResultIntakePersistenceGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationResultIntakePersistenceGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationResultIntakePersistenceGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationResultIntakePersistenceGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationResultIntakePersistenceGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationResultIntakePersistenceGate.pushEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationResultIntakePersistenceGate.claimEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationResultIntakePersistenceGate.executionEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationResultIntakePersistenceGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.claimable !== undefined ? ` / claimable ${String(readinessMutationResultIntakePersistenceGate.claimable)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationResultIntakePersistenceGate.mutationAllowed)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationResultIntakePersistenceGate.applyEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.testEnabled !== undefined ? ` / test ${String(readinessMutationResultIntakePersistenceGate.testEnabled)}` : ''}
+                            {readinessMutationResultIntakePersistenceGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationResultIntakePersistenceGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationResultIntakePersistenceGatePolicyChecks.map((item) => (
+                            <span key={`mutation-result-intake-persistence-policy-${item.key}`}>
+                              result intake persistence policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(item.intakePersistenceEnabled)}` : ''}
+                              {item.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(item.acceptedObservationPersistenceEnabled)}` : ''}
+                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationResultIntakePersistenceGate.blockingKeys?.length && (
+                            <span>mutation result intake persistence blocking keys: {readinessMutationResultIntakePersistenceGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationResultIntakePersistenceGate.message && (
+                            <span>{readinessMutationResultIntakePersistenceGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRollbackFallbackGate && (
+                        <>
+                          <span>
+                            mutation rollback fallback gate: {readinessMutationRollbackFallbackGate.status || 'BLOCKED_ROLLBACK_FALLBACK_DISABLED'}
+                            {readinessMutationRollbackFallbackGate.schema ? ` / ${readinessMutationRollbackFallbackGate.schema}` : ''}
+                            {readinessMutationRollbackFallbackGate.intakePersistenceReady !== undefined ? ` / intake persistence ready ${String(readinessMutationRollbackFallbackGate.intakePersistenceReady)}` : ''}
+                            {readinessMutationRollbackFallbackGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRollbackFallbackGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationRollbackFallbackGate.executionTarget ? ` / ${readinessMutationRollbackFallbackGate.executionTarget}` : ''}
+                            {readinessMutationRollbackFallbackGate.rollbackFallbackPolicy ? ` / policy ${readinessMutationRollbackFallbackGate.rollbackFallbackPolicy}` : ''}
+                            {readinessMutationRollbackFallbackGate.sourceResultIntakePersistenceGateStatus ? ` / intake status ${readinessMutationRollbackFallbackGate.sourceResultIntakePersistenceGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation rollback fallback ids:
+                            {readinessMutationRollbackFallbackGate.sourceRequestId ? ` source ${readinessMutationRollbackFallbackGate.sourceRequestId}` : ''}
+                            {readinessMutationRollbackFallbackGate.releaseAttemptId ? ` / release ${String(readinessMutationRollbackFallbackGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRollbackFallbackGate.sessionId ? ` / session ${readinessMutationRollbackFallbackGate.sessionId}` : ''}
+                            {readinessMutationRollbackFallbackGate.agentId ? ` / agent ${readinessMutationRollbackFallbackGate.agentId}` : ''}
+                            {readinessMutationRollbackFallbackGate.workspaceId ? ` / workspace ${readinessMutationRollbackFallbackGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation rollback fallback counts:
+                            {readinessMutationRollbackFallbackGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationRollbackFallbackGate.expectedResultCount)}` : ''}
+                            {readinessMutationRollbackFallbackGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationRollbackFallbackGate.completedResultCount)}` : ''}
+                            {readinessMutationRollbackFallbackGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationRollbackFallbackGate.acceptedResultCount)}` : ''}
+                            {readinessMutationRollbackFallbackGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationRollbackFallbackGate.rejectedResultCount)}` : ''}
+                            {readinessMutationRollbackFallbackGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationRollbackFallbackGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation rollback fallback disabled:
+                            {readinessMutationRollbackFallbackGate.rollbackFallbackExecutionEnabled !== undefined ? ` rollback fallback ${String(readinessMutationRollbackFallbackGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.rollbackFallbackInvocationEnabled !== undefined ? ` / rollback invocation ${String(readinessMutationRollbackFallbackGate.rollbackFallbackInvocationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationRollbackFallbackGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRollbackFallbackGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRollbackFallbackGate.publicationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRollbackFallbackGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationRollbackFallbackGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationRollbackFallbackGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationRollbackFallbackGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationRollbackFallbackGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationRollbackFallbackGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRollbackFallbackGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRollbackFallbackGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRollbackFallbackGate.pushEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRollbackFallbackGate.claimEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationRollbackFallbackGate.executionEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRollbackFallbackGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRollbackFallbackGate.claimable)}` : ''}
+                            {readinessMutationRollbackFallbackGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRollbackFallbackGate.mutationAllowed)}` : ''}
+                            {readinessMutationRollbackFallbackGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRollbackFallbackGate.applyEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRollbackFallbackGate.testEnabled)}` : ''}
+                            {readinessMutationRollbackFallbackGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRollbackFallbackGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationRollbackFallbackGatePolicyChecks.map((item) => (
+                            <span key={`mutation-rollback-fallback-policy-${item.key}`}>
+                              rollback fallback policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(item.rollbackFallbackExecutionEnabled)}` : ''}
+                              {item.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(item.rollbackRestoreEnabled)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRollbackFallbackGate.blockingKeys?.length && (
+                            <span>mutation rollback fallback blocking keys: {readinessMutationRollbackFallbackGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRollbackFallbackGate.message && (
+                            <span>{readinessMutationRollbackFallbackGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationRagFreshnessGate && (
+                        <>
+                          <span>
+                            mutation RAG freshness gate: {readinessMutationRagFreshnessGate.status || 'BLOCKED_RAG_FRESHNESS_DISABLED'}
+                            {readinessMutationRagFreshnessGate.schema ? ` / ${readinessMutationRagFreshnessGate.schema}` : ''}
+                            {readinessMutationRagFreshnessGate.rollbackFallbackReady !== undefined ? ` / rollback fallback ready ${String(readinessMutationRagFreshnessGate.rollbackFallbackReady)}` : ''}
+                            {readinessMutationRagFreshnessGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationRagFreshnessGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationRagFreshnessGate.executionTarget ? ` / ${readinessMutationRagFreshnessGate.executionTarget}` : ''}
+                            {readinessMutationRagFreshnessGate.ragFreshnessPolicy ? ` / policy ${readinessMutationRagFreshnessGate.ragFreshnessPolicy}` : ''}
+                            {readinessMutationRagFreshnessGate.sourceRollbackFallbackGateStatus ? ` / rollback fallback status ${readinessMutationRagFreshnessGate.sourceRollbackFallbackGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation RAG freshness ids:
+                            {readinessMutationRagFreshnessGate.sourceRequestId ? ` source ${readinessMutationRagFreshnessGate.sourceRequestId}` : ''}
+                            {readinessMutationRagFreshnessGate.releaseAttemptId ? ` / release ${String(readinessMutationRagFreshnessGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationRagFreshnessGate.sessionId ? ` / session ${readinessMutationRagFreshnessGate.sessionId}` : ''}
+                            {readinessMutationRagFreshnessGate.agentId ? ` / agent ${readinessMutationRagFreshnessGate.agentId}` : ''}
+                            {readinessMutationRagFreshnessGate.workspaceId ? ` / workspace ${readinessMutationRagFreshnessGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation RAG freshness counts:
+                            {readinessMutationRagFreshnessGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationRagFreshnessGate.expectedResultCount)}` : ''}
+                            {readinessMutationRagFreshnessGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationRagFreshnessGate.completedResultCount)}` : ''}
+                            {readinessMutationRagFreshnessGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationRagFreshnessGate.acceptedResultCount)}` : ''}
+                            {readinessMutationRagFreshnessGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationRagFreshnessGate.rejectedResultCount)}` : ''}
+                            {readinessMutationRagFreshnessGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationRagFreshnessGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation RAG freshness disabled:
+                            {readinessMutationRagFreshnessGate.ragFreshnessUpdateEnabled !== undefined ? ` rag freshness ${String(readinessMutationRagFreshnessGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.ragFreshnessUpdateInvocationEnabled !== undefined ? ` / freshness invocation ${String(readinessMutationRagFreshnessGate.ragFreshnessUpdateInvocationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationRagFreshnessGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationRagFreshnessGate.publicationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationRagFreshnessGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationRagFreshnessGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationRagFreshnessGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationRagFreshnessGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationRagFreshnessGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationRagFreshnessGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationRagFreshnessGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationRagFreshnessGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationRagFreshnessGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationRagFreshnessGate.pushEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationRagFreshnessGate.claimEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationRagFreshnessGate.executionEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationRagFreshnessGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.claimable !== undefined ? ` / claimable ${String(readinessMutationRagFreshnessGate.claimable)}` : ''}
+                            {readinessMutationRagFreshnessGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationRagFreshnessGate.mutationAllowed)}` : ''}
+                            {readinessMutationRagFreshnessGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationRagFreshnessGate.applyEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.testEnabled !== undefined ? ` / test ${String(readinessMutationRagFreshnessGate.testEnabled)}` : ''}
+                            {readinessMutationRagFreshnessGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationRagFreshnessGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationRagFreshnessGatePolicyChecks.map((item) => (
+                            <span key={`mutation-rag-freshness-policy-${item.key}`}>
+                              RAG freshness policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(item.ragFreshnessUpdateEnabled)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationRagFreshnessGate.blockingKeys?.length && (
+                            <span>mutation RAG freshness blocking keys: {readinessMutationRagFreshnessGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationRagFreshnessGate.message && (
+                            <span>{readinessMutationRagFreshnessGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationResultAggregationGate && (
+                        <>
+                          <span>
+                            mutation result aggregation gate: {readinessMutationResultAggregationGate.status || 'BLOCKED_RESULT_AGGREGATION_DISABLED'}
+                            {readinessMutationResultAggregationGate.schema ? ` / ${readinessMutationResultAggregationGate.schema}` : ''}
+                            {readinessMutationResultAggregationGate.ragFreshnessReady !== undefined ? ` / RAG freshness ready ${String(readinessMutationResultAggregationGate.ragFreshnessReady)}` : ''}
+                            {readinessMutationResultAggregationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationResultAggregationGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationResultAggregationGate.executionTarget ? ` / ${readinessMutationResultAggregationGate.executionTarget}` : ''}
+                            {readinessMutationResultAggregationGate.resultAggregationPolicy ? ` / policy ${readinessMutationResultAggregationGate.resultAggregationPolicy}` : ''}
+                            {readinessMutationResultAggregationGate.sourceRagFreshnessGateStatus ? ` / RAG freshness status ${readinessMutationResultAggregationGate.sourceRagFreshnessGateStatus}` : ''}
+                          </span>
+                          <span>
+                            mutation result aggregation ids:
+                            {readinessMutationResultAggregationGate.sourceRequestId ? ` source ${readinessMutationResultAggregationGate.sourceRequestId}` : ''}
+                            {readinessMutationResultAggregationGate.releaseAttemptId ? ` / release ${String(readinessMutationResultAggregationGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationResultAggregationGate.sessionId ? ` / session ${readinessMutationResultAggregationGate.sessionId}` : ''}
+                            {readinessMutationResultAggregationGate.agentId ? ` / agent ${readinessMutationResultAggregationGate.agentId}` : ''}
+                            {readinessMutationResultAggregationGate.workspaceId ? ` / workspace ${readinessMutationResultAggregationGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation result aggregation counts:
+                            {readinessMutationResultAggregationGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationResultAggregationGate.expectedResultCount)}` : ''}
+                            {readinessMutationResultAggregationGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationResultAggregationGate.completedResultCount)}` : ''}
+                            {readinessMutationResultAggregationGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationResultAggregationGate.acceptedResultCount)}` : ''}
+                            {readinessMutationResultAggregationGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationResultAggregationGate.rejectedResultCount)}` : ''}
+                            {readinessMutationResultAggregationGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationResultAggregationGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation result aggregation disabled:
+                            {readinessMutationResultAggregationGate.mutationResultAggregationEnabled !== undefined ? ` result aggregation ${String(readinessMutationResultAggregationGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.resultAggregationInvocationEnabled !== undefined ? ` / aggregation invocation ${String(readinessMutationResultAggregationGate.resultAggregationInvocationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationResultAggregationGate.publicationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationResultAggregationGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationResultAggregationGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationResultAggregationGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationResultAggregationGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationResultAggregationGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationResultAggregationGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationResultAggregationGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationResultAggregationGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationResultAggregationGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationResultAggregationGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationResultAggregationGate.pushEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationResultAggregationGate.claimEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationResultAggregationGate.executionEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationResultAggregationGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationResultAggregationGate.claimable)}` : ''}
+                            {readinessMutationResultAggregationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationResultAggregationGate.mutationAllowed)}` : ''}
+                            {readinessMutationResultAggregationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationResultAggregationGate.applyEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationResultAggregationGate.testEnabled)}` : ''}
+                            {readinessMutationResultAggregationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationResultAggregationGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationResultAggregationGatePolicyChecks.map((item) => (
+                            <span key={`mutation-result-aggregation-policy-${item.key}`}>
+                              result aggregation policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationResultAggregationGate.blockingKeys?.length && (
+                            <span>mutation result aggregation blocking keys: {readinessMutationResultAggregationGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationResultAggregationGate.message && (
+                            <span>{readinessMutationResultAggregationGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationPublicationGate && (
+                        <>
+                          <span>
+                            mutation publication gate: {readinessMutationPublicationGate.status || 'BLOCKED_PUBLICATION_DISABLED'}
+                            {readinessMutationPublicationGate.schema ? ` / ${readinessMutationPublicationGate.schema}` : ''}
+                            {readinessMutationPublicationGate.resultAggregationReady !== undefined ? ` / result aggregation ready ${String(readinessMutationPublicationGate.resultAggregationReady)}` : ''}
+                            {readinessMutationPublicationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationPublicationGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationPublicationGate.executionTarget ? ` / ${readinessMutationPublicationGate.executionTarget}` : ''}
+                            {readinessMutationPublicationGate.publicationPolicy ? ` / policy ${readinessMutationPublicationGate.publicationPolicy}` : ''}
+                            {readinessMutationPublicationGate.sourceResultAggregationGateStatus ? ` / result aggregation status ${readinessMutationPublicationGate.sourceResultAggregationGateStatus}` : ''}
+                            {readinessMutationPublicationGate.sourceResultAggregationGateSchema ? ` / ${readinessMutationPublicationGate.sourceResultAggregationGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation publication ids:
+                            {readinessMutationPublicationGate.sourceRequestId ? ` source ${readinessMutationPublicationGate.sourceRequestId}` : ''}
+                            {readinessMutationPublicationGate.releaseAttemptId ? ` / release ${String(readinessMutationPublicationGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationPublicationGate.sessionId ? ` / session ${readinessMutationPublicationGate.sessionId}` : ''}
+                            {readinessMutationPublicationGate.agentId ? ` / agent ${readinessMutationPublicationGate.agentId}` : ''}
+                            {readinessMutationPublicationGate.workspaceId ? ` / workspace ${readinessMutationPublicationGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation publication counts:
+                            {readinessMutationPublicationGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationPublicationGate.expectedResultCount)}` : ''}
+                            {readinessMutationPublicationGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationPublicationGate.completedResultCount)}` : ''}
+                            {readinessMutationPublicationGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationPublicationGate.acceptedResultCount)}` : ''}
+                            {readinessMutationPublicationGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationPublicationGate.rejectedResultCount)}` : ''}
+                            {readinessMutationPublicationGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationPublicationGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation publication disabled:
+                            {readinessMutationPublicationGate.publicationEnabled !== undefined ? ` publication ${String(readinessMutationPublicationGate.publicationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.publicationInvocationEnabled !== undefined ? ` / publication invocation ${String(readinessMutationPublicationGate.publicationInvocationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationPublicationGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationPublicationGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationPublicationGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationPublicationGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationPublicationGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationPublicationGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationPublicationGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationPublicationGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationPublicationGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationPublicationGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationPublicationGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationPublicationGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationPublicationGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationPublicationGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationPublicationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationPublicationGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationPublicationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationPublicationGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationPublicationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationPublicationGate.pushEnabled)}` : ''}
+                            {readinessMutationPublicationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationPublicationGate.claimEnabled)}` : ''}
+                            {readinessMutationPublicationGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationPublicationGate.executionEnabled)}` : ''}
+                            {readinessMutationPublicationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationPublicationGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationPublicationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationPublicationGate.claimable)}` : ''}
+                            {readinessMutationPublicationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationPublicationGate.mutationAllowed)}` : ''}
+                            {readinessMutationPublicationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationPublicationGate.applyEnabled)}` : ''}
+                            {readinessMutationPublicationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationPublicationGate.testEnabled)}` : ''}
+                            {readinessMutationPublicationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationPublicationGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationPublicationGatePolicyChecks.map((item) => (
+                            <span key={`mutation-publication-policy-${item.key}`}>
+                              publication policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationPublicationGate.blockingKeys?.length && (
+                            <span>mutation publication blocking keys: {readinessMutationPublicationGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationPublicationGate.message && (
+                            <span>{readinessMutationPublicationGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerGenerationGate && (
+                        <>
+                          <span>
+                            mutation final-answer generation gate: {readinessMutationFinalAnswerGenerationGate.status || 'BLOCKED_FINAL_ANSWER_GENERATION_DISABLED'}
+                            {readinessMutationFinalAnswerGenerationGate.schema ? ` / ${readinessMutationFinalAnswerGenerationGate.schema}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.publicationReady !== undefined ? ` / publication ready ${String(readinessMutationFinalAnswerGenerationGate.publicationReady)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerGenerationGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.executionTarget ? ` / ${readinessMutationFinalAnswerGenerationGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationPolicy ? ` / policy ${readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationPolicy}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.sourcePublicationGateStatus ? ` / publication status ${readinessMutationFinalAnswerGenerationGate.sourcePublicationGateStatus}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.sourcePublicationGateSchema ? ` / ${readinessMutationFinalAnswerGenerationGate.sourcePublicationGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer generation ids:
+                            {readinessMutationFinalAnswerGenerationGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerGenerationGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerGenerationGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.sessionId ? ` / session ${readinessMutationFinalAnswerGenerationGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.agentId ? ` / agent ${readinessMutationFinalAnswerGenerationGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerGenerationGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer generation counts:
+                            {readinessMutationFinalAnswerGenerationGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerGenerationGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerGenerationGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerGenerationGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerGenerationGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerGenerationGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer generation disabled:
+                            {readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationEnabled !== undefined ? ` final answer ${String(readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationInvocationEnabled !== undefined ? ` / final answer invocation ${String(readinessMutationFinalAnswerGenerationGate.finalAnswerGenerationInvocationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerGenerationGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerGenerationGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerGenerationGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerGenerationGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerGenerationGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerGenerationGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerGenerationGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerGenerationGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerGenerationGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerGenerationGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerGenerationGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerGenerationGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerGenerationGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerGenerationGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerGenerationGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerGenerationGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerGenerationGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerGenerationGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerGenerationGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerGenerationGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerGenerationGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerGenerationGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-generation-policy-${item.key}`}>
+                              final-answer generation policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerGenerationGate.blockingKeys?.length && (
+                            <span>mutation final-answer generation blocking keys: {readinessMutationFinalAnswerGenerationGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerGenerationGate.message && (
+                            <span>{readinessMutationFinalAnswerGenerationGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerCompletionGate && (
+                        <>
+                          <span>
+                            mutation final-answer completion gate: {readinessMutationFinalAnswerCompletionGate.status || 'BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED'}
+                            {readinessMutationFinalAnswerCompletionGate.schema ? ` / ${readinessMutationFinalAnswerCompletionGate.schema}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerGenerationReady !== undefined ? ` / final answer generation ready ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerGenerationReady)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerCompletionGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.executionTarget ? ` / ${readinessMutationFinalAnswerCompletionGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionPolicy ? ` / policy ${readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionPolicy}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.sourceFinalAnswerGenerationGateStatus ? ` / final answer generation status ${readinessMutationFinalAnswerCompletionGate.sourceFinalAnswerGenerationGateStatus}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.sourceFinalAnswerGenerationGateSchema ? ` / ${readinessMutationFinalAnswerCompletionGate.sourceFinalAnswerGenerationGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer completion ids:
+                            {readinessMutationFinalAnswerCompletionGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerCompletionGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerCompletionGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.sessionId ? ` / session ${readinessMutationFinalAnswerCompletionGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.agentId ? ` / agent ${readinessMutationFinalAnswerCompletionGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerCompletionGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer completion counts:
+                            {readinessMutationFinalAnswerCompletionGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerCompletionGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerCompletionGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerCompletionGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerCompletionGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerCompletionGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer completion disabled:
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionEnabled !== undefined ? ` completion ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionInvocationEnabled !== undefined ? ` / completion invocation ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerCompletionInvocationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerCompletionGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerCompletionGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerCompletionGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerCompletionGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerCompletionGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerCompletionGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerCompletionGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerCompletionGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerCompletionGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerCompletionGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerCompletionGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerCompletionGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerCompletionGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerCompletionGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerCompletionGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerCompletionGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerCompletionGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerCompletionGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerCompletionGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerCompletionGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerCompletionGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerCompletionGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerCompletionGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-completion-policy-${item.key}`}>
+                              final-answer completion policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerCompletionGate.blockingKeys?.length && (
+                            <span>mutation final-answer completion blocking keys: {readinessMutationFinalAnswerCompletionGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerCompletionGate.message && (
+                            <span>{readinessMutationFinalAnswerCompletionGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerPersistenceGate && (
+                        <>
+                          <span>
+                            mutation final-answer persistence gate: {readinessMutationFinalAnswerPersistenceGate.status || 'BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED'}
+                            {readinessMutationFinalAnswerPersistenceGate.schema ? ` / ${readinessMutationFinalAnswerPersistenceGate.schema}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerCompletionReady !== undefined ? ` / final answer completion ready ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerCompletionReady)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerPersistenceGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.executionTarget ? ` / ${readinessMutationFinalAnswerPersistenceGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistencePolicy ? ` / policy ${readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistencePolicy}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalAnswerPersistenceGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.sourceFinalAnswerCompletionGateStatus ? ` / final answer completion status ${readinessMutationFinalAnswerPersistenceGate.sourceFinalAnswerCompletionGateStatus}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.sourceFinalAnswerCompletionGateSchema ? ` / ${readinessMutationFinalAnswerPersistenceGate.sourceFinalAnswerCompletionGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer persistence ids:
+                            {readinessMutationFinalAnswerPersistenceGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerPersistenceGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerPersistenceGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.sessionId ? ` / session ${readinessMutationFinalAnswerPersistenceGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.agentId ? ` / agent ${readinessMutationFinalAnswerPersistenceGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerPersistenceGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer persistence counts:
+                            {readinessMutationFinalAnswerPersistenceGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerPersistenceGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerPersistenceGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerPersistenceGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerPersistenceGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerPersistenceGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer persistence disabled:
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistenceEnabled !== undefined ? ` persistence ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistenceInvocationEnabled !== undefined ? ` / persistence invocation ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerPersistenceInvocationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalAnswerPersistenceGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerPersistenceGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerPersistenceGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerPersistenceGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerPersistenceGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerPersistenceGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerPersistenceGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerPersistenceGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerPersistenceGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerPersistenceGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerPersistenceGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerPersistenceGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerPersistenceGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerPersistenceGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerPersistenceGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerPersistenceGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerPersistenceGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerPersistenceGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerPersistenceGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerPersistenceGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerPersistenceGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerPersistenceGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerPersistenceGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerPersistenceGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-persistence-policy-${item.key}`}>
+                              final-answer persistence policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerPersistenceGate.blockingKeys?.length && (
+                            <span>mutation final-answer persistence blocking keys: {readinessMutationFinalAnswerPersistenceGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerPersistenceGate.message && (
+                            <span>{readinessMutationFinalAnswerPersistenceGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerConversationSaveGate && (
+                        <>
+                          <span>
+                            mutation final-answer conversation-save gate: {readinessMutationFinalAnswerConversationSaveGate.status || 'BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED'}
+                            {readinessMutationFinalAnswerConversationSaveGate.schema ? ` / ${readinessMutationFinalAnswerConversationSaveGate.schema}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerPersistenceReady !== undefined ? ` / final answer persistence ready ${String(readinessMutationFinalAnswerConversationSaveGate.finalAnswerPersistenceReady)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerConversationSaveGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.executionTarget ? ` / ${readinessMutationFinalAnswerConversationSaveGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerConversationSavePolicy ? ` / policy ${readinessMutationFinalAnswerConversationSaveGate.finalAnswerConversationSavePolicy}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationFinalAnswerConversationSaveGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.sourceFinalAnswerPersistenceGateStatus ? ` / final answer persistence status ${readinessMutationFinalAnswerConversationSaveGate.sourceFinalAnswerPersistenceGateStatus}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.sourceFinalAnswerPersistenceGateSchema ? ` / ${readinessMutationFinalAnswerConversationSaveGate.sourceFinalAnswerPersistenceGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer conversation-save ids:
+                            {readinessMutationFinalAnswerConversationSaveGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerConversationSaveGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerConversationSaveGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.sessionId ? ` / session ${readinessMutationFinalAnswerConversationSaveGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.agentId ? ` / agent ${readinessMutationFinalAnswerConversationSaveGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerConversationSaveGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer conversation-save counts:
+                            {readinessMutationFinalAnswerConversationSaveGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerConversationSaveGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerConversationSaveGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerConversationSaveGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerConversationSaveGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerConversationSaveGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer conversation-save disabled:
+                            {readinessMutationFinalAnswerConversationSaveGate.conversationTurnSaveEnabled !== undefined ? ` conversation save ${String(readinessMutationFinalAnswerConversationSaveGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.conversationTurnSaveInvocationEnabled !== undefined ? ` / conversation save invocation ${String(readinessMutationFinalAnswerConversationSaveGate.conversationTurnSaveInvocationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationFinalAnswerConversationSaveGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationFinalAnswerConversationSaveGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerConversationSaveGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalAnswerConversationSaveGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerConversationSaveGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerConversationSaveGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerConversationSaveGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerConversationSaveGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerConversationSaveGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerConversationSaveGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerConversationSaveGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerConversationSaveGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerConversationSaveGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerConversationSaveGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerConversationSaveGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerConversationSaveGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerConversationSaveGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerConversationSaveGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerConversationSaveGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerConversationSaveGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerConversationSaveGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerConversationSaveGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerConversationSaveGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerConversationSaveGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerConversationSaveGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerConversationSaveGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerConversationSaveGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-conversation-save-policy-${item.key}`}>
+                              final-answer conversation-save policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerConversationSaveGate.blockingKeys?.length && (
+                            <span>mutation final-answer conversation-save blocking keys: {readinessMutationFinalAnswerConversationSaveGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerConversationSaveGate.message && (
+                            <span>{readinessMutationFinalAnswerConversationSaveGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerUserVisibleCompletionGate && (
+                        <>
+                          <span>
+                            mutation final-answer user-visible completion gate: {readinessMutationFinalAnswerUserVisibleCompletionGate.status || 'BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED'}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.schema ? ` / ${readinessMutationFinalAnswerUserVisibleCompletionGate.schema}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerConversationSaveReady !== undefined ? ` / final answer conversation-save ready ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerConversationSaveReady)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.executionTarget ? ` / ${readinessMutationFinalAnswerUserVisibleCompletionGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.userVisibleCompletionPolicy ? ` / policy ${readinessMutationFinalAnswerUserVisibleCompletionGate.userVisibleCompletionPolicy}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.sourceFinalAnswerConversationSaveGateStatus ? ` / final answer conversation-save status ${readinessMutationFinalAnswerUserVisibleCompletionGate.sourceFinalAnswerConversationSaveGateStatus}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.sourceFinalAnswerConversationSaveGateSchema ? ` / ${readinessMutationFinalAnswerUserVisibleCompletionGate.sourceFinalAnswerConversationSaveGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer user-visible completion ids:
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerUserVisibleCompletionGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.sessionId ? ` / session ${readinessMutationFinalAnswerUserVisibleCompletionGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.agentId ? ` / agent ${readinessMutationFinalAnswerUserVisibleCompletionGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerUserVisibleCompletionGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer user-visible completion counts:
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer user-visible completion disabled:
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.userVisibleCompletionEnabled !== undefined ? ` user-visible completion ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerUserVisibleCompletionGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerUserVisibleCompletionGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerUserVisibleCompletionGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-user-visible-completion-policy-${item.key}`}>
+                              final-answer user-visible completion policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerUserVisibleCompletionGate.blockingKeys?.length && (
+                            <span>mutation final-answer user-visible completion blocking keys: {readinessMutationFinalAnswerUserVisibleCompletionGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerUserVisibleCompletionGate.message && (
+                            <span>{readinessMutationFinalAnswerUserVisibleCompletionGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalResponseHandoffGate && (
+                        <>
+                          <span>
+                            mutation final-response handoff gate: {readinessMutationFinalResponseHandoffGate.status || 'BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED'}
+                            {readinessMutationFinalResponseHandoffGate.schema ? ` / ${readinessMutationFinalResponseHandoffGate.schema}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.userVisibleCompletionReady !== undefined ? ` / user-visible completion ready ${String(readinessMutationFinalResponseHandoffGate.userVisibleCompletionReady)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalResponseHandoffGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.executionTarget ? ` / ${readinessMutationFinalResponseHandoffGate.executionTarget}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.finalResponseHandoffPolicy ? ` / policy ${readinessMutationFinalResponseHandoffGate.finalResponseHandoffPolicy}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationFinalResponseHandoffGate.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.sourceFinalAnswerUserVisibleCompletionGateStatus ? ` / final-answer user-visible completion status ${readinessMutationFinalResponseHandoffGate.sourceFinalAnswerUserVisibleCompletionGateStatus}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.sourceFinalAnswerUserVisibleCompletionGateSchema ? ` / ${readinessMutationFinalResponseHandoffGate.sourceFinalAnswerUserVisibleCompletionGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-response handoff ids:
+                            {readinessMutationFinalResponseHandoffGate.sourceRequestId ? ` source ${readinessMutationFinalResponseHandoffGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalResponseHandoffGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.sessionId ? ` / session ${readinessMutationFinalResponseHandoffGate.sessionId}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.agentId ? ` / agent ${readinessMutationFinalResponseHandoffGate.agentId}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.workspaceId ? ` / workspace ${readinessMutationFinalResponseHandoffGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-response handoff counts:
+                            {readinessMutationFinalResponseHandoffGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalResponseHandoffGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalResponseHandoffGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalResponseHandoffGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalResponseHandoffGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalResponseHandoffGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-response handoff disabled:
+                            {readinessMutationFinalResponseHandoffGate.finalResponseHandoffEnabled !== undefined ? ` final response handoff ${String(readinessMutationFinalResponseHandoffGate.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationFinalResponseHandoffGate.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalResponseHandoffGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationFinalResponseHandoffGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalResponseHandoffGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationFinalResponseHandoffGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalResponseHandoffGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalResponseHandoffGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalResponseHandoffGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalResponseHandoffGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalResponseHandoffGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalResponseHandoffGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalResponseHandoffGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalResponseHandoffGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalResponseHandoffGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalResponseHandoffGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalResponseHandoffGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalResponseHandoffGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalResponseHandoffGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalResponseHandoffGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalResponseHandoffGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalResponseHandoffGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalResponseHandoffGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalResponseHandoffGate.claimable)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalResponseHandoffGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalResponseHandoffGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalResponseHandoffGate.testEnabled)}` : ''}
+                            {readinessMutationFinalResponseHandoffGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalResponseHandoffGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalResponseHandoffGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-response-handoff-policy-${item.key}`}>
+                              final-response handoff policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
+                              {item.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(item.deliveryHandoffEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalResponseHandoffGate.blockingKeys?.length && (
+                            <span>mutation final-response handoff blocking keys: {readinessMutationFinalResponseHandoffGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalResponseHandoffGate.message && (
+                            <span>{readinessMutationFinalResponseHandoffGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerDeliveryGate && (
+                        <>
+                          <span>
+                            mutation final-answer delivery gate: {readinessMutationFinalAnswerDeliveryGate.status || 'BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED'}
+                            {readinessMutationFinalAnswerDeliveryGate.schema ? ` / ${readinessMutationFinalAnswerDeliveryGate.schema}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalResponseHandoffReady !== undefined ? ` / final response handoff ready ${String(readinessMutationFinalAnswerDeliveryGate.finalResponseHandoffReady)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerDeliveryGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.executionTarget ? ` / ${readinessMutationFinalAnswerDeliveryGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalAnswerDeliveryPolicy ? ` / policy ${readinessMutationFinalAnswerDeliveryGate.finalAnswerDeliveryPolicy}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationFinalAnswerDeliveryGate.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.sourceFinalResponseHandoffGateStatus ? ` / final-response handoff status ${readinessMutationFinalAnswerDeliveryGate.sourceFinalResponseHandoffGateStatus}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.sourceFinalResponseHandoffGateSchema ? ` / ${readinessMutationFinalAnswerDeliveryGate.sourceFinalResponseHandoffGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery ids:
+                            {readinessMutationFinalAnswerDeliveryGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerDeliveryGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerDeliveryGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.sessionId ? ` / session ${readinessMutationFinalAnswerDeliveryGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.agentId ? ` / agent ${readinessMutationFinalAnswerDeliveryGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerDeliveryGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery counts:
+                            {readinessMutationFinalAnswerDeliveryGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerDeliveryGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerDeliveryGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerDeliveryGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerDeliveryGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerDeliveryGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery disabled:
+                            {readinessMutationFinalAnswerDeliveryGate.finalAnswerDeliveryEnabled !== undefined ? ` delivery ${String(readinessMutationFinalAnswerDeliveryGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationFinalAnswerDeliveryGate.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationFinalAnswerDeliveryGate.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationFinalAnswerDeliveryGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalAnswerDeliveryGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationFinalAnswerDeliveryGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalAnswerDeliveryGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerDeliveryGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerDeliveryGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerDeliveryGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerDeliveryGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerDeliveryGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerDeliveryGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerDeliveryGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerDeliveryGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerDeliveryGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerDeliveryGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerDeliveryGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerDeliveryGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerDeliveryGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerDeliveryGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerDeliveryGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerDeliveryGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerDeliveryGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerDeliveryGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerDeliveryGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerDeliveryGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerDeliveryGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerDeliveryGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-delivery-policy-${item.key}`}>
+                              final-answer delivery policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
+                              {item.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(item.deliveryHandoffEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerDeliveryGate.blockingKeys?.length && (
+                            <span>mutation final-answer delivery blocking keys: {readinessMutationFinalAnswerDeliveryGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerDeliveryGate.message && (
+                            <span>{readinessMutationFinalAnswerDeliveryGate.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessMutationFinalAnswerDeliveryReceiptGate && (
+                        <>
+                          <span>
+                            mutation final-answer delivery receipt gate: {readinessMutationFinalAnswerDeliveryReceiptGate.status || 'BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED'}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.schema ? ` / ${readinessMutationFinalAnswerDeliveryReceiptGate.schema}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerDeliveryReady !== undefined ? ` / final answer delivery ready ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerDeliveryReady)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.prerequisitesPassed !== undefined ? ` / prerequisites ${String(readinessMutationFinalAnswerDeliveryReceiptGate.prerequisitesPassed)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.executionTarget ? ` / ${readinessMutationFinalAnswerDeliveryReceiptGate.executionTarget}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.deliveryReceiptPolicy ? ` / policy ${readinessMutationFinalAnswerDeliveryReceiptGate.deliveryReceiptPolicy}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.sourceFinalAnswerDeliveryGateStatus ? ` / final-answer delivery status ${readinessMutationFinalAnswerDeliveryReceiptGate.sourceFinalAnswerDeliveryGateStatus}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.sourceFinalAnswerDeliveryGateSchema ? ` / ${readinessMutationFinalAnswerDeliveryReceiptGate.sourceFinalAnswerDeliveryGateSchema}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery receipt ids:
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.sourceRequestId ? ` source ${readinessMutationFinalAnswerDeliveryReceiptGate.sourceRequestId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.releaseAttemptId ? ` / release ${String(readinessMutationFinalAnswerDeliveryReceiptGate.releaseAttemptId).slice(0, 8)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.sessionId ? ` / session ${readinessMutationFinalAnswerDeliveryReceiptGate.sessionId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.agentId ? ` / agent ${readinessMutationFinalAnswerDeliveryReceiptGate.agentId}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.workspaceId ? ` / workspace ${readinessMutationFinalAnswerDeliveryReceiptGate.workspaceId}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery receipt counts:
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.expectedResultCount !== undefined ? ` expected ${String(readinessMutationFinalAnswerDeliveryReceiptGate.expectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.completedResultCount !== undefined ? ` / completed ${String(readinessMutationFinalAnswerDeliveryReceiptGate.completedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.acceptedResultCount !== undefined ? ` / accepted ${String(readinessMutationFinalAnswerDeliveryReceiptGate.acceptedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.rejectedResultCount !== undefined ? ` / rejected ${String(readinessMutationFinalAnswerDeliveryReceiptGate.rejectedResultCount)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.intakePersistedResultCount !== undefined ? ` / intake persisted ${String(readinessMutationFinalAnswerDeliveryReceiptGate.intakePersistedResultCount)}` : ''}
+                          </span>
+                          <span>
+                            mutation final-answer delivery receipt disabled:
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.deliveryReceiptEnabled !== undefined ? ` delivery receipt ${String(readinessMutationFinalAnswerDeliveryReceiptGate.deliveryReceiptEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationFinalAnswerDeliveryReceiptGate.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationFinalAnswerDeliveryReceiptGate.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationFinalAnswerDeliveryReceiptGate.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationFinalAnswerDeliveryReceiptGate.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationFinalAnswerDeliveryReceiptGate.publicationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationFinalAnswerDeliveryReceiptGate.mutationResultAggregationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessMutationFinalAnswerDeliveryReceiptGate.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.rollbackFallbackExecutionEnabled !== undefined ? ` / rollback fallback ${String(readinessMutationFinalAnswerDeliveryReceiptGate.rollbackFallbackExecutionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.intakePersistenceEnabled !== undefined ? ` / intake persistence ${String(readinessMutationFinalAnswerDeliveryReceiptGate.intakePersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.acceptedObservationPersistenceEnabled !== undefined ? ` / accepted observation persistence ${String(readinessMutationFinalAnswerDeliveryReceiptGate.acceptedObservationPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.postExecutionObservationEnabled !== undefined ? ` / post-execution observation ${String(readinessMutationFinalAnswerDeliveryReceiptGate.postExecutionObservationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.completedResultPersistenceEnabled !== undefined ? ` / result persistence ${String(readinessMutationFinalAnswerDeliveryReceiptGate.completedResultPersistenceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.observationAcceptanceEnabled !== undefined ? ` / acceptance ${String(readinessMutationFinalAnswerDeliveryReceiptGate.observationAcceptanceEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.releaseGateEnabled !== undefined ? ` / release gate ${String(readinessMutationFinalAnswerDeliveryReceiptGate.releaseGateEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessMutationFinalAnswerDeliveryReceiptGate.requestCreationEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.pushEnabled !== undefined ? ` / push ${String(readinessMutationFinalAnswerDeliveryReceiptGate.pushEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.claimEnabled !== undefined ? ` / claim ${String(readinessMutationFinalAnswerDeliveryReceiptGate.claimEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.executionEnabled !== undefined ? ` / execution ${String(readinessMutationFinalAnswerDeliveryReceiptGate.executionEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.writeHelperEnabled !== undefined ? ` / write helper ${String(readinessMutationFinalAnswerDeliveryReceiptGate.writeHelperEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.claimable !== undefined ? ` / claimable ${String(readinessMutationFinalAnswerDeliveryReceiptGate.claimable)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.mutationAllowed !== undefined ? ` / mutation ${String(readinessMutationFinalAnswerDeliveryReceiptGate.mutationAllowed)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.applyEnabled !== undefined ? ` / apply ${String(readinessMutationFinalAnswerDeliveryReceiptGate.applyEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.testEnabled !== undefined ? ` / test ${String(readinessMutationFinalAnswerDeliveryReceiptGate.testEnabled)}` : ''}
+                            {readinessMutationFinalAnswerDeliveryReceiptGate.rollbackRestoreEnabled !== undefined ? ` / rollback restore ${String(readinessMutationFinalAnswerDeliveryReceiptGate.rollbackRestoreEnabled)}` : ''}
+                          </span>
+                          {readinessMutationFinalAnswerDeliveryReceiptGatePolicyChecks.map((item) => (
+                            <span key={`mutation-final-answer-delivery-receipt-policy-${item.key}`}>
+                              final-answer delivery receipt policy {item.key}: {item.status || 'UNKNOWN'}
+                              {item.passed !== undefined ? ` / passed ${String(item.passed)}` : ''}
+                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
+                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
+                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
+                              {item.claimEnabled !== undefined ? ` / claim ${String(item.claimEnabled)}` : ''}
+                              {item.executionEnabled !== undefined ? ` / execution ${String(item.executionEnabled)}` : ''}
+                              {item.writeHelperEnabled !== undefined ? ` / write helper ${String(item.writeHelperEnabled)}` : ''}
+                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
+                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
+                              {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
+                              {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.deliveryReceiptEnabled !== undefined ? ` / delivery receipt ${String(item.deliveryReceiptEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
+                              {item.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(item.deliveryHandoffEnabled)}` : ''}
+                              {item.message ? ` / ${item.message}` : ''}
+                            </span>
+                          ))}
+                          {!!readinessMutationFinalAnswerDeliveryReceiptGate.blockingKeys?.length && (
+                            <span>mutation final-answer delivery receipt blocking keys: {readinessMutationFinalAnswerDeliveryReceiptGate.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessMutationFinalAnswerDeliveryReceiptGate.message && (
+                            <span>{readinessMutationFinalAnswerDeliveryReceiptGate.message}</span>
+                          )}
+                        </>
+                      )}
                       {readinessMutationCompletionSummary && (
                         <>
                           <span>
@@ -2023,6 +3472,14 @@ function CodeAgentPanel({
                             {readinessMutationCompletionSummary.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(readinessMutationCompletionSummary.mutationResultAggregationEnabled)}` : ''}
                             {readinessMutationCompletionSummary.publicationEnabled !== undefined ? ` / publication ${String(readinessMutationCompletionSummary.publicationEnabled)}` : ''}
                             {readinessMutationCompletionSummary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessMutationCompletionSummary.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(readinessMutationCompletionSummary.finalAnswerCompletionEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessMutationCompletionSummary.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(readinessMutationCompletionSummary.finalAnswerPersistenceEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(readinessMutationCompletionSummary.conversationTurnSaveEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(readinessMutationCompletionSummary.userVisibleCompletionEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(readinessMutationCompletionSummary.finalResponseHandoffEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(readinessMutationCompletionSummary.deliveryHandoffEnabled)}` : ''}
+                            {readinessMutationCompletionSummary.deliveryReceiptEnabled !== undefined ? ` / delivery receipt ${String(readinessMutationCompletionSummary.deliveryReceiptEnabled)}` : ''}
                           </span>
                           {readinessMutationCompletionSummaryItems.map((item) => (
                             <span key={`mutation-completion-${item.key}-${item.status || item.passed}`}>
@@ -2037,6 +3494,14 @@ function CodeAgentPanel({
                               {item.mutationResultAggregationEnabled !== undefined ? ` / result aggregation ${String(item.mutationResultAggregationEnabled)}` : ''}
                               {item.publicationEnabled !== undefined ? ` / publication ${String(item.publicationEnabled)}` : ''}
                               {item.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(item.finalAnswerGenerationEnabled)}` : ''}
+                              {item.finalAnswerCompletionEnabled !== undefined ? ` / completion ${String(item.finalAnswerCompletionEnabled)}` : ''}
+                              {item.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(item.finalAnswerDeliveryEnabled)}` : ''}
+                              {item.finalAnswerPersistenceEnabled !== undefined ? ` / persistence ${String(item.finalAnswerPersistenceEnabled)}` : ''}
+                              {item.conversationTurnSaveEnabled !== undefined ? ` / conversation save ${String(item.conversationTurnSaveEnabled)}` : ''}
+                              {item.userVisibleCompletionEnabled !== undefined ? ` / user-visible completion ${String(item.userVisibleCompletionEnabled)}` : ''}
+                              {item.finalResponseHandoffEnabled !== undefined ? ` / final response handoff ${String(item.finalResponseHandoffEnabled)}` : ''}
+                              {item.deliveryHandoffEnabled !== undefined ? ` / delivery handoff ${String(item.deliveryHandoffEnabled)}` : ''}
+                              {item.deliveryReceiptEnabled !== undefined ? ` / delivery receipt ${String(item.deliveryReceiptEnabled)}` : ''}
                               {item.message ? ` / ${item.message}` : ''}
                             </span>
                           ))}

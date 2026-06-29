@@ -648,6 +648,22 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestCreationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CREATION_DISABLED", true, 4);
         assertMutationRequestPushGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUSH_DISABLED", true, 4);
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
+        assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
+        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
+        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
+        assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
+        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
+        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
+        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
+        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUBLICATION_DISABLED", true, 4);
+        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
+        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
+        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
+        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
@@ -697,6 +713,7 @@ class LocalAgentToolGatewayServiceTest {
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -808,6 +825,22 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestCreationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CREATION_DISABLED", true, 4);
         assertMutationRequestPushGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUSH_DISABLED", true, 4);
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
+        assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
+        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
+        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
+        assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
+        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
+        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
+        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
+        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUBLICATION_DISABLED", true, 4);
+        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
+        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
+        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
+        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
@@ -847,6 +880,7 @@ class LocalAgentToolGatewayServiceTest {
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -986,6 +1020,134 @@ class LocalAgentToolGatewayServiceTest {
                 false,
                 4
         );
+        assertMutationExecutionGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_EXECUTION_DISABLED",
+                false,
+                4
+        );
+        assertMutationPostExecutionObservationGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED",
+                false,
+                4
+        );
+        assertMutationObservationAcceptanceGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED",
+                false,
+                4
+        );
+        assertMutationResultIntakePersistenceGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_INTAKE_PERSISTENCE_DISABLED",
+                false,
+                4
+        );
+        assertMutationRollbackFallbackGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_ROLLBACK_FALLBACK_DISABLED",
+                false,
+                4
+        );
+        assertMutationRagFreshnessGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_RAG_FRESHNESS_DISABLED",
+                false,
+                4
+        );
+        assertMutationResultAggregationGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_RESULT_AGGREGATION_DISABLED",
+                false,
+                4
+        );
+        assertMutationPublicationGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_PUBLICATION_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerGenerationGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_GENERATION_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerCompletionGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerPersistenceGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerConversationSaveGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerUserVisibleCompletionGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalResponseHandoffGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerDeliveryGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED",
+                false,
+                4
+        );
+        assertMutationFinalAnswerDeliveryReceiptGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED",
+                false,
+                4
+        );
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "MISSING");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
@@ -1027,6 +1189,26 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationDispatchEnvelopeContract",
                 "mutationDispatchPreflightBoundary",
                 "mutationDispatchDecisionModel",
+                "mutationRequestBlueprint",
+                "mutationRequestCreationGate",
+                "mutationRequestPushGate",
+                "mutationRequestClaimGate",
+                "mutationExecutionGate",
+                "mutationPostExecutionObservationGate",
+                "mutationObservationAcceptanceGate",
+                "mutationResultIntakePersistenceGate",
+                "mutationRollbackFallbackGate",
+                "mutationRagFreshnessGate",
+                "mutationResultAggregationGate",
+                "mutationPublicationGate",
+                "mutationFinalAnswerGenerationGate",
+                "mutationFinalAnswerCompletionGate",
+                "mutationFinalAnswerPersistenceGate",
+                "mutationFinalAnswerConversationSaveGate",
+                "mutationFinalAnswerUserVisibleCompletionGate",
+                "mutationFinalResponseHandoffGate",
+                "mutationFinalAnswerDeliveryGate",
+                "mutationFinalAnswerDeliveryReceiptGate",
                 "rollbackReadiness"
         );
         assertThat(readiness.repositoryVerification()).isNull();
@@ -1039,6 +1221,7 @@ class LocalAgentToolGatewayServiceTest {
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -2313,6 +2496,1526 @@ class LocalAgentToolGatewayServiceTest {
         );
     }
 
+    private void assertMutationExecutionGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean claimGateReady,
+            int expectedRequestCount
+    ) {
+        assertThat(latestAttempt.get("mutationExecutionGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationExecutionGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-execution-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("claimGateReady", claimGateReady)
+                .containsEntry("prerequisitesPassed", claimGateReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("executionPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("toolRunnerInvocationEnabled", false)
+                .containsEntry("writeHelperInvocationEnabled", false)
+                .containsEntry("expectedRequestCount", expectedRequestCount)
+                .containsEntry("persistedRequestCount", 0)
+                .containsEntry("pushedRequestCount", 0)
+                .containsEntry("claimableRequestCount", 0)
+                .containsEntry("runningRequestCount", 0)
+                .containsEntry("completedRequestCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionGateEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationRequestClaimGate",
+                        "executionPolicy",
+                        "toolRunnerInvocation",
+                        "writeHelperInvocation",
+                        "completionTransition"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("running", false)
+                .containsEntry("completed", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "executionPolicy",
+                "toolRunnerInvocation",
+                "writeHelperInvocation",
+                "completionTransition",
+                "executionEnabled",
+                "writeHelperEnabled",
+                "applyEnabled",
+                "testEnabled",
+                "rollbackRestoreEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationPostExecutionObservationGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean executionGateReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationPostExecutionObservationGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationPostExecutionObservationGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("executionGateReady", executionGateReady)
+                .containsEntry("prerequisitesPassed", executionGateReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("observationPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationExecutionGate",
+                        "observationPolicy",
+                        "completedResultPersistence",
+                        "rollbackFallbackExecution",
+                        "ragFreshnessUpdate",
+                        "resultAggregation",
+                        "publication"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "observationPolicy",
+                "completedResultPersistence",
+                "rollbackFallbackExecution",
+                "ragFreshnessUpdate",
+                "resultAggregation",
+                "publication",
+                "postExecutionObservationEnabled",
+                "completedResultPersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationObservationAcceptanceGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean postExecutionObservationReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationObservationAcceptanceGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationObservationAcceptanceGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-observation-acceptance-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("postExecutionObservationReady", postExecutionObservationReady)
+                .containsEntry("prerequisitesPassed", postExecutionObservationReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("acceptancePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationPostExecutionObservationGate",
+                        "acceptancePolicy",
+                        "intakePersistence",
+                        "rollbackFallbackExecution",
+                        "ragFreshnessUpdate",
+                        "resultAggregation",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "acceptancePolicy",
+                "intakePersistence",
+                "rollbackFallbackExecution",
+                "ragFreshnessUpdate",
+                "resultAggregation",
+                "publication",
+                "finalAnswerGeneration",
+                "observationAcceptanceEnabled",
+                "intakePersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationResultIntakePersistenceGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean observationAcceptanceReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationResultIntakePersistenceGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationResultIntakePersistenceGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-result-intake-persistence-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("observationAcceptanceReady", observationAcceptanceReady)
+                .containsEntry("prerequisitesPassed", observationAcceptanceReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("intakePersistencePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationObservationAcceptanceGate",
+                        "intakePersistencePolicy",
+                        "acceptedObservationPersistence",
+                        "rollbackFallbackExecution",
+                        "ragFreshnessUpdate",
+                        "resultAggregation",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "intakePersistencePolicy",
+                "acceptedObservationPersistence",
+                "rollbackFallbackExecution",
+                "ragFreshnessUpdate",
+                "resultAggregation",
+                "publication",
+                "finalAnswerGeneration",
+                "intakePersistenceEnabled",
+                "acceptedObservationPersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationRollbackFallbackGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean intakePersistenceReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationRollbackFallbackGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationRollbackFallbackGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-rollback-fallback-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("intakePersistenceReady", intakePersistenceReady)
+                .containsEntry("prerequisitesPassed", intakePersistenceReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("rollbackFallbackPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("rollbackFallbackInvocationEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationResultIntakePersistenceGate",
+                        "rollbackFallbackPolicy",
+                        "rollbackFallbackExecution",
+                        "ragFreshnessUpdate",
+                        "resultAggregation",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "rollbackFallbackPolicy",
+                "rollbackFallbackExecution",
+                "ragFreshnessUpdate",
+                "resultAggregation",
+                "publication",
+                "finalAnswerGeneration",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationRagFreshnessGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean rollbackFallbackReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationRagFreshnessGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationRagFreshnessGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-rag-freshness-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("rollbackFallbackReady", rollbackFallbackReady)
+                .containsEntry("prerequisitesPassed", rollbackFallbackReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("ragFreshnessUpdateInvocationEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationRollbackFallbackGate",
+                        "ragFreshnessPolicy",
+                        "ragFreshnessUpdate",
+                        "resultAggregation",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "ragFreshnessPolicy",
+                "ragFreshnessUpdate",
+                "resultAggregation",
+                "publication",
+                "finalAnswerGeneration",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationResultAggregationGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean ragFreshnessReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationResultAggregationGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationResultAggregationGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-result-aggregation-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("ragFreshnessReady", ragFreshnessReady)
+                .containsEntry("prerequisitesPassed", ragFreshnessReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("resultAggregationPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("resultAggregationInvocationEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationRagFreshnessGate",
+                        "resultAggregationPolicy",
+                        "resultAggregation",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "resultAggregationPolicy",
+                "resultAggregation",
+                "publication",
+                "finalAnswerGeneration",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationPublicationGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean resultAggregationReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationPublicationGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationPublicationGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-publication-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("resultAggregationReady", resultAggregationReady)
+                .containsEntry("prerequisitesPassed", resultAggregationReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceResultAggregationGateSchema", "learnbot.local-agent.mutation-result-aggregation-gate.v1")
+                .containsEntry("sourceResultAggregationGateStatus", resultAggregationReady
+                        ? "REFUSED_RESULT_AGGREGATION_DISABLED"
+                        : "BLOCKED_RESULT_AGGREGATION_DISABLED")
+                .containsEntry("publicationPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("publicationInvocationEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationResultAggregationGate",
+                        "publicationPolicy",
+                        "publication",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "publicationPolicy",
+                "publication",
+                "finalAnswerGeneration",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerGenerationGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean publicationReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerGenerationGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerGenerationGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-generation-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("publicationReady", publicationReady)
+                .containsEntry("prerequisitesPassed", publicationReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourcePublicationGateSchema", "learnbot.local-agent.mutation-publication-gate.v1")
+                .containsEntry("sourcePublicationGateStatus", publicationReady
+                        ? "REFUSED_PUBLICATION_DISABLED"
+                        : "BLOCKED_PUBLICATION_DISABLED")
+                .containsEntry("finalAnswerGenerationPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("finalAnswerGenerationInvocationEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationPublicationGate",
+                        "finalAnswerGenerationPolicy",
+                        "finalAnswerGeneration"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalAnswerGenerationPolicy",
+                "finalAnswerGeneration",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerCompletionGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalAnswerGenerationReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerCompletionGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerCompletionGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-completion-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalAnswerGenerationReady", finalAnswerGenerationReady)
+                .containsEntry("prerequisitesPassed", finalAnswerGenerationReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerGenerationGateSchema", "learnbot.local-agent.mutation-final-answer-generation-gate.v1")
+                .containsEntry("sourceFinalAnswerGenerationGateStatus", finalAnswerGenerationReady
+                        ? "REFUSED_FINAL_ANSWER_GENERATION_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_GENERATION_DISABLED")
+                .containsEntry("finalAnswerCompletionPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("finalAnswerCompletionInvocationEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerGenerationGate",
+                        "finalAnswerCompletionPolicy",
+                        "finalAnswerCompletion",
+                        "finalAnswerDelivery"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalAnswerCompletionPolicy",
+                "finalAnswerCompletion",
+                "finalAnswerDelivery",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerPersistenceGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalAnswerCompletionReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerPersistenceGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerPersistenceGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-persistence-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalAnswerCompletionReady", finalAnswerCompletionReady)
+                .containsEntry("prerequisitesPassed", finalAnswerCompletionReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerCompletionGateSchema", "learnbot.local-agent.mutation-final-answer-completion-gate.v1")
+                .containsEntry("sourceFinalAnswerCompletionGateStatus", finalAnswerCompletionReady
+                        ? "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED")
+                .containsEntry("finalAnswerPersistencePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("finalAnswerPersistenceInvocationEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerCompletionGate",
+                        "finalAnswerPersistencePolicy",
+                        "finalAnswerPersistence",
+                        "conversationTurnSave",
+                        "finalAnswerDelivery"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalAnswerPersistencePolicy",
+                "finalAnswerPersistence",
+                "conversationTurnSave",
+                "finalAnswerDelivery",
+                "finalAnswerPersistenceEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerConversationSaveGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalAnswerPersistenceReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerConversationSaveGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerConversationSaveGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalAnswerPersistenceReady", finalAnswerPersistenceReady)
+                .containsEntry("prerequisitesPassed", finalAnswerPersistenceReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerPersistenceGateSchema", "learnbot.local-agent.mutation-final-answer-persistence-gate.v1")
+                .containsEntry("sourceFinalAnswerPersistenceGateStatus", finalAnswerPersistenceReady
+                        ? "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED")
+                .containsEntry("finalAnswerConversationSavePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("conversationTurnSaveInvocationEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerPersistenceGate",
+                        "finalAnswerConversationSavePolicy",
+                        "conversationTurnSave",
+                        "userVisibleCompletion",
+                        "finalAnswerDelivery"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalAnswerConversationSavePolicy",
+                "conversationTurnSave",
+                "userVisibleCompletion",
+                "finalAnswerDelivery",
+                "conversationTurnSaveEnabled",
+                "userVisibleCompletionEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerUserVisibleCompletionGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalAnswerConversationSaveReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerUserVisibleCompletionGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerUserVisibleCompletionGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalAnswerConversationSaveReady", finalAnswerConversationSaveReady)
+                .containsEntry("prerequisitesPassed", finalAnswerConversationSaveReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerConversationSaveGateSchema", "learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1")
+                .containsEntry("sourceFinalAnswerConversationSaveGateStatus", finalAnswerConversationSaveReady
+                        ? "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED")
+                .containsEntry("userVisibleCompletionPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerConversationSaveGate",
+                        "userVisibleCompletionPolicy",
+                        "userVisibleCompletion",
+                        "finalResponseHandoff",
+                        "conversationTurnSave"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "userVisibleCompletionPolicy",
+                "userVisibleCompletion",
+                "finalResponseHandoff",
+                "conversationTurnSave",
+                "userVisibleCompletionEnabled",
+                "finalResponseHandoffEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalResponseHandoffGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean userVisibleCompletionReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalResponseHandoffGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalResponseHandoffGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-response-handoff-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("userVisibleCompletionReady", userVisibleCompletionReady)
+                .containsEntry("prerequisitesPassed", userVisibleCompletionReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateSchema", "learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1")
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateStatus", userVisibleCompletionReady
+                        ? "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED")
+                .containsEntry("finalResponseHandoffPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerUserVisibleCompletionGate",
+                        "finalResponseHandoffPolicy",
+                        "finalResponseHandoff",
+                        "finalAnswerDelivery",
+                        "userVisibleCompletion"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalResponseHandoffPolicy",
+                "finalResponseHandoff",
+                "finalAnswerDelivery",
+                "userVisibleCompletion",
+                "finalResponseHandoffEnabled",
+                "deliveryHandoffEnabled",
+                "finalAnswerDeliveryEnabled",
+                "userVisibleCompletionEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerDeliveryGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalResponseHandoffReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerDeliveryGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-delivery-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalResponseHandoffReady", finalResponseHandoffReady)
+                .containsEntry("prerequisitesPassed", finalResponseHandoffReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalResponseHandoffGateSchema", "learnbot.local-agent.mutation-final-response-handoff-gate.v1")
+                .containsEntry("sourceFinalResponseHandoffGateStatus", finalResponseHandoffReady
+                        ? "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED"
+                        : "BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED")
+                .containsEntry("finalAnswerDeliveryPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalResponseHandoffGate",
+                        "finalAnswerDeliveryPolicy",
+                        "finalAnswerDelivery",
+                        "deliveryHandoff",
+                        "finalResponseHandoff"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "finalAnswerDeliveryPolicy",
+                "finalAnswerDelivery",
+                "deliveryHandoff",
+                "finalResponseHandoff",
+                "finalAnswerDeliveryEnabled",
+                "deliveryHandoffEnabled",
+                "finalResponseHandoffEnabled",
+                "userVisibleCompletionEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
+    private void assertMutationFinalAnswerDeliveryReceiptGate(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId,
+            String status,
+            boolean finalAnswerDeliveryReady,
+            int expectedResultCount
+    ) {
+        assertThat(latestAttempt.get("mutationFinalAnswerDeliveryReceiptGate")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryReceiptGate");
+        assertThat(gate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("status", status)
+                .containsEntry("finalAnswerDeliveryReady", finalAnswerDeliveryReady)
+                .containsEntry("prerequisitesPassed", finalAnswerDeliveryReady)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerDeliveryGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-gate.v1")
+                .containsEntry("sourceFinalAnswerDeliveryGateStatus", finalAnswerDeliveryReady
+                        ? "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED"
+                        : "BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED")
+                .containsEntry("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("expectedResultCount", expectedResultCount)
+                .containsEntry("completedResultCount", 0)
+                .containsEntry("acceptedResultCount", 0)
+                .containsEntry("rejectedResultCount", 0)
+                .containsEntry("intakePersistedResultCount", 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("postExecutionObservationEnabled", false)
+                .containsEntry("completedResultPersistenceEnabled", false)
+                .containsEntry("observationAcceptanceEnabled", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("rollbackFallbackExecutionEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false);
+        assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
+        assertThat(policyChecks)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "mutationFinalAnswerDeliveryGate",
+                        "deliveryReceiptPolicy",
+                        "deliveryReceipt",
+                        "finalAnswerDelivery",
+                        "deliveryHandoff"
+                );
+        assertThat(policyChecks).allSatisfy(item -> assertThat(item)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("executionEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false));
+        assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(gate.get("blockingKeys")).asList().contains(
+                "deliveryReceiptPolicy",
+                "deliveryReceipt",
+                "finalAnswerDelivery",
+                "deliveryHandoff",
+                "deliveryReceiptEnabled",
+                "finalAnswerDeliveryEnabled",
+                "deliveryHandoffEnabled",
+                "finalResponseHandoffEnabled",
+                "userVisibleCompletionEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        );
+    }
+
     private void assertMutationResultIntakeBoundary(
             Map<String, Object> latestAttempt,
             UUID attemptId,
@@ -2794,6 +4497,22 @@ class LocalAgentToolGatewayServiceTest {
                         "mutationRequestCreationGate",
                         "mutationRequestPushGate",
                         "mutationRequestClaimGate",
+                        "mutationExecutionGate",
+                        "mutationPostExecutionObservationGate",
+                        "mutationObservationAcceptanceGate",
+                        "mutationResultIntakePersistenceGate",
+                        "mutationRollbackFallbackGate",
+                        "mutationRagFreshnessGate",
+                        "mutationResultAggregationGate",
+                        "mutationPublicationGate",
+                        "mutationFinalAnswerGenerationGate",
+                        "mutationFinalAnswerCompletionGate",
+                        "mutationFinalAnswerPersistenceGate",
+                        "mutationFinalAnswerConversationSaveGate",
+                        "mutationFinalAnswerUserVisibleCompletionGate",
+                        "mutationFinalResponseHandoffGate",
+                        "mutationFinalAnswerDeliveryGate",
+                        "mutationFinalAnswerDeliveryReceiptGate",
                         "rollbackReadiness",
                         "ragFreshnessRequirement"
                 );
@@ -2805,7 +4524,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("mutationAllowed", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false));
         assertThat(summary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) summary.get("blockingKeys");

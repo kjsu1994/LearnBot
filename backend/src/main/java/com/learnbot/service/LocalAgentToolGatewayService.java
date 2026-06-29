@@ -913,6 +913,86 @@ public class LocalAgentToolGatewayService {
                 mutationRequestPushGate
         );
         result.put("mutationRequestClaimGate", mutationRequestClaimGate);
+        Map<String, Object> mutationExecutionGate = releaseAttemptMutationExecutionGate(
+                attempt,
+                mutationRequestClaimGate
+        );
+        result.put("mutationExecutionGate", mutationExecutionGate);
+        Map<String, Object> mutationPostExecutionObservationGate = releaseAttemptMutationPostExecutionObservationGate(
+                attempt,
+                mutationExecutionGate
+        );
+        result.put("mutationPostExecutionObservationGate", mutationPostExecutionObservationGate);
+        Map<String, Object> mutationObservationAcceptanceGate = releaseAttemptMutationObservationAcceptanceGate(
+                attempt,
+                mutationPostExecutionObservationGate
+        );
+        result.put("mutationObservationAcceptanceGate", mutationObservationAcceptanceGate);
+        Map<String, Object> mutationResultIntakePersistenceGate = releaseAttemptMutationResultIntakePersistenceGate(
+                attempt,
+                mutationObservationAcceptanceGate
+        );
+        result.put("mutationResultIntakePersistenceGate", mutationResultIntakePersistenceGate);
+        Map<String, Object> mutationRollbackFallbackGate = releaseAttemptMutationRollbackFallbackGate(
+                attempt,
+                mutationResultIntakePersistenceGate
+        );
+        result.put("mutationRollbackFallbackGate", mutationRollbackFallbackGate);
+        Map<String, Object> mutationRagFreshnessGate = releaseAttemptMutationRagFreshnessGate(
+                attempt,
+                mutationRollbackFallbackGate
+        );
+        result.put("mutationRagFreshnessGate", mutationRagFreshnessGate);
+        Map<String, Object> mutationResultAggregationGate = releaseAttemptMutationResultAggregationGate(
+                attempt,
+                mutationRagFreshnessGate
+        );
+        result.put("mutationResultAggregationGate", mutationResultAggregationGate);
+        Map<String, Object> mutationPublicationGate = releaseAttemptMutationPublicationGate(
+                attempt,
+                mutationResultAggregationGate
+        );
+        result.put("mutationPublicationGate", mutationPublicationGate);
+        Map<String, Object> mutationFinalAnswerGenerationGate = releaseAttemptMutationFinalAnswerGenerationGate(
+                attempt,
+                mutationPublicationGate
+        );
+        result.put("mutationFinalAnswerGenerationGate", mutationFinalAnswerGenerationGate);
+        Map<String, Object> mutationFinalAnswerCompletionGate = releaseAttemptMutationFinalAnswerCompletionGate(
+                attempt,
+                mutationFinalAnswerGenerationGate
+        );
+        result.put("mutationFinalAnswerCompletionGate", mutationFinalAnswerCompletionGate);
+        Map<String, Object> mutationFinalAnswerPersistenceGate = releaseAttemptMutationFinalAnswerPersistenceGate(
+                attempt,
+                mutationFinalAnswerCompletionGate
+        );
+        result.put("mutationFinalAnswerPersistenceGate", mutationFinalAnswerPersistenceGate);
+        Map<String, Object> mutationFinalAnswerConversationSaveGate = releaseAttemptMutationFinalAnswerConversationSaveGate(
+                attempt,
+                mutationFinalAnswerPersistenceGate
+        );
+        result.put("mutationFinalAnswerConversationSaveGate", mutationFinalAnswerConversationSaveGate);
+        Map<String, Object> mutationFinalAnswerUserVisibleCompletionGate = releaseAttemptMutationFinalAnswerUserVisibleCompletionGate(
+                attempt,
+                mutationFinalAnswerConversationSaveGate
+        );
+        result.put("mutationFinalAnswerUserVisibleCompletionGate", mutationFinalAnswerUserVisibleCompletionGate);
+        Map<String, Object> mutationFinalResponseHandoffGate = releaseAttemptMutationFinalResponseHandoffGate(
+                attempt,
+                mutationFinalAnswerUserVisibleCompletionGate
+        );
+        result.put("mutationFinalResponseHandoffGate", mutationFinalResponseHandoffGate);
+        Map<String, Object> mutationFinalAnswerDeliveryGate = releaseAttemptMutationFinalAnswerDeliveryGate(
+                attempt,
+                mutationFinalResponseHandoffGate
+        );
+        result.put("mutationFinalAnswerDeliveryGate", mutationFinalAnswerDeliveryGate);
+        Map<String, Object> mutationFinalAnswerDeliveryReceiptGate = releaseAttemptMutationFinalAnswerDeliveryReceiptGate(
+                attempt,
+                mutationFinalAnswerDeliveryGate
+        );
+        result.put("mutationFinalAnswerDeliveryReceiptGate", mutationFinalAnswerDeliveryReceiptGate);
         result.put("mutationCompletionSummary", releaseAttemptMutationCompletionSummary(
                 attempt,
                 releaseAttemptFinalReadiness,
@@ -931,7 +1011,23 @@ public class LocalAgentToolGatewayService {
                 mutationRequestBlueprint,
                 mutationRequestCreationGate,
                 mutationRequestPushGate,
-                mutationRequestClaimGate
+                mutationRequestClaimGate,
+                mutationExecutionGate,
+                mutationPostExecutionObservationGate,
+                mutationObservationAcceptanceGate,
+                mutationResultIntakePersistenceGate,
+                mutationRollbackFallbackGate,
+                mutationRagFreshnessGate,
+                mutationResultAggregationGate,
+                mutationPublicationGate,
+                mutationFinalAnswerGenerationGate,
+                mutationFinalAnswerCompletionGate,
+                mutationFinalAnswerPersistenceGate,
+                mutationFinalAnswerConversationSaveGate,
+                mutationFinalAnswerUserVisibleCompletionGate,
+                mutationFinalResponseHandoffGate,
+                mutationFinalAnswerDeliveryGate,
+                mutationFinalAnswerDeliveryReceiptGate
         ));
         return result;
     }
@@ -1444,6 +1540,2257 @@ public class LocalAgentToolGatewayService {
         return result;
     }
 
+    private Map<String, Object> releaseAttemptMutationExecutionGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRequestClaimGate
+    ) {
+        boolean claimGateReady = "REFUSED_CLAIM_DISABLED".equals(mutationRequestClaimGate.get("status"))
+                && Boolean.TRUE.equals(mutationRequestClaimGate.get("prerequisitesPassed"));
+        int expectedRequestCount = numericValue(mutationRequestClaimGate.get("expectedRequestCount"));
+        int persistedRequestCount = numericValue(mutationRequestClaimGate.get("persistedRequestCount"));
+        int pushedRequestCount = numericValue(mutationRequestClaimGate.get("pushedRequestCount"));
+        int claimableRequestCount = numericValue(mutationRequestClaimGate.get("claimableRequestCount"));
+        int runningRequestCount = numericValue(mutationRequestClaimGate.get("runningRequestCount"));
+        int completedRequestCount = 0;
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationExecutionPolicyCheck(
+                        "mutationRequestClaimGate",
+                        claimGateReady,
+                        String.valueOf(mutationRequestClaimGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled claim gate must refuse claim and running transitions before execution can be considered."
+                ),
+                mutationExecutionPolicyCheck(
+                        "executionPolicy",
+                        false,
+                        "DISABLED",
+                        "Local Agent mutation tool execution is disabled."
+                ),
+                mutationExecutionPolicyCheck(
+                        "toolRunnerInvocation",
+                        false,
+                        "DISABLED",
+                        "No Local Agent tool runner may be invoked for disabled mutation execution."
+                ),
+                mutationExecutionPolicyCheck(
+                        "writeHelperInvocation",
+                        false,
+                        "DISABLED",
+                        "No Local Agent write helper may be called while mutation execution is disabled."
+                ),
+                mutationExecutionPolicyCheck(
+                        "completionTransition",
+                        false,
+                        "DISABLED",
+                        "No mutation request can move to a completed result while execution is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "executionEnabled",
+                "writeHelperEnabled",
+                "applyEnabled",
+                "testEnabled",
+                "rollbackRestoreEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-execution-gate.v1");
+        result.put("status", claimGateReady ? "REFUSED_EXECUTION_DISABLED" : "BLOCKED_EXECUTION_DISABLED");
+        result.put("claimGateReady", claimGateReady);
+        result.put("prerequisitesPassed", claimGateReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceClaimGateSchema", mutationRequestClaimGate.get("schema"));
+        result.put("sourceClaimGateStatus", mutationRequestClaimGate.get("status"));
+        result.put("executionPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("toolRunnerInvocationEnabled", false);
+        result.put("writeHelperInvocationEnabled", false);
+        result.put("expectedRequestCount", expectedRequestCount);
+        result.put("persistedRequestCount", persistedRequestCount);
+        result.put("pushedRequestCount", pushedRequestCount);
+        result.put("claimableRequestCount", claimableRequestCount);
+        result.put("runningRequestCount", runningRequestCount);
+        result.put("completedRequestCount", completedRequestCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionGateEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", claimGateReady
+                ? "Local Agent mutation execution is explicitly refused: no tool runner, write helper, apply, test, rollback restore, RAG freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation execution is blocked because the disabled request claim gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationExecutionPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("running", false);
+        result.put("completed", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationPostExecutionObservationGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationExecutionGate
+    ) {
+        boolean executionGateReady = "REFUSED_EXECUTION_DISABLED".equals(mutationExecutionGate.get("status"))
+                && Boolean.TRUE.equals(mutationExecutionGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationExecutionGate.get("expectedRequestCount"));
+        int completedResultCount = numericValue(mutationExecutionGate.get("completedRequestCount"));
+        int acceptedResultCount = 0;
+        int rejectedResultCount = 0;
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationPostExecutionObservationPolicyCheck(
+                        "mutationExecutionGate",
+                        executionGateReady,
+                        String.valueOf(mutationExecutionGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled execution gate must refuse Local Agent execution before post-execution observations can be considered."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "observationPolicy",
+                        false,
+                        "DISABLED",
+                        "Post-execution mutation observation capture is disabled."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "completedResultPersistence",
+                        false,
+                        "DISABLED",
+                        "Completed mutation results must not be persisted while observation capture is disabled."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "rollbackFallbackExecution",
+                        false,
+                        "DISABLED",
+                        "Rollback fallback execution remains disabled until mutation observations are accepted."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "ragFreshnessUpdate",
+                        false,
+                        "DISABLED",
+                        "RAG freshness updates remain disabled until completed mutation observations are accepted."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation remains disabled until post-execution observations are accepted."
+                ),
+                mutationPostExecutionObservationPolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until completed mutation observations are accepted."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "postExecutionObservationEnabled",
+                "completedResultPersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1");
+        result.put("status", executionGateReady ? "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED" : "BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED");
+        result.put("executionGateReady", executionGateReady);
+        result.put("prerequisitesPassed", executionGateReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceExecutionGateSchema", mutationExecutionGate.get("schema"));
+        result.put("sourceExecutionGateStatus", mutationExecutionGate.get("status"));
+        result.put("observationPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", executionGateReady
+                ? "Local Agent post-execution mutation observation is explicitly refused: no completed-result capture, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent post-execution mutation observation is blocked because the disabled mutation execution gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationPostExecutionObservationPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationObservationAcceptanceGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationPostExecutionObservationGate
+    ) {
+        boolean postExecutionObservationReady = "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED".equals(
+                mutationPostExecutionObservationGate.get("status"))
+                && Boolean.TRUE.equals(mutationPostExecutionObservationGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationPostExecutionObservationGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationPostExecutionObservationGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationPostExecutionObservationGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationPostExecutionObservationGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = 0;
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationObservationAcceptancePolicyCheck(
+                        "mutationPostExecutionObservationGate",
+                        postExecutionObservationReady,
+                        String.valueOf(mutationPostExecutionObservationGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled post-execution observation gate must refuse completed-result capture before acceptance can be considered."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "acceptancePolicy",
+                        false,
+                        "DISABLED",
+                        "Completed mutation observation acceptance is disabled."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "intakePersistence",
+                        false,
+                        "DISABLED",
+                        "Accepted mutation observation intake must not be persisted while acceptance is disabled."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "rollbackFallbackExecution",
+                        false,
+                        "DISABLED",
+                        "Rollback fallback execution remains disabled until accepted observations are persisted."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "ragFreshnessUpdate",
+                        false,
+                        "DISABLED",
+                        "RAG freshness updates remain disabled until accepted observations are persisted."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation remains disabled until accepted observations are persisted."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until accepted observations are persisted."
+                ),
+                mutationObservationAcceptancePolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until accepted observations are persisted."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "observationAcceptanceEnabled",
+                "intakePersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-observation-acceptance-gate.v1");
+        result.put("status", postExecutionObservationReady ? "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED" : "BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED");
+        result.put("postExecutionObservationReady", postExecutionObservationReady);
+        result.put("prerequisitesPassed", postExecutionObservationReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourcePostExecutionObservationGateSchema", mutationPostExecutionObservationGate.get("schema"));
+        result.put("sourcePostExecutionObservationGateStatus", mutationPostExecutionObservationGate.get("status"));
+        result.put("acceptancePolicy", "DISABLED_AUDIT_ONLY");
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", postExecutionObservationReady
+                ? "Local Agent mutation observation acceptance is explicitly refused: no accepted observation intake, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation observation acceptance is blocked because the disabled post-execution observation gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationObservationAcceptancePolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationResultIntakePersistenceGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationObservationAcceptanceGate
+    ) {
+        boolean observationAcceptanceReady = "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED".equals(mutationObservationAcceptanceGate.get("status"))
+                && Boolean.TRUE.equals(mutationObservationAcceptanceGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationObservationAcceptanceGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationObservationAcceptanceGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationObservationAcceptanceGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationObservationAcceptanceGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationObservationAcceptanceGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationResultIntakePersistencePolicyCheck(
+                        "mutationObservationAcceptanceGate",
+                        observationAcceptanceReady,
+                        String.valueOf(mutationObservationAcceptanceGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled observation acceptance gate must refuse accepted observation intake before persistence can be considered."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "intakePersistencePolicy",
+                        false,
+                        "DISABLED",
+                        "Accepted mutation result intake persistence is disabled."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "acceptedObservationPersistence",
+                        false,
+                        "DISABLED",
+                        "Accepted mutation observations must not be persisted while intake persistence is disabled."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "rollbackFallbackExecution",
+                        false,
+                        "DISABLED",
+                        "Rollback fallback execution remains disabled until accepted mutation observations are persisted."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "ragFreshnessUpdate",
+                        false,
+                        "DISABLED",
+                        "RAG freshness updates remain disabled until accepted mutation observations are persisted."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation remains disabled until accepted mutation observations are persisted."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until accepted mutation observations are persisted."
+                ),
+                mutationResultIntakePersistencePolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until accepted mutation observations are persisted."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "intakePersistenceEnabled",
+                "acceptedObservationPersistenceEnabled",
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-result-intake-persistence-gate.v1");
+        result.put("status", observationAcceptanceReady ? "REFUSED_INTAKE_PERSISTENCE_DISABLED" : "BLOCKED_INTAKE_PERSISTENCE_DISABLED");
+        result.put("observationAcceptanceReady", observationAcceptanceReady);
+        result.put("prerequisitesPassed", observationAcceptanceReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceObservationAcceptanceGateSchema", mutationObservationAcceptanceGate.get("schema"));
+        result.put("sourceObservationAcceptanceGateStatus", mutationObservationAcceptanceGate.get("status"));
+        result.put("intakePersistencePolicy", "DISABLED_AUDIT_ONLY");
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", observationAcceptanceReady
+                ? "Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation result intake persistence is blocked because the disabled observation acceptance gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationResultIntakePersistencePolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRollbackFallbackGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationResultIntakePersistenceGate
+    ) {
+        boolean intakePersistenceReady = "REFUSED_INTAKE_PERSISTENCE_DISABLED".equals(
+                mutationResultIntakePersistenceGate.get("status"))
+                && Boolean.TRUE.equals(mutationResultIntakePersistenceGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationResultIntakePersistenceGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationResultIntakePersistenceGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationResultIntakePersistenceGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationResultIntakePersistenceGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationResultIntakePersistenceGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationRollbackFallbackPolicyCheck(
+                        "mutationResultIntakePersistenceGate",
+                        intakePersistenceReady,
+                        String.valueOf(mutationResultIntakePersistenceGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled intake persistence gate must refuse accepted-observation persistence before rollback fallback can be considered."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "rollbackFallbackPolicy",
+                        false,
+                        "DISABLED",
+                        "Rollback fallback execution is disabled."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "rollbackFallbackExecution",
+                        false,
+                        "DISABLED",
+                        "No rollback fallback may execute while the rollback fallback gate is disabled."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "ragFreshnessUpdate",
+                        false,
+                        "DISABLED",
+                        "RAG freshness updates remain disabled until rollback fallback outcomes are modeled."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation remains disabled until rollback fallback outcomes are modeled."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until rollback fallback outcomes are modeled."
+                ),
+                mutationRollbackFallbackPolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until rollback fallback outcomes are modeled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "rollbackFallbackExecutionEnabled",
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-rollback-fallback-gate.v1");
+        result.put("status", intakePersistenceReady ? "REFUSED_ROLLBACK_FALLBACK_DISABLED" : "BLOCKED_ROLLBACK_FALLBACK_DISABLED");
+        result.put("intakePersistenceReady", intakePersistenceReady);
+        result.put("prerequisitesPassed", intakePersistenceReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceResultIntakePersistenceGateSchema", mutationResultIntakePersistenceGate.get("schema"));
+        result.put("sourceResultIntakePersistenceGateStatus", mutationResultIntakePersistenceGate.get("status"));
+        result.put("rollbackFallbackPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("rollbackFallbackInvocationEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", intakePersistenceReady
+                ? "Local Agent mutation rollback fallback is explicitly refused: no rollback fallback execution, RAG freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation rollback fallback is blocked because the disabled intake persistence gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationRollbackFallbackPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationRagFreshnessGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRollbackFallbackGate
+    ) {
+        boolean rollbackFallbackReady = "REFUSED_ROLLBACK_FALLBACK_DISABLED".equals(mutationRollbackFallbackGate.get("status"))
+                && Boolean.TRUE.equals(mutationRollbackFallbackGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationRollbackFallbackGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationRollbackFallbackGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationRollbackFallbackGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationRollbackFallbackGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationRollbackFallbackGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationRagFreshnessPolicyCheck(
+                        "mutationRollbackFallbackGate",
+                        rollbackFallbackReady,
+                        String.valueOf(mutationRollbackFallbackGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled rollback fallback gate must refuse rollback execution before RAG freshness can be considered."
+                ),
+                mutationRagFreshnessPolicyCheck(
+                        "ragFreshnessPolicy",
+                        false,
+                        "DISABLED",
+                        "RAG freshness updates are disabled."
+                ),
+                mutationRagFreshnessPolicyCheck(
+                        "ragFreshnessUpdate",
+                        false,
+                        "DISABLED",
+                        "No code or document index freshness update may run while RAG freshness is disabled."
+                ),
+                mutationRagFreshnessPolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation remains disabled until RAG freshness state is modeled."
+                ),
+                mutationRagFreshnessPolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until RAG freshness state is modeled."
+                ),
+                mutationRagFreshnessPolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until RAG freshness state is modeled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "ragFreshnessUpdateEnabled",
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-rag-freshness-gate.v1");
+        result.put("status", rollbackFallbackReady ? "REFUSED_RAG_FRESHNESS_DISABLED" : "BLOCKED_RAG_FRESHNESS_DISABLED");
+        result.put("rollbackFallbackReady", rollbackFallbackReady);
+        result.put("prerequisitesPassed", rollbackFallbackReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceRollbackFallbackGateSchema", mutationRollbackFallbackGate.get("schema"));
+        result.put("sourceRollbackFallbackGateStatus", mutationRollbackFallbackGate.get("status"));
+        result.put("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("ragFreshnessUpdateInvocationEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", rollbackFallbackReady
+                ? "Local Agent mutation RAG freshness is explicitly refused: no freshness update, aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation RAG freshness is blocked because the disabled rollback fallback gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationRagFreshnessPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationResultAggregationGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationRagFreshnessGate
+    ) {
+        boolean ragFreshnessReady = "REFUSED_RAG_FRESHNESS_DISABLED".equals(mutationRagFreshnessGate.get("status"))
+                && Boolean.TRUE.equals(mutationRagFreshnessGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationRagFreshnessGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationRagFreshnessGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationRagFreshnessGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationRagFreshnessGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationRagFreshnessGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationResultAggregationPolicyCheck(
+                        "mutationRagFreshnessGate",
+                        ragFreshnessReady,
+                        String.valueOf(mutationRagFreshnessGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled RAG freshness gate must refuse freshness updates before result aggregation can be considered."
+                ),
+                mutationResultAggregationPolicyCheck(
+                        "resultAggregationPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation result aggregation is disabled."
+                ),
+                mutationResultAggregationPolicyCheck(
+                        "resultAggregation",
+                        false,
+                        "DISABLED",
+                        "No mutation result aggregation may run while aggregation is disabled."
+                ),
+                mutationResultAggregationPolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "Final answer publication remains disabled until aggregation state is modeled."
+                ),
+                mutationResultAggregationPolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until aggregation state is modeled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "mutationResultAggregationEnabled",
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-result-aggregation-gate.v1");
+        result.put("status", ragFreshnessReady ? "REFUSED_RESULT_AGGREGATION_DISABLED" : "BLOCKED_RESULT_AGGREGATION_DISABLED");
+        result.put("ragFreshnessReady", ragFreshnessReady);
+        result.put("prerequisitesPassed", ragFreshnessReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceRagFreshnessGateSchema", mutationRagFreshnessGate.get("schema"));
+        result.put("sourceRagFreshnessGateStatus", mutationRagFreshnessGate.get("status"));
+        result.put("resultAggregationPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("resultAggregationInvocationEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", ragFreshnessReady
+                ? "Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled."
+                : "Local Agent mutation result aggregation is blocked because the disabled RAG freshness gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationResultAggregationPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationPublicationGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationResultAggregationGate
+    ) {
+        boolean aggregationReady = "REFUSED_RESULT_AGGREGATION_DISABLED".equals(mutationResultAggregationGate.get("status"))
+                && Boolean.TRUE.equals(mutationResultAggregationGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationResultAggregationGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationResultAggregationGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationResultAggregationGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationResultAggregationGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationResultAggregationGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationPublicationPolicyCheck(
+                        "mutationResultAggregationGate",
+                        aggregationReady,
+                        String.valueOf(mutationResultAggregationGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled result aggregation gate must refuse aggregation before publication can be considered."
+                ),
+                mutationPublicationPolicyCheck(
+                        "publicationPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation publication is disabled."
+                ),
+                mutationPublicationPolicyCheck(
+                        "publication",
+                        false,
+                        "DISABLED",
+                        "No mutation publication may run while publication is disabled."
+                ),
+                mutationPublicationPolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "Final-answer generation remains disabled until publication state is modeled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of(
+                "publicationEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-publication-gate.v1");
+        result.put("status", aggregationReady ? "REFUSED_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED");
+        result.put("resultAggregationReady", aggregationReady);
+        result.put("prerequisitesPassed", aggregationReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceResultAggregationGateSchema", mutationResultAggregationGate.get("schema"));
+        result.put("sourceResultAggregationGateStatus", mutationResultAggregationGate.get("status"));
+        result.put("publicationPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("publicationInvocationEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", aggregationReady
+                ? "Local Agent mutation publication is explicitly refused: no publication or final answer is enabled."
+                : "Local Agent mutation publication is blocked because the disabled result aggregation gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationPublicationPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerGenerationGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationPublicationGate
+    ) {
+        boolean publicationReady = "REFUSED_PUBLICATION_DISABLED".equals(mutationPublicationGate.get("status"))
+                && Boolean.TRUE.equals(mutationPublicationGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationPublicationGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationPublicationGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationPublicationGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationPublicationGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationPublicationGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerGenerationPolicyCheck(
+                        "mutationPublicationGate",
+                        publicationReady,
+                        String.valueOf(mutationPublicationGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled publication gate must refuse publication before final-answer generation can be considered."
+                ),
+                mutationFinalAnswerGenerationPolicyCheck(
+                        "finalAnswerGenerationPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer generation is disabled."
+                ),
+                mutationFinalAnswerGenerationPolicyCheck(
+                        "finalAnswerGeneration",
+                        false,
+                        "DISABLED",
+                        "No final answer may be generated while final-answer generation is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-generation-gate.v1");
+        result.put("status", publicationReady ? "REFUSED_FINAL_ANSWER_GENERATION_DISABLED" : "BLOCKED_FINAL_ANSWER_GENERATION_DISABLED");
+        result.put("publicationReady", publicationReady);
+        result.put("prerequisitesPassed", publicationReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourcePublicationGateSchema", mutationPublicationGate.get("schema"));
+        result.put("sourcePublicationGateStatus", mutationPublicationGate.get("status"));
+        result.put("finalAnswerGenerationPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("finalAnswerGenerationInvocationEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", publicationReady
+                ? "Local Agent mutation final-answer generation is explicitly refused: no final answer is generated."
+                : "Local Agent mutation final-answer generation is blocked because the disabled publication gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerGenerationPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerCompletionGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerGenerationGate
+    ) {
+        boolean finalAnswerGenerationReady = "REFUSED_FINAL_ANSWER_GENERATION_DISABLED".equals(mutationFinalAnswerGenerationGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerGenerationGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerGenerationGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerGenerationGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerGenerationGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerGenerationGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerGenerationGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerCompletionPolicyCheck(
+                        "mutationFinalAnswerGenerationGate",
+                        finalAnswerGenerationReady,
+                        String.valueOf(mutationFinalAnswerGenerationGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer generation gate must refuse generation before final-answer completion can be considered."
+                ),
+                mutationFinalAnswerCompletionPolicyCheck(
+                        "finalAnswerCompletionPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer completion and delivery are disabled."
+                ),
+                mutationFinalAnswerCompletionPolicyCheck(
+                        "finalAnswerCompletion",
+                        false,
+                        "DISABLED",
+                        "No final answer may be completed while final-answer completion is disabled."
+                ),
+                mutationFinalAnswerCompletionPolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while final-answer delivery is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("finalAnswerCompletionEnabled", "finalAnswerDeliveryEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-completion-gate.v1");
+        result.put("status", finalAnswerGenerationReady ? "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED" : "BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED");
+        result.put("finalAnswerGenerationReady", finalAnswerGenerationReady);
+        result.put("prerequisitesPassed", finalAnswerGenerationReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerGenerationGateSchema", mutationFinalAnswerGenerationGate.get("schema"));
+        result.put("sourceFinalAnswerGenerationGateStatus", mutationFinalAnswerGenerationGate.get("status"));
+        result.put("finalAnswerCompletionPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("finalAnswerCompletionInvocationEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalAnswerGenerationReady
+                ? "Local Agent mutation final-answer completion is explicitly refused: no final answer is completed or delivered."
+                : "Local Agent mutation final-answer completion is blocked because the disabled final-answer generation gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerCompletionPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerPersistenceGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerCompletionGate
+    ) {
+        boolean finalAnswerCompletionReady = "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED".equals(mutationFinalAnswerCompletionGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerCompletionGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerCompletionGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerCompletionGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerCompletionGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerCompletionGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerCompletionGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerPersistencePolicyCheck(
+                        "mutationFinalAnswerCompletionGate",
+                        finalAnswerCompletionReady,
+                        String.valueOf(mutationFinalAnswerCompletionGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer completion gate must refuse completion before final-answer persistence can be considered."
+                ),
+                mutationFinalAnswerPersistencePolicyCheck(
+                        "finalAnswerPersistencePolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer persistence and conversation save are disabled."
+                ),
+                mutationFinalAnswerPersistencePolicyCheck(
+                        "finalAnswerPersistence",
+                        false,
+                        "DISABLED",
+                        "No final answer may be persisted while final-answer persistence is disabled."
+                ),
+                mutationFinalAnswerPersistencePolicyCheck(
+                        "conversationTurnSave",
+                        false,
+                        "DISABLED",
+                        "No conversation turn may be saved while final-answer persistence is disabled."
+                ),
+                mutationFinalAnswerPersistencePolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while final-answer persistence is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("finalAnswerPersistenceEnabled", "conversationTurnSaveEnabled", "finalAnswerCompletionEnabled", "finalAnswerDeliveryEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-persistence-gate.v1");
+        result.put("status", finalAnswerCompletionReady ? "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED" : "BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED");
+        result.put("finalAnswerCompletionReady", finalAnswerCompletionReady);
+        result.put("prerequisitesPassed", finalAnswerCompletionReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerCompletionGateSchema", mutationFinalAnswerCompletionGate.get("schema"));
+        result.put("sourceFinalAnswerCompletionGateStatus", mutationFinalAnswerCompletionGate.get("status"));
+        result.put("finalAnswerPersistencePolicy", "DISABLED_AUDIT_ONLY");
+        result.put("finalAnswerPersistenceInvocationEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalAnswerCompletionReady
+                ? "Local Agent mutation final-answer persistence is explicitly refused: no final answer is persisted and no conversation turn is saved."
+                : "Local Agent mutation final-answer persistence is blocked because the disabled final-answer completion gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerPersistencePolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerConversationSaveGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerPersistenceGate
+    ) {
+        boolean finalAnswerPersistenceReady = "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED".equals(mutationFinalAnswerPersistenceGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerPersistenceGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerPersistenceGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerPersistenceGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerPersistenceGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerPersistenceGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerPersistenceGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerConversationSavePolicyCheck(
+                        "mutationFinalAnswerPersistenceGate",
+                        finalAnswerPersistenceReady,
+                        String.valueOf(mutationFinalAnswerPersistenceGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer persistence gate must refuse persistence before conversation save can be considered."
+                ),
+                mutationFinalAnswerConversationSavePolicyCheck(
+                        "finalAnswerConversationSavePolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer conversation save and user-visible completion are disabled."
+                ),
+                mutationFinalAnswerConversationSavePolicyCheck(
+                        "conversationTurnSave",
+                        false,
+                        "DISABLED",
+                        "No conversation turn may be saved while conversation save is disabled."
+                ),
+                mutationFinalAnswerConversationSavePolicyCheck(
+                        "userVisibleCompletion",
+                        false,
+                        "DISABLED",
+                        "No user-visible completion may be marked while conversation save is disabled."
+                ),
+                mutationFinalAnswerConversationSavePolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while conversation save is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("conversationTurnSaveEnabled", "userVisibleCompletionEnabled", "finalAnswerPersistenceEnabled", "finalAnswerDeliveryEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1");
+        result.put("status", finalAnswerPersistenceReady ? "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED" : "BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED");
+        result.put("finalAnswerPersistenceReady", finalAnswerPersistenceReady);
+        result.put("prerequisitesPassed", finalAnswerPersistenceReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerPersistenceGateSchema", mutationFinalAnswerPersistenceGate.get("schema"));
+        result.put("sourceFinalAnswerPersistenceGateStatus", mutationFinalAnswerPersistenceGate.get("status"));
+        result.put("finalAnswerConversationSavePolicy", "DISABLED_AUDIT_ONLY");
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("conversationTurnSaveInvocationEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalAnswerPersistenceReady
+                ? "Local Agent mutation final-answer conversation save is explicitly refused: no conversation turn is saved and no user-visible completion is marked."
+                : "Local Agent mutation final-answer conversation save is blocked because the disabled final-answer persistence gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerConversationSavePolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerUserVisibleCompletionGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerConversationSaveGate
+    ) {
+        boolean finalAnswerConversationSaveReady = "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED".equals(mutationFinalAnswerConversationSaveGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerConversationSaveGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerConversationSaveGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerConversationSaveGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerConversationSaveGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerConversationSaveGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerConversationSaveGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+                        "mutationFinalAnswerConversationSaveGate",
+                        finalAnswerConversationSaveReady,
+                        String.valueOf(mutationFinalAnswerConversationSaveGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer conversation-save gate must refuse conversation save before user-visible completion can be considered."
+                ),
+                mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+                        "userVisibleCompletionPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer user-visible completion and final-response handoff are disabled."
+                ),
+                mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+                        "userVisibleCompletion",
+                        false,
+                        "DISABLED",
+                        "No user-visible completion may be marked while user-visible completion is disabled."
+                ),
+                mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+                        "finalResponseHandoff",
+                        false,
+                        "DISABLED",
+                        "No final response may be handed off while user-visible completion is disabled."
+                ),
+                mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+                        "conversationTurnSave",
+                        false,
+                        "DISABLED",
+                        "No conversation turn may be saved while user-visible completion is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("userVisibleCompletionEnabled", "finalResponseHandoffEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerDeliveryEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1");
+        result.put("status", finalAnswerConversationSaveReady ? "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED" : "BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED");
+        result.put("finalAnswerConversationSaveReady", finalAnswerConversationSaveReady);
+        result.put("prerequisitesPassed", finalAnswerConversationSaveReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerConversationSaveGateSchema", mutationFinalAnswerConversationSaveGate.get("schema"));
+        result.put("sourceFinalAnswerConversationSaveGateStatus", mutationFinalAnswerConversationSaveGate.get("status"));
+        result.put("userVisibleCompletionPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalAnswerConversationSaveReady
+                ? "Local Agent mutation final-answer user-visible completion is explicitly refused: no user-visible completion is marked and no final response is handed off."
+                : "Local Agent mutation final-answer user-visible completion is blocked because the disabled final-answer conversation-save gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerUserVisibleCompletionPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalResponseHandoffGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerUserVisibleCompletionGate
+    ) {
+        boolean userVisibleCompletionReady = "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED".equals(mutationFinalAnswerUserVisibleCompletionGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerUserVisibleCompletionGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerUserVisibleCompletionGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerUserVisibleCompletionGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerUserVisibleCompletionGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerUserVisibleCompletionGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerUserVisibleCompletionGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalResponseHandoffPolicyCheck(
+                        "mutationFinalAnswerUserVisibleCompletionGate",
+                        userVisibleCompletionReady,
+                        String.valueOf(mutationFinalAnswerUserVisibleCompletionGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer user-visible completion gate must refuse user-visible completion before final-response handoff can be considered."
+                ),
+                mutationFinalResponseHandoffPolicyCheck(
+                        "finalResponseHandoffPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-response handoff and delivery handoff are disabled."
+                ),
+                mutationFinalResponseHandoffPolicyCheck(
+                        "finalResponseHandoff",
+                        false,
+                        "DISABLED",
+                        "No final response may be handed off while final-response handoff is disabled."
+                ),
+                mutationFinalResponseHandoffPolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while final-response handoff is disabled."
+                ),
+                mutationFinalResponseHandoffPolicyCheck(
+                        "userVisibleCompletion",
+                        false,
+                        "DISABLED",
+                        "No user-visible completion may be marked while final-response handoff is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("finalResponseHandoffEnabled", "deliveryHandoffEnabled", "finalAnswerDeliveryEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-response-handoff-gate.v1");
+        result.put("status", userVisibleCompletionReady ? "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED" : "BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED");
+        result.put("userVisibleCompletionReady", userVisibleCompletionReady);
+        result.put("prerequisitesPassed", userVisibleCompletionReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerUserVisibleCompletionGateSchema", mutationFinalAnswerUserVisibleCompletionGate.get("schema"));
+        result.put("sourceFinalAnswerUserVisibleCompletionGateStatus", mutationFinalAnswerUserVisibleCompletionGate.get("status"));
+        result.put("finalResponseHandoffPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", userVisibleCompletionReady
+                ? "Local Agent mutation final-response handoff is explicitly refused: no final response is handed off and no final answer is delivered."
+                : "Local Agent mutation final-response handoff is blocked because the disabled final-answer user-visible completion gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalResponseHandoffPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerDeliveryGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalResponseHandoffGate
+    ) {
+        boolean finalResponseHandoffReady = "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED".equals(mutationFinalResponseHandoffGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalResponseHandoffGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalResponseHandoffGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalResponseHandoffGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalResponseHandoffGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalResponseHandoffGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalResponseHandoffGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerDeliveryPolicyCheck(
+                        "mutationFinalResponseHandoffGate",
+                        finalResponseHandoffReady,
+                        String.valueOf(mutationFinalResponseHandoffGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-response handoff gate must refuse handoff before final-answer delivery can be considered."
+                ),
+                mutationFinalAnswerDeliveryPolicyCheck(
+                        "finalAnswerDeliveryPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer delivery and delivery handoff are disabled."
+                ),
+                mutationFinalAnswerDeliveryPolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while final-answer delivery is disabled."
+                ),
+                mutationFinalAnswerDeliveryPolicyCheck(
+                        "deliveryHandoff",
+                        false,
+                        "DISABLED",
+                        "No delivery handoff may run while final-answer delivery is disabled."
+                ),
+                mutationFinalAnswerDeliveryPolicyCheck(
+                        "finalResponseHandoff",
+                        false,
+                        "DISABLED",
+                        "No final response may be handed off while final-answer delivery is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-delivery-gate.v1");
+        result.put("status", finalResponseHandoffReady ? "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED" : "BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED");
+        result.put("finalResponseHandoffReady", finalResponseHandoffReady);
+        result.put("prerequisitesPassed", finalResponseHandoffReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalResponseHandoffGateSchema", mutationFinalResponseHandoffGate.get("schema"));
+        result.put("sourceFinalResponseHandoffGateStatus", mutationFinalResponseHandoffGate.get("status"));
+        result.put("finalAnswerDeliveryPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalResponseHandoffReady
+                ? "Local Agent mutation final-answer delivery is explicitly refused: no final answer is delivered and no delivery handoff runs."
+                : "Local Agent mutation final-answer delivery is blocked because the disabled final-response handoff gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerDeliveryPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptMutationFinalAnswerDeliveryReceiptGate(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> mutationFinalAnswerDeliveryGate
+    ) {
+        boolean finalAnswerDeliveryReady = "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED".equals(mutationFinalAnswerDeliveryGate.get("status"))
+                && Boolean.TRUE.equals(mutationFinalAnswerDeliveryGate.get("prerequisitesPassed"));
+        int expectedResultCount = numericValue(mutationFinalAnswerDeliveryGate.get("expectedResultCount"));
+        int completedResultCount = numericValue(mutationFinalAnswerDeliveryGate.get("completedResultCount"));
+        int acceptedResultCount = numericValue(mutationFinalAnswerDeliveryGate.get("acceptedResultCount"));
+        int rejectedResultCount = numericValue(mutationFinalAnswerDeliveryGate.get("rejectedResultCount"));
+        int intakePersistedResultCount = numericValue(mutationFinalAnswerDeliveryGate.get("intakePersistedResultCount"));
+        List<Map<String, Object>> policyChecks = List.of(
+                mutationFinalAnswerDeliveryReceiptPolicyCheck(
+                        "mutationFinalAnswerDeliveryGate",
+                        finalAnswerDeliveryReady,
+                        String.valueOf(mutationFinalAnswerDeliveryGate.getOrDefault("status", "UNKNOWN")),
+                        "A disabled final-answer delivery gate must refuse delivery before delivery receipt can be considered."
+                ),
+                mutationFinalAnswerDeliveryReceiptPolicyCheck(
+                        "deliveryReceiptPolicy",
+                        false,
+                        "DISABLED",
+                        "Mutation final-answer delivery receipt and acknowledgement are disabled."
+                ),
+                mutationFinalAnswerDeliveryReceiptPolicyCheck(
+                        "deliveryReceipt",
+                        false,
+                        "DISABLED",
+                        "No delivery receipt may be recorded while delivery receipt is disabled."
+                ),
+                mutationFinalAnswerDeliveryReceiptPolicyCheck(
+                        "finalAnswerDelivery",
+                        false,
+                        "DISABLED",
+                        "No final answer may be delivered while delivery receipt is disabled."
+                ),
+                mutationFinalAnswerDeliveryReceiptPolicyCheck(
+                        "deliveryHandoff",
+                        false,
+                        "DISABLED",
+                        "No delivery handoff may run while delivery receipt is disabled."
+                )
+        );
+        List<String> blockingKeys = new ArrayList<>(policyChecks.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        for (String key : List.of("deliveryReceiptEnabled", "finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+            if (!blockingKeys.contains(key)) {
+                blockingKeys.add(key);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1");
+        result.put("status", finalAnswerDeliveryReady ? "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED" : "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED");
+        result.put("finalAnswerDeliveryReady", finalAnswerDeliveryReady);
+        result.put("prerequisitesPassed", finalAnswerDeliveryReady);
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerDeliveryGateSchema", mutationFinalAnswerDeliveryGate.get("schema"));
+        result.put("sourceFinalAnswerDeliveryGateStatus", mutationFinalAnswerDeliveryGate.get("status"));
+        result.put("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("deliveryReceiptEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("expectedResultCount", expectedResultCount);
+        result.put("completedResultCount", completedResultCount);
+        result.put("acceptedResultCount", acceptedResultCount);
+        result.put("rejectedResultCount", rejectedResultCount);
+        result.put("intakePersistedResultCount", intakePersistedResultCount);
+        result.put("policyChecks", policyChecks);
+        result.put("releaseGateEnabled", false);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("applyEnabled", false);
+        result.put("testEnabled", false);
+        result.put("rollbackRestoreEnabled", false);
+        result.put("postExecutionObservationEnabled", false);
+        result.put("completedResultPersistenceEnabled", false);
+        result.put("observationAcceptanceEnabled", false);
+        result.put("intakePersistenceEnabled", false);
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("rollbackFallbackExecutionEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("blockingKeys", blockingKeys);
+        result.put("message", finalAnswerDeliveryReady
+                ? "Local Agent mutation final-answer delivery receipt is explicitly refused: no delivery receipt is recorded and no acknowledgement is saved."
+                : "Local Agent mutation final-answer delivery receipt is blocked because the disabled final-answer delivery gate is incomplete.");
+        return result;
+    }
+
+    private Map<String, Object> mutationFinalAnswerDeliveryReceiptPolicyCheck(
+            String key,
+            boolean passed,
+            String status,
+            String message
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", key);
+        result.put("status", status);
+        result.put("passed", passed);
+        result.put("blocking", !passed);
+        result.put("requestCreationEnabled", false);
+        result.put("pushEnabled", false);
+        result.put("claimEnabled", false);
+        result.put("executionEnabled", false);
+        result.put("writeHelperEnabled", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("mutationResultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("message", message);
+        return result;
+    }
+
     private int numericValue(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
     }
@@ -1802,7 +4149,23 @@ public class LocalAgentToolGatewayService {
             Map<String, Object> mutationRequestBlueprint,
             Map<String, Object> mutationRequestCreationGate,
             Map<String, Object> mutationRequestPushGate,
-            Map<String, Object> mutationRequestClaimGate
+            Map<String, Object> mutationRequestClaimGate,
+            Map<String, Object> mutationExecutionGate,
+            Map<String, Object> mutationPostExecutionObservationGate,
+            Map<String, Object> mutationObservationAcceptanceGate,
+            Map<String, Object> mutationResultIntakePersistenceGate,
+            Map<String, Object> mutationRollbackFallbackGate,
+            Map<String, Object> mutationRagFreshnessGate,
+            Map<String, Object> mutationResultAggregationGate,
+            Map<String, Object> mutationPublicationGate,
+            Map<String, Object> mutationFinalAnswerGenerationGate,
+            Map<String, Object> mutationFinalAnswerCompletionGate,
+            Map<String, Object> mutationFinalAnswerPersistenceGate,
+            Map<String, Object> mutationFinalAnswerConversationSaveGate,
+            Map<String, Object> mutationFinalAnswerUserVisibleCompletionGate,
+            Map<String, Object> mutationFinalResponseHandoffGate,
+            Map<String, Object> mutationFinalAnswerDeliveryGate,
+            Map<String, Object> mutationFinalAnswerDeliveryReceiptGate
     ) {
         List<Map<String, Object>> items = new ArrayList<>();
         items.add(mutationCompletionSummaryItem(
@@ -1897,6 +4260,102 @@ public class LocalAgentToolGatewayService {
                 "Future request claim must pass through a disabled claim gate that refuses claimNext, running transition, and mutation."
         ));
         items.add(mutationCompletionSummaryItem(
+                "mutationExecutionGate",
+                "REFUSED_EXECUTION_DISABLED".equals(mutationExecutionGate.get("status")),
+                String.valueOf(mutationExecutionGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation execution must pass through a disabled execution gate that refuses tool runner, write helper, apply, test, rollback, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationPostExecutionObservationGate",
+                "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED".equals(mutationPostExecutionObservationGate.get("status")),
+                String.valueOf(mutationPostExecutionObservationGate.getOrDefault("status", "UNKNOWN")),
+                "Future post-execution observations must pass through a disabled gate that refuses completed-result capture, rollback fallback, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationObservationAcceptanceGate",
+                "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED".equals(mutationObservationAcceptanceGate.get("status")),
+                String.valueOf(mutationObservationAcceptanceGate.getOrDefault("status", "UNKNOWN")),
+                "Future completed observations must pass through a disabled acceptance gate that refuses intake persistence, rollback fallback, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationResultIntakePersistenceGate",
+                "REFUSED_INTAKE_PERSISTENCE_DISABLED".equals(mutationResultIntakePersistenceGate.get("status")),
+                String.valueOf(mutationResultIntakePersistenceGate.getOrDefault("status", "UNKNOWN")),
+                "Future accepted observations must pass through a disabled intake persistence gate that refuses persistence, rollback fallback, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRollbackFallbackGate",
+                "REFUSED_ROLLBACK_FALLBACK_DISABLED".equals(mutationRollbackFallbackGate.get("status")),
+                String.valueOf(mutationRollbackFallbackGate.getOrDefault("status", "UNKNOWN")),
+                "Future rollback fallback handling must pass through a disabled rollback fallback gate that refuses rollback execution, freshness, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationRagFreshnessGate",
+                "REFUSED_RAG_FRESHNESS_DISABLED".equals(mutationRagFreshnessGate.get("status")),
+                String.valueOf(mutationRagFreshnessGate.getOrDefault("status", "UNKNOWN")),
+                "Future RAG freshness updates must pass through a disabled freshness gate that refuses index updates, aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationResultAggregationGate",
+                "REFUSED_RESULT_AGGREGATION_DISABLED".equals(mutationResultAggregationGate.get("status")),
+                String.valueOf(mutationResultAggregationGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation result aggregation must pass through a disabled aggregation gate that refuses aggregation, publication, and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationPublicationGate",
+                "REFUSED_PUBLICATION_DISABLED".equals(mutationPublicationGate.get("status")),
+                String.valueOf(mutationPublicationGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation publication must pass through a disabled publication gate that refuses publication and final-answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerGenerationGate",
+                "REFUSED_FINAL_ANSWER_GENERATION_DISABLED".equals(mutationFinalAnswerGenerationGate.get("status")),
+                String.valueOf(mutationFinalAnswerGenerationGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer generation must pass through a disabled final-answer gate that refuses answer generation."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerCompletionGate",
+                "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED".equals(mutationFinalAnswerCompletionGate.get("status")),
+                String.valueOf(mutationFinalAnswerCompletionGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer completion must pass through a disabled completion gate that refuses answer completion and delivery."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerPersistenceGate",
+                "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED".equals(mutationFinalAnswerPersistenceGate.get("status")),
+                String.valueOf(mutationFinalAnswerPersistenceGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer persistence must pass through a disabled persistence gate that refuses answer persistence and conversation save."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerConversationSaveGate",
+                "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED".equals(mutationFinalAnswerConversationSaveGate.get("status")),
+                String.valueOf(mutationFinalAnswerConversationSaveGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer conversation save must pass through a disabled conversation-save gate that refuses conversation save and user-visible completion."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerUserVisibleCompletionGate",
+                "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED".equals(mutationFinalAnswerUserVisibleCompletionGate.get("status")),
+                String.valueOf(mutationFinalAnswerUserVisibleCompletionGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer user-visible completion must pass through a disabled completion gate that refuses user-visible completion and final-response handoff."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalResponseHandoffGate",
+                "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED".equals(mutationFinalResponseHandoffGate.get("status")),
+                String.valueOf(mutationFinalResponseHandoffGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-response handoff must pass through a disabled handoff gate that refuses final-response handoff and final-answer delivery."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerDeliveryGate",
+                "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED".equals(mutationFinalAnswerDeliveryGate.get("status")),
+                String.valueOf(mutationFinalAnswerDeliveryGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer delivery must pass through a disabled delivery gate that refuses final-answer delivery and delivery handoff."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "mutationFinalAnswerDeliveryReceiptGate",
+                "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED".equals(mutationFinalAnswerDeliveryReceiptGate.get("status")),
+                String.valueOf(mutationFinalAnswerDeliveryReceiptGate.getOrDefault("status", "UNKNOWN")),
+                "Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement."
+        ));
+        items.add(mutationCompletionSummaryItem(
                 "rollbackReadiness",
                 rollbackReadiness != null && "RESTORE_VALIDATED".equals(rollbackReadiness.get("status")),
                 rollbackReadiness == null ? "MISSING" : String.valueOf(rollbackReadiness.getOrDefault("status", "UNKNOWN")),
@@ -1933,6 +4392,14 @@ public class LocalAgentToolGatewayService {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
         result.put("items", items);
         result.put("blockingKeys", items.stream()
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
@@ -1963,6 +4430,14 @@ public class LocalAgentToolGatewayService {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalAnswerPersistenceEnabled", false);
+        result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
         result.put("message", message);
         return result;
     }
