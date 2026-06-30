@@ -3006,6 +3006,25 @@ try {
   assert.equal(assertNoForbiddenTrueFlags(props, 'props'), true);
   const markup = renderToStaticMarkup(React.createElement(CodeWorkspace, props));
 
+  assert.match(markup, /agent loop preview: PREVIEW_ONLY \/ max steps 6 \/ timeout 120s/);
+  assert.match(markup, /agent loop state: mutation false \/ timeline persistence true \/ cancellation false/);
+  assert.match(markup, /1 PLAN: Retrieve code evidence and form a bounded repair plan\. \/ SERVER_LOCAL \/ approval false \/ may mutate false \/ enabled true/);
+  assert.match(markup, /3 REQUEST_APPROVAL: Require explicit user approval before any side-effectful tool can run\. \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true/);
+  assert.match(markup, /MUTATION_DISABLED: Do not apply patches, run tests, restore rollback, update RAG freshness, or publish a mutation result in this preview slice\./);
+  assert.match(markup, /recent agent loop timelines: 1/);
+  assert.match(markup, /timeline state: mutation false \/ persistence true \/ cancellation false/);
+  assert.match(markup, /1 LOOP_PREVIEW_CREATED \/ approval false \/ may mutate false \/ enabled false/);
+  assert.match(markup, /3 APPROVAL_CHECKPOINT_PREVIEW \/ REQUEST_APPROVAL \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true/);
+  assert.match(markup, /8 TIMEOUT_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ timeout 120s/);
+  assert.match(markup, /9 CANCELLATION_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status DISABLED \/ cancellation false/);
+  assert.match(markup, /10 FINAL_RESULT_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status PENDING_PREVIEW_ONLY \/ final result false/);
+  assert.match(markup, /11 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop WEAK_EVIDENCE \/ outcome ASK_FOR_CLARIFICATION/);
+  assert.match(markup, /12 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop AGENT_UNAVAILABLE \/ outcome WAIT_FOR_LOCAL_AGENT/);
+  assert.match(markup, /13 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop TOOL_FAILED \/ outcome REPORT_TOOL_FAILURE/);
+  assert.match(markup, /14 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop APPROVAL_DENIED \/ outcome REPORT_APPROVAL_DENIED/);
+  assert.match(markup, /15 LOCAL_AGENT_OBSERVATION_RESULT \/ OBSERVE \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true \/ status SUCCEEDED \/ fresh observation true \/ dry-run true \/ mutation applied false/);
+  assert.match(markup, /16 LOCAL_AGENT_APPROVAL_DECISION \/ REQUEST_APPROVAL \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true \/ status APPROVED_HELD \/ approval state APPROVED/);
+  assert.match(markup, /loop: loop-preview-1/);
   assert.match(markup, /Execution readiness: blocked/);
   assert.match(markup, /Linked release evidence: complete \/ release: blocked/);
   assert.match(markup, /evidence ALL_LINKED_RELEASE_DISABLED \/ linked 2 \/ missing 0 \/ fallback 0/);

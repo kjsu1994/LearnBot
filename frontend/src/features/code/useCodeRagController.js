@@ -42,6 +42,8 @@ export function useCodeRagController({
   const [codeAgentApplyResult, setCodeAgentApplyResult] = useState(null);
   const [codeAgentTestResult, setCodeAgentTestResult] = useState(null);
   const [codeAgentMutationPolicy, setCodeAgentMutationPolicy] = useState(null);
+  const [codeAgentLoopPreview, setCodeAgentLoopPreview] = useState(null);
+  const [codeAgentLoopTimelines, setCodeAgentLoopTimelines] = useState([]);
   const [codeAgentLocalPatchRequest, setCodeAgentLocalPatchRequest] = useState(null);
   const [codeAgentLocalPatchReadiness, setCodeAgentLocalPatchReadiness] = useState(null);
   const [codeAgentLocalPatchDryRunRequest, setCodeAgentLocalPatchDryRunRequest] = useState(null);
@@ -69,6 +71,7 @@ export function useCodeRagController({
       setSelectedCodeFile(null);
       setHighlightRange(null);
       setCodeModalOpen(false);
+      setCodeAgentLoopTimelines([]);
       return;
     }
     setSelectedCodeFile(null);
@@ -76,6 +79,7 @@ export function useCodeRagController({
     setCodeModalOpen(false);
     refreshJobs(selectedRepositoryId);
     refreshCodeFiles(selectedRepositoryId, fileQuery);
+    refreshCodeAgentLoopTimelines(selectedRepositoryId);
   }, [selectedRepositoryId]);
 
   useEffect(() => {
@@ -114,6 +118,8 @@ export function useCodeRagController({
     setCodeAgentApplyResult(null);
     setCodeAgentTestResult(null);
     setCodeAgentMutationPolicy(null);
+    setCodeAgentLoopPreview(null);
+    setCodeAgentLoopTimelines([]);
     setCodeAgentLocalPatchRequest(null);
     setCodeAgentLocalPatchReadiness(null);
     setCodeAgentLocalPatchDryRunRequest(null);
@@ -569,6 +575,65 @@ export function useCodeRagController({
       setCodeAgentPatch(null);
       setCodeAgentApplyResult(null);
       setCodeAgentTestResult(null);
+      setCodeAgentLoopPreview(null);
+    });
+  }
+
+  async function previewCodeAgentLoop() {
+    const instruction = codeAgentInstruction.trim();
+    if (!instruction || !selectedRepositoryId) return;
+    await run('code-agent-loop-preview', async () => {
+      try {
+        const preview = await request('/api/code-agent/loop/preview', {
+          method: 'POST',
+          json: {
+            repositoryId: selectedRepositoryId,
+            spaceId: activeSpaceId,
+            instruction,
+            maxSteps: 6,
+          },
+        });
+        setCodeAgentLoopPreview(preview);
+      } catch {
+        setCodeAgentLoopPreview({
+          status: 'PREVIEW_UNAVAILABLE',
+          maxSteps: 6,
+          timeoutSeconds: 120,
+          cancellationEnabled: false,
+          timelinePersistenceEnabled: false,
+          mutationEnabled: false,
+          steps: [],
+          stopConditions: [
+            {
+              key: 'PREVIEW_UNAVAILABLE',
+              message: 'Agent loop preview could not be loaded. Mutation remains disabled.',
+            },
+          ],
+          warnings: ['Agent loop preview is unavailable; no Local Agent request was created or executed.'],
+        });
+      } finally {
+        await refreshCodeAgentLoopTimelines(selectedRepositoryId);
+      }
+    });
+  }
+
+  async function refreshCodeAgentLoopTimelines(repositoryId = selectedRepositoryId) {
+    if (!repositoryId) {
+      setCodeAgentLoopTimelines([]);
+      return [];
+    }
+    return await run('code-agent-loop-timelines', async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set('repositoryId', repositoryId);
+        params.set('limit', '5');
+        const timelines = await request(`/api/code-agent/loop/timelines?${params.toString()}`);
+        setCodeAgentLoopTimelines(timelines || []);
+        return timelines || [];
+      } catch {
+        setCodeAgentLoopTimelines([]);
+        return [];
+      }
     });
   }
 
@@ -644,6 +709,7 @@ export function useCodeRagController({
       setCodeAgentPatch(patch);
       setCodeAgentApplyResult(null);
       setCodeAgentTestResult(null);
+      setCodeAgentLoopPreview(null);
       setCodeAgentLocalPatchRequest(null);
       setCodeAgentLocalPatchReadiness(null);
       setCodeAgentLocalPatchDryRunRequest(null);
@@ -666,6 +732,7 @@ export function useCodeRagController({
         json: {
           repositoryId: selectedRepositoryId,
           spaceId: activeSpaceId,
+          loopId: codeAgentLoopPreview?.loopId || null,
           agentId: localAgentStatus.agentId,
           workspaceId: approvedWorkspace.workspaceId,
           instruction,
@@ -765,6 +832,7 @@ export function useCodeRagController({
           toolName: 'git.status',
           input: {
             sourceRepository: codeAgentLocalPatchRequest?.input?.sourceRepository || null,
+            loopId: codeAgentLocalPatchRequest?.input?.loopId || codeAgentLoopPreview?.loopId || null,
             sourceRequestId: codeAgentLocalPatchRequest?.requestId || null,
           },
         },
@@ -884,6 +952,8 @@ export function useCodeRagController({
     codeAgentApplyResult,
     codeAgentTestResult,
     codeAgentMutationPolicy,
+    codeAgentLoopPreview,
+    codeAgentLoopTimelines,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -924,6 +994,8 @@ export function useCodeRagController({
     askCode,
     cancelCodeAsk,
     generateCodeAgentPlan,
+    previewCodeAgentLoop,
+    refreshCodeAgentLoopTimelines,
     generateCodeAgentPatch,
     prepareCodeAgentLocalPatchRequest,
     decideCodeAgentLocalPatchApproval,

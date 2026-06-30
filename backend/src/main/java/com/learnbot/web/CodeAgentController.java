@@ -3,6 +3,9 @@ package com.learnbot.web;
 import com.learnbot.dto.CodeAgentApplyRequest;
 import com.learnbot.dto.CodeAgentApplyResponse;
 import com.learnbot.dto.CodeAgentLocalPatchRequest;
+import com.learnbot.dto.CodeAgentLoopPreviewRequest;
+import com.learnbot.dto.CodeAgentLoopPreviewResponse;
+import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.CodeAgentMutationPolicyResponse;
 import com.learnbot.dto.CodeAgentPatchRequest;
 import com.learnbot.dto.CodeAgentPatchResponse;
@@ -20,12 +23,14 @@ import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
 import com.learnbot.service.CodeAgentApplyService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
+import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,6 +45,7 @@ public class CodeAgentController {
     private final CodeAgentService codeAgentService;
     private final CodeAgentApplyService codeAgentApplyService;
     private final CodeAgentLocalPatchRequestService localPatchRequestService;
+    private final CodeAgentLoopPreviewService loopPreviewService;
     private final CodeIndexingService indexingService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
@@ -49,6 +55,7 @@ public class CodeAgentController {
             CodeAgentService codeAgentService,
             CodeAgentApplyService codeAgentApplyService,
             CodeAgentLocalPatchRequestService localPatchRequestService,
+            CodeAgentLoopPreviewService loopPreviewService,
             CodeIndexingService indexingService,
             AuthService authService,
             CurrentUserProvider currentUserProvider,
@@ -57,6 +64,7 @@ public class CodeAgentController {
         this.codeAgentService = codeAgentService;
         this.codeAgentApplyService = codeAgentApplyService;
         this.localPatchRequestService = localPatchRequestService;
+        this.loopPreviewService = loopPreviewService;
         this.indexingService = indexingService;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
@@ -127,10 +135,38 @@ public class CodeAgentController {
                 user.id(),
                 request.agentId(),
                 request.workspaceId(),
+                request.loopId(),
                 request.instruction(),
                 request.diff(),
                 request.targetFiles()
         );
+    }
+
+    @PostMapping("/loop/preview")
+    CodeAgentLoopPreviewResponse loopPreview(@Valid @RequestBody CodeAgentLoopPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.preview(
+                user.id(),
+                request.repositoryId(),
+                selectedSpaceId,
+                request.instruction(),
+                request.maxSteps()
+        );
+    }
+
+    @GetMapping("/loop/timelines")
+    List<CodeAgentLoopTimelineSummary> loopTimelines(
+            @RequestParam UUID repositoryId,
+            @RequestParam(required = false) Integer limit
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, repositoryId);
+        authService.requireSpace(user, repositorySpaceId);
+        return loopPreviewService.recentTimelines(user.id(), repositoryId, limit);
     }
 
     @PostMapping("/apply")

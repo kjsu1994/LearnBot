@@ -10,6 +10,7 @@ import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
+import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
 import org.junit.jupiter.api.Test;
@@ -36,9 +37,10 @@ import static org.mockito.Mockito.doAnswer;
 class LocalAgentToolGatewayServiceTest {
     private final LocalAgentToolExecutionRepository repository = mock(LocalAgentToolExecutionRepository.class);
     private final LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = mock(LocalAgentPatchReleaseAttemptRepository.class);
+    private final CodeAgentLoopTimelineRepository loopTimelineRepository = mock(CodeAgentLoopTimelineRepository.class);
     private final LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
     private final LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
-    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, releaseAttemptRepository, gatewayService, toolPusher);
+    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher);
 
     @Test
     void enqueuePersistsReadOnlyRequestForConnectedApprovedWorkspace() {
@@ -217,6 +219,68 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void approveHeldAppendsAuditOnlyLoopApprovalDecisionWhenRepositoryContextExists() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                LocalAgentApprovalState.REQUIRED,
+                null,
+                List.of()
+        );
+        LocalAgentToolExecution awaitingApproval = execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED
+        );
+        LocalAgentToolExecution approvedHeld = execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(awaitingApproval));
+        when(repository.updateApprovalDecision(
+                requestId,
+                userId,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD,
+                "Approved by user. Execution remains held until Local Agent patch execution is enabled."
+        )).thenReturn(java.util.Optional.of(approvedHeld));
+
+        var response = service.approveHeld(userId, requestId);
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVED_HELD);
+        verify(loopTimelineRepository).appendApprovalDecision(
+                userId,
+                repositoryId,
+                requestId,
+                request.sessionId(),
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.APPROVED.name(),
+                LocalAgentToolStatus.APPROVED_HELD.name(),
+                loopId,
+                request.input()
+        );
+        verify(toolPusher, never()).sendToolRequest(any());
+        verify(repository, never()).claimNext(any(), any());
+    }
+
+    @Test
     void denyRejectsApprovalRequestWithoutPushingIt() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
@@ -249,6 +313,68 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(response.approvalState()).isEqualTo(LocalAgentApprovalState.DENIED);
         assertThat(response.status()).isEqualTo(LocalAgentToolStatus.REJECTED);
         verify(toolPusher, org.mockito.Mockito.never()).sendToolRequest(any());
+    }
+
+    @Test
+    void denyAppendsAuditOnlyLoopApprovalDecisionWhenRepositoryContextExists() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                LocalAgentApprovalState.REQUIRED,
+                null,
+                List.of()
+        );
+        LocalAgentToolExecution awaitingApproval = execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED
+        );
+        LocalAgentToolExecution denied = execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.DENIED,
+                LocalAgentToolStatus.REJECTED
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(awaitingApproval));
+        when(repository.updateApprovalDecision(
+                requestId,
+                userId,
+                LocalAgentApprovalState.DENIED,
+                LocalAgentToolStatus.REJECTED,
+                "Denied by user before Local Agent execution."
+        )).thenReturn(java.util.Optional.of(denied));
+
+        var response = service.deny(userId, requestId);
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.REJECTED);
+        verify(loopTimelineRepository).appendApprovalDecision(
+                userId,
+                repositoryId,
+                requestId,
+                request.sessionId(),
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.DENIED.name(),
+                LocalAgentToolStatus.REJECTED.name(),
+                loopId,
+                request.input()
+        );
+        verify(toolPusher, never()).sendToolRequest(any());
+        verify(repository, never()).claimNext(any(), any());
     }
 
     @Test
@@ -2229,6 +2355,159 @@ class LocalAgentToolGatewayServiceTest {
                 any(LocalAgentToolStatus.class),
                 any(String.class)
         );
+    }
+
+    @Test
+    void completePatchDryRunObservationDoesNotReleaseHeldSourceOrCreateMutationWork() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID dryRunRequestId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                UUID.randomUUID(),
+                dryRunRequestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "dryRun", true,
+                        "mutationApplied", false,
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "files", List.of(Map.of(
+                                "path", "src/App.jsx",
+                                "contextMatched", true,
+                                "wouldChange", true
+                        ))
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("dry-run completed without mutation")
+        );
+
+        service.complete(response);
+
+        var responseCaptor = forClass(LocalAgentToolResponse.class);
+        verify(repository).complete(responseCaptor.capture());
+        assertThat(responseCaptor.getValue().requestId()).isEqualTo(dryRunRequestId);
+        assertThat(responseCaptor.getValue().toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+        assertThat(responseCaptor.getValue().output())
+                .containsEntry("dryRun", true)
+                .containsEntry("mutationApplied", false)
+                .containsEntry("sourceRequestId", sourceRequestId.toString());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).updateApprovalDecision(
+                eq(sourceRequestId),
+                eq(userId),
+                any(LocalAgentApprovalState.class),
+                any(LocalAgentToolStatus.class),
+                any(String.class)
+        );
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeAppendsAuditOnlyLoopObservationEventWhenRepositoryContextExists() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID dryRunRequestId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "repositoryId", repositoryId.toString(),
+                        "loopId", loopId.toString(),
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "releaseAttemptId", UUID.randomUUID().toString(),
+                        "freshObservationOnly", true,
+                        "dryRunOnly", true,
+                        "mutationAllowed", false
+                ),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("dry-run observation only")
+        );
+        when(repository.find(dryRunRequestId)).thenReturn(java.util.Optional.of(execution(
+                dryRunRequestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.SUCCEEDED
+        )));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                request.sessionId(),
+                dryRunRequestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "dryRun", true,
+                        "mutationApplied", false,
+                        "snapshotCreated", true
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("dry-run completed without mutation")
+        );
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeSkipsLoopObservationEventWhenRepositoryContextIsMissing() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                UUID.randomUUID(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.FILE_READ,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of("content", "ok"),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of()
+        );
+        LocalAgentToolRequest request = request(userId, agentId, workspaceId, LocalAgentToolName.FILE_READ, LocalAgentApprovalState.NOT_REQUIRED);
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(requestId, request)));
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository, never()).appendObservationResult(any(), any(), any(), any(), any());
     }
 
     private LocalAgentToolRequest request(UUID userId, UUID agentId, UUID workspaceId, LocalAgentToolName toolName, LocalAgentApprovalState approvalState) {

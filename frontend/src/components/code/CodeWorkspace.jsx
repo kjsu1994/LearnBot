@@ -55,6 +55,8 @@ import { buildDryRunRollbackObservationSummaryView } from './dryRunRollbackObser
 import { buildDryRunSnapshotObservationSummaryView } from './dryRunSnapshotObservationSummary.js';
 import { buildDryRunResultSummaryView } from './dryRunResultSummary.js';
 import { buildDryRunPatchFilesSummaryView } from './dryRunPatchFilesSummary.js';
+import { buildAgentLoopPreviewSummaryView } from './agentLoopPreviewSummary.js';
+import { buildAgentLoopTimelineHistoryView } from './agentLoopTimelineSummary.js';
 
 function CodeWorkspace(props) {
   const {
@@ -78,6 +80,8 @@ function CodeWorkspace(props) {
     codeAgentApplyResult,
     codeAgentTestResult,
     codeAgentMutationPolicy,
+    codeAgentLoopPreview,
+    codeAgentLoopTimelines = [],
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -100,6 +104,8 @@ function CodeWorkspace(props) {
     openCodeFile = () => {},
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
+    previewCodeAgentLoop = () => {},
+    refreshCodeAgentLoopTimelines = () => {},
     generateCodeAgentPatch = () => {},
     prepareCodeAgentLocalPatchRequest = () => {},
     decideCodeAgentLocalPatchApproval = () => {},
@@ -199,6 +205,8 @@ function CodeWorkspace(props) {
           applyResult={codeAgentApplyResult}
           testResult={codeAgentTestResult}
           mutationPolicy={codeAgentMutationPolicy}
+          loopPreview={codeAgentLoopPreview}
+          loopTimelines={codeAgentLoopTimelines}
           localPatchRequest={codeAgentLocalPatchRequest}
           localPatchReadiness={codeAgentLocalPatchReadiness}
           localPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
@@ -210,6 +218,8 @@ function CodeWorkspace(props) {
           selectedRepositoryId={selectedRepositoryId}
           loading={loading}
           onPlan={generateCodeAgentPlan}
+          onLoopPreview={previewCodeAgentLoop}
+          onRefreshLoopTimelines={refreshCodeAgentLoopTimelines}
           onPatch={generateCodeAgentPatch}
           onPrepareLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
           onLocalPatchApproval={decideCodeAgentLocalPatchApproval}
@@ -347,6 +357,8 @@ function CodeAgentPanel({
   applyResult,
   testResult,
   mutationPolicy,
+  loopPreview,
+  loopTimelines = [],
   localPatchRequest,
   localPatchReadiness,
   localPatchDryRunRequest,
@@ -358,6 +370,8 @@ function CodeAgentPanel({
   selectedRepositoryId = '',
   loading = () => false,
   onPlan = (event) => event.preventDefault(),
+  onLoopPreview = () => {},
+  onRefreshLoopTimelines = () => {},
   onPatch = () => {},
   onPrepareLocalPatchRequest = () => {},
   onLocalPatchApproval = () => {},
@@ -376,6 +390,7 @@ function CodeAgentPanel({
 }) {
   const targetFiles = plan?.targetFiles || [];
   const canPlan = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-plan');
+  const canPreviewLoop = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-loop-preview');
   const canPatch = Boolean(selectedRepositoryId && instruction.trim() && targetFiles.length && !loading('code-agent-patch'));
   const canApply = false;
   const canRollback = false;
@@ -386,6 +401,8 @@ function CodeAgentPanel({
   const transportLabel = activeTransport || configuredTransport;
   const retryAt = localAgentStatus?.nextWebSocketRetryAt;
   const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
+  const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
+  const agentLoopTimelineHistoryView = buildAgentLoopTimelineHistoryView(loopTimelines);
   const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
   const canPrepareLocalPatchRequest = Boolean(
     patch?.valid
@@ -772,12 +789,65 @@ function CodeAgentPanel({
             {loading('code-agent-plan') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
             계획 생성
           </button>
+          <button type="button" className="ghost-button" disabled={!canPreviewLoop} onClick={onLoopPreview}>
+            {loading('code-agent-loop-preview') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+            Preview agent loop
+          </button>
+          <button type="button" className="ghost-button" disabled={!selectedRepositoryId || loading('code-agent-loop-timelines')} onClick={() => onRefreshLoopTimelines(selectedRepositoryId)}>
+            {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+            Refresh loop history
+          </button>
           <button type="button" className="ghost-button" disabled={!canPatch} onClick={onPatch}>
             {loading('code-agent-patch') ? <Loader2 className="spin" size={16} /> : <FileCode2 size={16} />}
             diff 생성
           </button>
         </div>
       </form>
+      {agentLoopPreviewSummaryView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopPreviewSummaryView.headerText}</strong>
+            <Badge variant="outline">preview only</Badge>
+          </div>
+          <small>{agentLoopPreviewSummaryView.stateText}</small>
+          {!!agentLoopPreviewSummaryView.stepLines.length && (
+            <ol className="code-agent-list">
+              {agentLoopPreviewSummaryView.stepLines.map((line) => <li key={line}>{line}</li>)}
+            </ol>
+          )}
+          {!!agentLoopPreviewSummaryView.stopLines.length && (
+            <div className="failure-list">
+              {agentLoopPreviewSummaryView.stopLines.map((line) => (
+                <div className="failure-item" key={line}>
+                  <strong>{line}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+          <WarningList warnings={agentLoopPreviewSummaryView.warnings} />
+        </div>
+      )}
+      {agentLoopTimelineHistoryView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopTimelineHistoryView.headerText}</strong>
+            <Badge variant="outline">read only</Badge>
+          </div>
+          {agentLoopTimelineHistoryView.timelines.map((timeline) => (
+            <div className="detail-box compact-box" key={timeline.id || timeline.headerText}>
+              <strong>{timeline.headerText}</strong>
+              <small>{timeline.stateText}</small>
+              {timeline.instructionText && <small>{timeline.instructionText}</small>}
+              {timeline.createdText && <small>{timeline.createdText}</small>}
+              {!!timeline.eventLines.length && (
+                <ol className="code-agent-list">
+                  {timeline.eventLines.map((line) => <li key={line}>{line}</li>)}
+                </ol>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {plan && (
         <div className="code-agent-result">
           <div className="result-heading">
@@ -839,6 +909,7 @@ function CodeAgentPanel({
               </div>
               <small>request: {localPatchRequest.requestId}</small>
               <small>tool: {localPatchRequest.toolName} / approval: {localPatchRequest.approvalState}</small>
+              {localPatchRequest.input?.loopId && <small>loop: {localPatchRequest.input.loopId}</small>}
               {localPatchRequest.status === 'APPROVED_HELD' && (
                 <small>Approved for later execution. No files are modified until Local Agent patch execution is enabled.</small>
               )}

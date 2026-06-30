@@ -11,23 +11,30 @@ import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
+import com.learnbot.dto.LocalAgentToolResponse;
+import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.LocalAgentAuthService;
 import com.learnbot.service.LocalAgentGatewayService;
+import com.learnbot.service.LocalAgentToken;
 import com.learnbot.service.LocalAgentToolGatewayService;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -176,6 +183,110 @@ class LocalAgentControllerTest {
                 .andExpect(jsonPath("$[0].request.input.mutationAllowed").doesNotExist());
 
         verify(toolGatewayService).enqueueReleaseAttemptFreshObservations(userId, requestId);
+    }
+
+    @Test
+    void pollingAgentCanClaimAndCompletePatchDryRunObservationWithoutOpeningMutation() throws Exception {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
+        UUID tokenId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID dryRunRequestId = UUID.randomUUID();
+        String agentToken = "agent-token";
+        LocalAgentToken token = new LocalAgentToken(
+                tokenId,
+                userId,
+                agentId,
+                "laptop",
+                OffsetDateTime.now().plusDays(1),
+                null,
+                null,
+                OffsetDateTime.now()
+        );
+        LocalAgentQueuedToolRequest queued = new LocalAgentQueuedToolRequest(
+                dryRunRequestId,
+                new LocalAgentToolRequest(
+                        sessionId,
+                        userId,
+                        agentId,
+                        workspaceId,
+                        AgentExecutionTarget.USER_LOCAL_AGENT,
+                        LocalAgentToolName.PATCH_APPLY,
+                        Map.of(
+                                "sourceRequestId", sourceRequestId.toString(),
+                                "dryRunOnly", true,
+                                "mutationAllowed", false
+                        ),
+                        LocalAgentApprovalState.APPROVED,
+                        null,
+                        List.of("Dry-run clone of approved-held patch request. Mutation remains disabled and the source request stays held.")
+                )
+        );
+        when(authService.authenticate(agentToken)).thenReturn(token);
+        when(toolGatewayService.claimNext(userId, agentId)).thenReturn(Optional.of(queued));
+
+        mockMvc.perform(get("/api/local-agents/tools/next")
+                        .header("X-Local-Agent-Token", agentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestId").value(dryRunRequestId.toString()))
+                .andExpect(jsonPath("$.request.toolName").value(LocalAgentToolName.PATCH_APPLY.wireName()))
+                .andExpect(jsonPath("$.request.input.sourceRequestId").value(sourceRequestId.toString()))
+                .andExpect(jsonPath("$.request.input.dryRunOnly").value(true))
+                .andExpect(jsonPath("$.request.input.mutationAllowed").value(false));
+
+        String responseJson = objectMapper.writeValueAsString(new LocalAgentToolResponse(
+                sessionId,
+                dryRunRequestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "dryRun", true,
+                        "mutationApplied", false,
+                        "sourceRequestId", sourceRequestId.toString()
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("dry-run completed without mutation")
+        ));
+        mockMvc.perform(post("/api/local-agents/tools/{requestId}/response", dryRunRequestId)
+                        .header("X-Local-Agent-Token", agentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(responseJson))
+                .andExpect(status().isNoContent());
+
+        verify(authService, org.mockito.Mockito.times(2)).authenticate(agentToken);
+        verify(toolGatewayService).claimNext(userId, agentId);
+        var responseCaptor = org.mockito.ArgumentCaptor.forClass(LocalAgentToolResponse.class);
+        verify(toolGatewayService).complete(responseCaptor.capture());
+        assertThat(responseCaptor.getValue().requestId()).isEqualTo(dryRunRequestId);
+        assertThat(responseCaptor.getValue().userId()).isEqualTo(userId);
+        assertThat(responseCaptor.getValue().agentId()).isEqualTo(agentId);
+        assertThat(responseCaptor.getValue().toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+        assertThat(responseCaptor.getValue().output())
+                .containsEntry("dryRun", true)
+                .containsEntry("mutationApplied", false)
+                .containsEntry("sourceRequestId", sourceRequestId.toString());
     }
 
     @Test

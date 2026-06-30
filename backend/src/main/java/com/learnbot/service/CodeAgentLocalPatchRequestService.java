@@ -47,6 +47,7 @@ public class CodeAgentLocalPatchRequestService {
             UUID userId,
             UUID agentId,
             UUID workspaceId,
+            UUID loopId,
             String instruction,
             String diff,
             List<String> targetFiles
@@ -73,6 +74,9 @@ public class CodeAgentLocalPatchRequestService {
         input.put("repositoryId", repositoryId.toString());
         if (spaceId != null) {
             input.put("spaceId", spaceId.toString());
+        }
+        if (loopId != null) {
+            input.put("loopId", loopId.toString());
         }
         input.put("sourceRepository", sourceRepositoryIdentity(repository));
         input.put("localWorkspace", localWorkspaceIdentity(workspaceId, workspace));

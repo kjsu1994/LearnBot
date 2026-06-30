@@ -16,6 +16,7 @@ import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
+import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
 public class LocalAgentToolGatewayService {
     private final LocalAgentToolExecutionRepository repository;
     private final LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository;
+    private final CodeAgentLoopTimelineRepository loopTimelineRepository;
     private final LocalAgentGatewayService gatewayService;
     private final LocalAgentToolPusher toolPusher;
     private final LocalAgentPostExecutionObservationGateBuilder postExecutionObservationGateBuilder =
@@ -79,11 +81,13 @@ public class LocalAgentToolGatewayService {
     public LocalAgentToolGatewayService(
             LocalAgentToolExecutionRepository repository,
             LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository,
+            CodeAgentLoopTimelineRepository loopTimelineRepository,
             LocalAgentGatewayService gatewayService,
             LocalAgentToolPusher toolPusher
     ) {
         this.repository = repository;
         this.releaseAttemptRepository = releaseAttemptRepository;
+        this.loopTimelineRepository = loopTimelineRepository;
         this.gatewayService = gatewayService;
         this.toolPusher = toolPusher;
     }
@@ -150,6 +154,7 @@ public class LocalAgentToolGatewayService {
                         LocalAgentToolStatus.APPROVED_HELD,
                         "Approved by user. Execution remains held until Local Agent patch execution is enabled."
                 )
+                .map(this::appendLoopApprovalDecisionEvent)
                 .map(this::toResponse)
                 .orElseThrow(() -> new IllegalArgumentException("Local Agent approval request is no longer awaiting approval."));
     }
@@ -164,6 +169,7 @@ public class LocalAgentToolGatewayService {
                         LocalAgentToolStatus.REJECTED,
                         "Denied by user before Local Agent execution."
                 )
+                .map(this::appendLoopApprovalDecisionEvent)
                 .map(this::toResponse)
                 .orElseThrow(() -> new IllegalArgumentException("Local Agent approval request is no longer awaiting approval."));
     }
@@ -739,6 +745,7 @@ public class LocalAgentToolGatewayService {
     public void complete(LocalAgentToolResponse response) {
         LocalAgentToolResponse enriched = enrichRepositoryVerification(response);
         repository.complete(enriched);
+        appendLoopObservationEvent(enriched);
     }
 
     public Optional<LocalAgentToolExecutionResponse> findForUser(UUID userId, UUID requestId) {
@@ -4098,6 +4105,62 @@ public class LocalAgentToolGatewayService {
                 response.finishedAt(),
                 response.warnings()
         );
+    }
+
+    private void appendLoopObservationEvent(LocalAgentToolResponse response) {
+        LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        UUID repositoryId = repositoryId(execution.input());
+        if (repositoryId == null) {
+            return;
+        }
+        loopTimelineRepository.appendObservationResult(response.userId(), repositoryId, loopId(execution.input()), response, execution.input());
+    }
+
+    private LocalAgentToolExecution appendLoopApprovalDecisionEvent(LocalAgentToolExecution execution) {
+        UUID repositoryId = repositoryId(execution.input());
+        if (repositoryId == null) {
+            return execution;
+        }
+        loopTimelineRepository.appendApprovalDecision(
+                execution.userId(),
+                repositoryId,
+                execution.id(),
+                execution.sessionId(),
+                execution.agentId(),
+                execution.workspaceId(),
+                execution.executionTarget(),
+                execution.toolName(),
+                execution.approvalState().name(),
+                execution.status().name(),
+                loopId(execution.input()),
+                execution.input()
+        );
+        return execution;
+    }
+
+    private UUID repositoryId(Map<String, Object> input) {
+        Object direct = input.get("repositoryId");
+        if (direct instanceof String text && hasText(text)) {
+            return UUID.fromString(text);
+        }
+        if (input.get("sourceRepository") instanceof Map<?, ?> source) {
+            Object nested = source.get("id");
+            if (nested instanceof String text && hasText(text)) {
+                return UUID.fromString(text);
+            }
+        }
+        return null;
+    }
+
+    private UUID loopId(Map<String, Object> input) {
+        Object direct = input.get("loopId");
+        if (direct instanceof String text && hasText(text)) {
+            return UUID.fromString(text);
+        }
+        return null;
     }
 
     private Map<String, Object> compareRepositoryIdentity(Map<?, ?> source, Object identityValue, LocalAgentToolStatus status) {

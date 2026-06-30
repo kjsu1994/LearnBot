@@ -208,6 +208,8 @@ export default function App() {
     codeAgentApplyResult,
     codeAgentTestResult,
     codeAgentMutationPolicy,
+    codeAgentLoopPreview,
+    codeAgentLoopTimelines,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -248,6 +250,8 @@ export default function App() {
     askCode,
     cancelCodeAsk,
     generateCodeAgentPlan,
+    previewCodeAgentLoop,
+    refreshCodeAgentLoopTimelines,
     generateCodeAgentPatch,
     prepareCodeAgentLocalPatchRequest,
     decideCodeAgentLocalPatchApproval,
@@ -1008,6 +1012,8 @@ export default function App() {
             codeAgentApplyResult={codeAgentApplyResult}
             codeAgentTestResult={codeAgentTestResult}
             codeAgentMutationPolicy={codeAgentMutationPolicy}
+            codeAgentLoopPreview={codeAgentLoopPreview}
+            codeAgentLoopTimelines={codeAgentLoopTimelines}
             codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
             codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
             codeAgentLocalPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
@@ -1049,6 +1055,8 @@ export default function App() {
             askCode={askCode}
             cancelCodeAsk={cancelCodeAsk}
             generateCodeAgentPlan={generateCodeAgentPlan}
+            previewCodeAgentLoop={previewCodeAgentLoop}
+            refreshCodeAgentLoopTimelines={refreshCodeAgentLoopTimelines}
             generateCodeAgentPatch={generateCodeAgentPatch}
             prepareCodeAgentLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
             decideCodeAgentLocalPatchApproval={decideCodeAgentLocalPatchApproval}

@@ -45,6 +45,7 @@ class CodeAgentLocalPatchRequestServiceTest {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
         String path = "src/App.java";
         String content = "class App {}\n";
@@ -105,6 +106,7 @@ class CodeAgentLocalPatchRequestServiceTest {
                 userId,
                 agentId,
                 workspaceId,
+                loopId,
                 "fix",
                 diff,
                 List.of(path)
@@ -119,6 +121,7 @@ class CodeAgentLocalPatchRequestServiceTest {
         assertThat(request.input()).containsEntry("schemaVersion", 1);
         assertThat(request.input()).containsEntry("repositoryId", repositoryId.toString());
         assertThat(request.input()).containsEntry("spaceId", spaceId.toString());
+        assertThat(request.input()).containsEntry("loopId", loopId.toString());
         assertThat(request.input()).containsEntry("requiresSnapshot", true);
         assertThat(request.input()).containsEntry("staleIndexPolicy", "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH");
         assertThat(request.input().get("snapshotPolicy").toString()).contains("TARGET_FILES", "LOCAL_AGENT_MANAGED", "createBeforeMutation=true");

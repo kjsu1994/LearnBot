@@ -54,6 +54,27 @@ const props = buildCodeWorkspaceReadinessSmokeProps({
 });
 
 assert.equal(props.selectedRepositoryId, 'repo-1');
+assert.equal(props.codeAgentLoopPreview.status, 'PREVIEW_ONLY');
+assert.equal(props.codeAgentLoopPreview.mutationEnabled, false);
+assert.equal(props.codeAgentLoopPreview.timelinePersistenceEnabled, true);
+assert.equal(props.codeAgentLoopPreview.cancellationEnabled, false);
+assert.equal(props.codeAgentLoopTimelines[0].mutationEnabled, false);
+assert.equal(props.codeAgentLoopTimelines[0].events[1].mayMutate, false);
+assert.equal(props.codeAgentLoopTimelines[0].events[2].eventType, 'TIMEOUT_POLICY_REGISTERED');
+assert.equal(props.codeAgentLoopTimelines[0].events[2].details.timeoutSeconds, 120);
+assert.equal(props.codeAgentLoopTimelines[0].events[3].eventType, 'CANCELLATION_POLICY_REGISTERED');
+assert.equal(props.codeAgentLoopTimelines[0].events[3].details.cancellationEnabled, false);
+assert.equal(props.codeAgentLoopTimelines[0].events[4].eventType, 'FINAL_RESULT_POLICY_REGISTERED');
+assert.equal(props.codeAgentLoopTimelines[0].events[4].details.finalResultEnabled, false);
+assert.equal(props.codeAgentLoopTimelines[0].events[5].eventType, 'STOP_OUTCOME_POLICY_REGISTERED');
+assert.equal(props.codeAgentLoopTimelines[0].events[5].details.stopKey, 'WEAK_EVIDENCE');
+assert.equal(props.codeAgentLoopTimelines[0].events[6].details.stopKey, 'AGENT_UNAVAILABLE');
+assert.equal(props.codeAgentLoopTimelines[0].events[7].details.stopKey, 'TOOL_FAILED');
+assert.equal(props.codeAgentLoopTimelines[0].events[8].details.stopKey, 'APPROVAL_DENIED');
+assert.equal(props.codeAgentLoopTimelines[0].events[9].eventType, 'LOCAL_AGENT_OBSERVATION_RESULT');
+assert.equal(props.codeAgentLoopTimelines[0].events[9].details.mutationApplied, false);
+assert.equal(props.codeAgentLoopTimelines[0].events[10].eventType, 'LOCAL_AGENT_APPROVAL_DECISION');
+assert.equal(props.codeAgentLoopTimelines[0].events[10].mayMutate, false);
 assert.equal(props.codeAgentLocalPatchRequest.requestId, 'request-1');
 assert.equal(props.codeAgentLocalPatchRequest.status, 'APPROVED_HELD');
 assert.equal(props.codeAgentLocalPatchRequest.toolName, 'patch.apply');
