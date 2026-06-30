@@ -30,6 +30,7 @@ const view = buildMutationToolRunnerBoundaryView({
   finalAnswerGenerationEnabled: false,
   finalResponseHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   runnerChecks: [
@@ -59,6 +60,7 @@ const view = buildMutationToolRunnerBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
     {
       key: 'toolRunnerPolicy',
@@ -87,6 +89,7 @@ const view = buildMutationToolRunnerBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
     {
       key: 'resultCompletionTransition',
@@ -106,6 +109,7 @@ const view = buildMutationToolRunnerBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
   ],
   blockingKeys: [
@@ -138,14 +142,14 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation tool runner disabled: release gate false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / claimable false / mutation false'
+  'mutation tool runner disabled: release gate false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / acknowledgement save false / claimable false / mutation false'
 );
 assert.deepEqual(view.checkLines, [
   'tool runner mutationExecutionReadinessBoundary: REFUSED_EXECUTION_READINESS_DISABLED / passed true / blocking false / tool runner false / mutation false',
-  'tool runner mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'tool runner mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
   'tool runner toolRunnerPolicy: DISABLED / passed false / blocking true / running transition false / tool runner false / mutation false',
-  'tool runner requestRunningTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
-  'tool runner resultCompletionTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'tool runner requestRunningTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
+  'tool runner resultCompletionTransition: DISABLED / passed false / blocking true / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,

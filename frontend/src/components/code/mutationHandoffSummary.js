@@ -19,6 +19,7 @@ const DISABLED_CONTROL_LABELS = [
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
   ['deliveryReceiptEnabled', 'receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['claimable', 'claimable'],
   ['mutationAllowed', 'mutation'],
 ];
@@ -31,6 +32,7 @@ const STAGE_CONTROL_LABELS = [
   ['resultIntakeEnabled', 'result intake'],
   ['finalResponseHandoffEnabled', 'final response'],
   ['deliveryReceiptEnabled', 'receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['claimable', 'claimable'],
   ['mutationAllowed', 'mutation'],
 ];

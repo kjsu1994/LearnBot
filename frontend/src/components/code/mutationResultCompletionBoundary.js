@@ -20,6 +20,7 @@ const DISABLED_CONTROL_LABELS = [
   ['finalAnswerGenerationEnabled', 'final answer'],
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryReceiptEnabled', 'receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['claimable', 'claimable'],
   ['mutationAllowed', 'mutation'],
 ];
@@ -30,6 +31,7 @@ const CHECK_CONTROL_LABELS = [
   ['completedResultPersistenceEnabled', 'result persistence'],
   ['postExecutionObservationEnabled', 'observation capture'],
   ['resultIntakeEnabled', 'result intake'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['claimable', 'claimable'],
   ['mutationAllowed', 'mutation'],
 ];

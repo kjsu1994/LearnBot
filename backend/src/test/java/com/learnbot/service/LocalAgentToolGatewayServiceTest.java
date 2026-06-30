@@ -380,6 +380,8 @@ class LocalAgentToolGatewayServiceTest {
         UUID agentId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
         LocalAgentToolRequest request = patchRequest(userId, agentId, workspaceId);
         when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
                 requestId,
@@ -544,6 +546,141 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void patchReadinessRejectsSnapshotObservationIfDryRunMutatedFiles() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest request = patchRequest(userId, agentId, workspaceId);
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        )));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(repository.findLatestRepositoryVerificationForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", false,
+                "message", "Observed local repository identity matches available indexed metadata.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForSourceRequest(userId, requestId))
+                .thenReturn(java.util.Optional.of(patchDryRunOutputWithMutationApplied()));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of("repositoryVerificationRequestId", "repo-check-1"),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+
+        var readiness = service.inspectPatchExecutionReadiness(userId, requestId);
+
+        assertThat(readiness.readyToRelease()).isFalse();
+        assertThat(readiness.snapshotReadiness())
+                .containsEntry("status", "INVALID")
+                .containsEntry("dryRun", true)
+                .containsEntry("mutationApplied", true)
+                .containsEntry("snapshotCreated", true)
+                .containsEntry("blocking", true)
+                .containsEntry("message", "Snapshot readiness requires a non-mutating Local Agent dry-run observation with mutationApplied=false.");
+        assertThat(readiness.rollbackReadiness())
+                .containsEntry("status", "INVALID")
+                .containsEntry("blocking", true)
+                .containsEntry("message", "Rollback validation requires a dry-run observation with mutationApplied=false.");
+        assertThat(readiness.patchReleaseReadiness())
+                .containsEntry("status", "BLOCKED")
+                .containsEntry("preconditionsPassed", false)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        assertThat(readiness.patchExecutionGate())
+                .containsEntry("status", "BLOCKED")
+                .containsEntry("preconditionsPassed", false)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("sourceRequestRelationship", "LINKED_DRY_RUN_OUTPUT_OBSERVED");
+        assertThat(readiness.checks()).anySatisfy(check -> {
+            assertThat(check.key()).isEqualTo("snapshotManifestPreview");
+            assertThat(check.passed()).isFalse();
+        });
+        assertThat(readiness.checks()).anySatisfy(check -> {
+            assertThat(check.key()).isEqualTo("rollbackRestorePreconditions");
+            assertThat(check.passed()).isFalse();
+        });
+        assertThat(readiness.releaseAttemptModel().created()).isTrue();
+        Map<String, Object> latestAttempt = readiness.releaseAttemptModel().latestAttempt();
+        assertThat(latestAttempt)
+                .containsEntry("id", attemptId)
+                .containsEntry("sourceRequestId", requestId)
+                .containsEntry("claimable", false);
+        assertThat(latestAttempt.get("releaseAttemptFinalReadiness")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalReadiness = (Map<String, Object>) latestAttempt.get("releaseAttemptFinalReadiness");
+        assertThat(finalReadiness)
+                .containsEntry("status", "BLOCKED_RELEASE_DISABLED")
+                .containsEntry("ready", false)
+                .containsEntry("patchPreconditionsPassed", false)
+                .containsEntry("patchReleaseStatus", "BLOCKED")
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("mutationAllowed", false);
+        assertThat(finalReadiness.get("blockingReasons")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> finalBlockingReasons = (List<String>) finalReadiness.get("blockingReasons");
+        assertThat(finalBlockingReasons)
+                .contains("patch release prerequisites are incomplete", "release gate is disabled", "held patch request remains non-claimable");
+        assertThat(latestAttempt.get("releaseEnablementChecklist")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> checklist = (Map<String, Object>) latestAttempt.get("releaseEnablementChecklist");
+        assertThat(checklist)
+                .containsEntry("status", "BLOCKED_ENABLEMENT_DISABLED")
+                .containsEntry("prerequisitesPassed", false)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("mutationAllowed", false);
+        assertThat(checklist.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> checklistBlockingKeys = (List<String>) checklist.get("blockingKeys");
+        assertThat(checklistBlockingKeys).containsExactly("finalReadiness", "rollbackReadiness");
+        assertThat(latestAttempt.get("releaseAttemptDisplaySummary")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> displaySummary = (Map<String, Object>) latestAttempt.get("releaseAttemptDisplaySummary");
+        assertThat(displaySummary)
+                .containsEntry("status", "BLOCKED_DISABLED_DISPLAY")
+                .containsEntry("releaseReadyButDisabled", false)
+                .containsEntry("patchPreconditionsPassed", false);
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
     void patchReadinessSurfacesLatestDisabledReleaseAttemptWithoutEnablingClaim() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
@@ -651,21 +788,32 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
         assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
         assertMutationWriteHelperSafetyGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_WRITE_HELPER_DISABLED", true, 4);
-        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
-        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
-        assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
-        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
-        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
-        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
-        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUBLICATION_DISABLED", true, 4);
-        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
-        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
-        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
-        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
-        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
-        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
-        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
-        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
+        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
+        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
+        assertMutationResultIntakePersistenceGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                "REFUSED_INTAKE_PERSISTENCE_DISABLED",
+                true,
+                4
+        );
+        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
+        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
+        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
+        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_PUBLICATION_DISABLED", true, 4);
+        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
+        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
+        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
+        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
@@ -697,6 +845,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_COMPLETION_DISABLED",
                 false,
                 "releaseAttemptReadiness",
@@ -848,21 +1000,32 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationRequestClaimGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_CLAIM_DISABLED", true, 4);
         assertMutationExecutionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_EXECUTION_DISABLED", true, 4);
         assertMutationWriteHelperSafetyGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_WRITE_HELPER_DISABLED", true, 4);
-        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
-        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
-        assertMutationResultIntakePersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_INTAKE_PERSISTENCE_DISABLED", true, 4);
-        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
-        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
-        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
-        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_PUBLICATION_DISABLED", true, 4);
-        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
-        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
-        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
-        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
-        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
-        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
-        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
-        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
+        assertMutationPostExecutionObservationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED", true, 4);
+        assertMutationObservationAcceptanceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED", true, 4);
+        assertMutationResultIntakePersistenceGate(
+                readiness.releaseAttemptModel().latestAttempt(),
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                "REFUSED_INTAKE_PERSISTENCE_DISABLED",
+                true,
+                4
+        );
+        assertMutationRollbackFallbackGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_ROLLBACK_FALLBACK_DISABLED", true, 4);
+        assertMutationRagFreshnessGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_RAG_FRESHNESS_DISABLED", true, 4);
+        assertMutationResultAggregationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_RESULT_AGGREGATION_DISABLED", true, 4);
+        assertMutationPublicationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_PUBLICATION_DISABLED", true, 4);
+        assertMutationFinalAnswerGenerationGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_GENERATION_DISABLED", true, 4);
+        assertMutationFinalAnswerCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalAnswerPersistenceGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED", true, 4);
+        assertMutationFinalAnswerConversationSaveGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED", true, 4);
+        assertMutationFinalAnswerUserVisibleCompletionGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED", true, 4);
+        assertMutationFinalResponseHandoffGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED", true, 4);
+        assertMutationFinalAnswerDeliveryReceiptGate(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, request.sessionId(), userId, agentId, workspaceId, "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED", true, 4);
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
@@ -891,6 +1054,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "READY_COMPLETION_DISABLED",
                 true
         );
@@ -898,6 +1065,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "READY_HANDOFF_DISABLED",
                 true,
                 "releaseGateEnabled",
@@ -910,6 +1081,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "REFUSED_EXECUTION_READINESS_DISABLED",
                 true,
                 "runtimeExecutionSwitch",
@@ -930,6 +1105,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "REFUSED_TOOL_RUNNER_DISABLED",
                 true,
                 "toolRunnerPolicy",
@@ -951,6 +1130,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "REFUSED_RESULT_COMPLETION_DISABLED",
                 true,
                 "completedResultTransition",
@@ -1135,6 +1318,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED",
                 false,
                 4
@@ -1143,6 +1330,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED",
                 false,
                 4
@@ -1151,6 +1342,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_INTAKE_PERSISTENCE_DISABLED",
                 false,
                 4
@@ -1159,6 +1354,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_ROLLBACK_FALLBACK_DISABLED",
                 false,
                 4
@@ -1167,6 +1366,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_RAG_FRESHNESS_DISABLED",
                 false,
                 4
@@ -1175,6 +1378,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_RESULT_AGGREGATION_DISABLED",
                 false,
                 4
@@ -1183,6 +1390,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_PUBLICATION_DISABLED",
                 false,
                 4
@@ -1191,6 +1402,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_GENERATION_DISABLED",
                 false,
                 4
@@ -1199,6 +1414,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED",
                 false,
                 4
@@ -1207,6 +1426,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED",
                 false,
                 4
@@ -1215,6 +1438,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED",
                 false,
                 4
@@ -1223,6 +1450,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED",
                 false,
                 4
@@ -1231,6 +1462,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED",
                 false,
                 4
@@ -1239,6 +1474,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED",
                 false,
                 4
@@ -1247,6 +1486,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED",
                 false,
                 4
@@ -1283,6 +1526,10 @@ class LocalAgentToolGatewayServiceTest {
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
                 requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
                 "BLOCKED_COMPLETION_DISABLED",
                 false,
                 "releaseAttemptReadiness",
@@ -1741,7 +1988,11 @@ class LocalAgentToolGatewayServiceTest {
                 .doesNotHaveDuplicates();
 
         var requestCaptor = forClass(LocalAgentToolRequest.class);
-        verify(repository, org.mockito.Mockito.times(2)).create(any(UUID.class), requestCaptor.capture());
+        var requestIdCaptor = forClass(UUID.class);
+        verify(repository, org.mockito.Mockito.times(2)).create(requestIdCaptor.capture(), requestCaptor.capture());
+        assertThat(requestIdCaptor.getAllValues())
+                .doesNotContain(sourceRequestId)
+                .doesNotHaveDuplicates();
         List<LocalAgentToolRequest> createdRequests = requestCaptor.getAllValues();
         LocalAgentToolRequest repositoryObservation = createdRequests.get(0);
         assertThat(repositoryObservation.toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
@@ -1763,6 +2014,8 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("releaseAttemptId", attemptId.toString())
                 .containsEntry("freshObservationOnly", true);
         assertThat(patchDryRun.warnings()).anyMatch(warning -> warning.contains("source request stays held"));
+        assertThat(repository.find(sourceRequestId).orElseThrow().status()).isEqualTo(LocalAgentToolStatus.APPROVED_HELD);
+        assertThat(repository.find(sourceRequestId).orElseThrow().approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
 
         verify(toolPusher, org.mockito.Mockito.times(2)).sendToolRequest(any(LocalAgentQueuedToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
@@ -2963,6 +3216,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean executionGateReady,
             int expectedResultCount
@@ -2978,7 +3235,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
+                .containsEntry("sourceExecutionGateStatus", executionGateReady ? "REFUSED_EXECUTION_DISABLED" : "BLOCKED_EXECUTION_DISABLED")
+                .containsEntry("sourceExecutionGateSessionId", sessionId)
+                .containsEntry("sourceExecutionGateUserId", userId)
+                .containsEntry("sourceExecutionGateAgentId", agentId)
+                .containsEntry("sourceExecutionGateWorkspaceId", workspaceId)
                 .containsEntry("observationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
@@ -3001,7 +3268,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("message", executionGateReady
+                        ? "Local Agent post-execution mutation observation is explicitly refused: no completed-result capture, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                        : "Local Agent post-execution mutation observation is blocked because the disabled mutation execution gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3132,6 +3402,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean postExecutionObservationReady,
             int expectedResultCount
@@ -3147,7 +3421,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourcePostExecutionObservationGateSchema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1")
+                .containsEntry("sourcePostExecutionObservationGateStatus", postExecutionObservationReady ? "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED" : "BLOCKED_POST_EXECUTION_OBSERVATION_DISABLED")
+                .containsEntry("sourcePostExecutionObservationGateSessionId", sessionId)
+                .containsEntry("sourcePostExecutionObservationGateUserId", userId)
+                .containsEntry("sourcePostExecutionObservationGateAgentId", agentId)
+                .containsEntry("sourcePostExecutionObservationGateWorkspaceId", workspaceId)
                 .containsEntry("acceptancePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
@@ -3173,7 +3457,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("message", postExecutionObservationReady
+                        ? "Local Agent mutation observation acceptance is explicitly refused: no accepted observation intake, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                        : "Local Agent mutation observation acceptance is blocked because the disabled post-execution observation gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3228,6 +3515,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean observationAcceptanceReady,
             int expectedResultCount
@@ -3243,7 +3534,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceObservationAcceptanceGateSchema", "learnbot.local-agent.mutation-observation-acceptance-gate.v1")
+                .containsEntry("sourceObservationAcceptanceGateStatus", observationAcceptanceReady ? "REFUSED_OBSERVATION_ACCEPTANCE_DISABLED" : "BLOCKED_OBSERVATION_ACCEPTANCE_DISABLED")
+                .containsEntry("sourceObservationAcceptanceGateSessionId", sessionId)
+                .containsEntry("sourceObservationAcceptanceGateUserId", userId)
+                .containsEntry("sourceObservationAcceptanceGateAgentId", agentId)
+                .containsEntry("sourceObservationAcceptanceGateWorkspaceId", workspaceId)
                 .containsEntry("intakePersistencePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
@@ -3270,7 +3571,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", observationAcceptanceReady
+                        ? "Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
+                        : "Local Agent mutation result intake persistence is blocked because the disabled observation acceptance gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3300,7 +3609,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "intakePersistencePolicy",
@@ -3317,6 +3631,11 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3325,6 +3644,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean intakePersistenceReady,
             int expectedResultCount
@@ -3340,7 +3663,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceResultIntakePersistenceGateSchema", "learnbot.local-agent.mutation-result-intake-persistence-gate.v1")
+                .containsEntry("sourceResultIntakePersistenceGateStatus", intakePersistenceReady ? "REFUSED_INTAKE_PERSISTENCE_DISABLED" : "BLOCKED_INTAKE_PERSISTENCE_DISABLED")
+                .containsEntry("sourceResultIntakePersistenceGateSessionId", sessionId)
+                .containsEntry("sourceResultIntakePersistenceGateUserId", userId)
+                .containsEntry("sourceResultIntakePersistenceGateAgentId", agentId)
+                .containsEntry("sourceResultIntakePersistenceGateWorkspaceId", workspaceId)
                 .containsEntry("rollbackFallbackPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("rollbackFallbackInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -3368,7 +3701,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", intakePersistenceReady
+                        ? "Local Agent mutation rollback fallback is explicitly refused: no rollback fallback execution, RAG freshness update, aggregation, publication, or final answer is enabled."
+                        : "Local Agent mutation rollback fallback is blocked because the disabled intake persistence gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3395,7 +3736,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "rollbackFallbackPolicy",
@@ -3409,6 +3755,11 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3417,6 +3768,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean rollbackFallbackReady,
             int expectedResultCount
@@ -3432,7 +3787,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceRollbackFallbackGateSchema", "learnbot.local-agent.mutation-rollback-fallback-gate.v1")
+                .containsEntry("sourceRollbackFallbackGateStatus", rollbackFallbackReady ? "REFUSED_ROLLBACK_FALLBACK_DISABLED" : "BLOCKED_ROLLBACK_FALLBACK_DISABLED")
+                .containsEntry("sourceRollbackFallbackGateSessionId", sessionId)
+                .containsEntry("sourceRollbackFallbackGateUserId", userId)
+                .containsEntry("sourceRollbackFallbackGateAgentId", agentId)
+                .containsEntry("sourceRollbackFallbackGateWorkspaceId", workspaceId)
                 .containsEntry("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("ragFreshnessUpdateInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -3460,7 +3825,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", rollbackFallbackReady
+                        ? "Local Agent mutation RAG freshness is explicitly refused: no freshness update, aggregation, publication, or final answer is enabled."
+                        : "Local Agent mutation RAG freshness is blocked because the disabled rollback fallback gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3485,7 +3858,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "ragFreshnessPolicy",
@@ -3497,6 +3875,11 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3505,6 +3888,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean ragFreshnessReady,
             int expectedResultCount
@@ -3520,7 +3907,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceRagFreshnessGateSchema", "learnbot.local-agent.mutation-rag-freshness-gate.v1")
+                .containsEntry("sourceRagFreshnessGateStatus", ragFreshnessReady ? "REFUSED_RAG_FRESHNESS_DISABLED" : "BLOCKED_RAG_FRESHNESS_DISABLED")
+                .containsEntry("sourceRagFreshnessGateSessionId", sessionId)
+                .containsEntry("sourceRagFreshnessGateUserId", userId)
+                .containsEntry("sourceRagFreshnessGateAgentId", agentId)
+                .containsEntry("sourceRagFreshnessGateWorkspaceId", workspaceId)
                 .containsEntry("resultAggregationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("resultAggregationInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -3548,7 +3945,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", ragFreshnessReady
+                        ? "Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled."
+                        : "Local Agent mutation result aggregation is blocked because the disabled RAG freshness gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3571,7 +3976,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("mutationAllowed", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "resultAggregationPolicy",
@@ -3581,6 +3991,11 @@ class LocalAgentToolGatewayServiceTest {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3589,6 +4004,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean resultAggregationReady,
             int expectedResultCount
@@ -3604,11 +4023,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceResultAggregationGateSchema", "learnbot.local-agent.mutation-result-aggregation-gate.v1")
                 .containsEntry("sourceResultAggregationGateStatus", resultAggregationReady
                         ? "REFUSED_RESULT_AGGREGATION_DISABLED"
                         : "BLOCKED_RESULT_AGGREGATION_DISABLED")
+                .containsEntry("sourceResultAggregationGateSessionId", sessionId)
+                .containsEntry("sourceResultAggregationGateUserId", userId)
+                .containsEntry("sourceResultAggregationGateAgentId", agentId)
+                .containsEntry("sourceResultAggregationGateWorkspaceId", workspaceId)
                 .containsEntry("publicationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("publicationInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -3636,7 +4063,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", resultAggregationReady
+                        ? "Local Agent mutation publication is explicitly refused: no publication or final answer is enabled."
+                        : "Local Agent mutation publication is blocked because the disabled result aggregation gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3658,7 +4093,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("mutationAllowed", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "publicationPolicy",
@@ -3666,6 +4106,11 @@ class LocalAgentToolGatewayServiceTest {
                 "finalAnswerGeneration",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3674,6 +4119,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean publicationReady,
             int expectedResultCount
@@ -3689,11 +4138,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourcePublicationGateSchema", "learnbot.local-agent.mutation-publication-gate.v1")
                 .containsEntry("sourcePublicationGateStatus", publicationReady
                         ? "REFUSED_PUBLICATION_DISABLED"
                         : "BLOCKED_PUBLICATION_DISABLED")
+                .containsEntry("sourcePublicationGateSessionId", sessionId)
+                .containsEntry("sourcePublicationGateUserId", userId)
+                .containsEntry("sourcePublicationGateAgentId", agentId)
+                .containsEntry("sourcePublicationGateWorkspaceId", workspaceId)
                 .containsEntry("finalAnswerGenerationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerGenerationInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -3721,7 +4178,15 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", publicationReady
+                        ? "Local Agent mutation final-answer generation is explicitly refused: no final answer is generated."
+                        : "Local Agent mutation final-answer generation is blocked because the disabled publication gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3742,12 +4207,22 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("mutationAllowed", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false));
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "finalAnswerGenerationPolicy",
                 "finalAnswerGeneration",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         );
     }
@@ -3756,6 +4231,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalAnswerGenerationReady,
             int expectedResultCount
@@ -3771,11 +4250,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerGenerationGateSchema", "learnbot.local-agent.mutation-final-answer-generation-gate.v1")
                 .containsEntry("sourceFinalAnswerGenerationGateStatus", finalAnswerGenerationReady
                         ? "REFUSED_FINAL_ANSWER_GENERATION_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_GENERATION_DISABLED")
+                .containsEntry("sourceFinalAnswerGenerationGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerGenerationGateUserId", userId)
+                .containsEntry("sourceFinalAnswerGenerationGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerGenerationGateWorkspaceId", workspaceId)
                 .containsEntry("finalAnswerCompletionPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerCompletionInvocationEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
@@ -3806,7 +4293,13 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("publicationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
-                .containsEntry("finalAnswerDeliveryEnabled", false);
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", finalAnswerGenerationReady
+                        ? "Local Agent mutation final-answer completion is explicitly refused: no final answer is completed or delivered."
+                        : "Local Agent mutation final-answer completion is blocked because the disabled final-answer generation gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3830,7 +4323,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("publicationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
-                .containsEntry("finalAnswerDeliveryEnabled", false));
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "finalAnswerCompletionPolicy",
@@ -3838,6 +4334,9 @@ class LocalAgentToolGatewayServiceTest {
                 "finalAnswerDelivery",
                 "finalAnswerCompletionEnabled",
                 "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalAnswerGenerationEnabled",
                 "mutationAllowed"
         );
@@ -3847,6 +4346,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalAnswerCompletionReady,
             int expectedResultCount
@@ -3862,11 +4365,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerCompletionGateSchema", "learnbot.local-agent.mutation-final-answer-completion-gate.v1")
                 .containsEntry("sourceFinalAnswerCompletionGateStatus", finalAnswerCompletionReady
                         ? "REFUSED_FINAL_ANSWER_COMPLETION_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_COMPLETION_DISABLED")
+                .containsEntry("sourceFinalAnswerCompletionGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerCompletionGateUserId", userId)
+                .containsEntry("sourceFinalAnswerCompletionGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerCompletionGateWorkspaceId", workspaceId)
                 .containsEntry("finalAnswerPersistencePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerPersistenceInvocationEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
@@ -3898,7 +4409,14 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
-                .containsEntry("finalAnswerPersistenceEnabled", false);
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", finalAnswerCompletionReady
+                        ? "Local Agent mutation final-answer persistence is explicitly refused: no final answer is persisted and no conversation turn is saved."
+                        : "Local Agent mutation final-answer persistence is blocked because the disabled final-answer completion gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -3925,7 +4443,11 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
-                .containsEntry("conversationTurnSaveEnabled", false));
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "finalAnswerPersistencePolicy",
@@ -3934,6 +4456,10 @@ class LocalAgentToolGatewayServiceTest {
                 "finalAnswerDelivery",
                 "finalAnswerPersistenceEnabled",
                 "conversationTurnSaveEnabled",
+                "userVisibleCompletionEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalAnswerCompletionEnabled",
                 "finalAnswerDeliveryEnabled",
                 "finalAnswerGenerationEnabled",
@@ -3945,6 +4471,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalAnswerPersistenceReady,
             int expectedResultCount
@@ -3960,11 +4490,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerPersistenceGateSchema", "learnbot.local-agent.mutation-final-answer-persistence-gate.v1")
                 .containsEntry("sourceFinalAnswerPersistenceGateStatus", finalAnswerPersistenceReady
                         ? "REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_PERSISTENCE_DISABLED")
+                .containsEntry("sourceFinalAnswerPersistenceGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerPersistenceGateUserId", userId)
+                .containsEntry("sourceFinalAnswerPersistenceGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerPersistenceGateWorkspaceId", workspaceId)
                 .containsEntry("finalAnswerConversationSavePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("conversationTurnSaveInvocationEnabled", false)
@@ -3997,7 +4535,13 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
-                .containsEntry("finalAnswerPersistenceEnabled", false);
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", finalAnswerPersistenceReady
+                        ? "Local Agent mutation final-answer conversation save is explicitly refused: no conversation turn is saved and no user-visible completion is marked."
+                        : "Local Agent mutation final-answer conversation save is blocked because the disabled final-answer persistence gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -4025,7 +4569,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
-                .containsEntry("userVisibleCompletionEnabled", false));
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "finalAnswerConversationSavePolicy",
@@ -4034,6 +4581,9 @@ class LocalAgentToolGatewayServiceTest {
                 "finalAnswerDelivery",
                 "conversationTurnSaveEnabled",
                 "userVisibleCompletionEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalAnswerPersistenceEnabled",
                 "finalAnswerDeliveryEnabled",
                 "finalAnswerCompletionEnabled",
@@ -4046,6 +4596,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalAnswerConversationSaveReady,
             int expectedResultCount
@@ -4061,11 +4615,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerConversationSaveGateSchema", "learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1")
                 .containsEntry("sourceFinalAnswerConversationSaveGateStatus", finalAnswerConversationSaveReady
                         ? "REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED")
+                .containsEntry("sourceFinalAnswerConversationSaveGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerConversationSaveGateUserId", userId)
+                .containsEntry("sourceFinalAnswerConversationSaveGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerConversationSaveGateWorkspaceId", workspaceId)
                 .containsEntry("userVisibleCompletionPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
@@ -4098,7 +4660,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
-                .containsEntry("conversationTurnSaveEnabled", false);
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", finalAnswerConversationSaveReady
+                        ? "Local Agent mutation final-answer user-visible completion is explicitly refused: no user-visible completion is marked and no final response is handed off."
+                        : "Local Agent mutation final-answer user-visible completion is blocked because the disabled final-answer conversation-save gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -4127,7 +4694,9 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerPersistenceEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
-                .containsEntry("finalResponseHandoffEnabled", false));
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "userVisibleCompletionPolicy",
@@ -4136,6 +4705,8 @@ class LocalAgentToolGatewayServiceTest {
                 "conversationTurnSave",
                 "userVisibleCompletionEnabled",
                 "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "conversationTurnSaveEnabled",
                 "finalAnswerPersistenceEnabled",
                 "finalAnswerDeliveryEnabled",
@@ -4149,6 +4720,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean userVisibleCompletionReady,
             int expectedResultCount
@@ -4164,14 +4739,23 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerUserVisibleCompletionGateSchema", "learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1")
                 .containsEntry("sourceFinalAnswerUserVisibleCompletionGateStatus", userVisibleCompletionReady
                         ? "REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED")
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateUserId", userId)
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateWorkspaceId", workspaceId)
                 .containsEntry("finalResponseHandoffPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -4202,7 +4786,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
-                .containsEntry("conversationTurnSaveEnabled", false);
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", userVisibleCompletionReady
+                        ? "Local Agent mutation final-response handoff is explicitly refused: no final response is handed off and no final answer is delivered."
+                        : "Local Agent mutation final-response handoff is blocked because the disabled final-answer user-visible completion gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -4232,7 +4821,9 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
-                .containsEntry("deliveryHandoffEnabled", false));
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(gate.get("blockingKeys")).isInstanceOf(List.class);
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "finalResponseHandoffPolicy",
@@ -4241,6 +4832,8 @@ class LocalAgentToolGatewayServiceTest {
                 "userVisibleCompletion",
                 "finalResponseHandoffEnabled",
                 "deliveryHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalAnswerDeliveryEnabled",
                 "userVisibleCompletionEnabled",
                 "conversationTurnSaveEnabled",
@@ -4255,6 +4848,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalResponseHandoffReady,
             int expectedResultCount
@@ -4270,14 +4867,24 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalResponseHandoffGateSchema", "learnbot.local-agent.mutation-final-response-handoff-gate.v1")
                 .containsEntry("sourceFinalResponseHandoffGateStatus", finalResponseHandoffReady
                         ? "REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED"
                         : "BLOCKED_FINAL_RESPONSE_HANDOFF_DISABLED")
+                .containsEntry("sourceFinalResponseHandoffGateSessionId", sessionId)
+                .containsEntry("sourceFinalResponseHandoffGateUserId", userId)
+                .containsEntry("sourceFinalResponseHandoffGateAgentId", agentId)
+                .containsEntry("sourceFinalResponseHandoffGateWorkspaceId", workspaceId)
                 .containsEntry("finalAnswerDeliveryPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -4308,7 +4915,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
-                .containsEntry("conversationTurnSaveEnabled", false);
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("message", finalResponseHandoffReady
+                        ? "Local Agent mutation final-answer delivery is explicitly refused: no final answer is delivered and no delivery handoff runs."
+                        : "Local Agent mutation final-answer delivery is blocked because the disabled final-response handoff gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -4334,6 +4944,8 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
@@ -4347,6 +4959,8 @@ class LocalAgentToolGatewayServiceTest {
                 "finalResponseHandoff",
                 "finalAnswerDeliveryEnabled",
                 "deliveryHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalResponseHandoffEnabled",
                 "userVisibleCompletionEnabled",
                 "conversationTurnSaveEnabled",
@@ -4361,6 +4975,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean finalAnswerDeliveryReady,
             int expectedResultCount
@@ -4376,13 +4994,22 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceFinalAnswerDeliveryGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-gate.v1")
                 .containsEntry("sourceFinalAnswerDeliveryGateStatus", finalAnswerDeliveryReady
                         ? "REFUSED_FINAL_ANSWER_DELIVERY_DISABLED"
                         : "BLOCKED_FINAL_ANSWER_DELIVERY_DISABLED")
+                .containsEntry("sourceFinalAnswerDeliveryGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerDeliveryGateUserId", userId)
+                .containsEntry("sourceFinalAnswerDeliveryGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerDeliveryGateWorkspaceId", workspaceId)
                 .containsEntry("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
@@ -4415,7 +5042,10 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
-                .containsEntry("conversationTurnSaveEnabled", false);
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("message", finalAnswerDeliveryReady
+                        ? "Local Agent mutation final-answer delivery receipt is explicitly refused: no delivery receipt is recorded and no acknowledgement is saved."
+                        : "Local Agent mutation final-answer delivery receipt is blocked because the disabled final-answer delivery gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
@@ -4442,6 +5072,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalAnswerCompletionEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("finalAnswerPersistenceEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("userVisibleCompletionEnabled", false)
@@ -4454,6 +5085,7 @@ class LocalAgentToolGatewayServiceTest {
                 "finalAnswerDelivery",
                 "deliveryHandoff",
                 "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "finalAnswerDeliveryEnabled",
                 "deliveryHandoffEnabled",
                 "finalResponseHandoffEnabled",
@@ -4897,6 +5529,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean prerequisitesPassed,
             String... expectedBlockingKeys
@@ -4904,6 +5540,9 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationCompletionSummary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("mutationCompletionSummary");
+        String sourceDeliveryReceiptGateStatus = List.of(expectedBlockingKeys).contains("mutationFinalAnswerDeliveryReceiptGate")
+                ? "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED"
+                : "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED";
         assertThat(summary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-completion-summary.v1")
                 .containsEntry("status", status)
@@ -4911,7 +5550,17 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateStatus", sourceDeliveryReceiptGateStatus)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateSessionId", sessionId)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateUserId", userId)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateAgentId", agentId)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateWorkspaceId", workspaceId)
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
                 .containsEntry("pushEnabled", false)
@@ -4925,7 +5574,19 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
                 .containsEntry("publicationEnabled", false)
-                .containsEntry("finalAnswerGenerationEnabled", false);
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("finalAnswerCompletionEnabled", false)
+                .containsEntry("finalAnswerDeliveryEnabled", false)
+                .containsEntry("finalAnswerPersistenceEnabled", false)
+                .containsEntry("conversationTurnSaveEnabled", false)
+                .containsEntry("userVisibleCompletionEnabled", false)
+                .containsEntry("finalResponseHandoffEnabled", false)
+                .containsEntry("deliveryHandoffEnabled", false)
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", prerequisitesPassed
+                        ? "Local Agent mutation completion prerequisites are modeled, but execution, aggregation, publication, and final-answer generation remain disabled."
+                        : "Local Agent mutation completion prerequisites are incomplete, and execution, aggregation, publication, and final-answer generation remain disabled.");
         assertThat(summary.get("items")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) summary.get("items");
@@ -4983,7 +5644,8 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
-                .containsEntry("deliveryReceiptEnabled", false));
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
         assertThat(summary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) summary.get("blockingKeys");
@@ -4994,6 +5656,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean prerequisitesPassed,
             String... expectedBlockingKeys
@@ -5001,6 +5667,9 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationHandoffSummary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("mutationHandoffSummary");
+        String sourceDeliveryReceiptGateStatus = List.of(expectedBlockingKeys).contains("mutationFinalAnswerDeliveryReceiptGate")
+                ? "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED"
+                : "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED";
         assertThat(summary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-handoff-summary.v1")
                 .containsEntry("status", status)
@@ -5008,10 +5677,27 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceCompletionSummaryStatus", prerequisitesPassed ? "READY_COMPLETION_DISABLED" : "BLOCKED_COMPLETION_DISABLED")
                 .containsEntry("sourceCompletionSummarySchema", "learnbot.local-agent.mutation-completion-summary.v1")
-                .containsEntry("sourceCompletionPrerequisitesPassed", prerequisitesPassed);
+                .containsEntry("sourceCompletionPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceCompletionSummarySessionId", sessionId)
+                .containsEntry("sourceCompletionSummaryUserId", userId)
+                .containsEntry("sourceCompletionSummaryAgentId", agentId)
+                .containsEntry("sourceCompletionSummaryWorkspaceId", workspaceId)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateStatus", sourceDeliveryReceiptGateStatus)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateSessionId", sessionId)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateUserId", userId)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateAgentId", agentId)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("message", prerequisitesPassed
+                        ? "Local Agent mutation handoff prerequisites are modeled, but release, request creation, push, claim, execution, result handling, final response, delivery, and mutation remain disabled."
+                        : "Local Agent mutation handoff is blocked by incomplete disabled readiness inputs, and all handoff controls remain disabled.");
         assertThat(summary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) summary.get("blockingKeys");
@@ -5041,6 +5727,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
                 .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("claimable", false)
                 .containsEntry("mutationAllowed", false);
 
@@ -5070,6 +5757,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("resultIntakeEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("claimable", false)
                 .containsEntry("mutationAllowed", false));
     }
@@ -5078,6 +5766,10 @@ class LocalAgentToolGatewayServiceTest {
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean prerequisitesPassed,
             String... expectedBlockingKeys
@@ -5092,13 +5784,35 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceHandoffSummarySchema", "learnbot.local-agent.mutation-handoff-summary.v1")
                 .containsEntry("sourceHandoffSummaryStatus", prerequisitesPassed ? "READY_HANDOFF_DISABLED" : "BLOCKED_HANDOFF_DISABLED")
+                .containsEntry("sourceHandoffSummarySessionId", sessionId)
+                .containsEntry("sourceHandoffSummaryUserId", userId)
+                .containsEntry("sourceHandoffSummaryAgentId", agentId)
+                .containsEntry("sourceHandoffSummaryWorkspaceId", workspaceId)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateStatus", "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED")
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateSessionId", sessionId)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateUserId", userId)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateAgentId", agentId)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGateWorkspaceId", workspaceId)
                 .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
                 .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
+                .containsEntry("sourceExecutionGateSessionId", sessionId)
+                .containsEntry("sourceExecutionGateUserId", userId)
+                .containsEntry("sourceExecutionGateAgentId", agentId)
+                .containsEntry("sourceExecutionGateWorkspaceId", workspaceId)
                 .containsEntry("sourceWriteHelperSafetyGateSchema", "learnbot.local-agent.mutation-write-helper-safety-gate.v1")
                 .containsEntry("sourceWriteHelperSafetyGateStatus", "REFUSED_WRITE_HELPER_DISABLED")
+                .containsEntry("sourceWriteHelperSafetyGateSessionId", sessionId)
+                .containsEntry("sourceWriteHelperSafetyGateUserId", userId)
+                .containsEntry("sourceWriteHelperSafetyGateAgentId", agentId)
+                .containsEntry("sourceWriteHelperSafetyGateWorkspaceId", workspaceId)
                 .containsEntry("expectedRequestCount", 4)
                 .containsEntry("completedRequestCount", 0)
                 .containsEntry("releaseGateEnabled", false)
@@ -5119,7 +5833,11 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("publicationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
-                .containsEntry("deliveryReceiptEnabled", false);
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", prerequisitesPassed
+                        ? "Local Agent mutation execution inputs are modeled, but runtime execution, request creation, push, claim, write helper, apply, test, rollback restore, result intake, final response handoff, delivery receipt, and mutation remain disabled."
+                        : "Local Agent mutation execution readiness is blocked by incomplete disabled handoff, execution, or write-helper inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
@@ -5149,13 +5867,18 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("applyEnabled", false)
                 .containsEntry("testEnabled", false)
                 .containsEntry("rollbackRestoreEnabled", false)
-                .containsEntry("resultIntakeEnabled", false));
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
     }
 
     private void assertMutationToolRunnerBoundary(
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean prerequisitesPassed,
             String... expectedBlockingKeys
@@ -5170,11 +5893,29 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceExecutionReadinessBoundarySchema", "learnbot.local-agent.mutation-execution-readiness-boundary.v1")
                 .containsEntry("sourceExecutionReadinessBoundaryStatus", prerequisitesPassed ? "REFUSED_EXECUTION_READINESS_DISABLED" : "BLOCKED_EXECUTION_READINESS_DISABLED")
+                .containsEntry("sourceExecutionReadinessBoundarySessionId", sessionId)
+                .containsEntry("sourceExecutionReadinessBoundaryUserId", userId)
+                .containsEntry("sourceExecutionReadinessBoundaryAgentId", agentId)
+                .containsEntry("sourceExecutionReadinessBoundaryWorkspaceId", workspaceId)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateStatus", "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED")
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateSessionId", sessionId)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateUserId", userId)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateAgentId", agentId)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateWorkspaceId", workspaceId)
                 .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
                 .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
+                .containsEntry("sourceExecutionGateSessionId", sessionId)
+                .containsEntry("sourceExecutionGateUserId", userId)
+                .containsEntry("sourceExecutionGateAgentId", agentId)
+                .containsEntry("sourceExecutionGateWorkspaceId", workspaceId)
                 .containsEntry("toolRunnerPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("expectedRequestCount", 4)
                 .containsEntry("runningRequestCount", 0)
@@ -5198,7 +5939,11 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("publicationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
-                .containsEntry("deliveryReceiptEnabled", false);
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", prerequisitesPassed
+                        ? "Local Agent mutation tool-runner inputs are modeled, but runner invocation, running transition, result completion, write helper, apply, test, rollback restore, result intake, and mutation remain disabled."
+                        : "Local Agent mutation tool-runner boundary is blocked by incomplete disabled execution readiness or execution gate inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
@@ -5229,13 +5974,18 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("applyEnabled", false)
                 .containsEntry("testEnabled", false)
                 .containsEntry("rollbackRestoreEnabled", false)
-                .containsEntry("resultIntakeEnabled", false));
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false));
     }
 
     private void assertMutationResultCompletionBoundary(
             Map<String, Object> latestAttempt,
             UUID attemptId,
             UUID sourceRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
             String status,
             boolean prerequisitesPassed,
             String... expectedBlockingKeys
@@ -5250,11 +6000,29 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("blocking", true)
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("sessionId", sessionId)
+                .containsEntry("userId", userId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("sourceToolRunnerBoundarySchema", "learnbot.local-agent.mutation-tool-runner-boundary.v1")
                 .containsEntry("sourceToolRunnerBoundaryStatus", prerequisitesPassed ? "REFUSED_TOOL_RUNNER_DISABLED" : "BLOCKED_TOOL_RUNNER_DISABLED")
+                .containsEntry("sourceToolRunnerBoundarySessionId", sessionId)
+                .containsEntry("sourceToolRunnerBoundaryUserId", userId)
+                .containsEntry("sourceToolRunnerBoundaryAgentId", agentId)
+                .containsEntry("sourceToolRunnerBoundaryWorkspaceId", workspaceId)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateSchema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateStatus", "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED")
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateSessionId", sessionId)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateUserId", userId)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateAgentId", agentId)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateWorkspaceId", workspaceId)
                 .containsEntry("sourcePostExecutionObservationGateSchema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1")
                 .containsEntry("sourcePostExecutionObservationGateStatus", "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED")
+                .containsEntry("sourcePostExecutionObservationGateSessionId", sessionId)
+                .containsEntry("sourcePostExecutionObservationGateUserId", userId)
+                .containsEntry("sourcePostExecutionObservationGateAgentId", agentId)
+                .containsEntry("sourcePostExecutionObservationGateWorkspaceId", workspaceId)
                 .containsEntry("completionPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("expectedResultCount", 4)
                 .containsEntry("completedResultCount", 0)
@@ -5282,7 +6050,11 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("publicationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
-                .containsEntry("deliveryReceiptEnabled", false);
+                .containsEntry("deliveryReceiptEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("message", prerequisitesPassed
+                        ? "Local Agent mutation result-completion inputs are modeled, but completed transition, result persistence, observation capture, result intake, and mutation remain disabled."
+                        : "Local Agent mutation result completion is blocked by incomplete disabled tool-runner or post-execution observation inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
@@ -5306,6 +6078,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("completedResultPersistenceEnabled", false)
                 .containsEntry("postExecutionObservationEnabled", false)
                 .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("claimable", false)
                 .containsEntry("mutationAllowed", false));
     }
@@ -5499,6 +6272,12 @@ class LocalAgentToolGatewayServiceTest {
                         ))
                 )
         );
+    }
+
+    private Map<String, Object> patchDryRunOutputWithMutationApplied() {
+        Map<String, Object> output = new java.util.LinkedHashMap<>(patchDryRunOutput(true));
+        output.put("mutationApplied", true);
+        return output;
     }
 
     private LocalAgentToolExecution execution(UUID requestId, LocalAgentToolRequest request) {

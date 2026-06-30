@@ -67,6 +67,11 @@ class LocalAgentRagFreshnessGateBuilder {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         )) {
             if (!blockingKeys.contains(key)) {
@@ -89,6 +94,10 @@ class LocalAgentRagFreshnessGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceRollbackFallbackGateSchema", mutationRollbackFallbackGate.get("schema"));
         result.put("sourceRollbackFallbackGateStatus", mutationRollbackFallbackGate.get("status"));
+        result.put("sourceRollbackFallbackGateSessionId", mutationRollbackFallbackGate.get("sessionId"));
+        result.put("sourceRollbackFallbackGateUserId", mutationRollbackFallbackGate.get("userId"));
+        result.put("sourceRollbackFallbackGateAgentId", mutationRollbackFallbackGate.get("agentId"));
+        result.put("sourceRollbackFallbackGateWorkspaceId", mutationRollbackFallbackGate.get("workspaceId"));
         result.put("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY");
         result.put("ragFreshnessUpdateInvocationEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -118,6 +127,11 @@ class LocalAgentRagFreshnessGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", rollbackFallbackReady
                 ? "Local Agent mutation RAG freshness is explicitly refused: no freshness update, aggregation, publication, or final answer is enabled."
@@ -147,6 +161,11 @@ class LocalAgentRagFreshnessGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

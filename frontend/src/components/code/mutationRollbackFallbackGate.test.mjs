@@ -25,6 +25,7 @@ const view = buildMutationRollbackFallbackGateView({
   mutationResultAggregationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  acknowledgementSaveEnabled: false,
   intakePersistenceEnabled: false,
   acceptedObservationPersistenceEnabled: false,
   postExecutionObservationEnabled: false,
@@ -59,6 +60,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled intake persistence gate must refuse accepted-observation persistence before rollback fallback can be considered.',
     },
     {
@@ -78,6 +80,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Rollback fallback execution is disabled.',
     },
     {
@@ -90,6 +93,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No rollback fallback may execute while the rollback fallback gate is disabled.',
     },
     {
@@ -102,6 +106,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'RAG freshness updates remain disabled until rollback fallback outcomes are modeled.',
     },
     {
@@ -114,6 +119,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation result aggregation remains disabled until rollback fallback outcomes are modeled.',
     },
     {
@@ -126,6 +132,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final answer publication remains disabled until rollback fallback outcomes are modeled.',
     },
     {
@@ -138,6 +145,7 @@ const view = buildMutationRollbackFallbackGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final-answer generation remains disabled until rollback fallback outcomes are modeled.',
     },
   ],
@@ -153,6 +161,7 @@ const view = buildMutationRollbackFallbackGateView({
     'mutationResultAggregationEnabled',
     'publicationEnabled',
     'finalAnswerGenerationEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation rollback fallback is explicitly refused: no rollback fallback execution, RAG freshness update, aggregation, publication, or final answer is enabled.',
@@ -173,20 +182,20 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation rollback fallback disabled: rollback fallback false / rollback invocation false / rag freshness false / result aggregation false / publication false / final answer false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation rollback fallback disabled: rollback fallback false / rollback invocation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'rollback fallback policy mutationResultIntakePersistenceGate: REFUSED_INTAKE_PERSISTENCE_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / A disabled intake persistence gate must refuse accepted-observation persistence before rollback fallback can be considered.',
-  'rollback fallback policy rollbackFallbackPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Rollback fallback execution is disabled.',
-  'rollback fallback policy rollbackFallbackExecution: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / No rollback fallback may execute while the rollback fallback gate is disabled.',
-  'rollback fallback policy ragFreshnessUpdate: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / RAG freshness updates remain disabled until rollback fallback outcomes are modeled.',
-  'rollback fallback policy resultAggregation: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Mutation result aggregation remains disabled until rollback fallback outcomes are modeled.',
-  'rollback fallback policy publication: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until rollback fallback outcomes are modeled.',
-  'rollback fallback policy finalAnswerGeneration: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until rollback fallback outcomes are modeled.',
+  'rollback fallback policy mutationResultIntakePersistenceGate: REFUSED_INTAKE_PERSISTENCE_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / A disabled intake persistence gate must refuse accepted-observation persistence before rollback fallback can be considered.',
+  'rollback fallback policy rollbackFallbackPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Rollback fallback execution is disabled.',
+  'rollback fallback policy rollbackFallbackExecution: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / No rollback fallback may execute while the rollback fallback gate is disabled.',
+  'rollback fallback policy ragFreshnessUpdate: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / RAG freshness updates remain disabled until rollback fallback outcomes are modeled.',
+  'rollback fallback policy resultAggregation: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Mutation result aggregation remains disabled until rollback fallback outcomes are modeled.',
+  'rollback fallback policy publication: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Final answer publication remains disabled until rollback fallback outcomes are modeled.',
+  'rollback fallback policy finalAnswerGeneration: DISABLED / passed false / blocking true / rollback fallback false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Final-answer generation remains disabled until rollback fallback outcomes are modeled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation rollback fallback blocking keys: rollbackFallbackPolicy, rollbackFallbackExecution, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, rollbackFallbackExecutionEnabled, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation rollback fallback blocking keys: rollbackFallbackPolicy, rollbackFallbackExecution, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, rollbackFallbackExecutionEnabled, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, acknowledgementSaveEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

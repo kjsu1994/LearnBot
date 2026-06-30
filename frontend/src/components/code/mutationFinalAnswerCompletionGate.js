@@ -2,6 +2,9 @@ const DISABLED_CONTROL_LABELS = [
   ['finalAnswerCompletionEnabled', 'completion'],
   ['finalAnswerCompletionInvocationEnabled', 'completion invocation'],
   ['finalAnswerDeliveryEnabled', 'delivery'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['finalAnswerGenerationEnabled', 'final answer'],
   ['publicationEnabled', 'publication'],
   ['mutationResultAggregationEnabled', 'result aggregation'],
@@ -36,6 +39,10 @@ const POLICY_CONTROL_LABELS = [
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
   ['finalAnswerCompletionEnabled', 'completion'],
+  ['finalAnswerDeliveryEnabled', 'delivery'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationFinalAnswerCompletionGateView(gate = null) {

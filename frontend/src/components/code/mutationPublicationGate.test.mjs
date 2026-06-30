@@ -23,6 +23,11 @@ const view = buildMutationPublicationGateView({
   publicationEnabled: false,
   publicationInvocationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   mutationResultAggregationEnabled: false,
   ragFreshnessUpdateEnabled: false,
   rollbackFallbackExecutionEnabled: false,
@@ -58,6 +63,11 @@ const view = buildMutationPublicationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled result aggregation gate must refuse aggregation before publication can be considered.',
     },
     {
@@ -75,6 +85,11 @@ const view = buildMutationPublicationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation publication is disabled.',
     },
     {
@@ -92,6 +107,11 @@ const view = buildMutationPublicationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No mutation publication may run while publication is disabled.',
     },
     {
@@ -109,6 +129,11 @@ const view = buildMutationPublicationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final-answer generation remains disabled until publication state is modeled.',
     },
   ],
@@ -118,6 +143,11 @@ const view = buildMutationPublicationGateView({
     'finalAnswerGeneration',
     'publicationEnabled',
     'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation publication is explicitly refused: no publication or final answer is enabled.',
@@ -138,17 +168,17 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation publication disabled: publication false / publication invocation false / final answer false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation publication disabled: publication false / publication invocation false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'publication policy mutationResultAggregationGate: REFUSED_RESULT_AGGREGATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / A disabled result aggregation gate must refuse aggregation before publication can be considered.',
-  'publication policy publicationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Mutation publication is disabled.',
-  'publication policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / No mutation publication may run while publication is disabled.',
-  'publication policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until publication state is modeled.',
+  'publication policy mutationResultAggregationGate: REFUSED_RESULT_AGGREGATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled result aggregation gate must refuse aggregation before publication can be considered.',
+  'publication policy publicationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Mutation publication is disabled.',
+  'publication policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / No mutation publication may run while publication is disabled.',
+  'publication policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Final-answer generation remains disabled until publication state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation publication blocking keys: publicationPolicy, publication, finalAnswerGeneration, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation publication blocking keys: publicationPolicy, publication, finalAnswerGeneration, publicationEnabled, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

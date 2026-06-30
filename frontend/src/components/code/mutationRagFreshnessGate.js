@@ -4,6 +4,7 @@ const DISABLED_CONTROL_LABELS = [
   ['mutationResultAggregationEnabled', 'result aggregation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['rollbackFallbackExecutionEnabled', 'rollback fallback'],
   ['intakePersistenceEnabled', 'intake persistence'],
   ['acceptedObservationPersistenceEnabled', 'accepted observation persistence'],
@@ -35,6 +36,7 @@ const POLICY_CONTROL_LABELS = [
   ['mutationResultAggregationEnabled', 'result aggregation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationRagFreshnessGateView(gate = null) {

@@ -1,4 +1,11 @@
-export function buildCodeWorkspaceReadinessSmokeProps({ requestId, latestAttempt }) {
+export function buildCodeWorkspaceReadinessSmokeProps({
+  requestId,
+  latestAttempt,
+  readinessOverrides = {},
+  dryRunRequest = null,
+  dryRunResult = null,
+}) {
+  const resolvedDryRunRequest = dryRunRequest || (dryRunResult ? { requestId: dryRunResult.requestId } : null);
   return {
     repositories: [],
     selectedRepositoryId: 'repo-1',
@@ -18,6 +25,8 @@ export function buildCodeWorkspaceReadinessSmokeProps({ requestId, latestAttempt
         sourceRepository: {},
       },
     },
+    codeAgentLocalPatchDryRunRequest: resolvedDryRunRequest,
+    codeAgentLocalPatchDryRunResult: dryRunResult,
     codeAgentLocalPatchReadiness: {
       requestId,
       readyToRelease: false,
@@ -32,6 +41,7 @@ export function buildCodeWorkspaceReadinessSmokeProps({ requestId, latestAttempt
         status: 'READY_RELEASE_ATTEMPT_DISABLED',
         latestAttempt,
       },
+      ...readinessOverrides,
     },
   };
 }

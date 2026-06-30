@@ -1,6 +1,8 @@
 const DISABLED_CONTROL_LABELS = [
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['finalAnswerDeliveryEnabled', 'delivery'],
   ['userVisibleCompletionEnabled', 'user-visible completion'],
   ['conversationTurnSaveEnabled', 'conversation save'],
@@ -46,6 +48,8 @@ const POLICY_CONTROL_LABELS = [
   ['userVisibleCompletionEnabled', 'user-visible completion'],
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationFinalResponseHandoffGateView(gate = null) {

@@ -21,6 +21,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
   rejectedResultCount: 0,
   intakePersistedResultCount: 0,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerDeliveryEnabled: false,
   deliveryHandoffEnabled: false,
   finalResponseHandoffEnabled: false,
@@ -67,6 +68,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -91,6 +93,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -115,6 +118,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -139,6 +143,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -163,6 +168,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -177,6 +183,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
     'finalAnswerDelivery',
     'deliveryHandoff',
     'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerDeliveryEnabled',
     'deliveryHandoffEnabled',
     'finalResponseHandoffEnabled',
@@ -205,18 +212,18 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation final-answer delivery receipt disabled: receipt false / delivery false / delivery handoff false / final response handoff false / user-visible completion false / conversation save false / persistence false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation final-answer delivery receipt disabled: receipt false / acknowledgement save false / delivery false / delivery handoff false / final response handoff false / user-visible completion false / conversation save false / persistence false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'final-answer delivery receipt policy mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-answer delivery gate must refuse delivery before delivery receipt can be considered.',
-  'final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery receipt and acknowledgement are disabled.',
-  'final-answer delivery receipt policy deliveryReceipt: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery receipt may be recorded while delivery receipt is disabled.',
-  'final-answer delivery receipt policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while delivery receipt is disabled.',
-  'final-answer delivery receipt policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while delivery receipt is disabled.',
+  'final-answer delivery receipt policy mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-answer delivery gate must refuse delivery before delivery receipt can be considered.',
+  'final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery receipt and acknowledgement are disabled.',
+  'final-answer delivery receipt policy deliveryReceipt: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery receipt may be recorded while delivery receipt is disabled.',
+  'final-answer delivery receipt policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while delivery receipt is disabled.',
+  'final-answer delivery receipt policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while delivery receipt is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

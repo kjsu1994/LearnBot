@@ -28,6 +28,7 @@ const view = buildMutationHandoffSummaryView({
     finalResponseHandoffEnabled: false,
     deliveryHandoffEnabled: false,
     deliveryReceiptEnabled: false,
+    acknowledgementSaveEnabled: false,
     claimable: false,
     mutationAllowed: false,
   },
@@ -44,6 +45,7 @@ const view = buildMutationHandoffSummaryView({
       resultIntakeEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -59,6 +61,7 @@ const view = buildMutationHandoffSummaryView({
       resultIntakeEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -74,6 +77,7 @@ const view = buildMutationHandoffSummaryView({
       resultIntakeEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -89,12 +93,12 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation handoff disabled: release gate false / request creation false / push false / claim false / write helper false / apply false / test false / rollback restore false / rag freshness false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / claimable false / mutation false'
+  'mutation handoff disabled: release gate false / request creation false / push false / claim false / write helper false / apply false / test false / rollback restore false / rag freshness false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / acknowledgement save false / claimable false / mutation false'
 );
 assert.deepEqual(view.stageLines, [
-  'handoff dispatchDecision: MODELED_DISABLED / source mutationDispatchDecisionModel / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
-  'handoff finalResponse: MODELED_DISABLED / source mutationFinalResponseHandoffGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
-  'handoff deliveryReceipt: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / claimable false / mutation false',
+  'handoff dispatchDecision: MODELED_DISABLED / source mutationDispatchDecisionModel / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
+  'handoff finalResponse: MODELED_DISABLED / source mutationFinalResponseHandoffGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
+  'handoff deliveryReceipt: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,
@@ -112,12 +116,13 @@ const blocked = buildMutationHandoffSummaryView({
     finalResponseHandoffEnabled: false,
     deliveryHandoffEnabled: false,
     deliveryReceiptEnabled: false,
+    acknowledgementSaveEnabled: false,
   },
   blockingKeys: ['mutationCompletionSummary'],
 });
 assert.equal(blocked.show, true);
 assert.equal(
   blocked.disabledText,
-  'mutation handoff disabled: final response handoff false / delivery handoff false / receipt false'
+  'mutation handoff disabled: final response handoff false / delivery handoff false / receipt false / acknowledgement save false'
 );
 assert.equal(blocked.blockingText, 'mutation handoff blocking keys: mutationCompletionSummary');

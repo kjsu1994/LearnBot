@@ -23,6 +23,11 @@ const view = buildMutationResultAggregationGateView({
   resultAggregationInvocationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   ragFreshnessUpdateEnabled: false,
   rollbackFallbackExecutionEnabled: false,
   intakePersistenceEnabled: false,
@@ -57,6 +62,11 @@ const view = buildMutationResultAggregationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled RAG freshness gate must refuse freshness updates before result aggregation can be considered.',
     },
     {
@@ -74,6 +84,11 @@ const view = buildMutationResultAggregationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation result aggregation is disabled.',
     },
     {
@@ -91,6 +106,11 @@ const view = buildMutationResultAggregationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No mutation result aggregation may run while aggregation is disabled.',
     },
     {
@@ -108,6 +128,11 @@ const view = buildMutationResultAggregationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final answer publication remains disabled until aggregation state is modeled.',
     },
     {
@@ -125,6 +150,11 @@ const view = buildMutationResultAggregationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final-answer generation remains disabled until aggregation state is modeled.',
     },
   ],
@@ -136,6 +166,11 @@ const view = buildMutationResultAggregationGateView({
     'mutationResultAggregationEnabled',
     'publicationEnabled',
     'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled.',
@@ -156,18 +191,18 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation result aggregation disabled: result aggregation false / aggregation invocation false / publication false / final answer false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation result aggregation disabled: result aggregation false / aggregation invocation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'result aggregation policy mutationRagFreshnessGate: REFUSED_RAG_FRESHNESS_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / A disabled RAG freshness gate must refuse freshness updates before result aggregation can be considered.',
-  'result aggregation policy resultAggregationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Mutation result aggregation is disabled.',
-  'result aggregation policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / No mutation result aggregation may run while aggregation is disabled.',
-  'result aggregation policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until aggregation state is modeled.',
-  'result aggregation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until aggregation state is modeled.',
+  'result aggregation policy mutationRagFreshnessGate: REFUSED_RAG_FRESHNESS_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled RAG freshness gate must refuse freshness updates before result aggregation can be considered.',
+  'result aggregation policy resultAggregationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Mutation result aggregation is disabled.',
+  'result aggregation policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / No mutation result aggregation may run while aggregation is disabled.',
+  'result aggregation policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Final answer publication remains disabled until aggregation state is modeled.',
+  'result aggregation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Final-answer generation remains disabled until aggregation state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation result aggregation blocking keys: resultAggregationPolicy, resultAggregation, publication, finalAnswerGeneration, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation result aggregation blocking keys: resultAggregationPolicy, resultAggregation, publication, finalAnswerGeneration, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

@@ -88,8 +88,22 @@ class LocalAgentMutationResultCompletionBoundaryBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceToolRunnerBoundarySchema", mutationToolRunnerBoundary.get("schema"));
         result.put("sourceToolRunnerBoundaryStatus", mutationToolRunnerBoundary.get("status"));
+        result.put("sourceToolRunnerBoundarySessionId", mutationToolRunnerBoundary.get("sessionId"));
+        result.put("sourceToolRunnerBoundaryUserId", mutationToolRunnerBoundary.get("userId"));
+        result.put("sourceToolRunnerBoundaryAgentId", mutationToolRunnerBoundary.get("agentId"));
+        result.put("sourceToolRunnerBoundaryWorkspaceId", mutationToolRunnerBoundary.get("workspaceId"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateSchema", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateSchema"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateStatus", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateStatus"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateSessionId", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateSessionId"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateUserId", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateUserId"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateAgentId", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateAgentId"));
+        result.put("sourceToolRunnerBoundaryDeliveryReceiptGateWorkspaceId", mutationToolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGateWorkspaceId"));
         result.put("sourcePostExecutionObservationGateSchema", mutationPostExecutionObservationGate.get("schema"));
         result.put("sourcePostExecutionObservationGateStatus", mutationPostExecutionObservationGate.get("status"));
+        result.put("sourcePostExecutionObservationGateSessionId", mutationPostExecutionObservationGate.get("sessionId"));
+        result.put("sourcePostExecutionObservationGateUserId", mutationPostExecutionObservationGate.get("userId"));
+        result.put("sourcePostExecutionObservationGateAgentId", mutationPostExecutionObservationGate.get("agentId"));
+        result.put("sourcePostExecutionObservationGateWorkspaceId", mutationPostExecutionObservationGate.get("workspaceId"));
         result.put("completionPolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);
@@ -119,6 +133,7 @@ class LocalAgentMutationResultCompletionBoundaryBuilder {
         result.put("finalAnswerGenerationEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", prerequisitesPassed
                 ? "Local Agent mutation result-completion inputs are modeled, but completed transition, result persistence, observation capture, result intake, and mutation remain disabled."
@@ -142,6 +157,7 @@ class LocalAgentMutationResultCompletionBoundaryBuilder {
         result.put("completedResultPersistenceEnabled", false);
         result.put("postExecutionObservationEnabled", false);
         result.put("resultIntakeEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("claimable", false);
         result.put("mutationAllowed", false);
         result.put("message", message);

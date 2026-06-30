@@ -47,6 +47,7 @@ const forbiddenEnabledFlagKeys = new Set([
   'deliveryHandoffEnabled',
   'finalAnswerDeliveryEnabled',
   'deliveryReceiptEnabled',
+  'acknowledgementSaveEnabled',
 ]);
 
 const forbiddenControlKeyPrefixes = [
@@ -76,6 +77,7 @@ const forbiddenControlKeyPrefixes = [
   'userVisible',
   'finalResponse',
   'delivery',
+  'acknowledgement',
 ];
 
 const forbiddenControlKeySuffixes = [

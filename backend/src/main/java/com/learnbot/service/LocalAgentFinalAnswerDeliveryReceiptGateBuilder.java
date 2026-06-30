@@ -56,7 +56,7 @@ class LocalAgentFinalAnswerDeliveryReceiptGateBuilder {
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
-        for (String key : List.of("deliveryReceiptEnabled", "finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+        for (String key : List.of("deliveryReceiptEnabled", "acknowledgementSaveEnabled", "finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
             if (!blockingKeys.contains(key)) {
                 blockingKeys.add(key);
             }
@@ -77,8 +77,13 @@ class LocalAgentFinalAnswerDeliveryReceiptGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceFinalAnswerDeliveryGateSchema", mutationFinalAnswerDeliveryGate.get("schema"));
         result.put("sourceFinalAnswerDeliveryGateStatus", mutationFinalAnswerDeliveryGate.get("status"));
+        result.put("sourceFinalAnswerDeliveryGateSessionId", mutationFinalAnswerDeliveryGate.get("sessionId"));
+        result.put("sourceFinalAnswerDeliveryGateUserId", mutationFinalAnswerDeliveryGate.get("userId"));
+        result.put("sourceFinalAnswerDeliveryGateAgentId", mutationFinalAnswerDeliveryGate.get("agentId"));
+        result.put("sourceFinalAnswerDeliveryGateWorkspaceId", mutationFinalAnswerDeliveryGate.get("workspaceId"));
         result.put("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY");
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("deliveryHandoffEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
@@ -144,6 +149,7 @@ class LocalAgentFinalAnswerDeliveryReceiptGateBuilder {
         result.put("finalAnswerCompletionEnabled", false);
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("finalAnswerPersistenceEnabled", false);
         result.put("conversationTurnSaveEnabled", false);
         result.put("userVisibleCompletionEnabled", false);

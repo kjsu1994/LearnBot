@@ -2414,7 +2414,17 @@ public class LocalAgentToolGatewayService {
         result.put("blocking", true);
         result.put("releaseAttemptId", attempt.id());
         result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("sourceFinalAnswerDeliveryReceiptGateSchema", mutationFinalAnswerDeliveryReceiptGate.get("schema"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateStatus", mutationFinalAnswerDeliveryReceiptGate.get("status"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateSessionId", mutationFinalAnswerDeliveryReceiptGate.get("sessionId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateUserId", mutationFinalAnswerDeliveryReceiptGate.get("userId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAgentId", mutationFinalAnswerDeliveryReceiptGate.get("agentId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateWorkspaceId", mutationFinalAnswerDeliveryReceiptGate.get("workspaceId"));
         result.put("releaseGateEnabled", false);
         result.put("requestCreationEnabled", false);
         result.put("pushEnabled", false);
@@ -2437,6 +2447,7 @@ public class LocalAgentToolGatewayService {
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("items", items);
         result.put("blockingKeys", items.stream()
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
@@ -2475,6 +2486,7 @@ public class LocalAgentToolGatewayService {
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }
@@ -2510,6 +2522,7 @@ public class LocalAgentToolGatewayService {
         disabledControls.put("finalResponseHandoffEnabled", false);
         disabledControls.put("deliveryHandoffEnabled", false);
         disabledControls.put("deliveryReceiptEnabled", false);
+        disabledControls.put("acknowledgementSaveEnabled", false);
         disabledControls.put("claimable", false);
         disabledControls.put("mutationAllowed", false);
 
@@ -2520,10 +2533,24 @@ public class LocalAgentToolGatewayService {
         result.put("blocking", true);
         result.put("releaseAttemptId", attempt.id());
         result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceCompletionSummaryStatus", completionSummary.get("status"));
         result.put("sourceCompletionSummarySchema", completionSummary.get("schema"));
         result.put("sourceCompletionPrerequisitesPassed", completionSummary.get("prerequisitesPassed"));
+        result.put("sourceCompletionSummarySessionId", completionSummary.get("sessionId"));
+        result.put("sourceCompletionSummaryUserId", completionSummary.get("userId"));
+        result.put("sourceCompletionSummaryAgentId", completionSummary.get("agentId"));
+        result.put("sourceCompletionSummaryWorkspaceId", completionSummary.get("workspaceId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateSchema", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateSchema"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateSessionId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateSessionId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateUserId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateUserId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAgentId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAgentId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateWorkspaceId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateWorkspaceId"));
         result.put("disabledControls", disabledControls);
         result.put("blockingKeys", completionReady ? List.of("releaseGateEnabled", "requestCreationEnabled", "pushEnabled", "claimEnabled", "mutationAllowed") : blockingKeys);
         result.put("handoffStages", List.of(
@@ -2556,6 +2583,7 @@ public class LocalAgentToolGatewayService {
         result.put("resultIntakeEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("claimable", false);
         result.put("mutationAllowed", false);
         return result;
@@ -3792,7 +3820,8 @@ public class LocalAgentToolGatewayService {
 
     private boolean validSnapshotManifestPreview(Map<String, Object> dryRunOutput) {
         if (dryRunOutput == null
-                || !Boolean.TRUE.equals(dryRunOutput.get("dryRun"))) {
+                || !Boolean.TRUE.equals(dryRunOutput.get("dryRun"))
+                || !Boolean.FALSE.equals(dryRunOutput.get("mutationApplied"))) {
             return false;
         }
         if (!(dryRunOutput.get("snapshotObservation") instanceof Map<?, ?> snapshot)
@@ -3826,6 +3855,14 @@ public class LocalAgentToolGatewayService {
         result.put("snapshotCreated", snapshotCreated);
         if (dryRunOutput.get("observationLinkage") != null) {
             result.put("observationLinkage", dryRunOutput.get("observationLinkage"));
+        }
+
+        if (!Boolean.TRUE.equals(dryRunOutput.get("dryRun"))
+                || !Boolean.FALSE.equals(dryRunOutput.get("mutationApplied"))) {
+            result.put("status", "INVALID");
+            result.put("message", "Snapshot readiness requires a non-mutating Local Agent dry-run observation with mutationApplied=false.");
+            result.put("blocking", true);
+            return result;
         }
 
         if (!(dryRunOutput.get("snapshotObservation") instanceof Map<?, ?> snapshot)

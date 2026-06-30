@@ -90,10 +90,28 @@ class LocalAgentMutationExecutionReadinessBoundaryBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceHandoffSummarySchema", mutationHandoffSummary.get("schema"));
         result.put("sourceHandoffSummaryStatus", mutationHandoffSummary.get("status"));
+        result.put("sourceHandoffSummarySessionId", mutationHandoffSummary.get("sessionId"));
+        result.put("sourceHandoffSummaryUserId", mutationHandoffSummary.get("userId"));
+        result.put("sourceHandoffSummaryAgentId", mutationHandoffSummary.get("agentId"));
+        result.put("sourceHandoffSummaryWorkspaceId", mutationHandoffSummary.get("workspaceId"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateSchema", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateSchema"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateStatus", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateStatus"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateSessionId", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateSessionId"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateUserId", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateUserId"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateAgentId", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateAgentId"));
+        result.put("sourceHandoffSummaryDeliveryReceiptGateWorkspaceId", mutationHandoffSummary.get("sourceCompletionSummaryDeliveryReceiptGateWorkspaceId"));
         result.put("sourceExecutionGateSchema", mutationExecutionGate.get("schema"));
         result.put("sourceExecutionGateStatus", mutationExecutionGate.get("status"));
+        result.put("sourceExecutionGateSessionId", mutationExecutionGate.get("sessionId"));
+        result.put("sourceExecutionGateUserId", mutationExecutionGate.get("userId"));
+        result.put("sourceExecutionGateAgentId", mutationExecutionGate.get("agentId"));
+        result.put("sourceExecutionGateWorkspaceId", mutationExecutionGate.get("workspaceId"));
         result.put("sourceWriteHelperSafetyGateSchema", mutationWriteHelperSafetyGate.get("schema"));
         result.put("sourceWriteHelperSafetyGateStatus", mutationWriteHelperSafetyGate.get("status"));
+        result.put("sourceWriteHelperSafetyGateSessionId", mutationWriteHelperSafetyGate.get("sessionId"));
+        result.put("sourceWriteHelperSafetyGateUserId", mutationWriteHelperSafetyGate.get("userId"));
+        result.put("sourceWriteHelperSafetyGateAgentId", mutationWriteHelperSafetyGate.get("agentId"));
+        result.put("sourceWriteHelperSafetyGateWorkspaceId", mutationWriteHelperSafetyGate.get("workspaceId"));
         result.put("expectedRequestCount", numericValue(mutationExecutionGate.get("expectedRequestCount")));
         result.put("completedRequestCount", numericValue(mutationExecutionGate.get("completedRequestCount")));
         result.put("readinessChecks", readinessChecks);
@@ -116,6 +134,7 @@ class LocalAgentMutationExecutionReadinessBoundaryBuilder {
         result.put("finalAnswerGenerationEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", prerequisitesPassed
                 ? "Local Agent mutation execution inputs are modeled, but runtime execution, request creation, push, claim, write helper, apply, test, rollback restore, result intake, final response handoff, delivery receipt, and mutation remain disabled."
@@ -146,6 +165,7 @@ class LocalAgentMutationExecutionReadinessBoundaryBuilder {
         result.put("testEnabled", false);
         result.put("rollbackRestoreEnabled", false);
         result.put("resultIntakeEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

@@ -1,6 +1,8 @@
 const DISABLED_CONTROL_LABELS = [
   ['finalAnswerDeliveryEnabled', 'delivery'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['userVisibleCompletionEnabled', 'user-visible completion'],
   ['conversationTurnSaveEnabled', 'conversation save'],
@@ -41,6 +43,8 @@ const POLICY_CONTROL_LABELS = [
   ['finalAnswerGenerationEnabled', 'final answer'],
   ['finalAnswerCompletionEnabled', 'completion'],
   ['finalAnswerDeliveryEnabled', 'delivery'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['finalAnswerPersistenceEnabled', 'persistence'],
   ['conversationTurnSaveEnabled', 'conversation save'],
   ['userVisibleCompletionEnabled', 'user-visible completion'],

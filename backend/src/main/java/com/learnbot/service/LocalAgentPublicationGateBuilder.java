@@ -53,6 +53,11 @@ class LocalAgentPublicationGateBuilder {
         for (String key : List.of(
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         )) {
             if (!blockingKeys.contains(key)) {
@@ -75,6 +80,10 @@ class LocalAgentPublicationGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceResultAggregationGateSchema", mutationResultAggregationGate.get("schema"));
         result.put("sourceResultAggregationGateStatus", mutationResultAggregationGate.get("status"));
+        result.put("sourceResultAggregationGateSessionId", mutationResultAggregationGate.get("sessionId"));
+        result.put("sourceResultAggregationGateUserId", mutationResultAggregationGate.get("userId"));
+        result.put("sourceResultAggregationGateAgentId", mutationResultAggregationGate.get("agentId"));
+        result.put("sourceResultAggregationGateWorkspaceId", mutationResultAggregationGate.get("workspaceId"));
         result.put("publicationPolicy", "DISABLED_AUDIT_ONLY");
         result.put("publicationInvocationEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -104,6 +113,11 @@ class LocalAgentPublicationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", aggregationReady
                 ? "Local Agent mutation publication is explicitly refused: no publication or final answer is enabled."
@@ -132,6 +146,11 @@ class LocalAgentPublicationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

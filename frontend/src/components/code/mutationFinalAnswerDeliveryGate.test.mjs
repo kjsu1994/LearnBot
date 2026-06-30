@@ -9,6 +9,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
   executionTarget: 'USER_LOCAL_AGENT',
   finalAnswerDeliveryPolicy: 'DISABLED_AUDIT_ONLY',
   deliveryHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   sourceFinalResponseHandoffGateStatus: 'REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED',
   sourceFinalResponseHandoffGateSchema: 'learnbot.local-agent.mutation-final-response-handoff-gate.v1',
   sourceRequestId: 'request-123',
@@ -65,6 +67,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -88,6 +92,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -111,6 +117,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -134,6 +142,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -157,6 +167,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -172,6 +184,8 @@ const view = buildMutationFinalAnswerDeliveryGateView({
     'finalResponseHandoff',
     'finalAnswerDeliveryEnabled',
     'deliveryHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalResponseHandoffEnabled',
     'userVisibleCompletionEnabled',
     'conversationTurnSaveEnabled',
@@ -198,18 +212,18 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation final-answer delivery disabled: delivery false / delivery handoff false / final response handoff false / user-visible completion false / conversation save false / persistence false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation final-answer delivery disabled: delivery false / delivery handoff false / delivery receipt false / acknowledgement save false / final response handoff false / user-visible completion false / conversation save false / persistence false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'final-answer delivery policy mutationFinalResponseHandoffGate: REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-response handoff gate must refuse handoff before final-answer delivery can be considered.',
-  'final-answer delivery policy finalAnswerDeliveryPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery and delivery handoff are disabled.',
-  'final-answer delivery policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while final-answer delivery is disabled.',
-  'final-answer delivery policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while final-answer delivery is disabled.',
-  'final-answer delivery policy finalResponseHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final response may be handed off while final-answer delivery is disabled.',
+  'final-answer delivery policy mutationFinalResponseHandoffGate: REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / delivery receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-response handoff gate must refuse handoff before final-answer delivery can be considered.',
+  'final-answer delivery policy finalAnswerDeliveryPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / delivery receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery and delivery handoff are disabled.',
+  'final-answer delivery policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / delivery receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while final-answer delivery is disabled.',
+  'final-answer delivery policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / delivery receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while final-answer delivery is disabled.',
+  'final-answer delivery policy finalResponseHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / delivery receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final response may be handed off while final-answer delivery is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer delivery blocking keys: finalAnswerDeliveryPolicy, finalAnswerDelivery, deliveryHandoff, finalResponseHandoff, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer delivery blocking keys: finalAnswerDeliveryPolicy, finalAnswerDelivery, deliveryHandoff, finalResponseHandoff, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

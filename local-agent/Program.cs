@@ -2201,6 +2201,10 @@ internal sealed class LearnBotLocalAgent
         {
             return SelfTestPatchApplyMemory();
         }
+        if (string.Equals(args[0], "patch-dry-run-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchDryRunContract();
+        }
         if (string.Equals(args[0], "patch-write-sequence", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestPatchWriteSequence();
@@ -2356,6 +2360,113 @@ internal sealed class LearnBotLocalAgent
         }
         Console.WriteLine("patch-apply-memory-ok");
         return 0;
+    }
+
+    private static int SelfTestPatchDryRunContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-patch-dry-run-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "src"));
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var targetPath = Path.Combine(workspaceRoot, "src", "App.cs");
+            var original = "class App {\n    string Name = \"old\";\n}\n";
+            File.WriteAllText(targetPath, original, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var originalHash = Sha256Hex(File.ReadAllBytes(targetPath));
+            var diff = """
+            --- a/src/App.cs
+            +++ b/src/App.cs
+            @@ -1,3 +1,4 @@
+             class App {
+            -    string Name = "old";
+            +    string Name = "new";
+            +    string Mode = "safe";
+             }
+            """;
+            using var requestJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["workspaceId"] = workspaceId,
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["workspaceId"] = workspaceId,
+                    ["sourceRequestId"] = "22222222-2222-2222-2222-222222222222",
+                    ["dryRunOnly"] = true,
+                    ["mutationAllowed"] = false,
+                    ["diff"] = diff,
+                    ["targetFiles"] = new[] { "src/App.cs" },
+                    ["expectedFiles"] = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["path"] = "src/App.cs",
+                            ["sha256"] = originalHash
+                        }
+                    }
+                }
+            }, JsonOptions));
+            var config = new AgentConfig
+            {
+                AgentId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            };
+
+            var result = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, requestJson.RootElement);
+            var ok = !result.Success
+                && result.Status == "REJECTED"
+                && result.FailureCode == "UNSAFE_TOOL"
+                && File.ReadAllText(targetPath, Encoding.UTF8) == original
+                && result.Output.TryGetValue("mutationApplied", out var mutationApplied)
+                && mutationApplied is false
+                && result.Output.TryGetValue("snapshotCreated", out var snapshotCreated)
+                && snapshotCreated is true
+                && result.Output.TryGetValue("preflightPassed", out var preflightPassed)
+                && preflightPassed is true
+                && result.Output.TryGetValue("snapshotObservation", out var snapshotObservation)
+                && snapshotObservation is Dictionary<string, object?> snapshot
+                && snapshot.TryGetValue("created", out var snapshotObservationCreated)
+                && snapshotObservationCreated is true
+                && snapshot.TryGetValue("manifestPreview", out var manifestPreview)
+                && manifestPreview is Dictionary<string, object?> manifest
+                && manifest.TryGetValue("created", out var manifestCreated)
+                && manifestCreated is true
+                && manifest.TryGetValue("writesCompleted", out var writesCompleted)
+                && writesCompleted is true
+                && result.Output.TryGetValue("rollbackObservation", out var rollbackObservation)
+                && rollbackObservation is Dictionary<string, object?> rollback
+                && rollback.TryGetValue("restored", out var restored)
+                && restored is false
+                && rollback.TryGetValue("requiresUserApproval", out var requiresUserApproval)
+                && requiresUserApproval is true;
+            if (!ok)
+            {
+                Console.Error.WriteLine("patch dry-run contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("patch-dry-run-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
     }
 
     private static int SelfTestPatchWriteSequence()

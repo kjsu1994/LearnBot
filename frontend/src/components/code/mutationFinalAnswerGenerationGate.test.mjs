@@ -22,6 +22,11 @@ const view = buildMutationFinalAnswerGenerationGateView({
   intakePersistedResultCount: 0,
   finalAnswerGenerationEnabled: false,
   finalAnswerGenerationInvocationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   publicationEnabled: false,
   mutationResultAggregationEnabled: false,
   ragFreshnessUpdateEnabled: false,
@@ -58,6 +63,11 @@ const view = buildMutationFinalAnswerGenerationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled publication gate must refuse publication before final-answer generation can be considered.',
     },
     {
@@ -75,6 +85,11 @@ const view = buildMutationFinalAnswerGenerationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer generation is disabled.',
     },
     {
@@ -92,6 +107,11 @@ const view = buildMutationFinalAnswerGenerationGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No final answer may be generated while final-answer generation is disabled.',
     },
   ],
@@ -99,6 +119,11 @@ const view = buildMutationFinalAnswerGenerationGateView({
     'finalAnswerGenerationPolicy',
     'finalAnswerGeneration',
     'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation final-answer generation is explicitly refused: no final answer is generated.',
@@ -119,16 +144,16 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation final-answer generation disabled: final answer false / final answer invocation false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation final-answer generation disabled: final answer false / final answer invocation false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'final-answer generation policy mutationPublicationGate: REFUSED_PUBLICATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / A disabled publication gate must refuse publication before final-answer generation can be considered.',
-  'final-answer generation policy finalAnswerGenerationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / Mutation final-answer generation is disabled.',
-  'final-answer generation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / No final answer may be generated while final-answer generation is disabled.',
+  'final-answer generation policy mutationPublicationGate: REFUSED_PUBLICATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled publication gate must refuse publication before final-answer generation can be considered.',
+  'final-answer generation policy finalAnswerGenerationPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Mutation final-answer generation is disabled.',
+  'final-answer generation policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / No final answer may be generated while final-answer generation is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer generation blocking keys: finalAnswerGenerationPolicy, finalAnswerGeneration, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer generation blocking keys: finalAnswerGenerationPolicy, finalAnswerGeneration, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

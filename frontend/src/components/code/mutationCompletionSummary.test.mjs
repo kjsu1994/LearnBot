@@ -28,6 +28,7 @@ const view = buildMutationCompletionSummaryView({
   finalResponseHandoffEnabled: false,
   deliveryHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   items: [
     {
       key: 'releaseAttemptReadiness',
@@ -50,6 +51,7 @@ const view = buildMutationCompletionSummaryView({
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Latest release attempt must be fresh, complete, and based on passing patch preconditions.',
     },
     {
@@ -73,6 +75,7 @@ const view = buildMutationCompletionSummaryView({
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Future mutation final-answer delivery must pass through a disabled delivery gate that refuses final-answer delivery and delivery handoff.',
     },
     {
@@ -96,6 +99,7 @@ const view = buildMutationCompletionSummaryView({
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement.',
     },
   ],
@@ -110,12 +114,12 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation completion disabled: release gate false / request creation false / push false / claim false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false / rag freshness false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false'
+  'mutation completion disabled: release gate false / request creation false / push false / claim false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false / rag freshness false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / acknowledgement save false'
 );
 assert.deepEqual(view.itemLines, [
-  'releaseAttemptReadiness: READY / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / Latest release attempt must be fresh, complete, and based on passing patch preconditions.',
-  'mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / Future mutation final-answer delivery must pass through a disabled delivery gate that refuses final-answer delivery and delivery handoff.',
-  'mutationFinalAnswerDeliveryReceiptGate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement.',
+  'releaseAttemptReadiness: READY / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / acknowledgement save false / Latest release attempt must be fresh, complete, and based on passing patch preconditions.',
+  'mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / acknowledgement save false / Future mutation final-answer delivery must pass through a disabled delivery gate that refuses final-answer delivery and delivery handoff.',
+  'mutationFinalAnswerDeliveryReceiptGate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / passed true / blocking false / release gate false / request creation false / push false / claimable false / mutation false / result aggregation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / receipt false / acknowledgement save false / Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement.',
 ]);
 assert.equal(view.blockingText, '');
 assert.match(view.message, /remain disabled/);
@@ -125,12 +129,13 @@ const blocked = buildMutationCompletionSummaryView({
   finalAnswerDeliveryEnabled: false,
   deliveryHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   blockingKeys: ['mutationCompletionSummary'],
 });
 assert.equal(blocked.show, true);
 assert.equal(
   blocked.disabledText,
-  'mutation completion disabled: delivery false / delivery handoff false / receipt false'
+  'mutation completion disabled: delivery false / delivery handoff false / receipt false / acknowledgement save false'
 );
 assert.equal(blocked.blockingText, 'mutation completion blocking keys: mutationCompletionSummary');
 

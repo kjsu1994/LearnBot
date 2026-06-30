@@ -21,6 +21,7 @@ const DISABLED_CONTROL_LABELS = [
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
   ['deliveryReceiptEnabled', 'receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 const ITEM_CONTROL_LABELS = [
@@ -40,6 +41,7 @@ const ITEM_CONTROL_LABELS = [
   ['finalResponseHandoffEnabled', 'final response handoff'],
   ['deliveryHandoffEnabled', 'delivery handoff'],
   ['deliveryReceiptEnabled', 'receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationCompletionSummaryView(summary = null) {

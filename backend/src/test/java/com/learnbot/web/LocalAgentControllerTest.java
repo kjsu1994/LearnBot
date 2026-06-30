@@ -2,16 +2,23 @@ package com.learnbot.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.learnbot.dto.AgentExecutionTarget;
+import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
+import com.learnbot.dto.LocalAgentToolName;
+import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.LocalAgentAuthService;
 import com.learnbot.service.LocalAgentGatewayService;
 import com.learnbot.service.LocalAgentToolGatewayService;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.Map;
@@ -21,9 +28,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class LocalAgentControllerTest {
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @Test
     void releasePatchExecutionReturnsRefusalOnlyBoundaryWithoutClaiming() {
@@ -80,7 +90,7 @@ class LocalAgentControllerTest {
     }
 
     @Test
-    void enqueueReleaseAttemptFreshObservationsDelegatesToObservationOnlyServicePath() {
+    void enqueueReleaseAttemptFreshObservationsRouteReturnsOnlyObservationRequests() throws Exception {
         LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
         LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
         LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
@@ -91,16 +101,80 @@ class LocalAgentControllerTest {
                 toolGatewayService,
                 currentUserProvider
         );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
         UUID userId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
+        UUID repositoryObservationId = UUID.randomUUID();
+        UUID patchDryRunId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
         AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
-        List<LocalAgentQueuedToolRequest> expected = List.of();
+        List<LocalAgentQueuedToolRequest> expected = List.of(
+                new LocalAgentQueuedToolRequest(
+                        repositoryObservationId,
+                        new LocalAgentToolRequest(
+                                sessionId,
+                                userId,
+                                agentId,
+                                workspaceId,
+                                AgentExecutionTarget.USER_LOCAL_AGENT,
+                                LocalAgentToolName.GIT_STATUS,
+                                Map.of(
+                                        "sourceRequestId", requestId.toString(),
+                                        "releaseAttemptId", attemptId.toString(),
+                                        "freshObservationOnly", true
+                                ),
+                                LocalAgentApprovalState.NOT_REQUIRED,
+                                null,
+                                List.of("Fresh release-attempt git.status observation. Read-only; the source patch request stays held.")
+                        )
+                ),
+                new LocalAgentQueuedToolRequest(
+                        patchDryRunId,
+                        new LocalAgentToolRequest(
+                                sessionId,
+                                userId,
+                                agentId,
+                                workspaceId,
+                                AgentExecutionTarget.USER_LOCAL_AGENT,
+                                LocalAgentToolName.PATCH_APPLY,
+                                Map.of(
+                                        "sourceRequestId", requestId.toString(),
+                                        "releaseAttemptId", attemptId.toString(),
+                                        "freshObservationOnly", true,
+                                        "dryRunOnly", true,
+                                        "mutationAllowed", false
+                                ),
+                                LocalAgentApprovalState.APPROVED,
+                                null,
+                                List.of("Fresh release-attempt patch dry-run observation. dryRunOnly=true, mutationAllowed=false, and the source request stays held.")
+                        )
+                )
+        );
         when(currentUserProvider.currentUser()).thenReturn(user);
         when(toolGatewayService.enqueueReleaseAttemptFreshObservations(userId, requestId)).thenReturn(expected);
 
-        var actual = controller.enqueueReleaseAttemptFreshObservations(requestId);
+        mockMvc.perform(post("/api/local-agents/tools/{requestId}/fresh-observations", requestId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].requestId").value(repositoryObservationId.toString()))
+                .andExpect(jsonPath("$[1].requestId").value(patchDryRunId.toString()))
+                .andExpect(jsonPath("$[0].requestId").value(org.hamcrest.Matchers.not(requestId.toString())))
+                .andExpect(jsonPath("$[1].requestId").value(org.hamcrest.Matchers.not(requestId.toString())))
+                .andExpect(jsonPath("$[0].request.toolName").value(LocalAgentToolName.GIT_STATUS.wireName()))
+                .andExpect(jsonPath("$[1].request.toolName").value(LocalAgentToolName.PATCH_APPLY.wireName()))
+                .andExpect(jsonPath("$[0].request.input.sourceRequestId").value(requestId.toString()))
+                .andExpect(jsonPath("$[1].request.input.sourceRequestId").value(requestId.toString()))
+                .andExpect(jsonPath("$[0].request.input.freshObservationOnly").value(true))
+                .andExpect(jsonPath("$[1].request.input.freshObservationOnly").value(true))
+                .andExpect(jsonPath("$[1].request.input.dryRunOnly").value(true))
+                .andExpect(jsonPath("$[1].request.input.mutationAllowed").value(false))
+                .andExpect(jsonPath("$[0].request.input.mutationAllowed").doesNotExist());
 
-        assertThat(actual).isSameAs(expected);
         verify(toolGatewayService).enqueueReleaseAttemptFreshObservations(userId, requestId);
     }
 

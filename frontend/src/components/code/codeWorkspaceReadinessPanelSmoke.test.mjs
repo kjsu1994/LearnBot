@@ -75,6 +75,7 @@ const mutationResultCompletionBoundary = {
   completedResultPersistenceEnabled: false,
   postExecutionObservationEnabled: false,
   resultIntakeEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   resultChecks: [
@@ -88,6 +89,7 @@ const mutationResultCompletionBoundary = {
       completedResultPersistenceEnabled: false,
       postExecutionObservationEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -128,6 +130,7 @@ const mutationExecutionReadinessBoundary = {
   finalAnswerGenerationEnabled: false,
   finalResponseHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   readinessChecks: [
@@ -165,6 +168,7 @@ const mutationExecutionReadinessBoundary = {
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
   ],
   blockingKeys: [
@@ -214,6 +218,7 @@ const mutationToolRunnerBoundary = {
   finalAnswerGenerationEnabled: false,
   finalResponseHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   runnerChecks: [
@@ -252,6 +257,7 @@ const mutationToolRunnerBoundary = {
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
   ],
   blockingKeys: [
@@ -298,6 +304,7 @@ const mutationResultIntakePersistenceGate = {
   mutationResultAggregationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  acknowledgementSaveEnabled: false,
   postExecutionObservationEnabled: false,
   completedResultPersistenceEnabled: false,
   observationAcceptanceEnabled: false,
@@ -332,6 +339,7 @@ const mutationResultIntakePersistenceGate = {
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Accepted mutation result intake persistence is disabled.',
     },
   ],
@@ -340,6 +348,7 @@ const mutationResultIntakePersistenceGate = {
     'acceptedObservationPersistence',
     'mutationResultAggregationEnabled',
     'finalAnswerGenerationEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled.',
@@ -369,6 +378,7 @@ const mutationRollbackFallbackGate = {
   mutationResultAggregationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  acknowledgementSaveEnabled: false,
   intakePersistenceEnabled: false,
   acceptedObservationPersistenceEnabled: false,
   postExecutionObservationEnabled: false,
@@ -403,6 +413,7 @@ const mutationRollbackFallbackGate = {
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Rollback fallback execution is disabled.',
     },
   ],
@@ -410,6 +421,7 @@ const mutationRollbackFallbackGate = {
     'rollbackFallbackPolicy',
     'rollbackFallbackExecution',
     'ragFreshnessUpdate',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation rollback fallback is explicitly refused: no rollback fallback execution, RAG freshness update, aggregation, publication, or final answer is enabled.',
@@ -438,6 +450,7 @@ const mutationRagFreshnessGate = {
   mutationResultAggregationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  acknowledgementSaveEnabled: false,
   rollbackFallbackExecutionEnabled: false,
   intakePersistenceEnabled: false,
   acceptedObservationPersistenceEnabled: false,
@@ -472,6 +485,7 @@ const mutationRagFreshnessGate = {
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'RAG freshness updates are disabled.',
     },
   ],
@@ -479,6 +493,7 @@ const mutationRagFreshnessGate = {
     'ragFreshnessPolicy',
     'ragFreshnessUpdate',
     'mutationResultAggregationEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation RAG freshness is explicitly refused: no freshness update, aggregation, publication, or final answer is enabled.',
@@ -506,6 +521,11 @@ const mutationResultAggregationGate = {
   resultAggregationInvocationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   ragFreshnessUpdateEnabled: false,
   rollbackFallbackExecutionEnabled: false,
   intakePersistenceEnabled: false,
@@ -540,6 +560,11 @@ const mutationResultAggregationGate = {
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation result aggregation is disabled.',
     },
   ],
@@ -547,7 +572,15 @@ const mutationResultAggregationGate = {
     'resultAggregationPolicy',
     'resultAggregation',
     'publication',
+    'finalAnswerGeneration',
     'mutationResultAggregationEnabled',
+    'publicationEnabled',
+    'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled.',
@@ -575,6 +608,11 @@ const mutationPublicationGate = {
   publicationEnabled: false,
   publicationInvocationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   mutationResultAggregationEnabled: false,
   ragFreshnessUpdateEnabled: false,
   rollbackFallbackExecutionEnabled: false,
@@ -610,6 +648,11 @@ const mutationPublicationGate = {
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation publication is disabled.',
     },
   ],
@@ -618,6 +661,12 @@ const mutationPublicationGate = {
     'publication',
     'finalAnswerGeneration',
     'publicationEnabled',
+    'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation publication is explicitly refused: no publication or final answer is enabled.',
@@ -644,6 +693,11 @@ const mutationFinalAnswerGenerationGate = {
   intakePersistedResultCount: 0,
   finalAnswerGenerationEnabled: false,
   finalAnswerGenerationInvocationEnabled: false,
+  finalAnswerCompletionEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   publicationEnabled: false,
   mutationResultAggregationEnabled: false,
   ragFreshnessUpdateEnabled: false,
@@ -679,6 +733,11 @@ const mutationFinalAnswerGenerationGate = {
       mutationAllowed: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer generation is disabled.',
     },
   ],
@@ -686,6 +745,11 @@ const mutationFinalAnswerGenerationGate = {
     'finalAnswerGenerationPolicy',
     'finalAnswerGeneration',
     'finalAnswerGenerationEnabled',
+    'finalAnswerCompletionEnabled',
+    'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation final-answer generation is explicitly refused: no final answer is generated.',
@@ -714,6 +778,9 @@ const mutationFinalAnswerCompletionGate = {
   finalAnswerCompletionEnabled: false,
   finalAnswerCompletionInvocationEnabled: false,
   finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerGenerationEnabled: false,
   publicationEnabled: false,
   mutationResultAggregationEnabled: false,
@@ -751,6 +818,10 @@ const mutationFinalAnswerCompletionGate = {
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer completion and delivery are disabled.',
     },
   ],
@@ -760,6 +831,9 @@ const mutationFinalAnswerCompletionGate = {
     'finalAnswerDelivery',
     'finalAnswerCompletionEnabled',
     'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerGenerationEnabled',
     'mutationAllowed',
   ],
@@ -789,6 +863,10 @@ const mutationFinalAnswerPersistenceGate = {
   finalAnswerPersistenceEnabled: false,
   finalAnswerPersistenceInvocationEnabled: false,
   conversationTurnSaveEnabled: false,
+  userVisibleCompletionEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerCompletionEnabled: false,
   finalAnswerDeliveryEnabled: false,
   finalAnswerGenerationEnabled: false,
@@ -831,6 +909,10 @@ const mutationFinalAnswerPersistenceGate = {
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer persistence and conversation save are disabled.',
     },
   ],
@@ -841,6 +923,10 @@ const mutationFinalAnswerPersistenceGate = {
     'finalAnswerDelivery',
     'finalAnswerPersistenceEnabled',
     'conversationTurnSaveEnabled',
+    'userVisibleCompletionEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerCompletionEnabled',
     'finalAnswerDeliveryEnabled',
     'finalAnswerGenerationEnabled',
@@ -872,6 +958,9 @@ const mutationFinalAnswerConversationSaveGate = {
   conversationTurnSaveEnabled: false,
   conversationTurnSaveInvocationEnabled: false,
   userVisibleCompletionEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerPersistenceEnabled: false,
   finalAnswerDeliveryEnabled: false,
   finalAnswerCompletionEnabled: false,
@@ -916,6 +1005,9 @@ const mutationFinalAnswerConversationSaveGate = {
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer conversation save and user-visible completion are disabled.',
     },
   ],
@@ -926,6 +1018,9 @@ const mutationFinalAnswerConversationSaveGate = {
     'finalAnswerDelivery',
     'conversationTurnSaveEnabled',
     'userVisibleCompletionEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerPersistenceEnabled',
     'finalAnswerDeliveryEnabled',
     'finalAnswerCompletionEnabled',
@@ -957,6 +1052,8 @@ const mutationFinalAnswerUserVisibleCompletionGate = {
   intakePersistedResultCount: 0,
   userVisibleCompletionEnabled: false,
   finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   conversationTurnSaveEnabled: false,
   finalAnswerPersistenceEnabled: false,
   finalAnswerDeliveryEnabled: false,
@@ -1003,6 +1100,8 @@ const mutationFinalAnswerUserVisibleCompletionGate = {
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
       finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer user-visible completion and final-response handoff are disabled.',
     },
   ],
@@ -1013,6 +1112,8 @@ const mutationFinalAnswerUserVisibleCompletionGate = {
     'conversationTurnSave',
     'userVisibleCompletionEnabled',
     'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'conversationTurnSaveEnabled',
     'finalAnswerPersistenceEnabled',
     'finalAnswerDeliveryEnabled',
@@ -1045,6 +1146,8 @@ const mutationFinalResponseHandoffGate = {
   intakePersistedResultCount: 0,
   finalResponseHandoffEnabled: false,
   deliveryHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerDeliveryEnabled: false,
   userVisibleCompletionEnabled: false,
   conversationTurnSaveEnabled: false,
@@ -1093,6 +1196,8 @@ const mutationFinalResponseHandoffGate = {
       userVisibleCompletionEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-response handoff and delivery handoff are disabled.',
     },
   ],
@@ -1103,6 +1208,8 @@ const mutationFinalResponseHandoffGate = {
     'userVisibleCompletion',
     'finalResponseHandoffEnabled',
     'deliveryHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerDeliveryEnabled',
     'userVisibleCompletionEnabled',
     'conversationTurnSaveEnabled',
@@ -1136,6 +1243,8 @@ const mutationFinalAnswerDeliveryGate = {
   intakePersistedResultCount: 0,
   finalAnswerDeliveryEnabled: false,
   deliveryHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalResponseHandoffEnabled: false,
   userVisibleCompletionEnabled: false,
   conversationTurnSaveEnabled: false,
@@ -1179,6 +1288,8 @@ const mutationFinalAnswerDeliveryGate = {
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -1194,6 +1305,8 @@ const mutationFinalAnswerDeliveryGate = {
     'finalResponseHandoff',
     'finalAnswerDeliveryEnabled',
     'deliveryHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalResponseHandoffEnabled',
     'userVisibleCompletionEnabled',
     'conversationTurnSaveEnabled',
@@ -1225,6 +1338,7 @@ const mutationFinalAnswerDeliveryReceiptGate = {
   rejectedResultCount: 0,
   intakePersistedResultCount: 0,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerDeliveryEnabled: false,
   deliveryHandoffEnabled: false,
   finalResponseHandoffEnabled: false,
@@ -1271,6 +1385,7 @@ const mutationFinalAnswerDeliveryReceiptGate = {
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
       userVisibleCompletionEnabled: false,
@@ -1285,6 +1400,7 @@ const mutationFinalAnswerDeliveryReceiptGate = {
     'finalAnswerDelivery',
     'deliveryHandoff',
     'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerDeliveryEnabled',
     'deliveryHandoffEnabled',
     'finalResponseHandoffEnabled',
@@ -1325,6 +1441,7 @@ const mutationCompletionSummary = {
   finalResponseHandoffEnabled: false,
   deliveryHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   items: [
     {
       key: 'releaseAttemptReadiness',
@@ -1347,7 +1464,32 @@ const mutationCompletionSummary = {
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Latest release attempt must be fresh, complete, and based on passing patch preconditions.',
+    },
+    {
+      key: 'mutationFinalResponseHandoffGate',
+      status: 'REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED',
+      passed: true,
+      blocking: false,
+      releaseGateEnabled: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      mutationResultAggregationEnabled: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
+      message: 'Future mutation final-response handoff must pass through a disabled handoff gate that refuses final response handoff.',
     },
     {
       key: 'mutationFinalAnswerDeliveryReceiptGate',
@@ -1370,6 +1512,7 @@ const mutationCompletionSummary = {
       finalResponseHandoffEnabled: false,
       deliveryHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement.',
     },
   ],
@@ -1404,6 +1547,7 @@ const mutationHandoffSummary = {
     finalResponseHandoffEnabled: false,
     deliveryHandoffEnabled: false,
     deliveryReceiptEnabled: false,
+    acknowledgementSaveEnabled: false,
     claimable: false,
     mutationAllowed: false,
   },
@@ -1420,6 +1564,23 @@ const mutationHandoffSummary = {
       resultIntakeEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
+    {
+      key: 'finalResponse',
+      sourceGateKey: 'mutationFinalResponseHandoffGate',
+      status: 'MODELED_DISABLED',
+      passed: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      resultIntakeEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -1435,6 +1596,7 @@ const mutationHandoffSummary = {
       resultIntakeEnabled: false,
       finalResponseHandoffEnabled: false,
       deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -2664,6 +2826,123 @@ const latestAttempt = {
   },
 };
 
+const invalidSnapshotLatestAttempt = {
+  ...latestAttempt,
+  releaseAttemptFinalReadiness: {
+    ...releaseAttemptFinalReadiness,
+    status: 'BLOCKED_RELEASE_DISABLED',
+    ready: false,
+    patchPreconditionsPassed: false,
+    patchReleaseStatus: 'BLOCKED',
+    blockingReasons: [
+      'patch release prerequisites are incomplete',
+      'release gate is disabled',
+      'held patch request remains non-claimable',
+    ],
+    message: 'The release attempt is blocked by stale, incomplete, or failed readiness evidence, and the release gate is disabled so the held patch remains non-claimable.',
+  },
+  releaseEnablementChecklist: {
+    ...releaseEnablementChecklist,
+    prerequisitesPassed: false,
+    items: [
+      {
+        key: 'finalReadiness',
+        status: 'BLOCKED_RELEASE_DISABLED',
+        passed: false,
+        blocking: true,
+        releaseGateEnabled: false,
+        claimable: false,
+        mutationAllowed: false,
+        message: 'Final readiness must be fresh, complete, and based on passing patch preconditions.',
+      },
+      {
+        key: 'rollbackReadiness',
+        status: 'INVALID',
+        passed: false,
+        blocking: true,
+        releaseGateEnabled: false,
+        claimable: false,
+        mutationAllowed: false,
+        message: 'Rollback manifest must be structurally valid before any future release can make the held patch claimable.',
+      },
+    ],
+    blockingKeys: ['finalReadiness', 'rollbackReadiness'],
+    message: 'Release enablement prerequisites are incomplete or not fresh, and the release gate is disabled so no Local Agent mutation can be claimed.',
+  },
+  releaseAttemptDisplaySummary: {
+    status: 'BLOCKED_DISABLED_DISPLAY',
+    show: true,
+    linkedEvidenceComplete: true,
+    releaseReadyButDisabled: false,
+    evidenceStatus: 'ALL_LINKED_RELEASE_DISABLED',
+    releaseReadinessStatus: 'BLOCKED_RELEASE_DISABLED',
+    patchPreconditionsPassed: false,
+    evidenceComplete: true,
+    linkedCount: 2,
+    missingCount: 0,
+    sourceOnlyFallbackCount: 0,
+    blockingCount: 0,
+    disabledFlags: {
+      releaseGateEnabled: false,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      writeHelperEnabled: false,
+      applyEnabled: false,
+      testEnabled: false,
+      rollbackRestoreEnabled: false,
+      ragFreshnessUpdateEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      mutationAllowed: false,
+    },
+    blockingReasons: [
+      'patch release prerequisites are incomplete',
+      'release gate is disabled',
+      'held patch request remains non-claimable',
+    ],
+    message: 'The release attempt remains blocked because the dry-run snapshot evidence mutated files.',
+  },
+};
+
+const invalidSnapshotDryRunOutput = {
+  dryRun: true,
+  preflightPassed: true,
+  mutationApplied: true,
+  snapshotCreated: true,
+  snapshotObservation: {
+    manifestPreview: {
+      id: 'snap-invalid-mutated',
+      relativeManifestPath: 'snap-invalid-mutated/manifest.json',
+      created: true,
+      writesPlanned: true,
+      writesCompleted: true,
+      files: [
+        {
+          path: 'README.md',
+          snapshotRelativePath: 'files/README.md',
+        },
+      ],
+    },
+    files: [
+      {
+        path: 'README.md',
+        hashMatches: true,
+        contextMatches: true,
+      },
+    ],
+  },
+  rollbackObservation: {
+    wouldRestore: true,
+    restored: false,
+    restorePreconditions: [
+      {
+        key: 'userApprovalRequired',
+        required: true,
+      },
+    ],
+  },
+};
+
 const vite = await createServer({
   server: { middlewareMode: true },
   appType: 'custom',
@@ -2674,30 +2953,94 @@ try {
   const { CodeWorkspace } = await vite.ssrLoadModule('/src/components/code/CodeWorkspace.jsx');
   const props = buildCodeWorkspaceReadinessSmokeProps({
     requestId,
-    latestAttempt,
+    latestAttempt: invalidSnapshotLatestAttempt,
+    dryRunRequest: {
+      requestId: 'dry-run-invalid-1',
+    },
+    dryRunResult: {
+      requestId: 'dry-run-invalid-1',
+      status: 'SUCCEEDED',
+      output: invalidSnapshotDryRunOutput,
+    },
+    readinessOverrides: {
+      snapshotReadiness: {
+        status: 'INVALID',
+        dryRun: true,
+        preflightPassed: true,
+        mutationApplied: true,
+        snapshotCreated: true,
+        manifestCreated: true,
+        writesPlanned: true,
+        writesCompleted: true,
+        manifestId: 'snap-invalid-mutated',
+        relativeManifestPath: 'snap-invalid-mutated/manifest.json',
+        fileCount: 1,
+        message: 'Snapshot readiness requires a non-mutating Local Agent dry-run observation with mutationApplied=false.',
+      },
+      rollbackReadiness: {
+        status: 'INVALID',
+        blocking: true,
+        message: 'Rollback validation requires a dry-run observation with mutationApplied=false.',
+      },
+      patchReleaseReadiness: {
+        status: 'BLOCKED',
+        preconditionsPassed: false,
+        releaseGateEnabled: false,
+        mutationEnabled: false,
+      },
+      checks: [
+        {
+          key: 'snapshotManifestPreview',
+          passed: false,
+          message: 'Latest Local Agent dry-run must provide non-mutating managed snapshot evidence.',
+        },
+        {
+          key: 'rollbackRestorePreconditions',
+          passed: false,
+          message: 'Latest Local Agent dry-run must provide rollback restore preconditions before release can be considered.',
+        },
+      ],
+    },
   });
-  assert.equal(assertNoForbiddenTrueFlags(latestAttempt), true);
+  assert.equal(assertNoForbiddenTrueFlags(invalidSnapshotLatestAttempt), true);
   assert.equal(assertNoForbiddenTrueFlags(props, 'props'), true);
   const markup = renderToStaticMarkup(React.createElement(CodeWorkspace, props));
 
   assert.match(markup, /Execution readiness: blocked/);
+  assert.match(markup, /Linked release evidence: complete \/ release: blocked/);
+  assert.match(markup, /evidence ALL_LINKED_RELEASE_DISABLED \/ linked 2 \/ missing 0 \/ fallback 0/);
+  assert.match(markup, /readiness BLOCKED_RELEASE_DISABLED \/ preconditions false \/ evidence complete true/);
+  assert.match(markup, /disabled gates: release false \/ request creation false \/ push false \/ claim false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ RAG freshness false \/ final answer false \/ mutation false/);
+  assert.match(markup, /why disabled: patch release prerequisites are incomplete, release gate is disabled, held patch request remains non-claimable/);
+  assert.match(markup, /The release attempt remains blocked because the dry-run snapshot evidence mutated files/);
   assert.match(markup, /Internal patch execution gate: BLOCKED_RELEASE_DISABLED/);
   assert.match(markup, /release attempt model: READY_RELEASE_ATTEMPT_DISABLED/);
   assert.match(markup, /fresh observation request plan: audit-only \/ no enqueue \/ no claim/);
+  assert.match(markup, /<button\b(?=[^>]*disabled="")[^>]*>(?:(?!<\/button>)[\s\S])*Queue release fresh observations(?:(?!<\/button>)[\s\S])*<\/button>/);
   assert.match(markup, /freshRepositoryVerification: PLANNED_DISABLED \/ git\.status \/ approval NOT_REQUIRED \/ enqueue false \/ claimable false \/ mutation false/);
   assert.match(markup, /freshPatchDryRun: PLANNED_DISABLED \/ patch\.apply \/ approval APPROVED \/ enqueue false \/ claimable false \/ mutation false \/ dry-run true/);
   assert.match(markup, /fresh observation evidence status: audit-only \/ no request creation \/ no push/);
   assert.match(markup, /freshRepositoryVerification: RELEASE_ATTEMPT_LINKED \/ linked true \/ fallback false \/ blocking false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /freshPatchDryRun: RELEASE_ATTEMPT_LINKED \/ linked true \/ fallback false \/ blocking false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /fresh observation evidence completeness: ALL_LINKED_RELEASE_DISABLED \/ complete true \/ linked 2 \/ missing 0 \/ fallback 0 \/ blocking 0/);
+  assert.match(markup, /mutation applied: true/);
+  assert.match(markup, /snapshot created: true/);
+  assert.match(markup, /Snapshot readiness: INVALID/);
+  assert.match(markup, /Snapshot readiness requires a non-mutating Local Agent dry-run observation with mutationApplied=false/);
+  assert.match(markup, /snapshot created: true \/ manifest created: true \/ writes planned: true \/ writes completed: true/);
+  assert.match(markup, /manifest: snap-invalid-mutated \/ snap-invalid-mutated\/manifest\.json \/ files 1/);
+  assert.match(markup, /blocked \/ snapshotManifestPreview: Latest Local Agent dry-run must provide non-mutating managed snapshot evidence/);
+  assert.match(markup, /Rollback manifest readiness: INVALID/);
+  assert.match(markup, /Rollback validation requires a dry-run observation with mutationApplied=false/);
+  assert.match(markup, /blocking release: true/);
   assert.match(markup, /release gate: false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /blocking evidence: releaseGateEnabled/);
   assert.match(markup, /Fresh observation evidence is complete and linked, but release remains disabled/);
-  assert.match(markup, /release attempt final readiness: READY_RELEASE_DISABLED \/ ready true \/ freshness FRESH \/ stale false \/ evidence complete true \/ patch preconditions true/);
+  assert.match(markup, /release attempt final readiness: BLOCKED_RELEASE_DISABLED \/ ready false \/ freshness FRESH \/ stale false \/ evidence complete true \/ patch preconditions false/);
   assert.match(markup, /final release gate: false \/ claim false \/ write helper false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /execution disabled: apply false \/ test false \/ rollback restore false/);
-  assert.match(markup, /final blocking reasons: releaseGateDisabled, claimDisabled, mutationDisabled/);
-  assert.match(markup, /Fresh evidence and patch preconditions are visible, but release remains disabled and non-claimable/);
+  assert.match(markup, /final blocking reasons: patch release prerequisites are incomplete, release gate is disabled, held patch request remains non-claimable/);
+  assert.match(markup, /The release attempt is blocked by stale, incomplete, or failed readiness evidence, and the release gate is disabled so the held patch remains non-claimable/);
   assert.match(markup, /final mutation report contract: CONTRACT_DISABLED \/ learnbot\.local-agent\.final-mutation-report\.v1 \/ USER_LOCAL_AGENT \/ source learnbot\.local-agent\.post-mutation-result\.v1 \/ rollback RESTORE_VALIDATED/);
   assert.match(markup, /final report disabled: release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false/);
   assert.match(markup, /final report source outcomes: patchApplyOutcome, allowlistedVerificationOutcome, postWriteRepositoryObservation, rollbackFallbackOutcome, ragFreshnessMarker/);
@@ -2713,11 +3056,12 @@ try {
   assert.match(markup, /publication required report sections: changedFiles, verificationOutcome, rollbackState, ragFreshnessState/);
   assert.match(markup, /publicationSwitch: DISABLED \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ Publication remains disabled/);
   assert.match(markup, /final answer publication blocking keys: publicationSwitch, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
-  assert.match(markup, /release enablement checklist: BLOCKED_ENABLEMENT_DISABLED \/ learnbot\.local-agent\.release-enablement-checklist\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ release gate false \/ claim false \/ write helper false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
+  assert.match(markup, /release enablement checklist: BLOCKED_ENABLEMENT_DISABLED \/ learnbot\.local-agent\.release-enablement-checklist\.v1 \/ prerequisites false \/ USER_LOCAL_AGENT \/ release gate false \/ claim false \/ write helper false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /release execution disabled: apply false \/ test false \/ rollback restore false \/ rag freshness false/);
-  assert.match(markup, /releaseAttemptFinalReadiness: READY_RELEASE_DISABLED \/ passed true \/ blocking false \/ release gate false \/ claimable false \/ mutation false \/ Final readiness is modeled but release remains disabled/);
-  assert.match(markup, /releaseGate: DISABLED \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ The release gate must remain disabled in this slice/);
-  assert.match(markup, /release enablement blocking keys: releaseGate, claimEnabled, mutationAllowed/);
+  assert.match(markup, /finalReadiness: BLOCKED_RELEASE_DISABLED \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ Final readiness must be fresh, complete, and based on passing patch preconditions/);
+  assert.match(markup, /rollbackReadiness: INVALID \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ Rollback manifest must be structurally valid before any future release can make the held patch claimable/);
+  assert.match(markup, /release enablement blocking keys: finalReadiness, rollbackReadiness/);
+  assert.match(markup, /Release enablement prerequisites are incomplete or not fresh, and the release gate is disabled so no Local Agent mutation can be claimed/);
   assert.match(markup, /fresh observation enqueue boundary: REFUSED_ENQUEUE_DISABLED \/ request creation false \/ push false \/ enqueue false \/ claimable false \/ mutation false/);
   assert.match(markup, /boundary planned freshRepositoryVerification: PLANNED_DISABLED \/ git\.status \/ approval NOT_REQUIRED \/ enqueue false \/ claimable false/);
   assert.match(markup, /boundary planned freshPatchDryRun: PLANNED_DISABLED \/ patch\.apply \/ approval APPROVED \/ enqueue false \/ claimable false/);
@@ -2729,85 +3073,87 @@ try {
   assert.match(markup, /Future Local Agent mutation result intake requirements are incomplete, and result aggregation remains disabled/);
   assert.match(markup, /mutation result completion boundary: REFUSED_RESULT_COMPLETION_DISABLED/);
   assert.match(markup, /mutation result completion sources: tool runner REFUSED_TOOL_RUNNER_DISABLED \/ observation REFUSED_POST_EXECUTION_OBSERVATION_DISABLED \/ completion policy DISABLED_AUDIT_ONLY/);
-  assert.match(markup, /result completion resultEnvelopePersistence: DISABLED \/ passed false \/ blocking true \/ tool runner false \/ completed transition false \/ result persistence false \/ observation capture false \/ result intake false \/ claimable false \/ mutation false/);
+  assert.match(markup, /result completion resultEnvelopePersistence: DISABLED \/ passed false \/ blocking true \/ tool runner false \/ completed transition false \/ result persistence false \/ observation capture false \/ result intake false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /mutation result completion blocking keys: resultEnvelopePersistence, completedResultPersistenceEnabled, resultIntakeEnabled, mutationAllowed/);
   assert.match(markup, /mutation result intake persistence gate: REFUSED_INTAKE_PERSISTENCE_DISABLED/);
   assert.match(markup, /mutation result intake persistence counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /result intake persistence policy intakePersistencePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ intake persistence false \/ accepted observation persistence false \/ rollback fallback false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation result intake persistence blocking keys: intakePersistencePolicy, acceptedObservationPersistence, mutationResultAggregationEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /result intake persistence policy intakePersistencePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ intake persistence false \/ accepted observation persistence false \/ rollback fallback false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ acknowledgement save false/);
+  assert.match(markup, /mutation result intake persistence blocking keys: intakePersistencePolicy, acceptedObservationPersistence, mutationResultAggregationEnabled, finalAnswerGenerationEnabled, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation rollback fallback gate: REFUSED_ROLLBACK_FALLBACK_DISABLED/);
   assert.match(markup, /mutation rollback fallback counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /rollback fallback policy rollbackFallbackPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ rollback fallback false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation rollback fallback blocking keys: rollbackFallbackPolicy, rollbackFallbackExecution, ragFreshnessUpdate, mutationAllowed/);
+  assert.match(markup, /rollback fallback policy rollbackFallbackPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ rollback fallback false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ acknowledgement save false/);
+  assert.match(markup, /mutation rollback fallback blocking keys: rollbackFallbackPolicy, rollbackFallbackExecution, ragFreshnessUpdate, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation RAG freshness gate: REFUSED_RAG_FRESHNESS_DISABLED/);
   assert.match(markup, /mutation RAG freshness counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /RAG freshness policy ragFreshnessPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation RAG freshness blocking keys: ragFreshnessPolicy, ragFreshnessUpdate, mutationResultAggregationEnabled, mutationAllowed/);
+  assert.match(markup, /RAG freshness policy ragFreshnessPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ acknowledgement save false/);
+  assert.match(markup, /mutation RAG freshness blocking keys: ragFreshnessPolicy, ragFreshnessUpdate, mutationResultAggregationEnabled, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation result aggregation gate: REFUSED_RESULT_AGGREGATION_DISABLED/);
   assert.match(markup, /mutation result aggregation counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /result aggregation policy resultAggregationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation result aggregation blocking keys: resultAggregationPolicy, resultAggregation, publication, mutationResultAggregationEnabled, mutationAllowed/);
+  assert.match(markup, /result aggregation policy resultAggregationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ final-answer completion false \/ final-answer delivery false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation result aggregation blocking keys: resultAggregationPolicy, resultAggregation, publication, finalAnswerGeneration, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation publication gate: REFUSED_PUBLICATION_DISABLED/);
   assert.match(markup, /mutation publication counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /publication policy publicationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation publication blocking keys: publicationPolicy, publication, finalAnswerGeneration, publicationEnabled, mutationAllowed/);
+  assert.match(markup, /publication policy publicationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ final-answer completion false \/ final-answer delivery false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation publication blocking keys: publicationPolicy, publication, finalAnswerGeneration, publicationEnabled, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer generation gate: REFUSED_FINAL_ANSWER_GENERATION_DISABLED/);
   assert.match(markup, /mutation final-answer generation counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer generation policy finalAnswerGenerationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false/);
-  assert.match(markup, /mutation final-answer generation blocking keys: finalAnswerGenerationPolicy, finalAnswerGeneration, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer generation policy finalAnswerGenerationPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ final-answer completion false \/ final-answer delivery false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-answer generation blocking keys: finalAnswerGenerationPolicy, finalAnswerGeneration, finalAnswerGenerationEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer completion gate: REFUSED_FINAL_ANSWER_COMPLETION_DISABLED/);
   assert.match(markup, /mutation final-answer completion counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer completion policy finalAnswerCompletionPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false/);
-  assert.match(markup, /mutation final-answer completion blocking keys: finalAnswerCompletionPolicy, finalAnswerCompletion, finalAnswerDelivery, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer completion policy finalAnswerCompletionPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-answer completion blocking keys: finalAnswerCompletionPolicy, finalAnswerCompletion, finalAnswerDelivery, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer persistence gate: REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED/);
   assert.match(markup, /mutation final-answer persistence counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer persistence policy finalAnswerPersistencePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false/);
-  assert.match(markup, /mutation final-answer persistence blocking keys: finalAnswerPersistencePolicy, finalAnswerPersistence, conversationTurnSave, finalAnswerDelivery, finalAnswerPersistenceEnabled, conversationTurnSaveEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer persistence policy finalAnswerPersistencePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-answer persistence blocking keys: finalAnswerPersistencePolicy, finalAnswerPersistence, conversationTurnSave, finalAnswerDelivery, finalAnswerPersistenceEnabled, conversationTurnSaveEnabled, userVisibleCompletionEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer conversation-save gate: REFUSED_FINAL_ANSWER_CONVERSATION_SAVE_DISABLED/);
   assert.match(markup, /mutation final-answer conversation-save counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer conversation-save policy finalAnswerConversationSavePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false/);
-  assert.match(markup, /mutation final-answer conversation-save blocking keys: finalAnswerConversationSavePolicy, conversationTurnSave, userVisibleCompletion, finalAnswerDelivery, conversationTurnSaveEnabled, userVisibleCompletionEnabled, finalAnswerPersistenceEnabled, finalAnswerDeliveryEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer conversation-save policy finalAnswerConversationSavePolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final-response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-answer conversation-save blocking keys: finalAnswerConversationSavePolicy, conversationTurnSave, userVisibleCompletion, finalAnswerDelivery, conversationTurnSaveEnabled, userVisibleCompletionEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerDeliveryEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer user-visible completion gate: REFUSED_FINAL_ANSWER_USER_VISIBLE_COMPLETION_DISABLED/);
   assert.match(markup, /mutation final-answer user-visible completion counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer user-visible completion policy userVisibleCompletionPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false/);
-  assert.match(markup, /mutation final-answer user-visible completion blocking keys: userVisibleCompletionPolicy, userVisibleCompletion, finalResponseHandoff, conversationTurnSave, userVisibleCompletionEnabled, finalResponseHandoffEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerDeliveryEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer user-visible completion policy userVisibleCompletionPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-answer user-visible completion blocking keys: userVisibleCompletionPolicy, userVisibleCompletion, finalResponseHandoff, conversationTurnSave, userVisibleCompletionEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerDeliveryEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-response handoff gate: REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED/);
   assert.match(markup, /mutation final-response handoff counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-response handoff policy finalResponseHandoffPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false/);
-  assert.match(markup, /mutation final-response handoff blocking keys: finalResponseHandoffPolicy, finalResponseHandoff, finalAnswerDelivery, userVisibleCompletion, finalResponseHandoffEnabled, deliveryHandoffEnabled, finalAnswerDeliveryEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-response handoff policy finalResponseHandoffPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ delivery receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutation final-response handoff blocking keys: finalResponseHandoffPolicy, finalResponseHandoff, finalAnswerDelivery, userVisibleCompletion, finalResponseHandoffEnabled, deliveryHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer delivery gate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED/);
   assert.match(markup, /mutation final-answer delivery counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer delivery policy finalAnswerDeliveryPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false/);
-  assert.match(markup, /mutation final-answer delivery blocking keys: finalAnswerDeliveryPolicy, finalAnswerDelivery, deliveryHandoff, finalResponseHandoff, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer delivery policy finalAnswerDeliveryPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ delivery receipt false \/ acknowledgement save false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false/);
+  assert.match(markup, /mutation final-answer delivery blocking keys: finalAnswerDeliveryPolicy, finalAnswerDelivery, deliveryHandoff, finalResponseHandoff, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation final-answer delivery receipt gate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED/);
   assert.match(markup, /mutation final-answer delivery receipt counts: expected 4 \/ completed 0 \/ accepted 0 \/ rejected 0 \/ intake persisted 0/);
-  assert.match(markup, /final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ receipt false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false/);
-  assert.match(markup, /mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ receipt false \/ acknowledgement save false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false/);
+  assert.match(markup, /mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation completion summary: READY_COMPLETION_DISABLED \/ learnbot\.local-agent\.mutation-completion-summary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT/);
-  assert.match(markup, /mutation completion disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ claimable false \/ mutation false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false/);
-  assert.match(markup, /releaseAttemptReadiness: READY \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false/);
-  assert.match(markup, /mutationFinalAnswerDeliveryReceiptGate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false/);
+  assert.match(markup, /mutation completion disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ claimable false \/ mutation false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
+  assert.match(markup, /releaseAttemptReadiness: READY \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutationFinalResponseHandoffGate: REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
+  assert.match(markup, /mutationFinalAnswerDeliveryReceiptGate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
   assert.match(markup, /Local Agent mutation completion prerequisites are modeled, but execution, aggregation, publication, and final-answer generation remain disabled/);
   assert.match(markup, /mutation handoff summary: READY_HANDOFF_DISABLED \/ learnbot\.local-agent\.mutation-handoff-summary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ completion READY_COMPLETION_DISABLED/);
-  assert.match(markup, /mutation handoff disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ claimable false \/ mutation false/);
-  assert.match(markup, /handoff dispatchDecision: MODELED_DISABLED \/ source mutationDispatchDecisionModel \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ claimable false \/ mutation false/);
-  assert.match(markup, /handoff deliveryReceipt: MODELED_DISABLED \/ source mutationFinalAnswerDeliveryReceiptGate \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ claimable false \/ mutation false/);
+  assert.match(markup, /mutation handoff disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
+  assert.match(markup, /handoff dispatchDecision: MODELED_DISABLED \/ source mutationDispatchDecisionModel \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
+  assert.match(markup, /handoff finalResponse: MODELED_DISABLED \/ source mutationFinalResponseHandoffGate \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
+  assert.match(markup, /handoff deliveryReceipt: MODELED_DISABLED \/ source mutationFinalAnswerDeliveryReceiptGate \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /mutation handoff blocking keys: releaseGateEnabled, requestCreationEnabled, pushEnabled, claimEnabled, mutationAllowed/);
   assert.match(markup, /Local Agent mutation handoff prerequisites are modeled, but all handoff controls remain disabled/);
   assert.match(markup, /mutation execution readiness: REFUSED_EXECUTION_READINESS_DISABLED \/ learnbot\.local-agent\.mutation-execution-readiness-boundary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ expected 4 \/ completed 0/);
   assert.match(markup, /mutation execution readiness sources: handoff READY_HANDOFF_DISABLED \/ execution gate REFUSED_EXECUTION_DISABLED \/ write helper REFUSED_WRITE_HELPER_DISABLED/);
-  assert.match(markup, /mutation execution readiness disabled: release gate false \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ final response handoff false \/ receipt false \/ claimable false \/ mutation false/);
+  assert.match(markup, /mutation execution readiness disabled: release gate false \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ final response handoff false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /execution readiness mutationHandoffSummary: READY_HANDOFF_DISABLED \/ passed true \/ blocking false \/ execution false \/ mutation false/);
   assert.match(markup, /execution readiness runtimeExecutionSwitch: DISABLED \/ passed false \/ blocking true \/ execution false \/ tool runner false \/ mutation false/);
-  assert.match(markup, /execution readiness sideEffectTransport: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ claimable false \/ mutation false/);
+  assert.match(markup, /execution readiness sideEffectTransport: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /mutation execution readiness blocking keys: runtimeExecutionSwitch, sideEffectTransport, releaseGateEnabled, requestCreationEnabled, pushEnabled, claimEnabled, executionEnabled, writeHelperEnabled, applyEnabled, testEnabled, rollbackRestoreEnabled, resultIntakeEnabled, mutationAllowed/);
   assert.match(markup, /Local Agent mutation execution inputs are modeled, but runtime execution remains disabled/);
   assert.match(markup, /mutation tool runner boundary: REFUSED_TOOL_RUNNER_DISABLED \/ learnbot\.local-agent\.mutation-tool-runner-boundary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ expected 4 \/ running 0 \/ completed 0/);
   assert.match(markup, /mutation tool runner sources: execution readiness REFUSED_EXECUTION_READINESS_DISABLED \/ execution gate REFUSED_EXECUTION_DISABLED \/ runner policy DISABLED_AUDIT_ONLY/);
-  assert.match(markup, /mutation tool runner disabled: release gate false \/ request creation false \/ push false \/ claim false \/ running transition false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ final response handoff false \/ receipt false \/ claimable false \/ mutation false/);
+  assert.match(markup, /mutation tool runner disabled: release gate false \/ request creation false \/ push false \/ claim false \/ running transition false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ final response handoff false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /tool runner mutationExecutionReadinessBoundary: REFUSED_EXECUTION_READINESS_DISABLED \/ passed true \/ blocking false \/ tool runner false \/ mutation false/);
   assert.match(markup, /tool runner toolRunnerPolicy: DISABLED \/ passed false \/ blocking true \/ running transition false \/ tool runner false \/ mutation false/);
-  assert.match(markup, /tool runner requestRunningTransition: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ running transition false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ claimable false \/ mutation false/);
+  assert.match(markup, /tool runner requestRunningTransition: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ running transition false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /mutation tool runner blocking keys: toolRunnerPolicy, requestRunningTransition, resultCompletionTransition, requestCreationEnabled, pushEnabled, claimEnabled, runningTransitionEnabled, toolRunnerEnabled, writeHelperEnabled, applyEnabled, testEnabled, rollbackRestoreEnabled, resultIntakeEnabled, mutationAllowed/);
   assert.match(markup, /Local Agent mutation tool-runner inputs are modeled, but runner invocation remains disabled/);
   assert.match(markup, /mutation dispatch envelope contract: READY_DISPATCH_DISABLED \/ learnbot\.local-agent\.mutation-dispatch-envelope\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ LOCAL_AGENT_TOOL_SEQUENCE/);

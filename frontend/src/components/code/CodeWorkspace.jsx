@@ -39,7 +39,22 @@ import { buildMutationWriteHelperSafetyGateView } from './mutationWriteHelperSaf
 import { buildMutationPostExecutionObservationGateView } from './mutationPostExecutionObservationGate.js';
 import { buildMutationObservationAcceptanceGateView } from './mutationObservationAcceptanceGate.js';
 import { buildMutationToolRunnerBoundaryView } from './mutationToolRunnerBoundary.js';
+import { buildReleaseAttemptModelSummaryView } from './releaseAttemptModelSummary.js';
+import { buildFreshObservationRequestPlanView } from './freshObservationRequestPlan.js';
+import { buildFreshObservationEnqueueBoundaryView } from './freshObservationEnqueueBoundary.js';
+import { buildFreshObservationEvidenceSummaryView } from './freshObservationEvidenceSummary.js';
 import { buildReleaseAttemptDisplaySummaryView } from './releaseAttemptDisplaySummary.js';
+import { buildPatchExecutionGateSummaryView } from './patchExecutionGateSummary.js';
+import { buildPatchReleaseReadinessSummaryView } from './patchReleaseReadinessSummary.js';
+import { buildRepositoryVerificationSummaryView } from './repositoryVerificationSummary.js';
+import { buildWorkspaceVerificationSummaryView } from './workspaceVerificationSummary.js';
+import { buildSnapshotReadinessSummaryView } from './snapshotReadinessSummary.js';
+import { buildRollbackReadinessSummaryView } from './rollbackReadinessSummary.js';
+import { buildReadinessChecksSummaryView } from './readinessChecksSummary.js';
+import { buildDryRunRollbackObservationSummaryView } from './dryRunRollbackObservationSummary.js';
+import { buildDryRunSnapshotObservationSummaryView } from './dryRunSnapshotObservationSummary.js';
+import { buildDryRunResultSummaryView } from './dryRunResultSummary.js';
+import { buildDryRunPatchFilesSummaryView } from './dryRunPatchFilesSummary.js';
 
 function CodeWorkspace(props) {
   const {
@@ -268,39 +283,8 @@ function isExpectedDryRunRefusal(result) {
     && result?.output?.mutationApplied === false;
 }
 
-function summarizeDryRunObservationFiles(files = []) {
-  return files
-    .map((file) => `${file.path || '(unknown)'}:${file.hashMatches ? 'hash-ok' : 'hash-check'}/${file.contextMatches ? 'context-ok' : 'context-blocked'}`)
-    .join(', ');
-}
-
 function findReadinessCheck(readiness, key) {
   return (readiness?.checks || []).find((check) => check.key === key) || null;
-}
-
-function formatReadinessCheck(check) {
-  return `${check.passed ? 'pass' : 'blocked'} / ${check.key}: ${check.message}`;
-}
-
-function formatObservationLinkage(value) {
-  const linkage = value?.observationLinkage;
-  if (!linkage?.status) {
-    return null;
-  }
-  const parts = [`observation linkage: ${linkage.status}`];
-  if (linkage.releaseAttemptLinked !== undefined) {
-    parts.push(`release-attempt linked: ${String(linkage.releaseAttemptLinked)}`);
-  }
-  if (linkage.sourceOnlyFallback !== undefined) {
-    parts.push(`source-only fallback: ${String(linkage.sourceOnlyFallback)}`);
-  }
-  if (linkage.releaseAttemptId) {
-    parts.push(`attempt ${String(linkage.releaseAttemptId).slice(0, 8)}`);
-  }
-  if (linkage.sourceRequestId) {
-    parts.push(`source ${String(linkage.sourceRequestId).slice(0, 8)}`);
-  }
-  return parts.join(' / ');
 }
 
 function compareRepositoryObservation(source = {}, observationResult = {}) {
@@ -436,8 +420,11 @@ function CodeAgentPanel({
     visibleRepositoryObservation
   );
   const readinessRepositoryVerification = visibleReadiness?.repositoryVerification || null;
+  const readinessRepositoryVerificationSummaryView = buildRepositoryVerificationSummaryView(readinessRepositoryVerification);
   const readinessWorkspaceVerification = visibleReadiness?.workspaceVerification || null;
+  const readinessWorkspaceVerificationSummaryView = buildWorkspaceVerificationSummaryView(readinessWorkspaceVerification);
   const readinessPatchRelease = visibleReadiness?.patchReleaseReadiness || null;
+  const readinessPatchReleaseSummaryView = buildPatchReleaseReadinessSummaryView(readinessPatchRelease);
   const canQueueReleaseFreshObservations = Boolean(
     localPatchRequest?.status === 'APPROVED_HELD'
     && visibleReadiness
@@ -445,14 +432,24 @@ function CodeAgentPanel({
     && !loading(`code-agent-local-release-fresh-observations-${localPatchRequest.requestId}`)
   );
   const readinessPatchExecutionGate = visibleReadiness?.patchExecutionGate || null;
+  const readinessPatchExecutionGateSummaryView = buildPatchExecutionGateSummaryView(readinessPatchExecutionGate);
   const readinessReleaseAttemptModel = visibleReadiness?.releaseAttemptModel || readinessPatchExecutionGate?.releaseAttemptModel || null;
   const readinessFreshObservationRequestPlan = Array.isArray(readinessReleaseAttemptModel?.latestAttempt?.freshObservationRequestPlan)
     ? readinessReleaseAttemptModel.latestAttempt.freshObservationRequestPlan
     : [];
+  const readinessFreshObservationRequestPlanView = buildFreshObservationRequestPlanView(readinessFreshObservationRequestPlan);
   const readinessFreshObservationEvidenceStatus = Array.isArray(readinessReleaseAttemptModel?.latestAttempt?.freshObservationEvidenceStatus)
     ? readinessReleaseAttemptModel.latestAttempt.freshObservationEvidenceStatus
     : [];
   const readinessFreshObservationEvidenceCompleteness = readinessReleaseAttemptModel?.latestAttempt?.freshObservationEvidenceCompleteness || null;
+  const readinessReleaseAttemptModelSummaryView = buildReleaseAttemptModelSummaryView({
+    preReleaseRevalidation: readinessPatchExecutionGate?.preReleaseRevalidation || null,
+    releaseAttemptModel: readinessReleaseAttemptModel,
+  });
+  const readinessFreshObservationEvidenceSummaryView = buildFreshObservationEvidenceSummaryView({
+    evidenceStatus: readinessFreshObservationEvidenceStatus,
+    evidenceCompleteness: readinessFreshObservationEvidenceCompleteness,
+  });
   const readinessReleaseAttemptFinalReadiness = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptFinalReadiness || null;
   const readinessReleaseAttemptDisplaySummary = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptDisplaySummary || null;
   const readinessReleaseAttemptDisplaySummaryView = buildReleaseAttemptDisplaySummaryView({
@@ -665,18 +662,31 @@ function CodeAgentPanel({
       }
     : null;
   const readinessFreshObservationEnqueueBoundary = readinessReleaseAttemptModel?.latestAttempt?.evidence?.freshObservationEnqueueBoundary || null;
-  const readinessFreshObservationBoundaryRequests = Array.isArray(readinessFreshObservationEnqueueBoundary?.plannedRequests)
-    ? readinessFreshObservationEnqueueBoundary.plannedRequests
-    : [];
+  const readinessFreshObservationEnqueueBoundaryView = buildFreshObservationEnqueueBoundaryView(readinessFreshObservationEnqueueBoundary);
   const expectedDryRunRefusal = isExpectedDryRunRefusal(visibleDryRun);
+  const dryRunResultSummaryView = buildDryRunResultSummaryView({
+    result: visibleDryRun,
+    expectedDryRunRefusal,
+  });
   const dryRunSnapshotObservation = visibleDryRun?.output?.snapshotObservation;
+  const dryRunSnapshotObservationSummaryView = buildDryRunSnapshotObservationSummaryView(dryRunSnapshotObservation);
   const dryRunRollbackObservation = visibleDryRun?.output?.rollbackObservation;
+  const dryRunRollbackObservationSummaryView = buildDryRunRollbackObservationSummaryView(dryRunRollbackObservation);
+  const dryRunPatchFilesSummaryView = buildDryRunPatchFilesSummaryView(visibleDryRun?.output?.files || []);
   const readinessSnapshot = visibleReadiness?.snapshotReadiness || null;
   const readinessRollback = visibleReadiness?.rollbackReadiness || null;
   const readinessSnapshotManifestCheck = findReadinessCheck(visibleReadiness, 'snapshotManifestPreview');
   const readinessRollbackPreconditionsCheck = findReadinessCheck(visibleReadiness, 'rollbackRestorePreconditions');
-  const visibleReadinessChecks = (visibleReadiness?.checks || [])
-    .filter((check) => !['snapshotManifestPreview', 'rollbackRestorePreconditions'].includes(check.key));
+  const readinessSnapshotSummaryView = buildSnapshotReadinessSummaryView({
+    snapshot: readinessSnapshot,
+    snapshotManifestCheck: readinessSnapshotManifestCheck,
+    rollbackPreconditionsCheck: readinessRollbackPreconditionsCheck,
+    dryRunSnapshotObservation,
+  });
+  const readinessRollbackSummaryView = buildRollbackReadinessSummaryView({
+    rollback: readinessRollback,
+  });
+  const readinessChecksSummaryView = buildReadinessChecksSummaryView(visibleReadiness);
   return (
     <section className="panel code-agent-panel">
       <div className="panel-title">
@@ -1024,51 +1034,18 @@ function CodeAgentPanel({
                   </div>
                   {visibleDryRun && (
                     <div className="failure-item">
-                      <strong>{expectedDryRunRefusal ? 'Dry-run completed; mutation refused as expected' : `Dry-run status: ${visibleDryRun.status}`}</strong>
-                      {visibleDryRun.error && <span>{visibleDryRun.error}</span>}
-                      {visibleDryRun.failureCode && <span>{expectedDryRunRefusal ? 'safety gate' : 'failure'}: {visibleDryRun.failureCode}</span>}
-                      {visibleDryRun.input?.releaseAttemptId && (
-                        <span>
-                          linked release evidence: attempt {String(visibleDryRun.input.releaseAttemptId).slice(0, 8)}
-                          {visibleDryRun.input?.freshObservationOnly ? ' / fresh observation only' : ''}
-                        </span>
-                      )}
-                      {visibleDryRun.output?.preflightPassed !== undefined && <span>preflight passed: {String(visibleDryRun.output.preflightPassed)}</span>}
-                      {visibleDryRun.output?.mutationApplied !== undefined && <span>mutation applied: {String(visibleDryRun.output.mutationApplied)}</span>}
-                      {visibleDryRun.output?.snapshotCreated !== undefined && <span>snapshot created: {String(visibleDryRun.output.snapshotCreated)}</span>}
-                      {dryRunSnapshotObservation && (
-                        <span>
-                          snapshot would create: {String(dryRunSnapshotObservation.wouldCreate)}
-                          {dryRunSnapshotObservation.created !== undefined ? ` / created: ${String(dryRunSnapshotObservation.created)}` : ''}
-                          {dryRunSnapshotObservation.scope ? ` / ${dryRunSnapshotObservation.scope}` : ''}
-                          {dryRunSnapshotObservation.location ? ` / ${dryRunSnapshotObservation.location}` : ''}
-                        </span>
-                      )}
-                      {dryRunSnapshotObservation?.manifestPreview && (
-                        <span>
-                          snapshot manifest: {dryRunSnapshotObservation.manifestPreview.id || '(preview)'}
-                          {dryRunSnapshotObservation.manifestPreview.relativeManifestPath ? ` / ${dryRunSnapshotObservation.manifestPreview.relativeManifestPath}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.created !== undefined ? ` / manifest created: ${String(dryRunSnapshotObservation.manifestPreview.created)}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.writesPlanned !== undefined ? ` / writes planned: ${String(dryRunSnapshotObservation.manifestPreview.writesPlanned)}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.writesCompleted !== undefined ? ` / writes completed: ${String(dryRunSnapshotObservation.manifestPreview.writesCompleted)}` : ''}
-                        </span>
-                      )}
-                      {dryRunRollbackObservation && (
-                        <span>
-                          rollback would restore: {String(dryRunRollbackObservation.wouldRestore)}
-                          {dryRunRollbackObservation.restored !== undefined ? ` / restored: ${String(dryRunRollbackObservation.restored)}` : ''}
-                          {dryRunRollbackObservation.tool ? ` / ${dryRunRollbackObservation.tool}` : ''}
-                          {dryRunRollbackObservation.restoreScope ? ` / ${dryRunRollbackObservation.restoreScope}` : ''}
-                        </span>
-                      )}
-                      {!!dryRunSnapshotObservation?.files?.length && (
-                        <span>snapshot files: {summarizeDryRunObservationFiles(dryRunSnapshotObservation.files)}</span>
-                      )}
-                      {!!visibleDryRun.output?.files?.length && (
-                        <span>
-                          files: {visibleDryRun.output.files.map((file) => `${file.path}:${file.contextMatches ? 'context-ok' : 'context-blocked'}`).join(', ')}
-                        </span>
-                      )}
+                      <strong>{dryRunResultSummaryView.titleText}</strong>
+                      {dryRunResultSummaryView.errorText && <span>{dryRunResultSummaryView.errorText}</span>}
+                      {dryRunResultSummaryView.failureText && <span>{dryRunResultSummaryView.failureText}</span>}
+                      {dryRunResultSummaryView.releaseEvidenceText && <span>{dryRunResultSummaryView.releaseEvidenceText}</span>}
+                      {dryRunResultSummaryView.preflightText && <span>{dryRunResultSummaryView.preflightText}</span>}
+                      {dryRunResultSummaryView.mutationText && <span>{dryRunResultSummaryView.mutationText}</span>}
+                      {dryRunResultSummaryView.snapshotText && <span>{dryRunResultSummaryView.snapshotText}</span>}
+                      {dryRunSnapshotObservationSummaryView.show && <span>{dryRunSnapshotObservationSummaryView.observationText}</span>}
+                      {dryRunSnapshotObservationSummaryView.manifestText && <span>{dryRunSnapshotObservationSummaryView.manifestText}</span>}
+                      {dryRunRollbackObservationSummaryView.show && <span>{dryRunRollbackObservationSummaryView.text}</span>}
+                      {dryRunSnapshotObservationSummaryView.filesText && <span>{dryRunSnapshotObservationSummaryView.filesText}</span>}
+                      {dryRunPatchFilesSummaryView.show && <span>{dryRunPatchFilesSummaryView.text}</span>}
                       <WarningList warnings={visibleDryRun.responseWarnings} />
                     </div>
                   )}
@@ -1092,137 +1069,71 @@ function CodeAgentPanel({
                       {readinessReleaseAttemptDisplaySummaryView.message && <span>{readinessReleaseAttemptDisplaySummaryView.message}</span>}
                     </div>
                   )}
-                  {readinessRepositoryVerification && (
+                  {readinessRepositoryVerificationSummaryView.show && (
                     <div className="failure-item">
-                      <strong>Recorded repository verification: {readinessRepositoryVerification.status || 'UNVERIFIED'}</strong>
-                      {readinessRepositoryVerification.message && <span>{readinessRepositoryVerification.message}</span>}
-                      {formatObservationLinkage(readinessRepositoryVerification) && <span>{formatObservationLinkage(readinessRepositoryVerification)}</span>}
-                      {(readinessRepositoryVerification.checks || [])
-                        .filter((check) => check.status !== 'SKIPPED')
-                        .map((check) => (
-                          <span key={check.key}>
-                            {check.key}: {check.status}
-                            {check.expected ? ` / indexed ${String(check.expected).slice(0, 48)}` : ' / indexed unknown'}
-                            {check.actual ? ` / local ${String(check.actual).slice(0, 48)}` : ' / local unknown'}
-                          </span>
-                        ))}
+                      <strong>{readinessRepositoryVerificationSummaryView.headerText}</strong>
+                      {readinessRepositoryVerificationSummaryView.message && <span>{readinessRepositoryVerificationSummaryView.message}</span>}
+                      {readinessRepositoryVerificationSummaryView.linkageText && <span>{readinessRepositoryVerificationSummaryView.linkageText}</span>}
+                      {readinessRepositoryVerificationSummaryView.checkLines.map((line) => (
+                        <span key={line}>{line}</span>
+                      ))}
                     </div>
                   )}
-                  {readinessWorkspaceVerification && (
+                  {readinessWorkspaceVerificationSummaryView.show && (
                     <div className="failure-item">
-                      <strong>Effective workspace verification: {readinessWorkspaceVerification.status || 'UNVERIFIED'}</strong>
-                      {readinessWorkspaceVerification.blocking !== undefined && <span>blocking release: {String(readinessWorkspaceVerification.blocking)}</span>}
-                      {readinessWorkspaceVerification.reason && <span>{readinessWorkspaceVerification.reason}</span>}
-                      {readinessWorkspaceVerification.source && <span>source: {readinessWorkspaceVerification.source}</span>}
+                      <strong>{readinessWorkspaceVerificationSummaryView.headerText}</strong>
+                      {readinessWorkspaceVerificationSummaryView.blockingText && <span>{readinessWorkspaceVerificationSummaryView.blockingText}</span>}
+                      {readinessWorkspaceVerificationSummaryView.reason && <span>{readinessWorkspaceVerificationSummaryView.reason}</span>}
+                      {readinessWorkspaceVerificationSummaryView.sourceText && <span>{readinessWorkspaceVerificationSummaryView.sourceText}</span>}
                     </div>
                   )}
-                  {readinessPatchRelease && (
+                  {readinessPatchReleaseSummaryView.show && (
                     <div className="failure-item">
-                      <strong>Pre-apply release checklist: {readinessPatchRelease.status || 'UNKNOWN'}</strong>
-                      {readinessPatchRelease.message && <span>{readinessPatchRelease.message}</span>}
-                      <span>
-                        preconditions passed: {String(readinessPatchRelease.preconditionsPassed)}
-                        {readinessPatchRelease.releaseGateEnabled !== undefined ? ` / release gate: ${String(readinessPatchRelease.releaseGateEnabled)}` : ''}
-                        {readinessPatchRelease.mutationEnabled !== undefined ? ` / mutation enabled: ${String(readinessPatchRelease.mutationEnabled)}` : ''}
-                      </span>
-                      {(readinessPatchRelease.prerequisites || []).map((item) => (
-                        <span key={item.key}>
-                          {item.passed ? 'pass' : 'blocked'} / {item.key}: {item.message}
+                      <strong>{readinessPatchReleaseSummaryView.headerText}</strong>
+                      {readinessPatchReleaseSummaryView.message && <span>{readinessPatchReleaseSummaryView.message}</span>}
+                      <span>{readinessPatchReleaseSummaryView.stateText}</span>
+                      {readinessPatchReleaseSummaryView.prerequisiteLines.map((line) => (
+                        <span key={line}>
+                          {line}
                         </span>
                       ))}
                     </div>
                   )}
-                  {readinessPatchExecutionGate && (
+                  {readinessPatchExecutionGateSummaryView.show && (
                     <div className="failure-item">
-                      <strong>Internal patch execution gate: {readinessPatchExecutionGate.status || 'UNKNOWN'}</strong>
-                      {readinessPatchExecutionGate.message && <span>{readinessPatchExecutionGate.message}</span>}
-                      <span>
-                        claim enabled: {String(readinessPatchExecutionGate.claimEnabled)}
-                        {readinessPatchExecutionGate.writeHelperEnabled !== undefined ? ` / write helper: ${String(readinessPatchExecutionGate.writeHelperEnabled)}` : ''}
-                        {readinessPatchExecutionGate.releaseGateEnabled !== undefined ? ` / release gate: ${String(readinessPatchExecutionGate.releaseGateEnabled)}` : ''}
-                        {readinessPatchExecutionGate.sourceRequestRelationship ? ` / ${readinessPatchExecutionGate.sourceRequestRelationship}` : ''}
-                      </span>
-                      {readinessPatchExecutionGate.preReleaseRevalidation && (
-                        <span>
-                          pre-release revalidation: {readinessPatchExecutionGate.preReleaseRevalidation.status || 'UNKNOWN'}
-                          {readinessPatchExecutionGate.preReleaseRevalidation.passed !== undefined ? ` / passed: ${String(readinessPatchExecutionGate.preReleaseRevalidation.passed)}` : ''}
-                          {readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshDryRunAfterReleaseAttempt !== undefined ? ` / fresh dry-run: ${String(readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshDryRunAfterReleaseAttempt)}` : ''}
-                          {readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshRepositoryVerificationAfterReleaseAttempt !== undefined ? ` / fresh repo check: ${String(readinessPatchExecutionGate.preReleaseRevalidation.requiresFreshRepositoryVerificationAfterReleaseAttempt)}` : ''}
-                        </span>
+                      <strong>{readinessPatchExecutionGateSummaryView.headerText}</strong>
+                      {readinessPatchExecutionGateSummaryView.message && <span>{readinessPatchExecutionGateSummaryView.message}</span>}
+                      <span>{readinessPatchExecutionGateSummaryView.controlText}</span>
+                      {readinessReleaseAttemptModelSummaryView.showPreReleaseRevalidation && (
+                        <span>{readinessReleaseAttemptModelSummaryView.preReleaseRevalidationText}</span>
                       )}
-                      {readinessReleaseAttemptModel && (
-                        <span>
-                          release attempt model: {readinessReleaseAttemptModel.status || 'UNKNOWN'}
-                          {readinessReleaseAttemptModel.schema ? ` / ${readinessReleaseAttemptModel.schema}` : ''}
-                          {readinessReleaseAttemptModel.staleWindowSeconds !== undefined ? ` / stale window ${readinessReleaseAttemptModel.staleWindowSeconds}s` : ''}
-                          {readinessReleaseAttemptModel.requiredEvidence?.length ? ` / evidence ${readinessReleaseAttemptModel.requiredEvidence.length}` : ''}
-                        </span>
+                      {readinessReleaseAttemptModelSummaryView.showReleaseAttemptModel && (
+                        <span>{readinessReleaseAttemptModelSummaryView.releaseAttemptModelText}</span>
                       )}
-                      {!!readinessFreshObservationRequestPlan.length && (
+                      {readinessFreshObservationRequestPlanView.show && (
                         <>
-                          <span>fresh observation request plan: audit-only / no enqueue / no claim</span>
-                          {readinessFreshObservationRequestPlan.map((item) => (
-                            <span key={`${item.key}-${item.releaseAttemptId || item.toolName}`}>
-                              {item.key}: {item.status || 'PLANNED_DISABLED'}
-                              {item.toolName ? ` / ${item.toolName}` : ''}
-                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
-                              {item.enqueueEnabled !== undefined ? ` / enqueue ${String(item.enqueueEnabled)}` : ''}
-                              {item.claimableAfterEnqueue !== undefined ? ` / claimable ${String(item.claimableAfterEnqueue)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.dryRunOnly !== undefined ? ` / dry-run ${String(item.dryRunOnly)}` : ''}
-                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
-                              {item.sourceRequestId ? ` / source ${String(item.sourceRequestId).slice(0, 8)}` : ''}
-                            </span>
+                          <span>{readinessFreshObservationRequestPlanView.headerText}</span>
+                          {readinessFreshObservationRequestPlanView.requestLines.map((line) => (
+                            <span key={line}>{line}</span>
                           ))}
                         </>
                       )}
-                      {!!readinessFreshObservationEvidenceStatus.length && (
+                      {readinessFreshObservationEvidenceSummaryView.showStatus && (
                         <>
-                          <span>fresh observation evidence status: audit-only / no request creation / no push</span>
-                          {readinessFreshObservationEvidenceStatus.map((item) => (
-                            <span key={`evidence-${item.key}-${item.releaseAttemptId || item.status}`}>
-                              {item.key}: {item.status || 'UNKNOWN'}
-                              {item.linked !== undefined ? ` / linked ${String(item.linked)}` : ''}
-                              {item.sourceOnlyFallback !== undefined ? ` / fallback ${String(item.sourceOnlyFallback)}` : ''}
-                              {item.blocking !== undefined ? ` / blocking ${String(item.blocking)}` : ''}
-                              {item.requestCreationEnabled !== undefined ? ` / request creation ${String(item.requestCreationEnabled)}` : ''}
-                              {item.pushEnabled !== undefined ? ` / push ${String(item.pushEnabled)}` : ''}
-                              {item.claimable !== undefined ? ` / claimable ${String(item.claimable)}` : ''}
-                              {item.mutationAllowed !== undefined ? ` / mutation ${String(item.mutationAllowed)}` : ''}
-                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
-                            </span>
+                          <span>{readinessFreshObservationEvidenceSummaryView.statusHeaderText}</span>
+                          {readinessFreshObservationEvidenceSummaryView.statusLines.map((line) => (
+                            <span key={line}>{line}</span>
                           ))}
                         </>
                       )}
-                      {readinessFreshObservationEvidenceCompleteness && (
+                      {readinessFreshObservationEvidenceSummaryView.showCompleteness && (
                         <>
-                          <span>
-                            fresh observation evidence completeness: {readinessFreshObservationEvidenceCompleteness.status || 'UNKNOWN'}
-                            {readinessFreshObservationEvidenceCompleteness.complete !== undefined ? ` / complete ${String(readinessFreshObservationEvidenceCompleteness.complete)}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.linkedCount !== undefined ? ` / linked ${readinessFreshObservationEvidenceCompleteness.linkedCount}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.missingCount !== undefined ? ` / missing ${readinessFreshObservationEvidenceCompleteness.missingCount}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackCount !== undefined ? ` / fallback ${readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackCount}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.blockingCount !== undefined ? ` / blocking ${readinessFreshObservationEvidenceCompleteness.blockingCount}` : ''}
-                          </span>
-                          <span>
-                            release gate: {String(readinessFreshObservationEvidenceCompleteness.releaseGateEnabled)}
-                            {readinessFreshObservationEvidenceCompleteness.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFreshObservationEvidenceCompleteness.requestCreationEnabled)}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.pushEnabled !== undefined ? ` / push ${String(readinessFreshObservationEvidenceCompleteness.pushEnabled)}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.claimable !== undefined ? ` / claimable ${String(readinessFreshObservationEvidenceCompleteness.claimable)}` : ''}
-                            {readinessFreshObservationEvidenceCompleteness.mutationAllowed !== undefined ? ` / mutation ${String(readinessFreshObservationEvidenceCompleteness.mutationAllowed)}` : ''}
-                          </span>
-                          {!!readinessFreshObservationEvidenceCompleteness.blockingKeys?.length && (
-                            <span>blocking evidence: {readinessFreshObservationEvidenceCompleteness.blockingKeys.join(', ')}</span>
-                          )}
-                          {!!readinessFreshObservationEvidenceCompleteness.missingKeys?.length && (
-                            <span>missing evidence: {readinessFreshObservationEvidenceCompleteness.missingKeys.join(', ')}</span>
-                          )}
-                          {!!readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackKeys?.length && (
-                            <span>fallback-only evidence: {readinessFreshObservationEvidenceCompleteness.sourceOnlyFallbackKeys.join(', ')}</span>
-                          )}
-                          {readinessFreshObservationEvidenceCompleteness.message && (
-                            <span>{readinessFreshObservationEvidenceCompleteness.message}</span>
-                          )}
+                          <span>{readinessFreshObservationEvidenceSummaryView.completenessText}</span>
+                          <span>{readinessFreshObservationEvidenceSummaryView.releaseGateText}</span>
+                          {readinessFreshObservationEvidenceSummaryView.blockingText && <span>{readinessFreshObservationEvidenceSummaryView.blockingText}</span>}
+                          {readinessFreshObservationEvidenceSummaryView.missingText && <span>{readinessFreshObservationEvidenceSummaryView.missingText}</span>}
+                          {readinessFreshObservationEvidenceSummaryView.fallbackText && <span>{readinessFreshObservationEvidenceSummaryView.fallbackText}</span>}
+                          {readinessFreshObservationEvidenceSummaryView.message && <span>{readinessFreshObservationEvidenceSummaryView.message}</span>}
                         </>
                       )}
                       {readinessReleaseAttemptFinalReadiness && (
@@ -2139,25 +2050,11 @@ function CodeAgentPanel({
                           <span>No release control is enabled; the future release endpoint is visible only as an audit/refusal boundary.</span>
                         </>
                       )}
-                      {readinessFreshObservationEnqueueBoundary && (
+                      {readinessFreshObservationEnqueueBoundaryView.show && (
                         <>
-                          <span>
-                            fresh observation enqueue boundary: {readinessFreshObservationEnqueueBoundary.status || 'DISABLED'}
-                            {readinessFreshObservationEnqueueBoundary.requestCreationEnabled !== undefined ? ` / request creation ${String(readinessFreshObservationEnqueueBoundary.requestCreationEnabled)}` : ''}
-                            {readinessFreshObservationEnqueueBoundary.pushEnabled !== undefined ? ` / push ${String(readinessFreshObservationEnqueueBoundary.pushEnabled)}` : ''}
-                            {readinessFreshObservationEnqueueBoundary.enqueueEnabled !== undefined ? ` / enqueue ${String(readinessFreshObservationEnqueueBoundary.enqueueEnabled)}` : ''}
-                            {readinessFreshObservationEnqueueBoundary.claimableAfterEnqueue !== undefined ? ` / claimable ${String(readinessFreshObservationEnqueueBoundary.claimableAfterEnqueue)}` : ''}
-                            {readinessFreshObservationEnqueueBoundary.mutationAllowed !== undefined ? ` / mutation ${String(readinessFreshObservationEnqueueBoundary.mutationAllowed)}` : ''}
-                          </span>
-                          {readinessFreshObservationBoundaryRequests.map((item) => (
-                            <span key={`boundary-${item.key}-${item.releaseAttemptId || item.toolName}`}>
-                              boundary planned {item.key}: {item.status || 'TEMPLATE_DISABLED'}
-                              {item.toolName ? ` / ${item.toolName}` : ''}
-                              {item.approvalState ? ` / approval ${item.approvalState}` : ''}
-                              {item.enqueueEnabled !== undefined ? ` / enqueue ${String(item.enqueueEnabled)}` : ''}
-                              {item.claimableAfterEnqueue !== undefined ? ` / claimable ${String(item.claimableAfterEnqueue)}` : ''}
-                              {item.releaseAttemptId ? ` / attempt ${String(item.releaseAttemptId).slice(0, 8)}` : ''}
-                            </span>
+                          <span>{readinessFreshObservationEnqueueBoundaryView.boundaryText}</span>
+                          {readinessFreshObservationEnqueueBoundaryView.plannedRequestLines.map((line) => (
+                            <span key={line}>{line}</span>
                           ))}
                         </>
                       )}
@@ -2166,60 +2063,33 @@ function CodeAgentPanel({
                       ))}
                     </div>
                   )}
-                  {(readinessSnapshot || readinessSnapshotManifestCheck || readinessRollbackPreconditionsCheck) && (
+                  {readinessSnapshotSummaryView.show && (
                     <div className="failure-item">
-                      <strong>Snapshot readiness: {readinessSnapshot?.status || (readinessSnapshotManifestCheck?.passed && readinessRollbackPreconditionsCheck?.passed ? 'observed' : 'blocked')}</strong>
-                      {readinessSnapshot?.message && <span>{readinessSnapshot.message}</span>}
-                      {formatObservationLinkage(readinessSnapshot) && <span>{formatObservationLinkage(readinessSnapshot)}</span>}
-                      {readinessSnapshot && (
-                        <span>
-                          snapshot created: {String(readinessSnapshot.snapshotCreated)}
-                          {readinessSnapshot.manifestCreated !== undefined ? ` / manifest created: ${String(readinessSnapshot.manifestCreated)}` : ''}
-                          {readinessSnapshot.writesPlanned !== undefined ? ` / writes planned: ${String(readinessSnapshot.writesPlanned)}` : ''}
-                          {readinessSnapshot.writesCompleted !== undefined ? ` / writes completed: ${String(readinessSnapshot.writesCompleted)}` : ''}
-                        </span>
-                      )}
-                      {readinessSnapshot?.relativeManifestPath && (
-                        <span>
-                          manifest: {readinessSnapshot.manifestId || '(snapshot)'} / {readinessSnapshot.relativeManifestPath}
-                          {readinessSnapshot.fileCount !== undefined ? ` / files ${readinessSnapshot.fileCount}` : ''}
-                        </span>
-                      )}
-                      {readinessSnapshotManifestCheck && <span>{formatReadinessCheck(readinessSnapshotManifestCheck)}</span>}
-                      {readinessRollbackPreconditionsCheck && <span>{formatReadinessCheck(readinessRollbackPreconditionsCheck)}</span>}
-                      {dryRunSnapshotObservation?.manifestPreview && (
-                        <span>
-                          latest dry-run manifest: {dryRunSnapshotObservation.manifestPreview.id || '(preview)'}
-                          {dryRunSnapshotObservation.manifestPreview.relativeManifestPath ? ` / ${dryRunSnapshotObservation.manifestPreview.relativeManifestPath}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.created !== undefined ? ` / manifest created: ${String(dryRunSnapshotObservation.manifestPreview.created)}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.writesPlanned !== undefined ? ` / writes planned: ${String(dryRunSnapshotObservation.manifestPreview.writesPlanned)}` : ''}
-                          {dryRunSnapshotObservation.manifestPreview.writesCompleted !== undefined ? ` / writes completed: ${String(dryRunSnapshotObservation.manifestPreview.writesCompleted)}` : ''}
-                        </span>
-                      )}
-                      {!dryRunSnapshotObservation?.manifestPreview && <span>Queue and refresh a Local Agent dry-run to provide snapshot manifest evidence.</span>}
-                    </div>
-                  )}
-                  {readinessRollback && (
-                    <div className="failure-item">
-                      <strong>Rollback manifest readiness: {readinessRollback.status || 'UNKNOWN'}</strong>
-                      {readinessRollback.message && <span>{readinessRollback.message}</span>}
-                      {formatObservationLinkage(readinessRollback) && <span>{formatObservationLinkage(readinessRollback)}</span>}
-                      <span>
-                        blocking release: {String(readinessRollback.blocking)}
-                        {readinessRollback.fileCount !== undefined ? ` / files ${readinessRollback.fileCount}` : ''}
-                        {readinessRollback.requiresUserApproval !== undefined ? ` / user approval: ${String(readinessRollback.requiresUserApproval)}` : ''}
-                      </span>
-                      {(readinessRollback.fileChecks || []).slice(0, 5).map((check) => (
-                        <span key={`${check.path}-${check.snapshotRelativePath}`}>
-                          {check.path || '(target)'} {'->'} {check.snapshotRelativePath || '(snapshot)'}
-                          {check.targetPathSafe !== undefined ? ` / target safe: ${String(check.targetPathSafe)}` : ''}
-                          {check.snapshotPathSafe !== undefined ? ` / snapshot safe: ${String(check.snapshotPathSafe)}` : ''}
-                        </span>
+                      <strong>{readinessSnapshotSummaryView.headerText}</strong>
+                      {readinessSnapshotSummaryView.message && <span>{readinessSnapshotSummaryView.message}</span>}
+                      {readinessSnapshotSummaryView.linkageText && <span>{readinessSnapshotSummaryView.linkageText}</span>}
+                      {readinessSnapshotSummaryView.stateText && <span>{readinessSnapshotSummaryView.stateText}</span>}
+                      {readinessSnapshotSummaryView.manifestText && <span>{readinessSnapshotSummaryView.manifestText}</span>}
+                      {readinessSnapshotSummaryView.checkLines.map((line) => (
+                        <span key={line}>{line}</span>
                       ))}
-                      {(readinessRollback.fileChecks || []).length > 5 && <span>{readinessRollback.fileChecks.length - 5} more rollback file checks hidden</span>}
+                      {readinessSnapshotSummaryView.latestManifestText && <span>{readinessSnapshotSummaryView.latestManifestText}</span>}
+                      {readinessSnapshotSummaryView.emptyText && <span>{readinessSnapshotSummaryView.emptyText}</span>}
                     </div>
                   )}
-                  {visibleReadinessChecks.map((check) => (
+                  {readinessRollbackSummaryView.show && (
+                    <div className="failure-item">
+                      <strong>{readinessRollbackSummaryView.headerText}</strong>
+                      {readinessRollbackSummaryView.message && <span>{readinessRollbackSummaryView.message}</span>}
+                      {readinessRollbackSummaryView.linkageText && <span>{readinessRollbackSummaryView.linkageText}</span>}
+                      {readinessRollbackSummaryView.blockingText && <span>{readinessRollbackSummaryView.blockingText}</span>}
+                      {readinessRollbackSummaryView.fileCheckLines.map((line) => (
+                        <span key={line}>{line}</span>
+                      ))}
+                      {readinessRollbackSummaryView.overflowText && <span>{readinessRollbackSummaryView.overflowText}</span>}
+                    </div>
+                  )}
+                  {readinessChecksSummaryView.checkRows.map((check) => (
                     <div className="failure-item" key={check.key}>
                       <strong>{check.passed ? 'pass' : 'blocked'} · {check.key}</strong>
                       <span>{check.message}</span>

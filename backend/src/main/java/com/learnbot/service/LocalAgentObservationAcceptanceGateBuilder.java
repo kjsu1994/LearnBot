@@ -105,6 +105,10 @@ class LocalAgentObservationAcceptanceGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourcePostExecutionObservationGateSchema", mutationPostExecutionObservationGate.get("schema"));
         result.put("sourcePostExecutionObservationGateStatus", mutationPostExecutionObservationGate.get("status"));
+        result.put("sourcePostExecutionObservationGateSessionId", mutationPostExecutionObservationGate.get("sessionId"));
+        result.put("sourcePostExecutionObservationGateUserId", mutationPostExecutionObservationGate.get("userId"));
+        result.put("sourcePostExecutionObservationGateAgentId", mutationPostExecutionObservationGate.get("agentId"));
+        result.put("sourcePostExecutionObservationGateWorkspaceId", mutationPostExecutionObservationGate.get("workspaceId"));
         result.put("acceptancePolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);

@@ -2,6 +2,10 @@ const DISABLED_CONTROL_LABELS = [
   ['finalAnswerPersistenceEnabled', 'persistence'],
   ['finalAnswerPersistenceInvocationEnabled', 'persistence invocation'],
   ['conversationTurnSaveEnabled', 'conversation save'],
+  ['userVisibleCompletionEnabled', 'user-visible completion'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['finalAnswerCompletionEnabled', 'completion'],
   ['finalAnswerDeliveryEnabled', 'delivery'],
   ['finalAnswerGenerationEnabled', 'final answer'],
@@ -41,6 +45,10 @@ const POLICY_CONTROL_LABELS = [
   ['finalAnswerDeliveryEnabled', 'delivery'],
   ['finalAnswerPersistenceEnabled', 'persistence'],
   ['conversationTurnSaveEnabled', 'conversation save'],
+  ['userVisibleCompletionEnabled', 'user-visible completion'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationFinalAnswerPersistenceGateView(gate = null) {

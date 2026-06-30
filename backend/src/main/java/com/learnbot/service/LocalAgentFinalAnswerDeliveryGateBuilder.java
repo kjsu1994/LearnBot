@@ -56,7 +56,7 @@ class LocalAgentFinalAnswerDeliveryGateBuilder {
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
-        for (String key : List.of("finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+        for (String key : List.of("finalAnswerDeliveryEnabled", "deliveryHandoffEnabled", "deliveryReceiptEnabled", "acknowledgementSaveEnabled", "finalResponseHandoffEnabled", "userVisibleCompletionEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
             if (!blockingKeys.contains(key)) {
                 blockingKeys.add(key);
             }
@@ -77,9 +77,15 @@ class LocalAgentFinalAnswerDeliveryGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceFinalResponseHandoffGateSchema", mutationFinalResponseHandoffGate.get("schema"));
         result.put("sourceFinalResponseHandoffGateStatus", mutationFinalResponseHandoffGate.get("status"));
+        result.put("sourceFinalResponseHandoffGateSessionId", mutationFinalResponseHandoffGate.get("sessionId"));
+        result.put("sourceFinalResponseHandoffGateUserId", mutationFinalResponseHandoffGate.get("userId"));
+        result.put("sourceFinalResponseHandoffGateAgentId", mutationFinalResponseHandoffGate.get("agentId"));
+        result.put("sourceFinalResponseHandoffGateWorkspaceId", mutationFinalResponseHandoffGate.get("workspaceId"));
         result.put("finalAnswerDeliveryPolicy", "DISABLED_AUDIT_ONLY");
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("deliveryHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
         result.put("userVisibleCompletionEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -142,6 +148,8 @@ class LocalAgentFinalAnswerDeliveryGateBuilder {
         result.put("finalAnswerGenerationEnabled", false);
         result.put("finalAnswerCompletionEnabled", false);
         result.put("finalAnswerDeliveryEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("finalAnswerPersistenceEnabled", false);
         result.put("conversationTurnSaveEnabled", false);
         result.put("userVisibleCompletionEnabled", false);

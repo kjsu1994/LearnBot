@@ -3,6 +3,11 @@ const DISABLED_CONTROL_LABELS = [
   ['resultAggregationInvocationEnabled', 'aggregation invocation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['finalAnswerCompletionEnabled', 'final-answer completion'],
+  ['finalAnswerDeliveryEnabled', 'final-answer delivery'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['ragFreshnessUpdateEnabled', 'rag freshness'],
   ['rollbackFallbackExecutionEnabled', 'rollback fallback'],
   ['intakePersistenceEnabled', 'intake persistence'],
@@ -34,6 +39,11 @@ const POLICY_CONTROL_LABELS = [
   ['mutationResultAggregationEnabled', 'result aggregation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['finalAnswerCompletionEnabled', 'final-answer completion'],
+  ['finalAnswerDeliveryEnabled', 'final-answer delivery'],
+  ['finalResponseHandoffEnabled', 'final-response handoff'],
+  ['deliveryReceiptEnabled', 'delivery receipt'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationResultAggregationGateView(gate = null) {

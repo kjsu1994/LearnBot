@@ -34,6 +34,7 @@ const view = buildMutationResultCompletionBoundaryView({
   finalAnswerGenerationEnabled: false,
   finalResponseHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   resultChecks: [
@@ -43,6 +44,7 @@ const view = buildMutationResultCompletionBoundaryView({
       passed: true,
       blocking: false,
       toolRunnerEnabled: false,
+      acknowledgementSaveEnabled: false,
       mutationAllowed: false,
     },
     {
@@ -55,6 +57,7 @@ const view = buildMutationResultCompletionBoundaryView({
       completedResultPersistenceEnabled: false,
       postExecutionObservationEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -65,6 +68,7 @@ const view = buildMutationResultCompletionBoundaryView({
       blocking: true,
       completedResultTransitionEnabled: false,
       completedResultPersistenceEnabled: false,
+      acknowledgementSaveEnabled: false,
       mutationAllowed: false,
     },
     {
@@ -77,6 +81,7 @@ const view = buildMutationResultCompletionBoundaryView({
       completedResultPersistenceEnabled: false,
       postExecutionObservationEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -90,6 +95,7 @@ const view = buildMutationResultCompletionBoundaryView({
       completedResultPersistenceEnabled: false,
       postExecutionObservationEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
       claimable: false,
       mutationAllowed: false,
     },
@@ -119,14 +125,14 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation result completion disabled: release gate false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / completed transition false / result persistence false / observation capture false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / claimable false / mutation false'
+  'mutation result completion disabled: release gate false / request creation false / push false / claim false / running transition false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / completed transition false / result persistence false / observation capture false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / acknowledgement save false / claimable false / mutation false'
 );
 assert.deepEqual(view.checkLines, [
-  'result completion mutationToolRunnerBoundary: REFUSED_TOOL_RUNNER_DISABLED / passed true / blocking false / tool runner false / mutation false',
-  'result completion mutationPostExecutionObservationGate: REFUSED_POST_EXECUTION_OBSERVATION_DISABLED / passed true / blocking false / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
-  'result completion completedResultTransition: DISABLED / passed false / blocking true / completed transition false / result persistence false / mutation false',
-  'result completion resultEnvelopePersistence: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
-  'result completion observationCapture: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / claimable false / mutation false',
+  'result completion mutationToolRunnerBoundary: REFUSED_TOOL_RUNNER_DISABLED / passed true / blocking false / tool runner false / acknowledgement save false / mutation false',
+  'result completion mutationPostExecutionObservationGate: REFUSED_POST_EXECUTION_OBSERVATION_DISABLED / passed true / blocking false / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / acknowledgement save false / claimable false / mutation false',
+  'result completion completedResultTransition: DISABLED / passed false / blocking true / completed transition false / result persistence false / acknowledgement save false / mutation false',
+  'result completion resultEnvelopePersistence: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / acknowledgement save false / claimable false / mutation false',
+  'result completion observationCapture: DISABLED / passed false / blocking true / tool runner false / completed transition false / result persistence false / observation capture false / result intake false / acknowledgement save false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,

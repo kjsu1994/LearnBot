@@ -56,7 +56,18 @@ class LocalAgentFinalAnswerUserVisibleCompletionGateBuilder {
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
-        for (String key : List.of("userVisibleCompletionEnabled", "finalResponseHandoffEnabled", "conversationTurnSaveEnabled", "finalAnswerPersistenceEnabled", "finalAnswerDeliveryEnabled", "finalAnswerCompletionEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+        for (String key : List.of(
+                "userVisibleCompletionEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
+                "conversationTurnSaveEnabled",
+                "finalAnswerPersistenceEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
             if (!blockingKeys.contains(key)) {
                 blockingKeys.add(key);
             }
@@ -77,9 +88,15 @@ class LocalAgentFinalAnswerUserVisibleCompletionGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceFinalAnswerConversationSaveGateSchema", mutationFinalAnswerConversationSaveGate.get("schema"));
         result.put("sourceFinalAnswerConversationSaveGateStatus", mutationFinalAnswerConversationSaveGate.get("status"));
+        result.put("sourceFinalAnswerConversationSaveGateSessionId", mutationFinalAnswerConversationSaveGate.get("sessionId"));
+        result.put("sourceFinalAnswerConversationSaveGateUserId", mutationFinalAnswerConversationSaveGate.get("userId"));
+        result.put("sourceFinalAnswerConversationSaveGateAgentId", mutationFinalAnswerConversationSaveGate.get("agentId"));
+        result.put("sourceFinalAnswerConversationSaveGateWorkspaceId", mutationFinalAnswerConversationSaveGate.get("workspaceId"));
         result.put("userVisibleCompletionPolicy", "DISABLED_AUDIT_ONLY");
         result.put("userVisibleCompletionEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);
         result.put("acceptedResultCount", acceptedResultCount);
@@ -111,6 +128,8 @@ class LocalAgentFinalAnswerUserVisibleCompletionGateBuilder {
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("finalAnswerPersistenceEnabled", false);
         result.put("conversationTurnSaveEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", finalAnswerConversationSaveReady
                 ? "Local Agent mutation final-answer user-visible completion is explicitly refused: no user-visible completion is marked and no final response is handed off."
@@ -145,6 +164,8 @@ class LocalAgentFinalAnswerUserVisibleCompletionGateBuilder {
         result.put("conversationTurnSaveEnabled", false);
         result.put("userVisibleCompletionEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

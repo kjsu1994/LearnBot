@@ -82,6 +82,11 @@ class LocalAgentResultIntakePersistenceGateBuilder {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         )) {
             if (!blockingKeys.contains(key)) {
@@ -104,6 +109,10 @@ class LocalAgentResultIntakePersistenceGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceObservationAcceptanceGateSchema", mutationObservationAcceptanceGate.get("schema"));
         result.put("sourceObservationAcceptanceGateStatus", mutationObservationAcceptanceGate.get("status"));
+        result.put("sourceObservationAcceptanceGateSessionId", mutationObservationAcceptanceGate.get("sessionId"));
+        result.put("sourceObservationAcceptanceGateUserId", mutationObservationAcceptanceGate.get("userId"));
+        result.put("sourceObservationAcceptanceGateAgentId", mutationObservationAcceptanceGate.get("agentId"));
+        result.put("sourceObservationAcceptanceGateWorkspaceId", mutationObservationAcceptanceGate.get("workspaceId"));
         result.put("intakePersistencePolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);
@@ -132,6 +141,11 @@ class LocalAgentResultIntakePersistenceGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", observationAcceptanceReady
                 ? "Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
@@ -164,6 +178,11 @@ class LocalAgentResultIntakePersistenceGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

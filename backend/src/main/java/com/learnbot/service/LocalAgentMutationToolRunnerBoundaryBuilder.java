@@ -92,8 +92,22 @@ class LocalAgentMutationToolRunnerBoundaryBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceExecutionReadinessBoundarySchema", mutationExecutionReadinessBoundary.get("schema"));
         result.put("sourceExecutionReadinessBoundaryStatus", mutationExecutionReadinessBoundary.get("status"));
+        result.put("sourceExecutionReadinessBoundarySessionId", mutationExecutionReadinessBoundary.get("sessionId"));
+        result.put("sourceExecutionReadinessBoundaryUserId", mutationExecutionReadinessBoundary.get("userId"));
+        result.put("sourceExecutionReadinessBoundaryAgentId", mutationExecutionReadinessBoundary.get("agentId"));
+        result.put("sourceExecutionReadinessBoundaryWorkspaceId", mutationExecutionReadinessBoundary.get("workspaceId"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateSchema", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateSchema"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateStatus", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateStatus"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateSessionId", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateSessionId"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateUserId", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateUserId"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateAgentId", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateAgentId"));
+        result.put("sourceExecutionReadinessBoundaryDeliveryReceiptGateWorkspaceId", mutationExecutionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGateWorkspaceId"));
         result.put("sourceExecutionGateSchema", mutationExecutionGate.get("schema"));
         result.put("sourceExecutionGateStatus", mutationExecutionGate.get("status"));
+        result.put("sourceExecutionGateSessionId", mutationExecutionGate.get("sessionId"));
+        result.put("sourceExecutionGateUserId", mutationExecutionGate.get("userId"));
+        result.put("sourceExecutionGateAgentId", mutationExecutionGate.get("agentId"));
+        result.put("sourceExecutionGateWorkspaceId", mutationExecutionGate.get("workspaceId"));
         result.put("toolRunnerPolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedRequestCount", expectedRequestCount);
         result.put("runningRequestCount", runningRequestCount);
@@ -119,6 +133,7 @@ class LocalAgentMutationToolRunnerBoundaryBuilder {
         result.put("finalAnswerGenerationEnabled", false);
         result.put("finalResponseHandoffEnabled", false);
         result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", prerequisitesPassed
                 ? "Local Agent mutation tool-runner inputs are modeled, but runner invocation, running transition, result completion, write helper, apply, test, rollback restore, result intake, and mutation remain disabled."
@@ -150,6 +165,7 @@ class LocalAgentMutationToolRunnerBoundaryBuilder {
         result.put("testEnabled", false);
         result.put("rollbackRestoreEnabled", false);
         result.put("resultIntakeEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

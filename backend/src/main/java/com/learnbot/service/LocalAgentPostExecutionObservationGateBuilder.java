@@ -97,6 +97,10 @@ class LocalAgentPostExecutionObservationGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceExecutionGateSchema", mutationExecutionGate.get("schema"));
         result.put("sourceExecutionGateStatus", mutationExecutionGate.get("status"));
+        result.put("sourceExecutionGateSessionId", mutationExecutionGate.get("sessionId"));
+        result.put("sourceExecutionGateUserId", mutationExecutionGate.get("userId"));
+        result.put("sourceExecutionGateAgentId", mutationExecutionGate.get("agentId"));
+        result.put("sourceExecutionGateWorkspaceId", mutationExecutionGate.get("workspaceId"));
         result.put("observationPolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);

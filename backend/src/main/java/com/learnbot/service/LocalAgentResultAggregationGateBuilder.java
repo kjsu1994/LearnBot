@@ -60,6 +60,11 @@ class LocalAgentResultAggregationGateBuilder {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         )) {
             if (!blockingKeys.contains(key)) {
@@ -82,6 +87,10 @@ class LocalAgentResultAggregationGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceRagFreshnessGateSchema", mutationRagFreshnessGate.get("schema"));
         result.put("sourceRagFreshnessGateStatus", mutationRagFreshnessGate.get("status"));
+        result.put("sourceRagFreshnessGateSessionId", mutationRagFreshnessGate.get("sessionId"));
+        result.put("sourceRagFreshnessGateUserId", mutationRagFreshnessGate.get("userId"));
+        result.put("sourceRagFreshnessGateAgentId", mutationRagFreshnessGate.get("agentId"));
+        result.put("sourceRagFreshnessGateWorkspaceId", mutationRagFreshnessGate.get("workspaceId"));
         result.put("resultAggregationPolicy", "DISABLED_AUDIT_ONLY");
         result.put("resultAggregationInvocationEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -111,6 +120,11 @@ class LocalAgentResultAggregationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", ragFreshnessReady
                 ? "Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled."
@@ -139,6 +153,11 @@ class LocalAgentResultAggregationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

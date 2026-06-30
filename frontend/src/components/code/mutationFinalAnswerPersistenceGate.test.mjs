@@ -23,6 +23,11 @@ const view = buildMutationFinalAnswerPersistenceGateView({
   intakePersistedResultCount: 0,
   finalAnswerPersistenceEnabled: false,
   finalAnswerPersistenceInvocationEnabled: false,
+  conversationTurnSaveEnabled: false,
+  userVisibleCompletionEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerCompletionEnabled: false,
   finalAnswerDeliveryEnabled: false,
   finalAnswerGenerationEnabled: false,
@@ -65,6 +70,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled final-answer completion gate must refuse completion before final-answer persistence can be considered.',
     },
     {
@@ -85,6 +94,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer persistence and conversation save are disabled.',
     },
     {
@@ -105,6 +118,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No final answer may be persisted while final-answer persistence is disabled.',
     },
     {
@@ -125,6 +142,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No conversation turn may be saved while final-answer persistence is disabled.',
     },
     {
@@ -145,6 +166,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
       finalAnswerDeliveryEnabled: false,
       finalAnswerPersistenceEnabled: false,
       conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No final answer may be delivered while final-answer persistence is disabled.',
     },
   ],
@@ -155,6 +180,10 @@ const view = buildMutationFinalAnswerPersistenceGateView({
     'finalAnswerDelivery',
     'finalAnswerPersistenceEnabled',
     'conversationTurnSaveEnabled',
+    'userVisibleCompletionEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerCompletionEnabled',
     'finalAnswerDeliveryEnabled',
     'finalAnswerGenerationEnabled',
@@ -178,18 +207,18 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation final-answer persistence disabled: persistence false / persistence invocation false / conversation save false / completion false / delivery false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation final-answer persistence disabled: persistence false / persistence invocation false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / completion false / delivery false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'final-answer persistence policy mutationFinalAnswerCompletionGate: REFUSED_FINAL_ANSWER_COMPLETION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / A disabled final-answer completion gate must refuse completion before final-answer persistence can be considered.',
-  'final-answer persistence policy finalAnswerPersistencePolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / Mutation final-answer persistence and conversation save are disabled.',
-  'final-answer persistence policy finalAnswerPersistence: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / No final answer may be persisted while final-answer persistence is disabled.',
-  'final-answer persistence policy conversationTurnSave: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / No conversation turn may be saved while final-answer persistence is disabled.',
-  'final-answer persistence policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / No final answer may be delivered while final-answer persistence is disabled.',
+  'final-answer persistence policy mutationFinalAnswerCompletionGate: REFUSED_FINAL_ANSWER_COMPLETION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled final-answer completion gate must refuse completion before final-answer persistence can be considered.',
+  'final-answer persistence policy finalAnswerPersistencePolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / Mutation final-answer persistence and conversation save are disabled.',
+  'final-answer persistence policy finalAnswerPersistence: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / No final answer may be persisted while final-answer persistence is disabled.',
+  'final-answer persistence policy conversationTurnSave: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / No conversation turn may be saved while final-answer persistence is disabled.',
+  'final-answer persistence policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / persistence false / conversation save false / user-visible completion false / final-response handoff false / delivery receipt false / acknowledgement save false / No final answer may be delivered while final-answer persistence is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer persistence blocking keys: finalAnswerPersistencePolicy, finalAnswerPersistence, conversationTurnSave, finalAnswerDelivery, finalAnswerPersistenceEnabled, conversationTurnSaveEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer persistence blocking keys: finalAnswerPersistencePolicy, finalAnswerPersistence, conversationTurnSave, finalAnswerDelivery, finalAnswerPersistenceEnabled, conversationTurnSaveEnabled, userVisibleCompletionEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

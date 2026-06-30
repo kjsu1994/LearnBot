@@ -8,7 +8,6 @@ const view = buildMutationFinalAnswerCompletionGateView({
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
   finalAnswerCompletionPolicy: 'DISABLED_AUDIT_ONLY',
-  finalAnswerDeliveryEnabled: false,
   sourceFinalAnswerGenerationGateStatus: 'REFUSED_FINAL_ANSWER_GENERATION_DISABLED',
   sourceFinalAnswerGenerationGateSchema: 'learnbot.local-agent.mutation-final-answer-generation-gate.v1',
   sourceRequestId: 'request-123',
@@ -23,6 +22,10 @@ const view = buildMutationFinalAnswerCompletionGateView({
   intakePersistedResultCount: 0,
   finalAnswerCompletionEnabled: false,
   finalAnswerCompletionInvocationEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  finalResponseHandoffEnabled: false,
+  deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   finalAnswerGenerationEnabled: false,
   publicationEnabled: false,
   mutationResultAggregationEnabled: false,
@@ -60,6 +63,10 @@ const view = buildMutationFinalAnswerCompletionGateView({
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled final-answer generation gate must refuse generation before final-answer completion can be considered.',
     },
     {
@@ -77,6 +84,10 @@ const view = buildMutationFinalAnswerCompletionGateView({
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation final-answer completion and delivery are disabled.',
     },
     {
@@ -95,6 +106,9 @@ const view = buildMutationFinalAnswerCompletionGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No final answer may be completed while final-answer completion is disabled.',
     },
     {
@@ -113,6 +127,9 @@ const view = buildMutationFinalAnswerCompletionGateView({
       finalAnswerGenerationEnabled: false,
       finalAnswerCompletionEnabled: false,
       finalAnswerDeliveryEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No final answer may be delivered while final-answer delivery is disabled.',
     },
   ],
@@ -122,6 +139,9 @@ const view = buildMutationFinalAnswerCompletionGateView({
     'finalAnswerDelivery',
     'finalAnswerCompletionEnabled',
     'finalAnswerDeliveryEnabled',
+    'finalResponseHandoffEnabled',
+    'deliveryReceiptEnabled',
+    'acknowledgementSaveEnabled',
     'finalAnswerGenerationEnabled',
     'mutationAllowed',
   ],
@@ -143,17 +163,17 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation final-answer completion disabled: completion false / completion invocation false / delivery false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation final-answer completion disabled: completion false / completion invocation false / delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'final-answer completion policy mutationFinalAnswerGenerationGate: REFUSED_FINAL_ANSWER_GENERATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / A disabled final-answer generation gate must refuse generation before final-answer completion can be considered.',
-  'final-answer completion policy finalAnswerCompletionPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / Mutation final-answer completion and delivery are disabled.',
-  'final-answer completion policy finalAnswerCompletion: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / No final answer may be completed while final-answer completion is disabled.',
-  'final-answer completion policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / No final answer may be delivered while final-answer delivery is disabled.',
+  'final-answer completion policy mutationFinalAnswerGenerationGate: REFUSED_FINAL_ANSWER_GENERATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled final-answer generation gate must refuse generation before final-answer completion can be considered.',
+  'final-answer completion policy finalAnswerCompletionPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / Mutation final-answer completion and delivery are disabled.',
+  'final-answer completion policy finalAnswerCompletion: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / No final answer may be completed while final-answer completion is disabled.',
+  'final-answer completion policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / No final answer may be delivered while final-answer delivery is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer completion blocking keys: finalAnswerCompletionPolicy, finalAnswerCompletion, finalAnswerDelivery, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer completion blocking keys: finalAnswerCompletionPolicy, finalAnswerCompletion, finalAnswerDelivery, finalAnswerCompletionEnabled, finalAnswerDeliveryEnabled, finalResponseHandoffEnabled, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

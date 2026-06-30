@@ -75,6 +75,11 @@ class LocalAgentRollbackFallbackGateBuilder {
                 "mutationResultAggregationEnabled",
                 "publicationEnabled",
                 "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
                 "mutationAllowed"
         )) {
             if (!blockingKeys.contains(key)) {
@@ -97,6 +102,10 @@ class LocalAgentRollbackFallbackGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceResultIntakePersistenceGateSchema", mutationResultIntakePersistenceGate.get("schema"));
         result.put("sourceResultIntakePersistenceGateStatus", mutationResultIntakePersistenceGate.get("status"));
+        result.put("sourceResultIntakePersistenceGateSessionId", mutationResultIntakePersistenceGate.get("sessionId"));
+        result.put("sourceResultIntakePersistenceGateUserId", mutationResultIntakePersistenceGate.get("userId"));
+        result.put("sourceResultIntakePersistenceGateAgentId", mutationResultIntakePersistenceGate.get("agentId"));
+        result.put("sourceResultIntakePersistenceGateWorkspaceId", mutationResultIntakePersistenceGate.get("workspaceId"));
         result.put("rollbackFallbackPolicy", "DISABLED_AUDIT_ONLY");
         result.put("rollbackFallbackInvocationEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -126,6 +135,11 @@ class LocalAgentRollbackFallbackGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", intakePersistenceReady
                 ? "Local Agent mutation rollback fallback is explicitly refused: no rollback fallback execution, RAG freshness update, aggregation, publication, or final answer is enabled."
@@ -156,6 +170,11 @@ class LocalAgentRollbackFallbackGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

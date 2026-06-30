@@ -78,6 +78,44 @@ assert.equal(
 );
 assert.equal(fallback.whyDisabledText, primary.whyDisabledText);
 
+const blockedLinkedEvidence = buildReleaseAttemptDisplaySummaryView({
+  displaySummary: {
+    show: true,
+    linkedEvidenceComplete: true,
+    releaseReadyButDisabled: false,
+    evidenceStatus: 'ALL_LINKED_RELEASE_DISABLED',
+    releaseReadinessStatus: 'BLOCKED_RELEASE_DISABLED',
+    patchPreconditionsPassed: false,
+    evidenceComplete: true,
+    linkedCount: 2,
+    missingCount: 0,
+    sourceOnlyFallbackCount: 0,
+    disabledFlags,
+    blockingReasons: [
+      'patch release prerequisites are incomplete',
+      'release gate is disabled',
+      'held patch request remains non-claimable',
+    ],
+    message: 'The release attempt remains blocked because the dry-run snapshot evidence mutated files.',
+  },
+});
+
+assert.equal(blockedLinkedEvidence.show, true);
+assert.equal(blockedLinkedEvidence.linkedEvidenceComplete, true);
+assert.equal(blockedLinkedEvidence.releaseReadyButDisabled, false);
+assert.equal(blockedLinkedEvidence.title, 'Linked release evidence: complete / release: blocked');
+assert.equal(blockedLinkedEvidence.evidenceText, primary.evidenceText);
+assert.equal(blockedLinkedEvidence.readinessText, 'readiness BLOCKED_RELEASE_DISABLED / preconditions false / evidence complete true');
+assert.equal(
+  blockedLinkedEvidence.disabledGatesText,
+  'disabled gates: release false / request creation false / push false / claim false / write helper false / apply false / test false / rollback restore false / RAG freshness false / final answer false / mutation false'
+);
+assert.equal(
+  blockedLinkedEvidence.whyDisabledText,
+  'why disabled: patch release prerequisites are incomplete, release gate is disabled, held patch request remains non-claimable'
+);
+assert.match(blockedLinkedEvidence.message, /dry-run snapshot evidence mutated files/);
+
 const hidden = buildReleaseAttemptDisplaySummaryView({});
 assert.equal(hidden.show, false);
 assert.equal(hidden.title, 'Linked release evidence: incomplete / release: blocked');

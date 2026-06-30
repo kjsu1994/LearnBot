@@ -44,7 +44,15 @@ class LocalAgentFinalAnswerGenerationGateBuilder {
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
-        for (String key : List.of("finalAnswerGenerationEnabled", "mutationAllowed")) {
+        for (String key : List.of(
+                "finalAnswerGenerationEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
+                "mutationAllowed"
+        )) {
             if (!blockingKeys.contains(key)) {
                 blockingKeys.add(key);
             }
@@ -65,6 +73,10 @@ class LocalAgentFinalAnswerGenerationGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourcePublicationGateSchema", mutationPublicationGate.get("schema"));
         result.put("sourcePublicationGateStatus", mutationPublicationGate.get("status"));
+        result.put("sourcePublicationGateSessionId", mutationPublicationGate.get("sessionId"));
+        result.put("sourcePublicationGateUserId", mutationPublicationGate.get("userId"));
+        result.put("sourcePublicationGateAgentId", mutationPublicationGate.get("agentId"));
+        result.put("sourcePublicationGateWorkspaceId", mutationPublicationGate.get("workspaceId"));
         result.put("finalAnswerGenerationPolicy", "DISABLED_AUDIT_ONLY");
         result.put("finalAnswerGenerationInvocationEnabled", false);
         result.put("expectedResultCount", expectedResultCount);
@@ -94,6 +106,11 @@ class LocalAgentFinalAnswerGenerationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", publicationReady
                 ? "Local Agent mutation final-answer generation is explicitly refused: no final answer is generated."
@@ -122,6 +139,11 @@ class LocalAgentFinalAnswerGenerationGateBuilder {
         result.put("mutationResultAggregationEnabled", false);
         result.put("publicationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerCompletionEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }

@@ -24,6 +24,7 @@ const view = buildMutationRagFreshnessGateView({
   mutationResultAggregationEnabled: false,
   publicationEnabled: false,
   finalAnswerGenerationEnabled: false,
+  acknowledgementSaveEnabled: false,
   rollbackFallbackExecutionEnabled: false,
   intakePersistenceEnabled: false,
   acceptedObservationPersistenceEnabled: false,
@@ -58,6 +59,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'A disabled rollback fallback gate must refuse rollback execution before RAG freshness can be considered.',
     },
     {
@@ -76,6 +78,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'RAG freshness updates are disabled.',
     },
     {
@@ -94,6 +97,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'No code or document index freshness update may run while RAG freshness is disabled.',
     },
     {
@@ -112,6 +116,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Mutation result aggregation remains disabled until RAG freshness state is modeled.',
     },
     {
@@ -130,6 +135,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final answer publication remains disabled until RAG freshness state is modeled.',
     },
     {
@@ -148,6 +154,7 @@ const view = buildMutationRagFreshnessGateView({
       mutationResultAggregationEnabled: false,
       publicationEnabled: false,
       finalAnswerGenerationEnabled: false,
+      acknowledgementSaveEnabled: false,
       message: 'Final-answer generation remains disabled until RAG freshness state is modeled.',
     },
   ],
@@ -161,6 +168,7 @@ const view = buildMutationRagFreshnessGateView({
     'mutationResultAggregationEnabled',
     'publicationEnabled',
     'finalAnswerGenerationEnabled',
+    'acknowledgementSaveEnabled',
     'mutationAllowed',
   ],
   message: 'Local Agent mutation RAG freshness is explicitly refused: no freshness update, aggregation, publication, or final answer is enabled.',
@@ -181,19 +189,19 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation RAG freshness disabled: rag freshness false / freshness invocation false / result aggregation false / publication false / final answer false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+  'mutation RAG freshness disabled: rag freshness false / freshness invocation false / result aggregation false / publication false / final answer false / acknowledgement save false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
 assert.deepEqual(view.policyLines, [
-  'RAG freshness policy mutationRollbackFallbackGate: REFUSED_ROLLBACK_FALLBACK_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / A disabled rollback fallback gate must refuse rollback execution before RAG freshness can be considered.',
-  'RAG freshness policy ragFreshnessPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / RAG freshness updates are disabled.',
-  'RAG freshness policy ragFreshnessUpdate: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / No code or document index freshness update may run while RAG freshness is disabled.',
-  'RAG freshness policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Mutation result aggregation remains disabled until RAG freshness state is modeled.',
-  'RAG freshness policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Final answer publication remains disabled until RAG freshness state is modeled.',
-  'RAG freshness policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / Final-answer generation remains disabled until RAG freshness state is modeled.',
+  'RAG freshness policy mutationRollbackFallbackGate: REFUSED_ROLLBACK_FALLBACK_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / A disabled rollback fallback gate must refuse rollback execution before RAG freshness can be considered.',
+  'RAG freshness policy ragFreshnessPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / RAG freshness updates are disabled.',
+  'RAG freshness policy ragFreshnessUpdate: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / No code or document index freshness update may run while RAG freshness is disabled.',
+  'RAG freshness policy resultAggregation: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Mutation result aggregation remains disabled until RAG freshness state is modeled.',
+  'RAG freshness policy publication: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Final answer publication remains disabled until RAG freshness state is modeled.',
+  'RAG freshness policy finalAnswerGeneration: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / rag freshness false / result aggregation false / publication false / final answer false / acknowledgement save false / Final-answer generation remains disabled until RAG freshness state is modeled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation RAG freshness blocking keys: ragFreshnessPolicy, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation RAG freshness blocking keys: ragFreshnessPolicy, ragFreshnessUpdate, resultAggregation, publication, finalAnswerGeneration, ragFreshnessUpdateEnabled, mutationResultAggregationEnabled, publicationEnabled, finalAnswerGenerationEnabled, acknowledgementSaveEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

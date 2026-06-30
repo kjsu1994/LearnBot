@@ -28,6 +28,7 @@ const view = buildMutationExecutionReadinessBoundaryView({
   finalAnswerGenerationEnabled: false,
   finalResponseHandoffEnabled: false,
   deliveryReceiptEnabled: false,
+  acknowledgementSaveEnabled: false,
   claimable: false,
   mutationAllowed: false,
   readinessChecks: [
@@ -56,6 +57,7 @@ const view = buildMutationExecutionReadinessBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
     {
       key: 'mutationWriteHelperSafetyGate',
@@ -74,6 +76,7 @@ const view = buildMutationExecutionReadinessBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
     {
       key: 'runtimeExecutionSwitch',
@@ -101,6 +104,7 @@ const view = buildMutationExecutionReadinessBoundaryView({
       testEnabled: false,
       rollbackRestoreEnabled: false,
       resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
     },
   ],
   blockingKeys: [
@@ -132,14 +136,14 @@ assert.equal(
 );
 assert.equal(
   view.disabledText,
-  'mutation execution readiness disabled: release gate false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / claimable false / mutation false'
+  'mutation execution readiness disabled: release gate false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / rag freshness false / result aggregation false / publication false / final answer false / final response handoff false / receipt false / acknowledgement save false / claimable false / mutation false'
 );
 assert.deepEqual(view.checkLines, [
   'execution readiness mutationHandoffSummary: READY_HANDOFF_DISABLED / passed true / blocking false / execution false / mutation false',
-  'execution readiness mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
-  'execution readiness mutationWriteHelperSafetyGate: REFUSED_WRITE_HELPER_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'execution readiness mutationExecutionGate: REFUSED_EXECUTION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
+  'execution readiness mutationWriteHelperSafetyGate: REFUSED_WRITE_HELPER_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
   'execution readiness runtimeExecutionSwitch: DISABLED / passed false / blocking true / execution false / tool runner false / mutation false',
-  'execution readiness sideEffectTransport: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / claimable false / mutation false',
+  'execution readiness sideEffectTransport: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / tool runner false / write helper false / apply false / test false / rollback restore false / result intake false / acknowledgement save false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,

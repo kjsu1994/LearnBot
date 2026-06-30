@@ -6,6 +6,7 @@ const DISABLED_CONTROL_LABELS = [
   ['mutationResultAggregationEnabled', 'result aggregation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
   ['postExecutionObservationEnabled', 'post-execution observation'],
   ['completedResultPersistenceEnabled', 'result persistence'],
   ['observationAcceptanceEnabled', 'acceptance'],
@@ -37,6 +38,7 @@ const POLICY_CONTROL_LABELS = [
   ['mutationResultAggregationEnabled', 'result aggregation'],
   ['publicationEnabled', 'publication'],
   ['finalAnswerGenerationEnabled', 'final answer'],
+  ['acknowledgementSaveEnabled', 'acknowledgement save'],
 ];
 
 export function buildMutationResultIntakePersistenceGateView(gate = null) {

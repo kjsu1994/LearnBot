@@ -56,7 +56,18 @@ class LocalAgentFinalAnswerPersistenceGateBuilder {
                 .filter(item -> Boolean.TRUE.equals(item.get("blocking")))
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
-        for (String key : List.of("finalAnswerPersistenceEnabled", "conversationTurnSaveEnabled", "finalAnswerCompletionEnabled", "finalAnswerDeliveryEnabled", "finalAnswerGenerationEnabled", "mutationAllowed")) {
+        for (String key : List.of(
+                "finalAnswerPersistenceEnabled",
+                "conversationTurnSaveEnabled",
+                "userVisibleCompletionEnabled",
+                "finalResponseHandoffEnabled",
+                "deliveryReceiptEnabled",
+                "acknowledgementSaveEnabled",
+                "finalAnswerCompletionEnabled",
+                "finalAnswerDeliveryEnabled",
+                "finalAnswerGenerationEnabled",
+                "mutationAllowed"
+        )) {
             if (!blockingKeys.contains(key)) {
                 blockingKeys.add(key);
             }
@@ -77,6 +88,10 @@ class LocalAgentFinalAnswerPersistenceGateBuilder {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("sourceFinalAnswerCompletionGateSchema", mutationFinalAnswerCompletionGate.get("schema"));
         result.put("sourceFinalAnswerCompletionGateStatus", mutationFinalAnswerCompletionGate.get("status"));
+        result.put("sourceFinalAnswerCompletionGateSessionId", mutationFinalAnswerCompletionGate.get("sessionId"));
+        result.put("sourceFinalAnswerCompletionGateUserId", mutationFinalAnswerCompletionGate.get("userId"));
+        result.put("sourceFinalAnswerCompletionGateAgentId", mutationFinalAnswerCompletionGate.get("agentId"));
+        result.put("sourceFinalAnswerCompletionGateWorkspaceId", mutationFinalAnswerCompletionGate.get("workspaceId"));
         result.put("finalAnswerPersistencePolicy", "DISABLED_AUDIT_ONLY");
         result.put("finalAnswerPersistenceInvocationEnabled", false);
         result.put("conversationTurnSaveEnabled", false);
@@ -110,6 +125,10 @@ class LocalAgentFinalAnswerPersistenceGateBuilder {
         result.put("finalAnswerCompletionEnabled", false);
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("finalAnswerPersistenceEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("blockingKeys", blockingKeys);
         result.put("message", finalAnswerCompletionReady
                 ? "Local Agent mutation final-answer persistence is explicitly refused: no final answer is persisted and no conversation turn is saved."
@@ -142,6 +161,10 @@ class LocalAgentFinalAnswerPersistenceGateBuilder {
         result.put("finalAnswerDeliveryEnabled", false);
         result.put("finalAnswerPersistenceEnabled", false);
         result.put("conversationTurnSaveEnabled", false);
+        result.put("userVisibleCompletionEnabled", false);
+        result.put("finalResponseHandoffEnabled", false);
+        result.put("deliveryReceiptEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
         result.put("message", message);
         return result;
     }
