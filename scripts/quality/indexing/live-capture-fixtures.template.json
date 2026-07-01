@@ -1,0 +1,23 @@
+{
+  "schema": "learnbot.quality.indexing-live-capture-template.v1",
+  "cases": [
+    {
+      "id": "document-post-processing-partial-keeps-searchable",
+      "kind": "document",
+      "goal": "Capture document indexing job diagnostics from a live stack.",
+      "endpoint": "/api/document-indexing/jobs/{jobId}"
+    },
+    {
+      "id": "code-reindex-failure-keeps-active-index",
+      "kind": "code",
+      "goal": "Capture code indexing diagnostics from a live stack.",
+      "endpoint": "/api/code/repositories/{repositoryId}/jobs/{jobId}/diagnostics"
+    },
+    {
+      "id": "crawler-allowlist-budget-stores-source-pages",
+      "kind": "crawler",
+      "goal": "Capture crawler audit data from a live stack.",
+      "endpoint": "/api/documents/{documentId}"
+    }
+  ]
+}

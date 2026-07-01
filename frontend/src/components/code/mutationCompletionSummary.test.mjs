@@ -6,6 +6,10 @@ const view = buildMutationCompletionSummaryView({
   status: 'READY_COMPLETION_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceFinalAnswerDeliveryReceiptGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED',
   sourceFinalAnswerDeliveryReceiptGateAcknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
   sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled: false,
@@ -166,6 +170,10 @@ assert.equal(view.show, true);
 assert.equal(
   view.headerText,
   'mutation completion summary: READY_COMPLETION_DISABLED / learnbot.local-agent.mutation-completion-summary.v1 / prerequisites true / USER_LOCAL_AGENT / receipt REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / acknowledgement DISABLED_AUDIT_ONLY / acknowledgement save false'
+);
+assert.equal(
+  view.idsText,
+  'mutation completion summary ids: session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.sourceContextText,

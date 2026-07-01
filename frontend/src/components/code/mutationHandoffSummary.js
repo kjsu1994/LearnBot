@@ -42,6 +42,7 @@ export function buildMutationHandoffSummaryView(summary = null) {
     return {
       show: false,
       headerText: '',
+      idsText: '',
       sourceContextText: '',
       disabledText: '',
       stageLines: [],
@@ -57,6 +58,7 @@ export function buildMutationHandoffSummaryView(summary = null) {
   return {
     show: true,
     headerText: mutationHandoffHeaderText(summary),
+    idsText: mutationHandoffIdsText(summary),
     sourceContextText: mutationHandoffSourceContextText(summary),
     disabledText: `mutation handoff disabled:${disabledControlSuffix(disabledControls)}`,
     stageLines: stages.map(mutationHandoffStageText),
@@ -87,6 +89,23 @@ function mutationHandoffHeaderText(summary) {
   }
   if (summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled !== undefined) {
     text += ` / acknowledgement save ${String(summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled)}`;
+  }
+  return text;
+}
+
+function mutationHandoffIdsText(summary) {
+  let text = 'mutation handoff summary ids:';
+  if (summary.sessionId) {
+    text += ` session ${summary.sessionId}`;
+  }
+  if (summary.userId) {
+    text += ` / user ${summary.userId}`;
+  }
+  if (summary.agentId) {
+    text += ` / agent ${summary.agentId}`;
+  }
+  if (summary.workspaceId) {
+    text += ` / workspace ${summary.workspaceId}`;
   }
   return text;
 }

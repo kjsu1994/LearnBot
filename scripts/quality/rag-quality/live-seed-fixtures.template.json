@@ -1,0 +1,42 @@
+{
+  "schema": "learnbot.quality.rag-live-seed-template.v1",
+  "cases": [
+    {
+      "id": "live-document-security-policy-citation",
+      "domain": "document",
+      "question": "What approvals are required for security exceptions?",
+      "mode": "qa",
+      "speedProfile": "balanced",
+      "expectedCitationIds": [],
+      "expectedEvidenceSnippets": [
+        "Security exceptions require manager approval",
+        "All approvals must be recorded in the audit log"
+      ],
+      "forbiddenAnswerTerms": [
+        "unlimited access",
+        "no approval required"
+      ],
+      "maxLatencyMs": 20000
+    },
+    {
+      "id": "live-code-local-agent-flow-order",
+      "domain": "code",
+      "repositoryId": "",
+      "question": "What is the approved Local Agent execution order?",
+      "mode": "overview",
+      "limit": 10,
+      "expectedCitationIds": [],
+      "expectedEvidenceSnippets": [
+        "patch.apply",
+        "command.runAllowed",
+        "git.status",
+        "rollback.restore"
+      ],
+      "forbiddenAnswerTerms": [
+        "arbitrary shell",
+        "server-local mutation must not be the default path"
+      ],
+      "maxLatencyMs": 20000
+    }
+  ]
+}

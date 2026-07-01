@@ -13,6 +13,7 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.exception.ApiExceptionHandler;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.LocalAgentAuthService;
@@ -94,6 +95,219 @@ class LocalAgentControllerTest {
 
         assertThat(actual).isSameAs(expected);
         verify(toolGatewayService).inspectPatchReleaseBoundary(userId, requestId);
+    }
+
+    @Test
+    void approvedExecutionFlowInspectionReturnsReadOnlyServiceSummary() throws Exception {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
+        UUID userId = UUID.randomUUID();
+        UUID patchRequestId = UUID.randomUUID();
+        UUID commandRequestId = UUID.randomUUID();
+        UUID statusRequestId = UUID.randomUUID();
+        UUID rollbackRequestId = UUID.randomUUID();
+        List<UUID> requestIds = List.of(patchRequestId, commandRequestId, statusRequestId, rollbackRequestId);
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        Map<String, Object> summary = Map.ofEntries(
+                Map.entry("schema", "learnbot.local-agent.approved-execution-flow-contract.v1"),
+                Map.entry("repositoryBacked", true),
+                Map.entry("readModelOnly", true),
+                Map.entry("ordered", true),
+                Map.entry("identityConsistent", true),
+                Map.entry("releaseAttemptLinked", true),
+                Map.entry("allTerminal", true),
+                Map.entry("requestCreationEnabled", false),
+                Map.entry("pushEnabled", false),
+                Map.entry("claimEnabled", false),
+                Map.entry("resultIntakeEnabled", false),
+                Map.entry("acknowledgementSaveEnabled", false),
+                Map.entry("mutationAllowedForFollowup", false),
+                Map.entry("readyForServerOrchestration", false),
+                Map.entry("requestIds", requestIds)
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(toolGatewayService.inspectApprovedExecutionFlow(userId, requestIds)).thenReturn(summary);
+
+        mockMvc.perform(post("/api/local-agents/tools/approved-execution-flow/inspection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("requestIds", requestIds))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schema").value("learnbot.local-agent.approved-execution-flow-contract.v1"))
+                .andExpect(jsonPath("$.repositoryBacked").value(true))
+                .andExpect(jsonPath("$.readModelOnly").value(true))
+                .andExpect(jsonPath("$.ordered").value(true))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.resultIntakeEnabled").value(false))
+                .andExpect(jsonPath("$.acknowledgementSaveEnabled").value(false))
+                .andExpect(jsonPath("$.mutationAllowedForFollowup").value(false))
+                .andExpect(jsonPath("$.readyForServerOrchestration").value(false))
+                .andExpect(jsonPath("$.requestIds[0]").value(patchRequestId.toString()))
+                .andExpect(jsonPath("$.requestIds[1]").value(commandRequestId.toString()))
+                .andExpect(jsonPath("$.requestIds[2]").value(statusRequestId.toString()))
+                .andExpect(jsonPath("$.requestIds[3]").value(rollbackRequestId.toString()));
+
+        verify(toolGatewayService).inspectApprovedExecutionFlow(userId, requestIds);
+        verify(toolGatewayService, org.mockito.Mockito.never()).claimNext(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(LocalAgentToolResponse.class));
+        verify(toolGatewayService, org.mockito.Mockito.never()).enqueueReleaseAttemptFreshObservations(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void approvedExecutionFlowReleaseAttemptInspectionReturnsReadOnlyServiceSummary() throws Exception {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
+        UUID userId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        List<UUID> requestIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        Map<String, Object> summary = Map.ofEntries(
+                Map.entry("schema", "learnbot.local-agent.approved-execution-flow-contract.v1"),
+                Map.entry("repositoryBacked", true),
+                Map.entry("readModelOnly", true),
+                Map.entry("requestIdSource", "durableCompletedRows"),
+                Map.entry("releaseAttemptId", releaseAttemptId),
+                Map.entry("requestCreationEnabled", false),
+                Map.entry("pushEnabled", false),
+                Map.entry("claimEnabled", false),
+                Map.entry("resultIntakeEnabled", false),
+                Map.entry("acknowledgementSaveEnabled", false),
+                Map.entry("readyForServerOrchestration", false),
+                Map.entry("requestIds", requestIds)
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(toolGatewayService.inspectApprovedExecutionFlowForReleaseAttempt(userId, releaseAttemptId)).thenReturn(summary);
+
+        mockMvc.perform(post("/api/local-agents/tools/approved-execution-flow/inspection/by-release-attempt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("releaseAttemptId", releaseAttemptId))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schema").value("learnbot.local-agent.approved-execution-flow-contract.v1"))
+                .andExpect(jsonPath("$.repositoryBacked").value(true))
+                .andExpect(jsonPath("$.readModelOnly").value(true))
+                .andExpect(jsonPath("$.requestIdSource").value("durableCompletedRows"))
+                .andExpect(jsonPath("$.releaseAttemptId").value(releaseAttemptId.toString()))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.resultIntakeEnabled").value(false))
+                .andExpect(jsonPath("$.acknowledgementSaveEnabled").value(false))
+                .andExpect(jsonPath("$.readyForServerOrchestration").value(false));
+
+        verify(toolGatewayService).inspectApprovedExecutionFlowForReleaseAttempt(userId, releaseAttemptId);
+        verify(toolGatewayService, org.mockito.Mockito.never()).inspectApprovedExecutionFlow(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).claimNext(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(LocalAgentToolResponse.class));
+    }
+
+    @Test
+    void approvedExecutionFlowInspectionRejectsEmptyRequestIdsBeforeServiceCall() throws Exception {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        when(currentUserProvider.currentUser()).thenReturn(user);
+
+        mockMvc.perform(post("/api/local-agents/tools/approved-execution-flow/inspection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("requestIds", List.of()))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Invalid request payload."));
+
+        verify(toolGatewayService, org.mockito.Mockito.never()).inspectApprovedExecutionFlow(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).claimNext(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(LocalAgentToolResponse.class));
+    }
+
+    @Test
+    void approvedExecutionFlowInspectionRejectsOversizedRequestIdsBeforeServiceCall() throws Exception {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .build();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        List<UUID> requestIds = java.util.stream.IntStream.range(0, 13)
+                .mapToObj(ignored -> UUID.randomUUID())
+                .toList();
+        when(currentUserProvider.currentUser()).thenReturn(user);
+
+        mockMvc.perform(post("/api/local-agents/tools/approved-execution-flow/inspection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("requestIds", requestIds))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Invalid request payload."));
+
+        verify(toolGatewayService, org.mockito.Mockito.never()).inspectApprovedExecutionFlow(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).claimNext(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+        verify(toolGatewayService, org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(LocalAgentToolResponse.class));
     }
 
     @Test

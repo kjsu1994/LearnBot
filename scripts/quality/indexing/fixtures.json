@@ -1,0 +1,57 @@
+{
+  "schema": "learnbot.quality.indexing-fixtures.v1",
+  "cases": [
+    {
+      "id": "document-post-processing-partial-keeps-searchable",
+      "goal": "Document graph/enrichment failures must not make original chunks unsearchable.",
+      "kind": "document",
+      "observed": {
+        "sourceStatus": "PARTIAL",
+        "baseChunksSearchable": true,
+        "originalChunksPreserved": true,
+        "failedStages": ["DOCUMENT_GRAPH_REBUILD"],
+        "retryAvailableStages": ["DOCUMENT_GRAPH_REBUILD"],
+        "diagnostics": [
+          { "stage": "DOCUMENT_BASE_INDEX", "status": "SUCCESS" },
+          { "stage": "DOCUMENT_GRAPH_REBUILD", "status": "FAILED" }
+        ]
+      }
+    },
+    {
+      "id": "code-reindex-failure-keeps-active-index",
+      "goal": "A failed code reindex must not replace the active searchable index.",
+      "kind": "code",
+      "observed": {
+        "previousActiveIndexVersion": "index-v1",
+        "candidateIndexVersion": "index-v2",
+        "candidateJobStatus": "FAILED",
+        "activeIndexVersionAfterFailure": "index-v1",
+        "searchFallbackAvailable": true,
+        "diagnostics": [
+          { "stage": "BASE_CHUNK_INDEX", "status": "SUCCESS" },
+          { "stage": "JAVA_SEMANTIC", "status": "PARTIAL" }
+        ]
+      }
+    },
+    {
+      "id": "crawler-allowlist-budget-stores-source-pages",
+      "goal": "Crawler output must stay within policy and keep per-page source URIs for citations.",
+      "kind": "crawler",
+      "observed": {
+        "allowedDomain": true,
+        "robotsAllowed": true,
+        "requestedMaxDepth": 5,
+        "effectiveMaxDepth": 2,
+        "requestedMaxPages": 100,
+        "effectiveMaxPages": 30,
+        "fetchedPages": [
+          { "url": "https://example.com/docs", "depth": 0, "storedAsSeparateDocument": true, "sourceUri": "https://example.com/docs" },
+          { "url": "https://example.com/docs/setup", "depth": 1, "storedAsSeparateDocument": true, "sourceUri": "https://example.com/docs/setup" }
+        ],
+        "skippedPages": [
+          { "url": "https://evil.example.net/docs", "reason": "DISALLOWED_DOMAIN" }
+        ]
+      }
+    }
+  ]
+}

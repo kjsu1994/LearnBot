@@ -7,6 +7,8 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.service.LocalAgentToolExecution;
+import com.learnbot.service.localagent.LocalAgentApprovedExecutionFlowContract;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -22,6 +24,100 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfSystemProperty(named = "learnbot.live-postgres-tests", matches = "true")
 class LocalAgentToolExecutionRepositoryLivePostgresTest {
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void approvedExecutionFlowSurvivesClaimAndCompletedResponsePersistence() {
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository repository = new LocalAgentToolExecutionRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        List<UUID> requestIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        try {
+            insertUser(jdbc, userId);
+            createApproved(repository, requestIds.get(0), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.PATCH_APPLY,
+                    Map.of(
+                            "sourceRequestId", sourceRequestId.toString(),
+                            "releaseAttemptId", releaseAttemptId.toString(),
+                            "mutationAllowed", true,
+                            "dryRunOnly", false,
+                            "diff", "--- a/README.md\n+++ b/README.md\n"
+                    ));
+            createApproved(repository, requestIds.get(1), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                    Map.of(
+                            "sourceRequestId", sourceRequestId.toString(),
+                            "releaseAttemptId", releaseAttemptId.toString(),
+                            "mutationAllowed", true,
+                            "commandId", "maven.backend.test"
+                    ));
+            createApproved(repository, requestIds.get(2), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.GIT_STATUS,
+                    Map.of(
+                            "sourceRequestId", sourceRequestId.toString(),
+                            "releaseAttemptId", releaseAttemptId.toString(),
+                            "mutationAllowed", true
+                    ));
+            createApproved(repository, requestIds.get(3), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.ROLLBACK_RESTORE,
+                    Map.of(
+                            "sourceRequestId", sourceRequestId.toString(),
+                            "releaseAttemptId", releaseAttemptId.toString(),
+                            "mutationAllowed", true,
+                            "manifestId", "snap-flow"
+                    ));
+
+            assertClaimAndComplete(repository, requestIds.get(0), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.PATCH_APPLY,
+                    Map.of(
+                            "mutationApplied", true,
+                            "snapshotManifestId", "snap-flow",
+                            "rollbackAvailable", true
+                    ));
+            assertClaimAndComplete(repository, requestIds.get(1), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                    Map.of("commandId", "maven.backend.test", "exitCode", 0));
+            assertClaimAndComplete(repository, requestIds.get(2), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.GIT_STATUS,
+                    Map.of("clean", false, "branch", "main"));
+            assertClaimAndComplete(repository, requestIds.get(3), sessionId, userId, agentId, workspaceId,
+                    LocalAgentToolName.ROLLBACK_RESTORE,
+                    Map.of("restored", true, "manifestId", "snap-flow"));
+
+            List<LocalAgentApprovedExecutionFlowContract.Step> steps = requestIds.stream()
+                    .map(id -> repository.find(id).orElseThrow())
+                    .map(this::persistedStep)
+                    .toList();
+
+            Map<String, Object> summary = LocalAgentApprovedExecutionFlowContract.summarize(steps);
+
+            assertThat(summary)
+                    .containsEntry("ordered", true)
+                    .containsEntry("identityConsistent", true)
+                    .containsEntry("releaseAttemptLinked", true)
+                    .containsEntry("allTerminal", true)
+                    .containsEntry("requestCreationEnabled", false)
+                    .containsEntry("pushEnabled", false)
+                    .containsEntry("claimEnabled", false)
+                    .containsEntry("resultIntakeEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("mutationAllowedForFollowup", false)
+                    .containsEntry("readyForServerOrchestration", false);
+            assertThat((List<String>) summary.get("expectedToolOrder"))
+                    .containsExactly("patch.apply", "command.runAllowed", "git.status", "rollback.restore");
+            assertThat((List<Map<String, Object>>) summary.get("steps"))
+                    .extracting(step -> step.get("verificationStatus"))
+                    .containsExactly("APPLIED", "PASSED", "OBSERVED", "RESTORED");
+            assertThat(repository.claimNext(userId, agentId)).isEmpty();
+        } finally {
+            cleanup(jdbc, requestIds, userId);
+        }
+    }
 
     @Test
     void persistedDryRunRequestMovesFromApprovedToRunningToCompletedWithoutChangingSource() {
@@ -266,6 +362,83 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
         }
     }
 
+    @Test
+    void findsLatestCompletedApprovedExecutionFlowRowsForReleaseAttemptInToolOrder() {
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository repository = new LocalAgentToolExecutionRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID otherUserId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID olderPatchId = UUID.randomUUID();
+        UUID latestPatchId = UUID.randomUUID();
+        UUID commandId = UUID.randomUUID();
+        UUID statusId = UUID.randomUUID();
+        UUID rollbackId = UUID.randomUUID();
+        UUID ignoredOtherUserId = UUID.randomUUID();
+        UUID ignoredRunningId = UUID.randomUUID();
+        List<UUID> allRequestIds = List.of(
+                olderPatchId,
+                latestPatchId,
+                commandId,
+                statusId,
+                rollbackId,
+                ignoredOtherUserId,
+                ignoredRunningId
+        );
+        try {
+            insertUser(jdbc, userId);
+            insertUser(jdbc, otherUserId);
+            Map<String, Object> input = Map.of(
+                    "sourceRequestId", sourceRequestId.toString(),
+                    "releaseAttemptId", releaseAttemptId.toString(),
+                    "mutationAllowed", true
+            );
+            createApproved(repository, olderPatchId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY, input);
+            createApproved(repository, latestPatchId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY, input);
+            createApproved(repository, commandId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.COMMAND_RUN_ALLOWED, input);
+            createApproved(repository, statusId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS, input);
+            createApproved(repository, rollbackId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.ROLLBACK_RESTORE, input);
+            createApproved(repository, ignoredOtherUserId, sessionId, otherUserId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS, input);
+            createApproved(repository, ignoredRunningId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.ROLLBACK_RESTORE, input);
+
+            complete(repository, olderPatchId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                    Map.of("mutationApplied", true, "version", "older"), OffsetDateTime.now().minusSeconds(30));
+            complete(repository, commandId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                    Map.of("exitCode", 0), OffsetDateTime.now().minusSeconds(20));
+            complete(repository, statusId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                    Map.of("clean", false), OffsetDateTime.now().minusSeconds(10));
+            complete(repository, rollbackId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.ROLLBACK_RESTORE,
+                    Map.of("restored", true), OffsetDateTime.now().minusSeconds(5));
+            complete(repository, latestPatchId, sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                    Map.of("mutationApplied", true, "version", "latest"), OffsetDateTime.now());
+            complete(repository, ignoredOtherUserId, sessionId, otherUserId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                    Map.of("clean", true), OffsetDateTime.now());
+
+            List<LocalAgentToolExecution> rows = repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId);
+
+            assertThat(rows)
+                    .extracting(LocalAgentToolExecution::id)
+                    .containsExactly(latestPatchId, commandId, statusId, rollbackId);
+            assertThat(rows)
+                    .extracting(LocalAgentToolExecution::toolName)
+                    .containsExactly(
+                            LocalAgentToolName.PATCH_APPLY,
+                            LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                            LocalAgentToolName.GIT_STATUS,
+                            LocalAgentToolName.ROLLBACK_RESTORE
+                    );
+            assertThat(rows.get(0).output()).containsEntry("version", "latest");
+        } finally {
+            cleanup(jdbc, allRequestIds, userId);
+            jdbc.update("DELETE FROM app_users WHERE id = :userId",
+                    new MapSqlParameterSource().addValue("userId", otherUserId));
+        }
+    }
+
     private NamedParameterJdbcTemplate jdbc() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setUrl(System.getenv().getOrDefault("SPRING_DATASOURCE_URL", "jdbc:postgresql://localhost:5432/learnbot"));
@@ -281,6 +454,121 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                 """, new MapSqlParameterSource()
                 .addValue("id", userId)
                 .addValue("email", "local-agent-live-" + userId + "@example.test"));
+    }
+
+    private void createApproved(
+            LocalAgentToolExecutionRepository repository,
+            UUID requestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            Map<String, Object> input
+    ) {
+        repository.create(requestId, new LocalAgentToolRequest(
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                input,
+                LocalAgentApprovalState.APPROVED,
+                OffsetDateTime.now(),
+                List.of("approved execution-flow live repository contract")
+        ));
+    }
+
+    private void assertClaimAndComplete(
+            LocalAgentToolExecutionRepository repository,
+            UUID requestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            Map<String, Object> output
+    ) {
+        var claimed = repository.claimNext(userId, agentId).orElseThrow();
+        assertThat(claimed.id()).isEqualTo(requestId);
+        assertThat(claimed.status()).isEqualTo(LocalAgentToolStatus.RUNNING);
+        assertThat(claimed.toolName()).isEqualTo(toolName);
+        repository.complete(new LocalAgentToolResponse(
+                sessionId,
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                LocalAgentToolStatus.SUCCEEDED,
+                output,
+                null,
+                null,
+                OffsetDateTime.now().minusSeconds(1),
+                OffsetDateTime.now(),
+                List.of("approved execution-flow response persisted")
+        ));
+        assertThat(repository.find(requestId).orElseThrow().status()).isEqualTo(LocalAgentToolStatus.SUCCEEDED);
+    }
+
+    private void complete(
+            LocalAgentToolExecutionRepository repository,
+            UUID requestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            Map<String, Object> output,
+            OffsetDateTime finishedAt
+    ) {
+        repository.complete(new LocalAgentToolResponse(
+                sessionId,
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                LocalAgentToolStatus.SUCCEEDED,
+                output,
+                null,
+                null,
+                finishedAt.minusSeconds(1),
+                finishedAt,
+                List.of("completed for durable row lookup")
+        ));
+    }
+
+    private LocalAgentApprovedExecutionFlowContract.Step persistedStep(LocalAgentToolExecution execution) {
+        return new LocalAgentApprovedExecutionFlowContract.Step(
+                new LocalAgentToolResponse(
+                        execution.sessionId(),
+                        execution.id(),
+                        execution.userId(),
+                        execution.agentId(),
+                        execution.workspaceId(),
+                        execution.executionTarget(),
+                        execution.toolName(),
+                        execution.status(),
+                        execution.output(),
+                        execution.failureCode(),
+                        execution.error(),
+                        execution.startedAt(),
+                        execution.finishedAt(),
+                        execution.responseWarnings()
+                ),
+                execution.input()
+        );
+    }
+
+    private void cleanup(NamedParameterJdbcTemplate jdbc, List<UUID> requestIds, UUID userId) {
+        jdbc.update("DELETE FROM local_agent_tool_executions WHERE id IN (:requestIds)",
+                new MapSqlParameterSource().addValue("requestIds", requestIds));
+        jdbc.update("DELETE FROM app_users WHERE id = :userId",
+                new MapSqlParameterSource().addValue("userId", userId));
     }
 
     private void cleanup(NamedParameterJdbcTemplate jdbc, UUID dryRunRequestId, UUID sourceRequestId, UUID userId) {

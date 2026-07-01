@@ -49,6 +49,7 @@ export function buildMutationCompletionSummaryView(summary = null) {
     return {
       show: false,
       headerText: '',
+      idsText: '',
       sourceContextText: '',
       disabledText: '',
       itemLines: [],
@@ -63,6 +64,7 @@ export function buildMutationCompletionSummaryView(summary = null) {
   return {
     show: true,
     headerText: mutationCompletionHeaderText(summary),
+    idsText: mutationCompletionIdsText(summary),
     sourceContextText: mutationCompletionSourceContextText(summary),
     disabledText: `mutation completion disabled:${disabledControlSuffix(summary)}`,
     itemLines: items.map(mutationCompletionItemText),
@@ -90,6 +92,23 @@ function mutationCompletionHeaderText(summary) {
   }
   if (summary.sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled !== undefined) {
     text += ` / acknowledgement save ${String(summary.sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled)}`;
+  }
+  return text;
+}
+
+function mutationCompletionIdsText(summary) {
+  let text = 'mutation completion summary ids:';
+  if (summary.sessionId) {
+    text += ` session ${summary.sessionId}`;
+  }
+  if (summary.userId) {
+    text += ` / user ${summary.userId}`;
+  }
+  if (summary.agentId) {
+    text += ` / agent ${summary.agentId}`;
+  }
+  if (summary.workspaceId) {
+    text += ` / workspace ${summary.workspaceId}`;
   }
   return text;
 }

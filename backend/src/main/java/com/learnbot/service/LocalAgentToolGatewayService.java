@@ -21,6 +21,7 @@ import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
+import com.learnbot.service.localagent.LocalAgentApprovedExecutionFlowContract;
 import com.learnbot.service.localagent.LocalAgentFinalMutationReportDraftBuilder;
 import com.learnbot.service.localagent.LocalAgentMutationResultClassifier;
 import org.springframework.stereotype.Service;
@@ -843,6 +844,89 @@ public class LocalAgentToolGatewayService {
         return repository.find(requestId)
                 .filter(execution -> execution.userId().equals(userId))
                 .map(this::toResponse);
+    }
+
+    public Map<String, Object> inspectApprovedExecutionFlow(UUID userId, List<UUID> requestIds) {
+        List<UUID> safeRequestIds = requestIds == null ? List.of() : requestIds;
+        List<LocalAgentToolExecution> executions = safeRequestIds.stream()
+                .map(requestId -> repository.find(requestId)
+                        .filter(execution -> execution.userId().equals(userId))
+                        .orElseThrow(() -> new IllegalArgumentException("Local Agent tool execution was not found.")))
+                .peek(this::requireCompletedApprovedExecutionFlowRow)
+                .toList();
+        return approvedExecutionFlowSummary(executions, List.copyOf(safeRequestIds), null, "callerProvidedRequestIds");
+    }
+
+    public Map<String, Object> inspectApprovedExecutionFlowForReleaseAttempt(UUID userId, UUID releaseAttemptId) {
+        if (releaseAttemptId == null) {
+            throw new IllegalArgumentException("Release attempt id is required.");
+        }
+        List<LocalAgentToolExecution> executions = repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId);
+        executions.forEach(this::requireCompletedApprovedExecutionFlowRow);
+        List<UUID> requestIds = executions.stream().map(LocalAgentToolExecution::id).toList();
+        return approvedExecutionFlowSummary(executions, requestIds, releaseAttemptId, "durableCompletedRows");
+    }
+
+    private Map<String, Object> approvedExecutionFlowSummary(
+            List<LocalAgentToolExecution> executions,
+            List<UUID> requestIds,
+            UUID releaseAttemptId,
+            String requestIdSource
+    ) {
+        List<LocalAgentApprovedExecutionFlowContract.Step> steps = executions.stream()
+                .map(this::approvedExecutionFlowStep)
+                .toList();
+        Map<String, Object> summary = new LinkedHashMap<>(LocalAgentApprovedExecutionFlowContract.summarize(steps));
+        summary.put("readModelOnly", true);
+        summary.put("repositoryBacked", true);
+        summary.put("requestIds", List.copyOf(requestIds));
+        summary.put("requestIdSource", requestIdSource);
+        if (releaseAttemptId != null) {
+            summary.put("releaseAttemptId", releaseAttemptId);
+        }
+        summary.put("message", "Approved Local Agent execution-flow rows were inspected as a read-only service model; production request creation, push, claim, result intake, acknowledgement save, orchestration, and follow-up mutation remain disabled.");
+        return summary;
+    }
+
+    private void requireCompletedApprovedExecutionFlowRow(LocalAgentToolExecution execution) {
+        if (execution.executionTarget() != AgentExecutionTarget.USER_LOCAL_AGENT) {
+            throw new IllegalArgumentException("Approved execution-flow inspection requires USER_LOCAL_AGENT rows.");
+        }
+        if (execution.approvalState() != LocalAgentApprovalState.APPROVED) {
+            throw new IllegalArgumentException("Approved execution-flow inspection requires approved rows.");
+        }
+        if (!isTerminal(execution.status()) || execution.finishedAt() == null) {
+            throw new IllegalArgumentException("Approved execution-flow inspection requires completed terminal rows.");
+        }
+    }
+
+    private boolean isTerminal(LocalAgentToolStatus status) {
+        return switch (status) {
+            case SUCCEEDED, FAILED, REJECTED, TIMED_OUT, DISCONNECTED, CANCELLED -> true;
+            case PENDING, APPROVAL_REQUIRED, APPROVED, APPROVED_HELD, RUNNING -> false;
+        };
+    }
+
+    private LocalAgentApprovedExecutionFlowContract.Step approvedExecutionFlowStep(LocalAgentToolExecution execution) {
+        return new LocalAgentApprovedExecutionFlowContract.Step(
+                new LocalAgentToolResponse(
+                        execution.sessionId(),
+                        execution.id(),
+                        execution.userId(),
+                        execution.agentId(),
+                        execution.workspaceId(),
+                        execution.executionTarget(),
+                        execution.toolName(),
+                        execution.status(),
+                        execution.output(),
+                        execution.failureCode(),
+                        execution.error(),
+                        execution.startedAt(),
+                        execution.finishedAt(),
+                        execution.responseWarnings()
+                ),
+                execution.input()
+        );
     }
 
     private LocalAgentPatchExecutionReadinessCheck check(String key, boolean passed, String message) {

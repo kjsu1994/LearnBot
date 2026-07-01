@@ -3,6 +3,8 @@ package com.learnbot.web;
 import com.learnbot.dto.LocalAgentHeartbeatRequest;
 import com.learnbot.dto.LocalAgentApprovalDecision;
 import com.learnbot.dto.LocalAgentApprovalDecisionRequest;
+import com.learnbot.dto.LocalAgentApprovedExecutionFlowInspectionRequest;
+import com.learnbot.dto.LocalAgentApprovedExecutionFlowReleaseAttemptInspectionRequest;
 import com.learnbot.dto.LocalAgentPairingTokenRequest;
 import com.learnbot.dto.LocalAgentPairingTokenResponse;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
@@ -33,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -150,6 +153,22 @@ public class LocalAgentController {
     LocalAgentPatchExecutionReadinessResponse toolReadiness(@PathVariable UUID requestId) {
         var user = currentUserProvider.currentUser();
         return toolGatewayService.inspectPatchExecutionReadiness(user.id(), requestId);
+    }
+
+    @PostMapping("/tools/approved-execution-flow/inspection")
+    Map<String, Object> inspectApprovedExecutionFlow(
+            @Valid @RequestBody LocalAgentApprovedExecutionFlowInspectionRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.inspectApprovedExecutionFlow(user.id(), request.requestIds());
+    }
+
+    @PostMapping("/tools/approved-execution-flow/inspection/by-release-attempt")
+    Map<String, Object> inspectApprovedExecutionFlowForReleaseAttempt(
+            @Valid @RequestBody LocalAgentApprovedExecutionFlowReleaseAttemptInspectionRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.inspectApprovedExecutionFlowForReleaseAttempt(user.id(), request.releaseAttemptId());
     }
 
     @PostMapping("/tools/{requestId}/dry-run")

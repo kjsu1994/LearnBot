@@ -47,6 +47,7 @@ const view = buildMutationFinalAnswerDeliveryGateView({
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -235,7 +236,7 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation final-answer delivery ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation final-answer delivery ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,

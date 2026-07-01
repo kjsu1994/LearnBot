@@ -42,6 +42,7 @@ export function buildMutationExecutionReadinessBoundaryView(boundary = null) {
     return {
       show: false,
       headerText: '',
+      idsText: '',
       sourceText: '',
       sourceContextText: '',
       disabledText: '',
@@ -57,6 +58,7 @@ export function buildMutationExecutionReadinessBoundaryView(boundary = null) {
   return {
     show: true,
     headerText: mutationExecutionReadinessHeaderText(boundary),
+    idsText: mutationExecutionReadinessIdsText(boundary),
     sourceText: mutationExecutionReadinessSourceText(boundary),
     sourceContextText: mutationExecutionReadinessSourceContextText(boundary),
     disabledText: `mutation execution readiness disabled:${disabledControlSuffix(boundary)}`,
@@ -82,6 +84,23 @@ function mutationExecutionReadinessHeaderText(boundary) {
   }
   if (boundary.completedRequestCount !== undefined) {
     text += ` / completed ${String(boundary.completedRequestCount)}`;
+  }
+  return text;
+}
+
+function mutationExecutionReadinessIdsText(boundary) {
+  let text = 'mutation execution readiness ids:';
+  if (boundary.sessionId) {
+    text += ` session ${boundary.sessionId}`;
+  }
+  if (boundary.userId) {
+    text += ` / user ${boundary.userId}`;
+  }
+  if (boundary.agentId) {
+    text += ` / agent ${boundary.agentId}`;
+  }
+  if (boundary.workspaceId) {
+    text += ` / workspace ${boundary.workspaceId}`;
   }
   return text;
 }

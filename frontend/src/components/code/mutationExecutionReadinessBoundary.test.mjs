@@ -6,6 +6,10 @@ const view = buildMutationExecutionReadinessBoundaryView({
   status: 'REFUSED_EXECUTION_READINESS_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceHandoffSummaryStatus: 'READY_HANDOFF_DISABLED',
   sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
   sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
@@ -157,6 +161,10 @@ assert.equal(view.show, true);
 assert.equal(
   view.headerText,
   'mutation execution readiness: REFUSED_EXECUTION_READINESS_DISABLED / learnbot.local-agent.mutation-execution-readiness-boundary.v1 / prerequisites true / USER_LOCAL_AGENT / expected 4 / completed 0'
+);
+assert.equal(
+  view.idsText,
+  'mutation execution readiness ids: session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.sourceText,

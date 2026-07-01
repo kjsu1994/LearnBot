@@ -1,0 +1,80 @@
+{
+  "schema": "learnbot.quality.rag-fixtures.v1",
+  "cases": [
+    {
+      "id": "document-security-policy-citation",
+      "domain": "document",
+      "question": "What is the security policy?",
+      "expectedCitationIds": ["doc-security-policy#chunk-1"],
+      "expectedEvidenceSnippets": [
+        "Security exceptions require manager approval",
+        "All approvals must be recorded"
+      ],
+      "forbiddenAnswerTerms": ["unlimited access", "no approval required"],
+      "maxLatencyMs": 1500,
+      "observed": {
+        "answer": "Security exceptions require manager approval, and all approvals must be recorded. [doc-security-policy#chunk-1]",
+        "citationIds": ["doc-security-policy#chunk-1"],
+        "evidence": [
+          {
+            "id": "doc-security-policy#chunk-1",
+            "text": "Security exceptions require manager approval. All approvals must be recorded in the audit log."
+          }
+        ],
+        "latencyMs": 420
+      }
+    },
+    {
+      "id": "code-approved-flow-order",
+      "domain": "code",
+      "question": "What is the approved Local Agent execution order?",
+      "expectedCitationIds": ["code-local-agent-flow#contract"],
+      "expectedEvidenceSnippets": [
+        "patch.apply",
+        "command.runAllowed",
+        "git.status",
+        "rollback.restore"
+      ],
+      "forbiddenAnswerTerms": ["arbitrary shell", "server-local mutation by default"],
+      "maxLatencyMs": 1500,
+      "observed": {
+        "answer": "The approved execution flow is patch.apply, command.runAllowed, git.status, then rollback.restore. [code-local-agent-flow#contract]",
+        "citationIds": ["code-local-agent-flow#contract"],
+        "evidence": [
+          {
+            "id": "code-local-agent-flow#contract",
+            "text": "The approved execution-flow contract requires patch.apply, command.runAllowed, git.status, and rollback.restore in order."
+          }
+        ],
+        "latencyMs": 510
+      }
+    },
+    {
+      "id": "document-follow-up-focus",
+      "domain": "document",
+      "question": "What must be recorded?",
+      "conversational": true,
+      "expectedCitationIds": ["doc-security-policy#chunk-1"],
+      "expectedPriorCitationIds": ["doc-security-policy#chunk-1"],
+      "expectedFollowUpTerms": ["approvals", "audit log"],
+      "expectedEvidenceSnippets": [
+        "All approvals must be recorded in the audit log"
+      ],
+      "forbiddenAnswerTerms": ["new unrelated policy", "no citation needed"],
+      "forbiddenFollowUpTerms": ["password reset", "vacation policy"],
+      "maxLatencyMs": 1500,
+      "observed": {
+        "answer": "All approvals must be recorded in the audit log. [doc-security-policy#chunk-1]",
+        "effectiveQuestion": "What must be recorded from the security approval policy?",
+        "citationIds": ["doc-security-policy#chunk-1"],
+        "evidence": [
+          {
+            "id": "doc-security-policy#chunk-1",
+            "text": "Security exceptions require manager approval. All approvals must be recorded in the audit log."
+          }
+        ],
+        "latencyMs": 430
+      }
+    }
+  ]
+}

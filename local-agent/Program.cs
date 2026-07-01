@@ -561,7 +561,7 @@ internal sealed partial class LearnBotLocalAgent
         {
             agentId = config.AgentId,
             version = config.Version,
-            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff", "command.runAllowed" },
+            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore" },
             workspaces = config.Workspaces.Select(workspace => new
             {
                 workspace.WorkspaceId,
@@ -2238,6 +2238,10 @@ internal sealed partial class LearnBotLocalAgent
         if (string.Equals(args[0], "allowed-test-runner-contract", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestAllowedTestRunnerContract();
+        }
+        if (string.Equals(args[0], "approved-execution-flow-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestApprovedExecutionFlowContract(GetOption(args, "--report"));
         }
         if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
         {

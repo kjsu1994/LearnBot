@@ -423,6 +423,203 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void inspectApprovedExecutionFlowBuildsReadOnlyServiceModelFromPersistedRows() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        List<UUID> requestIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        when(repository.find(requestIds.get(0))).thenReturn(java.util.Optional.of(flowExecution(
+                requestIds.get(0),
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.PATCH_APPLY,
+                sourceRequestId,
+                releaseAttemptId,
+                Map.of("mutationApplied", true, "snapshotManifestId", "snap-flow", "rollbackAvailable", true)
+        )));
+        when(repository.find(requestIds.get(1))).thenReturn(java.util.Optional.of(flowExecution(
+                requestIds.get(1),
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                sourceRequestId,
+                releaseAttemptId,
+                Map.of("commandId", "maven.backend.test", "exitCode", 0)
+        )));
+        when(repository.find(requestIds.get(2))).thenReturn(java.util.Optional.of(flowExecution(
+                requestIds.get(2),
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.GIT_STATUS,
+                sourceRequestId,
+                releaseAttemptId,
+                Map.of("clean", false, "branch", "main")
+        )));
+        when(repository.find(requestIds.get(3))).thenReturn(java.util.Optional.of(flowExecution(
+                requestIds.get(3),
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.ROLLBACK_RESTORE,
+                sourceRequestId,
+                releaseAttemptId,
+                Map.of("restored", true, "manifestId", "snap-flow")
+        )));
+
+        Map<String, Object> summary = service.inspectApprovedExecutionFlow(userId, requestIds);
+
+        assertThat(summary)
+                .containsEntry("schema", "learnbot.local-agent.approved-execution-flow-contract.v1")
+                .containsEntry("repositoryBacked", true)
+                .containsEntry("readModelOnly", true)
+                .containsEntry("ordered", true)
+                .containsEntry("identityConsistent", true)
+                .containsEntry("releaseAttemptLinked", true)
+                .containsEntry("allTerminal", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("mutationAllowedForFollowup", false)
+                .containsEntry("readyForServerOrchestration", false);
+        assertThat((List<UUID>) summary.get("requestIds")).containsExactlyElementsOf(requestIds);
+        assertThat((List<Map<String, Object>>) summary.get("steps"))
+                .extracting(step -> step.get("verificationStatus"))
+                .containsExactly("APPLIED", "PASSED", "OBSERVED", "RESTORED");
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inspectApprovedExecutionFlowForReleaseAttemptDerivesRequestIdsFromDurableRows() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        List<UUID> requestIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        when(repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId)).thenReturn(List.of(
+                flowExecution(requestIds.get(0), sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                        sourceRequestId, releaseAttemptId, Map.of("mutationApplied", true, "snapshotManifestId", "snap-flow", "rollbackAvailable", true)),
+                flowExecution(requestIds.get(1), sessionId, userId, agentId, workspaceId, LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        sourceRequestId, releaseAttemptId, Map.of("commandId", "maven.backend.test", "exitCode", 0)),
+                flowExecution(requestIds.get(2), sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                        sourceRequestId, releaseAttemptId, Map.of("clean", false, "branch", "main")),
+                flowExecution(requestIds.get(3), sessionId, userId, agentId, workspaceId, LocalAgentToolName.ROLLBACK_RESTORE,
+                        sourceRequestId, releaseAttemptId, Map.of("restored", true, "manifestId", "snap-flow"))
+        ));
+
+        Map<String, Object> summary = service.inspectApprovedExecutionFlowForReleaseAttempt(userId, releaseAttemptId);
+
+        assertThat(summary)
+                .containsEntry("repositoryBacked", true)
+                .containsEntry("readModelOnly", true)
+                .containsEntry("requestIdSource", "durableCompletedRows")
+                .containsEntry("releaseAttemptId", releaseAttemptId)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("readyForServerOrchestration", false);
+        assertThat((List<UUID>) summary.get("requestIds")).containsExactlyElementsOf(requestIds);
+        assertThat((List<Map<String, Object>>) summary.get("steps"))
+                .extracting(step -> step.get("verificationStatus"))
+                .containsExactly("APPLIED", "PASSED", "OBSERVED", "RESTORED");
+        verify(repository).findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId);
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void inspectApprovedExecutionFlowRejectsMissingRowsWithoutSideEffects() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        when(repository.find(requestId)).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> service.inspectApprovedExecutionFlow(userId, List.of(requestId)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not found");
+
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void inspectApprovedExecutionFlowRejectsRowsOwnedByAnotherUserWithoutSideEffects() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(flowExecution(
+                requestId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                LocalAgentToolName.PATCH_APPLY,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                Map.of("mutationApplied", true)
+        )));
+
+        assertThatThrownBy(() -> service.inspectApprovedExecutionFlow(userId, List.of(requestId)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not found");
+
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void inspectApprovedExecutionFlowRejectsNonterminalRowsWithoutSideEffects() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(flowExecution(
+                requestId,
+                UUID.randomUUID(),
+                userId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                LocalAgentToolName.PATCH_APPLY,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                Map.of("mutationApplied", true),
+                LocalAgentToolStatus.RUNNING,
+                null
+        )));
+
+        assertThatThrownBy(() -> service.inspectApprovedExecutionFlow(userId, List.of(requestId)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("completed terminal rows");
+
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
     void approvalDecisionRejectsRequestsThatAreNotAwaitingApproval() {
         UUID userId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
@@ -8018,6 +8215,72 @@ class LocalAgentToolGatewayServiceTest {
                 request.createdAt(),
                 null,
                 null
+        );
+    }
+
+    private LocalAgentToolExecution flowExecution(
+            UUID requestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            Map<String, Object> output
+    ) {
+        return flowExecution(
+                requestId,
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                toolName,
+                sourceRequestId,
+                releaseAttemptId,
+                output,
+                LocalAgentToolStatus.SUCCEEDED,
+                OffsetDateTime.now()
+        );
+    }
+
+    private LocalAgentToolExecution flowExecution(
+            UUID requestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            Map<String, Object> output,
+            LocalAgentToolStatus status,
+            OffsetDateTime finishedAt
+    ) {
+        return new LocalAgentToolExecution(
+                requestId,
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                LocalAgentApprovalState.APPROVED,
+                status,
+                Map.of(
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "releaseAttemptId", releaseAttemptId.toString(),
+                        "mutationAllowed", true,
+                        "dryRunOnly", false
+                ),
+                output,
+                null,
+                null,
+                List.of("approved execution-flow read model"),
+                List.of("approved execution-flow response"),
+                OffsetDateTime.now().minusSeconds(2),
+                OffsetDateTime.now().minusSeconds(1),
+                finishedAt
         );
     }
 }

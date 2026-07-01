@@ -122,6 +122,42 @@ public class LocalAgentToolExecutionRepository {
         return executions.stream().findFirst();
     }
 
+    public List<LocalAgentToolExecution> findCompletedApprovedExecutionFlowRowsForReleaseAttempt(
+            UUID userId,
+            UUID releaseAttemptId
+    ) {
+        return jdbc.query("""
+                SELECT id, session_id, user_id, agent_id, workspace_id, execution_target, tool_name,
+                       approval_state, status, input::text, output::text, failure_code, error,
+                       request_warnings::text, response_warnings::text, created_at, started_at, finished_at
+                FROM (
+                    SELECT DISTINCT ON (tool_name)
+                           id, session_id, user_id, agent_id, workspace_id, execution_target, tool_name,
+                           approval_state, status, input, output, failure_code, error,
+                           request_warnings, response_warnings, created_at, started_at, finished_at
+                    FROM local_agent_tool_executions
+                    WHERE user_id = :userId
+                      AND input ->> 'releaseAttemptId' = :releaseAttemptId
+                      AND execution_target = 'USER_LOCAL_AGENT'
+                      AND approval_state = 'APPROVED'
+                      AND status IN ('SUCCEEDED', 'FAILED', 'REJECTED', 'TIMED_OUT', 'DISCONNECTED', 'CANCELLED')
+                      AND finished_at IS NOT NULL
+                      AND tool_name IN ('patch.apply', 'command.runAllowed', 'git.status', 'rollback.restore')
+                    ORDER BY tool_name, finished_at DESC NULLS LAST, created_at DESC
+                ) latest
+                ORDER BY CASE tool_name
+                    WHEN 'patch.apply' THEN 1
+                    WHEN 'command.runAllowed' THEN 2
+                    WHEN 'git.status' THEN 3
+                    WHEN 'rollback.restore' THEN 4
+                    ELSE 99
+                END
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("releaseAttemptId", releaseAttemptId.toString()),
+                this::mapExecution);
+    }
+
     public Optional<Map<String, Object>> findLatestRepositoryVerificationForSourceRequest(UUID userId, UUID sourceRequestId) {
         List<Map<String, Object>> results = jdbc.query("""
                 SELECT output -> 'repositoryVerification' AS repository_verification

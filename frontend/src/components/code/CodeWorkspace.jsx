@@ -59,6 +59,7 @@ import { buildDryRunResultSummaryView } from './dryRunResultSummary.js';
 import { buildDryRunPatchFilesSummaryView } from './dryRunPatchFilesSummary.js';
 import { buildAgentLoopPreviewSummaryView } from './agentLoopPreviewSummary.js';
 import { buildAgentLoopTimelineHistoryView } from './agentLoopTimelineSummary.js';
+import { buildApprovedExecutionFlowInspectionView } from './approvedExecutionFlowInspectionSummary.js';
 
 function CodeWorkspace(props) {
   const {
@@ -90,6 +91,7 @@ function CodeWorkspace(props) {
     codeAgentLocalPatchDryRunResult,
     codeAgentLocalRepositoryObservationRequest,
     codeAgentLocalRepositoryObservationResult,
+    codeAgentApprovedExecutionFlowInspection,
     localAgentStatus,
     codeConversations = [],
     codeConversationId = '',
@@ -117,6 +119,7 @@ function CodeWorkspace(props) {
     refreshCodeAgentLocalPatchDryRunResult = () => {},
     queueCodeAgentLocalRepositoryObservation = () => {},
     refreshCodeAgentLocalRepositoryObservationResult = () => {},
+    inspectCodeAgentApprovedExecutionFlow = () => {},
     refreshLocalAgentStatus = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
@@ -215,6 +218,7 @@ function CodeWorkspace(props) {
           localPatchDryRunResult={codeAgentLocalPatchDryRunResult}
           localRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
           localRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
+          approvedExecutionFlowInspection={codeAgentApprovedExecutionFlowInspection}
           localAgentStatus={localAgentStatus}
           localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
@@ -231,6 +235,7 @@ function CodeWorkspace(props) {
           onRefreshLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
           onQueueLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
           onRefreshLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
+          onInspectApprovedExecutionFlow={inspectCodeAgentApprovedExecutionFlow}
           onRefreshLocalAgent={refreshLocalAgentStatus}
           onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
           onRevokeLocalAgentToken={props.revokeLocalAgentToken}
@@ -367,6 +372,7 @@ function CodeAgentPanel({
   localPatchDryRunResult,
   localRepositoryObservationRequest,
   localRepositoryObservationResult,
+  approvedExecutionFlowInspection,
   localAgentStatus,
   localAgentTokens = [],
   selectedRepositoryId = '',
@@ -383,6 +389,7 @@ function CodeAgentPanel({
   onRefreshLocalPatchDryRunResult = () => {},
   onQueueLocalRepositoryObservation = () => {},
   onRefreshLocalRepositoryObservationResult = () => {},
+  onInspectApprovedExecutionFlow = () => {},
   onRefreshLocalAgent = () => {},
   onRefreshLocalAgentTokens = () => {},
   onRevokeLocalAgentToken = () => {},
@@ -677,6 +684,19 @@ function CodeAgentPanel({
   const readinessMutationResultCompletionBoundaryView = buildMutationResultCompletionBoundaryView(
     readinessMutationResultCompletionBoundary
   );
+  const approvedExecutionFlowRequestIds = visibleReadiness?.approvedExecutionFlowRequestIds
+    || readinessReleaseAttemptModel?.latestAttempt?.approvedExecutionFlowRequestIds
+    || readinessReleaseAttemptModel?.latestAttempt?.approvedExecutionFlowInspectionRequestIds
+    || [];
+  const approvedExecutionFlowReleaseAttemptId = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptId
+    || readinessReleaseAttemptModel?.latestAttempt?.id
+    || visibleReadiness?.releaseAttemptId
+    || null;
+  const approvedExecutionFlowInspectionKey = approvedExecutionFlowReleaseAttemptId
+    || (Array.isArray(approvedExecutionFlowRequestIds) ? approvedExecutionFlowRequestIds.join('-') : '');
+  const canInspectApprovedExecutionFlow = Boolean(approvedExecutionFlowInspectionKey)
+    && !loading(`code-agent-approved-execution-flow-inspection-${approvedExecutionFlowInspectionKey}`);
+  const approvedExecutionFlowInspectionView = buildApprovedExecutionFlowInspectionView(approvedExecutionFlowInspection);
   const readinessReleaseBoundaryVisibility = localPatchRequest?.status === 'APPROVED_HELD'
     ? {
         status: 'RELEASE_REFUSAL_ONLY_VISIBLE',
@@ -1097,6 +1117,16 @@ function CodeAgentPanel({
                       Release Local Agent patch disabled
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!canInspectApprovedExecutionFlow}
+                    onClick={() => onInspectApprovedExecutionFlow(approvedExecutionFlowRequestIds)}
+                    title="Inspects already-completed approved Local Agent rows only. It does not create, push, claim, complete, or mutate."
+                  >
+                    {loading(`code-agent-approved-execution-flow-inspection-${approvedExecutionFlowInspectionKey}`) ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
+                    Inspect approved flow
+                  </button>
                 </div>
               )}
               {localPatchDryRunRequest && (
@@ -1155,6 +1185,22 @@ function CodeAgentPanel({
                         <span>{readinessReleaseAttemptDisplaySummaryView.whyDisabledText}</span>
                       )}
                       {readinessReleaseAttemptDisplaySummaryView.message && <span>{readinessReleaseAttemptDisplaySummaryView.message}</span>}
+                    </div>
+                  )}
+                  {approvedExecutionFlowInspectionView.show && (
+                    <div className="failure-item">
+                      <strong>{approvedExecutionFlowInspectionView.headerText}</strong>
+                      <span>{approvedExecutionFlowInspectionView.stateText}</span>
+                      <span>{approvedExecutionFlowInspectionView.disabledText}</span>
+                      {approvedExecutionFlowInspectionView.requestText && (
+                        <span>{approvedExecutionFlowInspectionView.requestText}</span>
+                      )}
+                      {approvedExecutionFlowInspectionView.stepLines.map((line) => (
+                        <span key={`approved-execution-flow-${line}`}>{line}</span>
+                      ))}
+                      {approvedExecutionFlowInspectionView.message && (
+                        <span>{approvedExecutionFlowInspectionView.message}</span>
+                      )}
                     </div>
                   )}
                   {readinessRepositoryVerificationSummaryView.show && (
@@ -2091,6 +2137,7 @@ function CodeAgentPanel({
                       {readinessMutationCompletionSummaryView.show && (
                         <>
                           <span>{readinessMutationCompletionSummaryView.headerText}</span>
+                          <span>{readinessMutationCompletionSummaryView.idsText}</span>
                           {readinessMutationCompletionSummaryView.sourceContextText && (
                             <span>{readinessMutationCompletionSummaryView.sourceContextText}</span>
                           )}
@@ -2111,6 +2158,7 @@ function CodeAgentPanel({
                       {readinessMutationHandoffSummaryView.show && (
                         <>
                           <span>{readinessMutationHandoffSummaryView.headerText}</span>
+                          <span>{readinessMutationHandoffSummaryView.idsText}</span>
                           {readinessMutationHandoffSummaryView.sourceContextText && (
                             <span>{readinessMutationHandoffSummaryView.sourceContextText}</span>
                           )}
@@ -2129,6 +2177,7 @@ function CodeAgentPanel({
                       {readinessMutationExecutionReadinessBoundaryView.show && (
                         <>
                           <span>{readinessMutationExecutionReadinessBoundaryView.headerText}</span>
+                          <span>{readinessMutationExecutionReadinessBoundaryView.idsText}</span>
                           {readinessMutationExecutionReadinessBoundaryView.sourceText && (
                             <span>{readinessMutationExecutionReadinessBoundaryView.sourceText}</span>
                           )}

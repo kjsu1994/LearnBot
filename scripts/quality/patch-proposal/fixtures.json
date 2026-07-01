@@ -1,0 +1,32 @@
+{
+  "schema": "learnbot.quality.patch-proposal-fixtures.v1",
+  "cases": [
+    {
+      "id": "local-agent-approved-single-file-patch",
+      "goal": "Require Local Agent smoke contract coverage in the quality harness.",
+      "expectedExecutionTarget": "USER_LOCAL_AGENT",
+      "requiredEvidenceIds": ["evidence-local-agent-smoke-contract"],
+      "requiredFiles": ["scripts/quality/run-regression-harness.ps1"],
+      "forbiddenFiles": ["backend/src/main/resources/application.yml", ".env"],
+      "allowedTestCommands": [
+        "node scripts\\quality\\regression-harness\\assert-quality-report.test.mjs",
+        "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\quality\\local-agent-smoke\\assert-local-agent-smoke-contract.ps1"
+      ],
+      "observed": {
+        "executionTarget": "USER_LOCAL_AGENT",
+        "approvalRequired": true,
+        "rollbackSnapshotRequired": true,
+        "evidenceIds": ["evidence-local-agent-smoke-contract"],
+        "files": [
+          {
+            "path": "scripts/quality/run-regression-harness.ps1",
+            "patch": "--- a/scripts/quality/run-regression-harness.ps1\n+++ b/scripts/quality/run-regression-harness.ps1\n@@ -1,3 +1,4 @@\n existing\n+local-agent-live-smoke-contract\n"
+          }
+        ],
+        "testCommands": [
+          "node scripts\\quality\\regression-harness\\assert-quality-report.test.mjs"
+        ]
+      }
+    }
+  ]
+}

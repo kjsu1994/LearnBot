@@ -151,6 +151,88 @@ class LocalAgentMutationResultClassifierTest {
                 .containsEntry("publicationEnabled", false);
     }
 
+    @Test
+    void summarizesApprovedExecutionFlowWithoutEnablingServerOrchestration() {
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> linkedInput = Map.of(
+                "sourceRequestId", sourceRequestId.toString(),
+                "releaseAttemptId", releaseAttemptId.toString(),
+                "mutationAllowed", true,
+                "dryRunOnly", false
+        );
+
+        Map<String, Object> summary = LocalAgentApprovedExecutionFlowContract.summarize(List.of(
+                new LocalAgentApprovedExecutionFlowContract.Step(
+                        response(sessionId, userId, agentId, workspaceId, UUID.randomUUID(), LocalAgentToolName.PATCH_APPLY, LocalAgentToolStatus.SUCCEEDED, Map.of(
+                                "mutationApplied", true,
+                                "snapshotManifestId", "snap-1",
+                                "rollbackAvailable", true
+                        ), null),
+                        linkedInput
+                ),
+                new LocalAgentApprovedExecutionFlowContract.Step(
+                        response(sessionId, userId, agentId, workspaceId, UUID.randomUUID(), LocalAgentToolName.COMMAND_RUN_ALLOWED, LocalAgentToolStatus.SUCCEEDED, Map.of(
+                                "commandId", "maven.backend.test",
+                                "exitCode", 0
+                        ), null),
+                        linkedInput
+                ),
+                new LocalAgentApprovedExecutionFlowContract.Step(
+                        response(sessionId, userId, agentId, workspaceId, UUID.randomUUID(), LocalAgentToolName.GIT_STATUS, LocalAgentToolStatus.SUCCEEDED, Map.of(
+                                "clean", false,
+                                "branch", "main"
+                        ), null),
+                        linkedInput
+                ),
+                new LocalAgentApprovedExecutionFlowContract.Step(
+                        response(sessionId, userId, agentId, workspaceId, UUID.randomUUID(), LocalAgentToolName.ROLLBACK_RESTORE, LocalAgentToolStatus.SUCCEEDED, Map.of(
+                                "restored", true,
+                                "manifestId", "snap-1"
+                        ), null),
+                        linkedInput
+                )
+        ));
+
+        assertThat(summary)
+                .containsEntry("schema", "learnbot.local-agent.approved-execution-flow-contract.v1")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("stepCount", 4)
+                .containsEntry("ordered", true)
+                .containsEntry("identityConsistent", true)
+                .containsEntry("releaseAttemptLinked", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("mutationAllowedForFollowup", false)
+                .containsEntry("readyForServerOrchestration", false);
+        assertThat(summary.get("expectedToolOrder"))
+                .asList()
+                .containsExactly("patch.apply", "command.runAllowed", "git.status", "rollback.restore");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) summary.get("steps");
+        assertThat(steps)
+                .extracting(step -> step.get("toolName"))
+                .containsExactly("patch.apply", "command.runAllowed", "git.status", "rollback.restore");
+        assertThat(steps)
+                .extracting(step -> step.get("verificationStatus"))
+                .containsExactly("APPLIED", "PASSED", "OBSERVED", "RESTORED");
+        assertThat(steps)
+                .extracting(step -> step.get("acceptanceStatus"))
+                .containsExactly("ACCEPTED", "ACCEPTED", "ACCEPTED", "ACCEPTED");
+        assertThat(steps)
+                .allSatisfy(step -> assertThat(step)
+                        .containsEntry("resultIntakeEnabled", false)
+                        .containsEntry("acknowledgementSaveEnabled", false)
+                        .containsEntry("mutationAllowedForFollowup", false));
+    }
+
     private LocalAgentToolResponse response(
             UUID requestId,
             LocalAgentToolName toolName,
@@ -158,12 +240,26 @@ class LocalAgentMutationResultClassifierTest {
             Map<String, Object> output,
             LocalAgentFailureCode failureCode
     ) {
+        return response(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), requestId, toolName, status, output, failureCode);
+    }
+
+    private LocalAgentToolResponse response(
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            UUID requestId,
+            LocalAgentToolName toolName,
+            LocalAgentToolStatus status,
+            Map<String, Object> output,
+            LocalAgentFailureCode failureCode
+    ) {
         return new LocalAgentToolResponse(
-                UUID.randomUUID(),
+                sessionId,
                 requestId,
-                UUID.randomUUID(),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
                 AgentExecutionTarget.USER_LOCAL_AGENT,
                 toolName,
                 status,

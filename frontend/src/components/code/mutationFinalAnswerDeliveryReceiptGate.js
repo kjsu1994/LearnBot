@@ -239,6 +239,9 @@ function deliveryReceiptIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }

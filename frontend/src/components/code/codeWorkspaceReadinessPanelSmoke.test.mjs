@@ -136,6 +136,10 @@ const mutationExecutionReadinessBoundary = {
   status: 'REFUSED_EXECUTION_READINESS_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceHandoffSummaryStatus: 'READY_HANDOFF_DISABLED',
   sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
   sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
@@ -1931,6 +1935,10 @@ const mutationCompletionSummary = {
   status: 'READY_COMPLETION_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceFinalAnswerDeliveryReceiptGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED',
   sourceFinalAnswerDeliveryReceiptGateAcknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
   sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled: false,
@@ -2116,6 +2124,10 @@ const mutationHandoffSummary = {
   status: 'READY_HANDOFF_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceCompletionSummaryStatus: 'READY_COMPLETION_DISABLED',
   sourceCompletionSummaryDeliveryReceiptGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED',
   sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
@@ -3751,6 +3763,7 @@ try {
       output: invalidSnapshotDryRunOutput,
     },
     readinessOverrides: {
+      approvedExecutionFlowRequestIds: ['patch-flow-1', 'command-flow-1', 'status-flow-1', 'rollback-flow-1'],
       snapshotReadiness: {
         status: 'INVALID',
         dryRun: true,
@@ -3788,6 +3801,44 @@ try {
           message: 'Latest Local Agent dry-run must provide rollback restore preconditions before release can be considered.',
         },
       ],
+    },
+    approvedExecutionFlowInspection: {
+      schema: 'learnbot.local-agent.approved-execution-flow-contract.v1',
+      repositoryBacked: true,
+      readModelOnly: true,
+      ordered: true,
+      identityConsistent: true,
+      releaseAttemptLinked: true,
+      allTerminal: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      resultIntakeEnabled: false,
+      acknowledgementSaveEnabled: false,
+      mutationAllowedForFollowup: false,
+      readyForServerOrchestration: false,
+      requestIds: ['patch-flow-1', 'command-flow-1', 'status-flow-1', 'rollback-flow-1'],
+      steps: [
+        {
+          index: 0,
+          toolName: 'patch.apply',
+          status: 'SUCCEEDED',
+          verificationStatus: 'APPLIED',
+          acceptanceStatus: 'ACCEPTED',
+          accepted: true,
+          requestId: 'patch-flow-1',
+        },
+        {
+          index: 1,
+          toolName: 'command.runAllowed',
+          status: 'SUCCEEDED',
+          verificationStatus: 'PASSED',
+          acceptanceStatus: 'ACCEPTED',
+          accepted: true,
+          requestId: 'command-flow-1',
+        },
+      ],
+      message: 'Approved Local Agent execution-flow rows were inspected as a read-only service model.',
     },
   });
   assert.equal(assertNoForbiddenTrueFlags(invalidSnapshotLatestAttempt), true);
@@ -3973,6 +4024,7 @@ try {
   assert.match(markup, /final-answer delivery receipt policy acknowledgementSave: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ write helper false \/ claimable false \/ mutation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ receipt false \/ acknowledgement save false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ No acknowledgement may be saved while acknowledgement save is disabled/);
   assert.match(markup, /mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, acknowledgementSave, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
   assert.match(markup, /mutation completion summary: READY_COMPLETION_DISABLED \/ learnbot\.local-agent\.mutation-completion-summary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ receipt REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED \/ acknowledgement DISABLED_AUDIT_ONLY \/ acknowledgement save false/);
+  assert.match(markup, /mutation completion summary ids: session session-1 \/ user user-1 \/ agent agent-1 \/ workspace workspace-1/);
   assert.match(markup, /mutation completion source context: publication gate REFUSED_PUBLICATION_DISABLED \/ publication schema learnbot\.local-agent\.mutation-publication-gate\.v1 \/ publication session session-1 \/ publication user user-1 \/ publication agent agent-1 \/ publication workspace workspace-1 \/ publication READY_PUBLICATION_DISABLED \/ draft READY_DRAFT_DISABLED \/ observations 2 \/ accepted 2 \/ rejected 0 \/ missing result risk false \/ stale index risk true \/ publication observations OBSERVED \/ publication count 2 \/ publication accepted 2 \/ publication rejected 0 \/ publication missing result risk false \/ publication stale index risk true \/ publication latest ACCEPTED \/ publication tool patch\.apply \/ publication verification PASSED \/ publication rollback summary observations OBSERVED \/ publication rollback summary count 2 \/ publication rollback summary accepted 2 \/ publication rollback summary rejected 0 \/ publication rollback summary missing result risk false \/ publication rollback summary stale index risk true/);
   assert.match(markup, /mutation completion disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ claimable false \/ mutation false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
   assert.match(markup, /releaseAttemptReadiness: READY \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false/);
@@ -3982,6 +4034,7 @@ try {
   assert.match(markup, /acknowledgementSaveRefusal: DISABLED_AUDIT_ONLY \/ passed true \/ blocking false \/ release gate false \/ request creation false \/ push false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false \/ Future acknowledgement save must remain explicitly refused until final-answer delivery receipt is enabled/);
   assert.match(markup, /Local Agent mutation completion prerequisites are modeled, but execution, aggregation, publication, and final-answer generation remain disabled/);
   assert.match(markup, /mutation handoff summary: READY_HANDOFF_DISABLED \/ learnbot\.local-agent\.mutation-handoff-summary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ completion READY_COMPLETION_DISABLED \/ receipt REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED \/ acknowledgement DISABLED_AUDIT_ONLY \/ acknowledgement save false/);
+  assert.match(markup, /mutation handoff summary ids: session session-1 \/ user user-1 \/ agent agent-1 \/ workspace workspace-1/);
   assert.match(markup, /mutation handoff source context: publication gate REFUSED_PUBLICATION_DISABLED \/ publication schema learnbot\.local-agent\.mutation-publication-gate\.v1 \/ publication session session-1 \/ publication user user-1 \/ publication agent agent-1 \/ publication workspace workspace-1 \/ publication READY_PUBLICATION_DISABLED \/ draft READY_DRAFT_DISABLED \/ observations 2 \/ accepted 2 \/ rejected 0 \/ missing result risk false \/ stale index risk true \/ publication observations OBSERVED \/ publication count 2 \/ publication accepted 2 \/ publication rejected 0 \/ publication missing result risk false \/ publication stale index risk true \/ publication latest ACCEPTED \/ publication tool patch\.apply \/ publication verification PASSED \/ publication rollback summary observations OBSERVED \/ publication rollback summary count 2 \/ publication rollback summary accepted 2 \/ publication rollback summary rejected 0 \/ publication rollback summary missing result risk false \/ publication rollback summary stale index risk true/);
   assert.match(markup, /mutation handoff disabled: release gate false \/ request creation false \/ push false \/ claim false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ completion false \/ delivery false \/ persistence false \/ conversation save false \/ user-visible completion false \/ final response handoff false \/ delivery handoff false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /handoff dispatchDecision: MODELED_DISABLED \/ source mutationDispatchDecisionModel \/ passed true \/ request creation false \/ push false \/ claim false \/ execution false \/ result intake false \/ final response false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
@@ -3991,6 +4044,7 @@ try {
   assert.match(markup, /mutation handoff blocking keys: releaseGateEnabled, requestCreationEnabled, pushEnabled, claimEnabled, mutationAllowed/);
   assert.match(markup, /Local Agent mutation handoff prerequisites are modeled, but all handoff controls remain disabled/);
   assert.match(markup, /mutation execution readiness: REFUSED_EXECUTION_READINESS_DISABLED \/ learnbot\.local-agent\.mutation-execution-readiness-boundary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ expected 4 \/ completed 0/);
+  assert.match(markup, /mutation execution readiness ids: session session-1 \/ user user-1 \/ agent agent-1 \/ workspace workspace-1/);
   assert.match(markup, /mutation execution readiness sources: handoff READY_HANDOFF_DISABLED \/ execution gate REFUSED_EXECUTION_DISABLED \/ write helper REFUSED_WRITE_HELPER_DISABLED/);
   assert.match(markup, /mutation execution readiness source context: publication gate REFUSED_PUBLICATION_DISABLED \/ publication schema learnbot\.local-agent\.mutation-publication-gate\.v1 \/ publication session session-1 \/ publication user user-1 \/ publication agent agent-1 \/ publication workspace workspace-1 \/ publication READY_PUBLICATION_DISABLED \/ draft READY_DRAFT_DISABLED \/ observations 2 \/ accepted 2 \/ rejected 0 \/ missing result risk false \/ stale index risk true \/ publication observations OBSERVED \/ publication count 2 \/ publication accepted 2 \/ publication rejected 0 \/ publication missing result risk false \/ publication stale index risk true \/ publication latest ACCEPTED \/ publication tool patch\.apply \/ publication verification PASSED \/ publication rollback summary observations OBSERVED \/ publication rollback summary count 2 \/ publication rollback summary accepted 2 \/ publication rollback summary rejected 0 \/ publication rollback summary missing result risk false \/ publication rollback summary stale index risk true/);
   assert.match(markup, /mutation execution readiness disabled: release gate false \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ rag freshness false \/ result aggregation false \/ publication false \/ final answer false \/ final response handoff false \/ receipt false \/ acknowledgement save false \/ claimable false \/ mutation false/);
@@ -3999,6 +4053,12 @@ try {
   assert.match(markup, /execution readiness sideEffectTransport: DISABLED \/ passed false \/ blocking true \/ request creation false \/ push false \/ claim false \/ execution false \/ tool runner false \/ write helper false \/ apply false \/ test false \/ rollback restore false \/ result intake false \/ acknowledgement save false \/ claimable false \/ mutation false/);
   assert.match(markup, /mutation execution readiness blocking keys: runtimeExecutionSwitch, sideEffectTransport, releaseGateEnabled, requestCreationEnabled, pushEnabled, claimEnabled, executionEnabled, writeHelperEnabled, applyEnabled, testEnabled, rollbackRestoreEnabled, resultIntakeEnabled, mutationAllowed/);
   assert.match(markup, /Local Agent mutation execution inputs are modeled, but runtime execution remains disabled/);
+  assert.match(markup, /approved execution flow inspection: learnbot\.local-agent\.approved-execution-flow-contract\.v1/);
+  assert.match(markup, /ordered true \/ identity true \/ release linked true \/ terminal true \/ repository backed true \/ read model true/);
+  assert.match(markup, /approved flow controls disabled: request creation false \/ push false \/ claim false \/ result intake false \/ acknowledgement save false \/ follow-up mutation false \/ server orchestration false/);
+  assert.match(markup, /approved flow request ids: patch-flow-1, command-flow-1, status-flow-1, rollback-flow-1/);
+  assert.match(markup, /0\. patch\.apply: SUCCEEDED \/ verification APPLIED \/ acceptance ACCEPTED \/ accepted true \/ request patch-flow-1/);
+  assert.match(markup, /Approved Local Agent execution-flow rows were inspected as a read-only service model/);
   assert.match(markup, /mutation tool runner boundary: REFUSED_TOOL_RUNNER_DISABLED \/ learnbot\.local-agent\.mutation-tool-runner-boundary\.v1 \/ prerequisites true \/ USER_LOCAL_AGENT \/ expected 4 \/ running 0 \/ completed 0/);
   assert.match(markup, /mutation tool runner sources: execution readiness REFUSED_EXECUTION_READINESS_DISABLED \/ execution gate REFUSED_EXECUTION_DISABLED \/ runner policy DISABLED_AUDIT_ONLY/);
   assert.match(markup, /mutation tool runner source context: publication gate REFUSED_PUBLICATION_DISABLED \/ publication schema learnbot\.local-agent\.mutation-publication-gate\.v1 \/ publication session session-1 \/ publication user user-1 \/ publication agent agent-1 \/ publication workspace workspace-1 \/ publication READY_PUBLICATION_DISABLED \/ draft READY_DRAFT_DISABLED \/ observations 2 \/ accepted 2 \/ rejected 0 \/ missing result risk false \/ stale index risk true \/ publication observations OBSERVED \/ publication count 2 \/ publication accepted 2 \/ publication rejected 0 \/ publication missing result risk false \/ publication stale index risk true \/ publication latest ACCEPTED \/ publication tool patch\.apply \/ publication verification PASSED \/ publication rollback summary observations OBSERVED \/ publication rollback summary count 2 \/ publication rollback summary accepted 2 \/ publication rollback summary rejected 0 \/ publication rollback summary missing result risk false \/ publication rollback summary stale index risk true/);

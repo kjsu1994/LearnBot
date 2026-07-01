@@ -1,0 +1,13 @@
+{
+  "schema": "learnbot.quality.indexing-live-seed-manifest.v1",
+  "document": {
+    "jobId": "replace-with-document-indexing-job-id"
+  },
+  "code": {
+    "repositoryId": "replace-with-code-repository-id",
+    "jobId": "replace-with-code-indexing-job-id"
+  },
+  "crawler": {
+    "documentId": "replace-with-crawled-document-id"
+  }
+}

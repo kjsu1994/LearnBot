@@ -6,6 +6,10 @@ const view = buildMutationHandoffSummaryView({
   status: 'READY_HANDOFF_DISABLED',
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
+  sessionId: 'session-1',
+  userId: 'user-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
   sourceCompletionSummaryStatus: 'READY_COMPLETION_DISABLED',
   sourceCompletionSummaryDeliveryReceiptGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED',
   sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
@@ -137,6 +141,10 @@ assert.equal(view.show, true);
 assert.equal(
   view.headerText,
   'mutation handoff summary: READY_HANDOFF_DISABLED / learnbot.local-agent.mutation-handoff-summary.v1 / prerequisites true / USER_LOCAL_AGENT / completion READY_COMPLETION_DISABLED / receipt REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / acknowledgement DISABLED_AUDIT_ONLY / acknowledgement save false'
+);
+assert.equal(
+  view.idsText,
+  'mutation handoff summary ids: session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.sourceContextText,
