@@ -7,6 +7,37 @@ const view = buildMutationHandoffSummaryView({
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
   sourceCompletionSummaryStatus: 'READY_COMPLETION_DISABLED',
+  sourceCompletionSummaryDeliveryReceiptGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED',
+  sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
+  sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled: false,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId: 'session-1',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId: 'user-1',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId: 'agent-1',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationRejectedCount: 0,
+  sourceCompletionSummaryDeliveryReceiptGateMissingMutationResultRiskVisible: false,
+  sourceCompletionSummaryDeliveryReceiptGateStaleIndexRiskVisible: true,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible: false,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible: true,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   disabledControls: {
     releaseGateEnabled: false,
     requestCreationEnabled: false,
@@ -81,6 +112,22 @@ const view = buildMutationHandoffSummaryView({
       claimable: false,
       mutationAllowed: false,
     },
+    {
+      key: 'acknowledgementSave',
+      sourceGateKey: 'mutationFinalAnswerDeliveryReceiptGate',
+      status: 'MODELED_DISABLED',
+      passed: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      resultIntakeEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+    },
   ],
   blockingKeys: ['releaseGateEnabled', 'requestCreationEnabled', 'pushEnabled', 'claimEnabled', 'mutationAllowed'],
   message: 'Local Agent mutation handoff prerequisites are modeled, but all handoff controls remain disabled.',
@@ -89,7 +136,11 @@ const view = buildMutationHandoffSummaryView({
 assert.equal(view.show, true);
 assert.equal(
   view.headerText,
-  'mutation handoff summary: READY_HANDOFF_DISABLED / learnbot.local-agent.mutation-handoff-summary.v1 / prerequisites true / USER_LOCAL_AGENT / completion READY_COMPLETION_DISABLED'
+  'mutation handoff summary: READY_HANDOFF_DISABLED / learnbot.local-agent.mutation-handoff-summary.v1 / prerequisites true / USER_LOCAL_AGENT / completion READY_COMPLETION_DISABLED / receipt REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / acknowledgement DISABLED_AUDIT_ONLY / acknowledgement save false'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation handoff source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication READY_PUBLICATION_DISABLED / draft READY_DRAFT_DISABLED / observations 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,
@@ -99,6 +150,7 @@ assert.deepEqual(view.stageLines, [
   'handoff dispatchDecision: MODELED_DISABLED / source mutationDispatchDecisionModel / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
   'handoff finalResponse: MODELED_DISABLED / source mutationFinalResponseHandoffGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
   'handoff deliveryReceipt: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
+  'handoff acknowledgementSave: MODELED_DISABLED / source mutationFinalAnswerDeliveryReceiptGate / passed true / request creation false / push false / claim false / execution false / result intake false / final response false / receipt false / acknowledgement save false / claimable false / mutation false',
 ]);
 assert.equal(
   view.blockingText,

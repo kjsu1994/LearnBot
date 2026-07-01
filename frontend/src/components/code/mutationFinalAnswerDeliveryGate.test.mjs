@@ -13,6 +13,37 @@ const view = buildMutationFinalAnswerDeliveryGateView({
   acknowledgementSaveEnabled: false,
   sourceFinalResponseHandoffGateStatus: 'REFUSED_FINAL_RESPONSE_HANDOFF_DISABLED',
   sourceFinalResponseHandoffGateSchema: 'learnbot.local-agent.mutation-final-response-handoff-gate.v1',
+  sourceFinalResponseHandoffGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceFinalResponseHandoffGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceFinalResponseHandoffGatePublicationGateSessionId: 'session-1',
+  sourceFinalResponseHandoffGatePublicationGateUserId: 'user-1',
+  sourceFinalResponseHandoffGatePublicationGateAgentId: 'agent-1',
+  sourceFinalResponseHandoffGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceFinalResponseHandoffGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceFinalResponseHandoffGatePublicationBoundaryPrerequisitesPassed: true,
+  sourceFinalResponseHandoffGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceFinalResponseHandoffGatePublicationBoundaryDraftSections: ['changedFiles', 'verificationOutcome', 'rollbackState', 'ragFreshnessState'],
+  sourceFinalResponseHandoffGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalResponseHandoffGateAcceptedObservationCount: 2,
+  sourceFinalResponseHandoffGateAcceptedObservationAcceptedCount: 2,
+  sourceFinalResponseHandoffGateAcceptedObservationRejectedCount: 0,
+  sourceFinalResponseHandoffGateMissingMutationResultRiskVisible: false,
+  sourceFinalResponseHandoffGateStaleIndexRiskVisible: true,
+  sourceFinalResponseHandoffGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalResponseHandoffGatePublicationAcceptedObservationCount: 2,
+  sourceFinalResponseHandoffGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceFinalResponseHandoffGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceFinalResponseHandoffGatePublicationMissingMutationResultRiskVisible: false,
+  sourceFinalResponseHandoffGatePublicationStaleIndexRiskVisible: true,
+  sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
@@ -209,6 +240,10 @@ assert.equal(
 assert.equal(
   view.countsText,
   'mutation final-answer delivery counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation final-answer delivery source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication boundary READY_PUBLICATION_DISABLED / publication prerequisites true / draft READY_DRAFT_DISABLED / sections changedFiles, verificationOutcome, rollbackState, ragFreshnessState / observations OBSERVED / observed 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

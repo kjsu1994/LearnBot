@@ -40,6 +40,12 @@ class LocalAgentFinalAnswerDeliveryReceiptGateBuilder {
                         "No delivery receipt may be recorded while delivery receipt is disabled."
                 ),
                 policyCheck(
+                        "acknowledgementSave",
+                        false,
+                        "DISABLED",
+                        "No acknowledgement may be saved while acknowledgement save is disabled."
+                ),
+                policyCheck(
                         "finalAnswerDelivery",
                         false,
                         "DISABLED",
@@ -81,7 +87,40 @@ class LocalAgentFinalAnswerDeliveryReceiptGateBuilder {
         result.put("sourceFinalAnswerDeliveryGateUserId", mutationFinalAnswerDeliveryGate.get("userId"));
         result.put("sourceFinalAnswerDeliveryGateAgentId", mutationFinalAnswerDeliveryGate.get("agentId"));
         result.put("sourceFinalAnswerDeliveryGateWorkspaceId", mutationFinalAnswerDeliveryGate.get("workspaceId"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateSchema", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateSchema"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateSessionId", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateSessionId"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateUserId", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateUserId"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateAgentId", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateAgentId"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationGateWorkspaceId", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateWorkspaceId"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationBoundaryStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationBoundaryPrerequisitesPassed", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryPrerequisitesPassed"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryDraftStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftSections", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryDraftSections"));
+        result.put("sourceFinalAnswerDeliveryGateAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryGateAcceptedObservationCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationCount"));
+        result.put("sourceFinalAnswerDeliveryGateAcceptedObservationAcceptedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryGateAcceptedObservationRejectedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryGateMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryGateStaleIndexRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateStaleIndexRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationAcceptedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationRejectedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationStaleIndexRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationStaleIndexRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationToolName", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationToolName"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationVerificationStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationVerificationStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryObservationCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryObservationCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryRejectedCount", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", mutationFinalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"));
         result.put("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY");
+        result.put("acknowledgementSavePolicy", "DISABLED_AUDIT_ONLY");
+        result.put("acknowledgementSaveReady", false);
         result.put("deliveryReceiptEnabled", false);
         result.put("acknowledgementSaveEnabled", false);
         result.put("finalAnswerDeliveryEnabled", false);

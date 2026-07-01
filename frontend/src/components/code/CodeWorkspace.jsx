@@ -16,7 +16,9 @@ import { buildMutationResultCompletionBoundaryView } from './mutationResultCompl
 import { buildMutationResultIntakePersistenceGateView } from './mutationResultIntakePersistenceGate.js';
 import { buildMutationRollbackFallbackGateView } from './mutationRollbackFallbackGate.js';
 import { buildMutationRagFreshnessGateView } from './mutationRagFreshnessGate.js';
+import { buildAcceptedMutationObservationSummaryText } from './mutationObservationSummary.js';
 import { buildMutationResultAggregationGateView } from './mutationResultAggregationGate.js';
+import { buildMutationFinalReportDraftView } from './mutationFinalReportDraft.js';
 import { buildMutationPublicationGateView } from './mutationPublicationGate.js';
 import { buildMutationFinalAnswerGenerationGateView } from './mutationFinalAnswerGenerationGate.js';
 import { buildMutationFinalAnswerCompletionGateView } from './mutationFinalAnswerCompletionGate.js';
@@ -491,6 +493,11 @@ function CodeAgentPanel({
   const readinessMutationResultAggregationSteps = Array.isArray(readinessMutationResultAggregationPlan?.steps)
     ? readinessMutationResultAggregationPlan.steps
     : [];
+  const readinessFinalMutationReportDraft =
+    readinessReleaseAttemptModel?.latestAttempt?.finalMutationReportDraft || null;
+  const readinessFinalMutationReportDraftView = buildMutationFinalReportDraftView(
+    readinessFinalMutationReportDraft
+  );
   const readinessFinalMutationReportContract = readinessReleaseAttemptModel?.latestAttempt?.finalMutationReportContract || null;
   const readinessFinalMutationReportSections = Array.isArray(readinessFinalMutationReportContract?.requiredSections)
     ? readinessFinalMutationReportContract.requiredSections
@@ -500,6 +507,11 @@ function CodeAgentPanel({
     : [];
   const readinessFinalMutationReportFinalizationBoundary =
     readinessReleaseAttemptModel?.latestAttempt?.finalMutationReportFinalizationBoundary || null;
+  const readinessFinalMutationReportFinalizationObservationSummaryText =
+    buildAcceptedMutationObservationSummaryText(
+      readinessFinalMutationReportFinalizationBoundary,
+      'final report finalization accepted observations'
+    );
   const readinessFinalMutationReportFinalizationRequirements = Array.isArray(
     readinessFinalMutationReportFinalizationBoundary?.requirements
   )
@@ -507,6 +519,11 @@ function CodeAgentPanel({
     : [];
   const readinessFinalAnswerPublicationBoundary =
     readinessReleaseAttemptModel?.latestAttempt?.finalAnswerPublicationBoundary || null;
+  const readinessFinalAnswerPublicationObservationSummaryText =
+    buildAcceptedMutationObservationSummaryText(
+      readinessFinalAnswerPublicationBoundary,
+      'final answer publication accepted observations'
+    );
   const readinessFinalAnswerPublicationRequirements = Array.isArray(
     readinessFinalAnswerPublicationBoundary?.requirements
   )
@@ -1370,6 +1387,24 @@ function CodeAgentPanel({
                           )}
                         </>
                       )}
+                      {readinessFinalMutationReportDraftView.show && (
+                        <>
+                          <span>{readinessFinalMutationReportDraftView.headerText}</span>
+                          {readinessFinalMutationReportDraftView.observationSummaryText && (
+                            <span>{readinessFinalMutationReportDraftView.observationSummaryText}</span>
+                          )}
+                          <span>{readinessFinalMutationReportDraftView.disabledText}</span>
+                          {readinessFinalMutationReportDraftView.sectionLines.map((line) => (
+                            <span key={`final-mutation-report-draft-${line}`}>{line}</span>
+                          ))}
+                          {readinessFinalMutationReportDraftView.blockingText && (
+                            <span>{readinessFinalMutationReportDraftView.blockingText}</span>
+                          )}
+                          {readinessFinalMutationReportDraftView.message && (
+                            <span>{readinessFinalMutationReportDraftView.message}</span>
+                          )}
+                        </>
+                      )}
                       {readinessFinalMutationReportContract && (
                         <>
                           <span>
@@ -1435,6 +1470,9 @@ function CodeAgentPanel({
                             {readinessFinalMutationReportFinalizationBoundary.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessFinalMutationReportFinalizationBoundary.ragFreshnessUpdateEnabled)}` : ''}
                             {readinessFinalMutationReportFinalizationBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessFinalMutationReportFinalizationBoundary.finalAnswerGenerationEnabled)}` : ''}
                           </span>
+                          {readinessFinalMutationReportFinalizationObservationSummaryText && (
+                            <span>{readinessFinalMutationReportFinalizationObservationSummaryText}</span>
+                          )}
                           {readinessFinalMutationReportFinalizationRequirements.map((item) => (
                             <span key={`final-report-finalization-${item.key}-${item.status || item.passed}`}>
                               {item.key}: {item.status || 'UNKNOWN'}
@@ -1464,6 +1502,7 @@ function CodeAgentPanel({
                             {readinessFinalAnswerPublicationBoundary.executionTarget ? ` / ${readinessFinalAnswerPublicationBoundary.executionTarget}` : ''}
                             {readinessFinalAnswerPublicationBoundary.finalMutationReportSchema ? ` / report ${readinessFinalAnswerPublicationBoundary.finalMutationReportSchema}` : ''}
                             {readinessFinalAnswerPublicationBoundary.aggregationPlanSchema ? ` / aggregation ${readinessFinalAnswerPublicationBoundary.aggregationPlanSchema}` : ''}
+                            {readinessFinalAnswerPublicationBoundary.finalMutationReportDraftStatus ? ` / draft ${readinessFinalAnswerPublicationBoundary.finalMutationReportDraftStatus}` : ''}
                           </span>
                           <span>
                             final answer publication disabled:
@@ -1482,8 +1521,14 @@ function CodeAgentPanel({
                             {readinessFinalAnswerPublicationBoundary.publicationEnabled !== undefined ? ` / publication ${String(readinessFinalAnswerPublicationBoundary.publicationEnabled)}` : ''}
                             {readinessFinalAnswerPublicationBoundary.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessFinalAnswerPublicationBoundary.finalAnswerGenerationEnabled)}` : ''}
                           </span>
+                          {readinessFinalAnswerPublicationObservationSummaryText && (
+                            <span>{readinessFinalAnswerPublicationObservationSummaryText}</span>
+                          )}
                           {!!readinessFinalAnswerPublicationBoundary.requiredReportSections?.length && (
                             <span>publication required report sections: {readinessFinalAnswerPublicationBoundary.requiredReportSections.join(', ')}</span>
+                          )}
+                          {!!readinessFinalAnswerPublicationBoundary.finalMutationReportDraftSections?.length && (
+                            <span>publication final report draft sections: {readinessFinalAnswerPublicationBoundary.finalMutationReportDraftSections.join(', ')}</span>
                           )}
                           {readinessFinalAnswerPublicationGuardrails.map((item, index) => (
                             <span key={`final-answer-publication-guardrail-${index}`}>publication guardrail: {item}</span>
@@ -1773,6 +1818,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationResultIntakePersistenceGateView.headerText}</span>
                           <span>{readinessMutationResultIntakePersistenceGateView.idsText}</span>
                           <span>{readinessMutationResultIntakePersistenceGateView.countsText}</span>
+                          {readinessMutationResultIntakePersistenceGateView.sourceContextText && (
+                            <span>{readinessMutationResultIntakePersistenceGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationResultIntakePersistenceGateView.disabledText}</span>
                           {readinessMutationResultIntakePersistenceGateView.policyLines.map((line) => (
                             <span key={`mutation-result-intake-persistence-policy-${line}`}>{line}</span>
@@ -1790,6 +1838,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationRollbackFallbackGateView.headerText}</span>
                           <span>{readinessMutationRollbackFallbackGateView.idsText}</span>
                           <span>{readinessMutationRollbackFallbackGateView.countsText}</span>
+                          {readinessMutationRollbackFallbackGateView.sourceContextText && (
+                            <span>{readinessMutationRollbackFallbackGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationRollbackFallbackGateView.disabledText}</span>
                           {readinessMutationRollbackFallbackGateView.policyLines.map((line) => (
                             <span key={`mutation-rollback-fallback-policy-${line}`}>{line}</span>
@@ -1807,6 +1858,12 @@ function CodeAgentPanel({
                           <span>{readinessMutationRagFreshnessGateView.headerText}</span>
                           <span>{readinessMutationRagFreshnessGateView.idsText}</span>
                           <span>{readinessMutationRagFreshnessGateView.countsText}</span>
+                          {readinessMutationRagFreshnessGateView.observationSummaryText && (
+                            <span>{readinessMutationRagFreshnessGateView.observationSummaryText}</span>
+                          )}
+                          {readinessMutationRagFreshnessGateView.sourceContextText && (
+                            <span>{readinessMutationRagFreshnessGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationRagFreshnessGateView.disabledText}</span>
                           {readinessMutationRagFreshnessGateView.policyLines.map((line) => (
                             <span key={`mutation-rag-freshness-policy-${line}`}>{line}</span>
@@ -1824,6 +1881,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationResultAggregationGateView.headerText}</span>
                           <span>{readinessMutationResultAggregationGateView.idsText}</span>
                           <span>{readinessMutationResultAggregationGateView.countsText}</span>
+                          {readinessMutationResultAggregationGateView.sourceContextText && (
+                            <span>{readinessMutationResultAggregationGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationResultAggregationGateView.disabledText}</span>
                           {readinessMutationResultAggregationGateView.policyLines.map((line) => (
                             <span key={`mutation-result-aggregation-policy-${line}`}>{line}</span>
@@ -1842,6 +1902,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationPublicationGateView.idsText}</span>
                           <span>{readinessMutationPublicationGateView.countsText}</span>
                           <span>{readinessMutationPublicationGateView.disabledText}</span>
+                          {readinessMutationPublicationGateView.sourceContextText && (
+                            <span>{readinessMutationPublicationGateView.sourceContextText}</span>
+                          )}
                           {readinessMutationPublicationGateView.policyLines.map((line) => (
                             <span key={`mutation-publication-policy-${line}`}>{line}</span>
                           ))}
@@ -1859,6 +1922,12 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerGenerationGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerGenerationGateView.countsText}</span>
                           <span>{readinessMutationFinalAnswerGenerationGateView.disabledText}</span>
+                          {readinessMutationFinalAnswerGenerationGateView.publicationContextText && (
+                            <span>{readinessMutationFinalAnswerGenerationGateView.publicationContextText}</span>
+                          )}
+                          {readinessMutationFinalAnswerGenerationGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerGenerationGateView.sourceContextText}</span>
+                          )}
                           {readinessMutationFinalAnswerGenerationGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-generation-policy-${line}`}>{line}</span>
                           ))}
@@ -1875,6 +1944,12 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerCompletionGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerCompletionGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerCompletionGateView.countsText}</span>
+                          {readinessMutationFinalAnswerCompletionGateView.generationContextText && (
+                            <span>{readinessMutationFinalAnswerCompletionGateView.generationContextText}</span>
+                          )}
+                          {readinessMutationFinalAnswerCompletionGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerCompletionGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerCompletionGateView.disabledText}</span>
                           {readinessMutationFinalAnswerCompletionGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-completion-policy-${line}`}>{line}</span>
@@ -1892,6 +1967,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerPersistenceGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerPersistenceGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerPersistenceGateView.countsText}</span>
+                          {readinessMutationFinalAnswerPersistenceGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerPersistenceGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerPersistenceGateView.disabledText}</span>
                           {readinessMutationFinalAnswerPersistenceGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-persistence-policy-${line}`}>{line}</span>
@@ -1909,6 +1987,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerConversationSaveGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerConversationSaveGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerConversationSaveGateView.countsText}</span>
+                          {readinessMutationFinalAnswerConversationSaveGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerConversationSaveGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerConversationSaveGateView.disabledText}</span>
                           {readinessMutationFinalAnswerConversationSaveGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-conversation-save-policy-${line}`}>{line}</span>
@@ -1926,6 +2007,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerUserVisibleCompletionGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerUserVisibleCompletionGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerUserVisibleCompletionGateView.countsText}</span>
+                          {readinessMutationFinalAnswerUserVisibleCompletionGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerUserVisibleCompletionGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerUserVisibleCompletionGateView.disabledText}</span>
                           {readinessMutationFinalAnswerUserVisibleCompletionGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-user-visible-completion-policy-${line}`}>{line}</span>
@@ -1943,6 +2027,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalResponseHandoffGateView.headerText}</span>
                           <span>{readinessMutationFinalResponseHandoffGateView.idsText}</span>
                           <span>{readinessMutationFinalResponseHandoffGateView.countsText}</span>
+                          {readinessMutationFinalResponseHandoffGateView.sourceContextText && (
+                            <span>{readinessMutationFinalResponseHandoffGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalResponseHandoffGateView.disabledText}</span>
                           {readinessMutationFinalResponseHandoffGateView.policyLines.map((line) => (
                             <span key={`mutation-final-response-handoff-policy-${line}`}>
@@ -1962,6 +2049,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerDeliveryGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerDeliveryGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerDeliveryGateView.countsText}</span>
+                          {readinessMutationFinalAnswerDeliveryGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerDeliveryGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerDeliveryGateView.disabledText}</span>
                           {readinessMutationFinalAnswerDeliveryGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-delivery-policy-${line}`}>
@@ -1981,6 +2071,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationFinalAnswerDeliveryReceiptGateView.headerText}</span>
                           <span>{readinessMutationFinalAnswerDeliveryReceiptGateView.idsText}</span>
                           <span>{readinessMutationFinalAnswerDeliveryReceiptGateView.countsText}</span>
+                          {readinessMutationFinalAnswerDeliveryReceiptGateView.sourceContextText && (
+                            <span>{readinessMutationFinalAnswerDeliveryReceiptGateView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationFinalAnswerDeliveryReceiptGateView.disabledText}</span>
                           {readinessMutationFinalAnswerDeliveryReceiptGateView.policyLines.map((line) => (
                             <span key={`mutation-final-answer-delivery-receipt-policy-${line}`}>
@@ -1998,6 +2091,9 @@ function CodeAgentPanel({
                       {readinessMutationCompletionSummaryView.show && (
                         <>
                           <span>{readinessMutationCompletionSummaryView.headerText}</span>
+                          {readinessMutationCompletionSummaryView.sourceContextText && (
+                            <span>{readinessMutationCompletionSummaryView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationCompletionSummaryView.disabledText}</span>
                           {readinessMutationCompletionSummaryView.itemLines.map((line) => (
                             <span key={`mutation-completion-${line}`}>
@@ -2015,6 +2111,9 @@ function CodeAgentPanel({
                       {readinessMutationHandoffSummaryView.show && (
                         <>
                           <span>{readinessMutationHandoffSummaryView.headerText}</span>
+                          {readinessMutationHandoffSummaryView.sourceContextText && (
+                            <span>{readinessMutationHandoffSummaryView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationHandoffSummaryView.disabledText}</span>
                           {readinessMutationHandoffSummaryView.stageLines.map((line) => (
                             <span key={`mutation-handoff-stage-${line}`}>{line}</span>
@@ -2032,6 +2131,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationExecutionReadinessBoundaryView.headerText}</span>
                           {readinessMutationExecutionReadinessBoundaryView.sourceText && (
                             <span>{readinessMutationExecutionReadinessBoundaryView.sourceText}</span>
+                          )}
+                          {readinessMutationExecutionReadinessBoundaryView.sourceContextText && (
+                            <span>{readinessMutationExecutionReadinessBoundaryView.sourceContextText}</span>
                           )}
                           <span>{readinessMutationExecutionReadinessBoundaryView.disabledText}</span>
                           {readinessMutationExecutionReadinessBoundaryView.checkLines.map((line) => (
@@ -2051,6 +2153,9 @@ function CodeAgentPanel({
                           {readinessMutationToolRunnerBoundaryView.sourceText && (
                             <span>{readinessMutationToolRunnerBoundaryView.sourceText}</span>
                           )}
+                          {readinessMutationToolRunnerBoundaryView.sourceContextText && (
+                            <span>{readinessMutationToolRunnerBoundaryView.sourceContextText}</span>
+                          )}
                           <span>{readinessMutationToolRunnerBoundaryView.disabledText}</span>
                           {readinessMutationToolRunnerBoundaryView.checkLines.map((line) => (
                             <span key={`mutation-tool-runner-${line}`}>{line}</span>
@@ -2068,6 +2173,9 @@ function CodeAgentPanel({
                           <span>{readinessMutationResultCompletionBoundaryView.headerText}</span>
                           {readinessMutationResultCompletionBoundaryView.sourceText && (
                             <span>{readinessMutationResultCompletionBoundaryView.sourceText}</span>
+                          )}
+                          {readinessMutationResultCompletionBoundaryView.sourceContextText && (
+                            <span>{readinessMutationResultCompletionBoundaryView.sourceContextText}</span>
                           )}
                           <span>{readinessMutationResultCompletionBoundaryView.disabledText}</span>
                           {readinessMutationResultCompletionBoundaryView.checkLines.map((line) => (

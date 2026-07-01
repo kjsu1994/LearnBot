@@ -8,8 +8,41 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
   deliveryReceiptPolicy: 'DISABLED_AUDIT_ONLY',
+  acknowledgementSavePolicy: 'DISABLED_AUDIT_ONLY',
+  acknowledgementSaveReady: false,
   sourceFinalAnswerDeliveryGateStatus: 'REFUSED_FINAL_ANSWER_DELIVERY_DISABLED',
   sourceFinalAnswerDeliveryGateSchema: 'learnbot.local-agent.mutation-final-answer-delivery-gate.v1',
+  sourceFinalAnswerDeliveryGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceFinalAnswerDeliveryGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceFinalAnswerDeliveryGatePublicationGateSessionId: 'session-1',
+  sourceFinalAnswerDeliveryGatePublicationGateUserId: 'user-1',
+  sourceFinalAnswerDeliveryGatePublicationGateAgentId: 'agent-1',
+  sourceFinalAnswerDeliveryGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceFinalAnswerDeliveryGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceFinalAnswerDeliveryGatePublicationBoundaryPrerequisitesPassed: true,
+  sourceFinalAnswerDeliveryGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceFinalAnswerDeliveryGatePublicationBoundaryDraftSections: ['changedFiles', 'verificationOutcome', 'rollbackState', 'ragFreshnessState'],
+  sourceFinalAnswerDeliveryGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerDeliveryGateAcceptedObservationCount: 2,
+  sourceFinalAnswerDeliveryGateAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerDeliveryGateAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerDeliveryGateMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerDeliveryGateStaleIndexRiskVisible: true,
+  sourceFinalAnswerDeliveryGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerDeliveryGatePublicationAcceptedObservationCount: 2,
+  sourceFinalAnswerDeliveryGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerDeliveryGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerDeliveryGatePublicationMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerDeliveryGatePublicationStaleIndexRiskVisible: true,
+  sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
@@ -127,6 +160,31 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
       message: 'No delivery receipt may be recorded while delivery receipt is disabled.',
     },
     {
+      key: 'acknowledgementSave',
+      status: 'DISABLED',
+      passed: false,
+      blocking: true,
+      requestCreationEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      executionEnabled: false,
+      writeHelperEnabled: false,
+      claimable: false,
+      mutationAllowed: false,
+      publicationEnabled: false,
+      finalAnswerGenerationEnabled: false,
+      finalAnswerCompletionEnabled: false,
+      finalAnswerDeliveryEnabled: false,
+      deliveryReceiptEnabled: false,
+      acknowledgementSaveEnabled: false,
+      finalAnswerPersistenceEnabled: false,
+      conversationTurnSaveEnabled: false,
+      userVisibleCompletionEnabled: false,
+      finalResponseHandoffEnabled: false,
+      deliveryHandoffEnabled: false,
+      message: 'No acknowledgement may be saved while acknowledgement save is disabled.',
+    },
+    {
       key: 'finalAnswerDelivery',
       status: 'DISABLED',
       passed: false,
@@ -180,6 +238,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
   blockingKeys: [
     'deliveryReceiptPolicy',
     'deliveryReceipt',
+    'acknowledgementSave',
     'finalAnswerDelivery',
     'deliveryHandoff',
     'deliveryReceiptEnabled',
@@ -200,7 +259,7 @@ const view = buildMutationFinalAnswerDeliveryReceiptGateView({
 assert.equal(view.show, true);
 assert.equal(
   view.headerText,
-  'mutation final-answer delivery receipt gate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1 / final-answer delivery ready true / prerequisites true / USER_LOCAL_AGENT / policy DISABLED_AUDIT_ONLY / final-answer delivery status REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / learnbot.local-agent.mutation-final-answer-delivery-gate.v1'
+  'mutation final-answer delivery receipt gate: REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED / learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1 / final-answer delivery ready true / prerequisites true / USER_LOCAL_AGENT / policy DISABLED_AUDIT_ONLY / acknowledgement DISABLED_AUDIT_ONLY / acknowledgement ready false / final-answer delivery status REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / learnbot.local-agent.mutation-final-answer-delivery-gate.v1'
 );
 assert.equal(
   view.idsText,
@@ -211,6 +270,10 @@ assert.equal(
   'mutation final-answer delivery receipt counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
 );
 assert.equal(
+  view.sourceContextText,
+  'mutation final-answer delivery receipt source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication boundary READY_PUBLICATION_DISABLED / publication prerequisites true / draft READY_DRAFT_DISABLED / sections changedFiles, verificationOutcome, rollbackState, ragFreshnessState / observations OBSERVED / observed 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
+);
+assert.equal(
   view.disabledText,
   'mutation final-answer delivery receipt disabled: receipt false / acknowledgement save false / delivery false / delivery handoff false / final response handoff false / user-visible completion false / conversation save false / persistence false / completion false / final answer false / publication false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
 );
@@ -218,12 +281,13 @@ assert.deepEqual(view.policyLines, [
   'final-answer delivery receipt policy mutationFinalAnswerDeliveryGate: REFUSED_FINAL_ANSWER_DELIVERY_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / A disabled final-answer delivery gate must refuse delivery before delivery receipt can be considered.',
   'final-answer delivery receipt policy deliveryReceiptPolicy: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / Mutation final-answer delivery receipt and acknowledgement are disabled.',
   'final-answer delivery receipt policy deliveryReceipt: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery receipt may be recorded while delivery receipt is disabled.',
+  'final-answer delivery receipt policy acknowledgementSave: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No acknowledgement may be saved while acknowledgement save is disabled.',
   'final-answer delivery receipt policy finalAnswerDelivery: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No final answer may be delivered while delivery receipt is disabled.',
   'final-answer delivery receipt policy deliveryHandoff: DISABLED / passed false / blocking true / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / publication false / final answer false / completion false / delivery false / receipt false / acknowledgement save false / persistence false / conversation save false / user-visible completion false / final response handoff false / delivery handoff false / No delivery handoff may run while delivery receipt is disabled.',
 ]);
 assert.equal(
   view.blockingText,
-  'mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
+  'mutation final-answer delivery receipt blocking keys: deliveryReceiptPolicy, deliveryReceipt, acknowledgementSave, finalAnswerDelivery, deliveryHandoff, deliveryReceiptEnabled, acknowledgementSaveEnabled, finalAnswerDeliveryEnabled, deliveryHandoffEnabled, finalResponseHandoffEnabled, userVisibleCompletionEnabled, conversationTurnSaveEnabled, finalAnswerPersistenceEnabled, finalAnswerCompletionEnabled, finalAnswerGenerationEnabled, mutationAllowed'
 );
 assert.match(view.message, /explicitly refused/);
 

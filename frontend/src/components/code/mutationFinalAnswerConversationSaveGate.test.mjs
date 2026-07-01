@@ -11,9 +11,41 @@ const view = buildMutationFinalAnswerConversationSaveGateView({
   userVisibleCompletionEnabled: false,
   sourceFinalAnswerPersistenceGateStatus: 'REFUSED_FINAL_ANSWER_PERSISTENCE_DISABLED',
   sourceFinalAnswerPersistenceGateSchema: 'learnbot.local-agent.mutation-final-answer-persistence-gate.v1',
+  sourceFinalAnswerPersistenceGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceFinalAnswerPersistenceGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceFinalAnswerPersistenceGatePublicationGateSessionId: 'session-1',
+  sourceFinalAnswerPersistenceGatePublicationGateUserId: 'user-1',
+  sourceFinalAnswerPersistenceGatePublicationGateAgentId: 'agent-1',
+  sourceFinalAnswerPersistenceGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceFinalAnswerPersistenceGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceFinalAnswerPersistenceGatePublicationBoundaryPrerequisitesPassed: true,
+  sourceFinalAnswerPersistenceGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceFinalAnswerPersistenceGatePublicationBoundaryDraftSections: ['changedFiles', 'verificationOutcome', 'rollbackState', 'ragFreshnessState'],
+  sourceFinalAnswerPersistenceGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerPersistenceGateAcceptedObservationCount: 2,
+  sourceFinalAnswerPersistenceGateAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerPersistenceGateAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerPersistenceGateMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerPersistenceGateStaleIndexRiskVisible: true,
+  sourceFinalAnswerPersistenceGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerPersistenceGatePublicationAcceptedObservationCount: 2,
+  sourceFinalAnswerPersistenceGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerPersistenceGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerPersistenceGatePublicationMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerPersistenceGatePublicationStaleIndexRiskVisible: true,
+  sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -199,11 +231,15 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation final-answer conversation-save ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation final-answer conversation-save ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,
   'mutation final-answer conversation-save counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation final-answer conversation-save source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication boundary READY_PUBLICATION_DISABLED / publication prerequisites true / draft READY_DRAFT_DISABLED / sections changedFiles, verificationOutcome, rollbackState, ragFreshnessState / observations OBSERVED / observed 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

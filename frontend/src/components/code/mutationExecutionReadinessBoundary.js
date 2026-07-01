@@ -43,6 +43,7 @@ export function buildMutationExecutionReadinessBoundaryView(boundary = null) {
       show: false,
       headerText: '',
       sourceText: '',
+      sourceContextText: '',
       disabledText: '',
       checkLines: [],
       blockingText: '',
@@ -57,6 +58,7 @@ export function buildMutationExecutionReadinessBoundaryView(boundary = null) {
     show: true,
     headerText: mutationExecutionReadinessHeaderText(boundary),
     sourceText: mutationExecutionReadinessSourceText(boundary),
+    sourceContextText: mutationExecutionReadinessSourceContextText(boundary),
     disabledText: `mutation execution readiness disabled:${disabledControlSuffix(boundary)}`,
     checkLines: checks.map(mutationExecutionReadinessCheckText),
     blockingText: blockingKeys.length ? `mutation execution readiness blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -93,6 +95,42 @@ function mutationExecutionReadinessSourceText(boundary) {
     .map(([label, value]) => value === undefined ? null : `${label} ${value}`)
     .filter(Boolean);
   return parts.length ? `mutation execution readiness sources: ${parts.join(' / ')}` : '';
+}
+
+function mutationExecutionReadinessSourceContextText(boundary) {
+  const parts = [
+    ['publication gate', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus],
+    ['publication schema', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema],
+    ['publication session', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateSessionId],
+    ['publication user', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateUserId],
+    ['publication agent', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateAgentId],
+    ['publication workspace', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationGateWorkspaceId],
+    ['publication', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryStatus],
+    ['draft', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus],
+    ['observations', boundary.sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationCount],
+    ['accepted', boundary.sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount],
+    ['rejected', boundary.sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationRejectedCount],
+    ['missing result risk', boundary.sourceHandoffSummaryDeliveryReceiptGateMissingMutationResultRiskVisible],
+    ['stale index risk', boundary.sourceHandoffSummaryDeliveryReceiptGateStaleIndexRiskVisible],
+    ['publication observations', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus],
+    ['publication count', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationCount],
+    ['publication accepted', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount],
+    ['publication rejected', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount],
+    ['publication missing result risk', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible],
+    ['publication stale index risk', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible],
+    ['publication latest', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus],
+    ['publication tool', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName],
+    ['publication verification', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus],
+    ['publication rollback summary observations', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus],
+    ['publication rollback summary count', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount],
+    ['publication rollback summary accepted', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount],
+    ['publication rollback summary rejected', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount],
+    ['publication rollback summary missing result risk', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['publication rollback summary stale index risk', boundary.sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${Array.isArray(value) ? value.join(',') : String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation execution readiness source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(boundary) {

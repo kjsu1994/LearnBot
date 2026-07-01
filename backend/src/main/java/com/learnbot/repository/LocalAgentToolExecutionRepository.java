@@ -25,6 +25,8 @@ import java.util.UUID;
 
 @Repository
 public class LocalAgentToolExecutionRepository {
+    private static final int TOOL_EXECUTION_LEASE_SECONDS = 300;
+    private static final String TOOL_EXECUTION_LEASE_TIMEOUT_WARNING = "Local Agent tool execution lease timed out before completion.";
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -78,11 +80,35 @@ public class LocalAgentToolExecutionRepository {
         int updated = jdbc.update("""
                 UPDATE local_agent_tool_executions
                 SET status = 'RUNNING',
-                    started_at = COALESCE(started_at, now())
+                    started_at = COALESCE(started_at, now()),
+                    lease_expires_at = now() + (:leaseSeconds * INTERVAL '1 second')
                 WHERE id = :id
                   AND status IN ('PENDING', 'APPROVED')
-                """, new MapSqlParameterSource().addValue("id", id));
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("leaseSeconds", TOOL_EXECUTION_LEASE_SECONDS));
         return updated == 0 ? Optional.empty() : find(id);
+    }
+
+    public List<LocalAgentToolExecution> expireTimedOutLeases() {
+        return jdbc.query("""
+                UPDATE local_agent_tool_executions
+                SET status = 'TIMED_OUT',
+                    failure_code = 'TIMEOUT',
+                    error = :error,
+                    response_warnings = COALESCE(response_warnings, '[]'::jsonb) || CAST(:warning AS jsonb),
+                    finished_at = COALESCE(finished_at, now()),
+                    lease_expires_at = NULL
+                WHERE status = 'RUNNING'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at < now()
+                RETURNING id, session_id, user_id, agent_id, workspace_id, execution_target, tool_name,
+                          approval_state, status, input::text, output::text, failure_code, error,
+                          request_warnings::text, response_warnings::text, created_at, started_at, finished_at
+                """, new MapSqlParameterSource()
+                .addValue("error", TOOL_EXECUTION_LEASE_TIMEOUT_WARNING)
+                .addValue("warning", toJson(List.of(TOOL_EXECUTION_LEASE_TIMEOUT_WARNING))),
+                this::mapExecution);
     }
 
     public Optional<LocalAgentToolExecution> find(UUID id) {
@@ -174,6 +200,28 @@ public class LocalAgentToolExecutionRepository {
         return results.stream().findFirst();
     }
 
+    public Optional<Map<String, Object>> findLatestAcceptedMutationObservationForReleaseAttempt(
+            UUID userId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId
+    ) {
+        List<Map<String, Object>> results = jdbc.query("""
+                SELECT output -> 'acceptedMutationObservation' AS accepted_observation
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'sourceRequestId' = :sourceRequestId
+                  AND input ->> 'releaseAttemptId' = :releaseAttemptId
+                  AND output ? 'acceptedMutationObservation'
+                ORDER BY finished_at DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("sourceRequestId", sourceRequestId.toString())
+                .addValue("releaseAttemptId", releaseAttemptId.toString()),
+                (rs, rowNum) -> fromJson(rs.getString("accepted_observation"), new TypeReference<Map<String, Object>>() {}));
+        return results.stream().findFirst();
+    }
+
     public Optional<LocalAgentToolExecution> updateApprovalDecision(
             UUID id,
             UUID userId,
@@ -219,6 +267,31 @@ public class LocalAgentToolExecutionRepository {
         return updated == 0 ? Optional.empty() : find(id);
     }
 
+    public Optional<LocalAgentToolExecution> releaseApprovedHeldPatchWithMutationInput(
+            UUID id,
+            UUID userId,
+            Map<String, Object> mutationInput,
+            String warning
+    ) {
+        int updated = jdbc.update("""
+                UPDATE local_agent_tool_executions
+                SET status = 'APPROVED',
+                    input = CAST(:input AS jsonb),
+                    request_warnings = request_warnings || CAST(:warning AS jsonb)
+                WHERE id = :id
+                  AND user_id = :userId
+                  AND tool_name = 'patch.apply'
+                  AND execution_target = 'USER_LOCAL_AGENT'
+                  AND approval_state = 'APPROVED'
+                  AND status = 'APPROVED_HELD'
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("userId", userId)
+                .addValue("input", toJson(mutationInput))
+                .addValue("warning", toJson(List.of(warning))));
+        return updated == 0 ? Optional.empty() : find(id);
+    }
+
     public void complete(LocalAgentToolResponse response) {
         jdbc.update("""
                 UPDATE local_agent_tool_executions
@@ -228,10 +301,12 @@ public class LocalAgentToolExecutionRepository {
                     error = :error,
                     response_warnings = CAST(:warnings AS jsonb),
                     started_at = COALESCE(started_at, :startedAt),
-                    finished_at = COALESCE(:finishedAt, now())
+                    finished_at = COALESCE(:finishedAt, now()),
+                    lease_expires_at = NULL
                 WHERE id = :id
                   AND user_id = :userId
                   AND agent_id = :agentId
+                  AND status IN ('PENDING', 'APPROVED', 'RUNNING')
                 """, new MapSqlParameterSource()
                 .addValue("id", response.requestId())
                 .addValue("userId", response.userId())

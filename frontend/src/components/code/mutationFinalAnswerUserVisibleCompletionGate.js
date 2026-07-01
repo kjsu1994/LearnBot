@@ -57,6 +57,7 @@ export function buildMutationFinalAnswerUserVisibleCompletionGateView(gate = nul
       headerText: '',
       idsText: '',
       countsText: '',
+      sourceContextText: '',
       disabledText: '',
       policyLines: [],
       blockingText: '',
@@ -72,11 +73,125 @@ export function buildMutationFinalAnswerUserVisibleCompletionGateView(gate = nul
     headerText: userVisibleCompletionHeaderText(gate),
     idsText: userVisibleCompletionIdsText(gate),
     countsText: userVisibleCompletionCountsText(gate),
+    sourceContextText: userVisibleCompletionSourceContextText(gate),
     disabledText: `mutation final-answer user-visible completion disabled:${disabledControlSuffix(gate)}`,
     policyLines: policyChecks.map(userVisibleCompletionPolicyText),
     blockingText: blockingKeys.length ? `mutation final-answer user-visible completion blocking keys: ${blockingKeys.join(', ')}` : '',
     message: gate.message || '',
   };
+}
+
+function userVisibleCompletionSourceContextText(gate) {
+  const hasSourceContext = gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryStatus
+    || gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftStatus
+    || gate.sourceFinalAnswerConversationSaveGateAcceptedObservationSummaryStatus
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateStatus
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateSchema
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateSessionId
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateUserId
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateAgentId
+    || gate.sourceFinalAnswerConversationSaveGatePublicationGateWorkspaceId;
+  if (!hasSourceContext) {
+    return '';
+  }
+  let text = 'mutation final-answer user-visible completion source context:';
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateStatus) {
+    text += ` publication gate ${gate.sourceFinalAnswerConversationSaveGatePublicationGateStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateSchema) {
+    text += ` / publication schema ${gate.sourceFinalAnswerConversationSaveGatePublicationGateSchema}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateSessionId) {
+    text += ` / publication session ${gate.sourceFinalAnswerConversationSaveGatePublicationGateSessionId}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateUserId) {
+    text += ` / publication user ${gate.sourceFinalAnswerConversationSaveGatePublicationGateUserId}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateAgentId) {
+    text += ` / publication agent ${gate.sourceFinalAnswerConversationSaveGatePublicationGateAgentId}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationGateWorkspaceId) {
+    text += ` / publication workspace ${gate.sourceFinalAnswerConversationSaveGatePublicationGateWorkspaceId}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryStatus) {
+    text += ` / publication boundary ${gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryPrerequisitesPassed !== undefined) {
+    text += ` / publication prerequisites ${String(gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryPrerequisitesPassed)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftStatus) {
+    text += ` / draft ${gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftStatus}`;
+  }
+  const draftSections = Array.isArray(gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftSections)
+    ? gate.sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftSections
+    : [];
+  if (draftSections.length) {
+    text += ` / sections ${draftSections.join(', ')}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateAcceptedObservationSummaryStatus) {
+    text += ` / observations ${gate.sourceFinalAnswerConversationSaveGateAcceptedObservationSummaryStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateAcceptedObservationCount !== undefined) {
+    text += ` / observed ${String(gate.sourceFinalAnswerConversationSaveGateAcceptedObservationCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateAcceptedObservationAcceptedCount !== undefined) {
+    text += ` / accepted ${String(gate.sourceFinalAnswerConversationSaveGateAcceptedObservationAcceptedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateAcceptedObservationRejectedCount !== undefined) {
+    text += ` / rejected ${String(gate.sourceFinalAnswerConversationSaveGateAcceptedObservationRejectedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateMissingMutationResultRiskVisible !== undefined) {
+    text += ` / missing result risk ${String(gate.sourceFinalAnswerConversationSaveGateMissingMutationResultRiskVisible)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGateStaleIndexRiskVisible !== undefined) {
+    text += ` / stale index risk ${String(gate.sourceFinalAnswerConversationSaveGateStaleIndexRiskVisible)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationSummaryStatus) {
+    text += ` / publication observations ${gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationSummaryStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationCount !== undefined) {
+    text += ` / publication count ${String(gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationAcceptedCount !== undefined) {
+    text += ` / publication accepted ${String(gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationAcceptedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationRejectedCount !== undefined) {
+    text += ` / publication rejected ${String(gate.sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationRejectedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationMissingMutationResultRiskVisible !== undefined) {
+    text += ` / publication missing result risk ${String(gate.sourceFinalAnswerConversationSaveGatePublicationMissingMutationResultRiskVisible)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationStaleIndexRiskVisible !== undefined) {
+    text += ` / publication stale index risk ${String(gate.sourceFinalAnswerConversationSaveGatePublicationStaleIndexRiskVisible)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationStatus) {
+    text += ` / publication latest ${gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationToolName) {
+    text += ` / publication tool ${gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationToolName}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationVerificationStatus) {
+    text += ` / publication verification ${gate.sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationVerificationStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStatus) {
+    text += ` / publication rollback summary observations ${gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStatus}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryObservationCount !== undefined) {
+    text += ` / publication rollback summary count ${String(gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryObservationCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryAcceptedCount !== undefined) {
+    text += ` / publication rollback summary accepted ${String(gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryAcceptedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryRejectedCount !== undefined) {
+    text += ` / publication rollback summary rejected ${String(gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryRejectedCount)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible !== undefined) {
+    text += ` / publication rollback summary missing result risk ${String(gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible)}`;
+  }
+  if (gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible !== undefined) {
+    text += ` / publication rollback summary stale index risk ${String(gate.sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible)}`;
+  }
+  return text;
 }
 
 function userVisibleCompletionHeaderText(gate) {
@@ -118,6 +233,9 @@ function userVisibleCompletionIdsText(gate) {
   }
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
+  }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
   }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;

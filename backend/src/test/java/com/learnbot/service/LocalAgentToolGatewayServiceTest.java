@@ -3,6 +3,7 @@ package com.learnbot.service;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentConnectionState;
+import com.learnbot.dto.LocalAgentFailureCode;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentStatusResponse;
 import com.learnbot.dto.LocalAgentToolName;
@@ -11,6 +12,7 @@ import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
+import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
 import org.junit.jupiter.api.Test;
@@ -36,11 +38,12 @@ import static org.mockito.Mockito.doAnswer;
 
 class LocalAgentToolGatewayServiceTest {
     private final LocalAgentToolExecutionRepository repository = mock(LocalAgentToolExecutionRepository.class);
+    private final LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository = mock(LocalAgentMutationObservationIntakeRepository.class);
     private final LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = mock(LocalAgentPatchReleaseAttemptRepository.class);
     private final CodeAgentLoopTimelineRepository loopTimelineRepository = mock(CodeAgentLoopTimelineRepository.class);
     private final LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
     private final LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
-    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher);
+    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher);
 
     @Test
     void enqueuePersistsReadOnlyRequestForConnectedApprovedWorkspace() {
@@ -181,6 +184,36 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
         verify(repository).create(eq(response.requestId()), eq(request));
         verify(toolPusher, org.mockito.Mockito.never()).sendToolRequest(any());
+    }
+
+    @Test
+    void createApprovalRequestAppendsAuditOnlyStopOutcomeWhenAgentIsUnavailable() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                LocalAgentApprovalState.REQUIRED,
+                null,
+                List.of()
+        );
+        when(gatewayService.isConnected(userId, agentId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createApprovalRequest(request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not connected");
+
+        verify(loopTimelineRepository).appendAgentUnavailableStopOutcome(userId, repositoryId, loopId, request);
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(toolPusher, never()).sendToolRequest(any());
     }
 
     @Test
@@ -371,6 +404,18 @@ class LocalAgentToolGatewayServiceTest {
                 LocalAgentApprovalState.DENIED.name(),
                 LocalAgentToolStatus.REJECTED.name(),
                 loopId,
+                request.input()
+        );
+        verify(loopTimelineRepository).appendApprovalDeniedStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                requestId,
+                request.sessionId(),
+                agentId,
+                workspaceId,
+                LocalAgentApprovalState.DENIED.name(),
+                LocalAgentToolStatus.REJECTED.name(),
                 request.input()
         );
         verify(toolPusher, never()).sendToolRequest(any());
@@ -843,6 +888,19 @@ class LocalAgentToolGatewayServiceTest {
                 "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
         )));
         when(repository.findLatestPatchDryRunOutputForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        when(repository.findLatestAcceptedMutationObservationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.ofEntries(
+                Map.entry("schema", "learnbot.local-agent.accepted-mutation-observation.v1"),
+                Map.entry("status", "ACCEPTED"),
+                Map.entry("accepted", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("sourceRequestId", requestId.toString()),
+                Map.entry("releaseAttemptId", attemptId.toString()),
+                Map.entry("acceptedObservationPersistenceEnabled", false),
+                Map.entry("resultAggregationEnabled", false),
+                Map.entry("publicationEnabled", false),
+                Map.entry("acknowledgementSaveEnabled", false),
+                Map.entry("ragFreshnessUpdateEnabled", false)
+        )));
         when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
                 attemptId,
                 requestId,
@@ -943,6 +1001,7 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
+        assertFinalMutationReportDraft(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportFinalizationBoundary(
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
@@ -1155,6 +1214,7 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "RESTORE_VALIDATED");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
+        assertFinalMutationReportDraft(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportFinalizationBoundary(
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
@@ -1623,6 +1683,7 @@ class LocalAgentToolGatewayServiceTest {
         assertMutationResultIntakeBoundary(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportContract(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, "MISSING");
         assertMutationResultAggregationPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
+        assertFinalMutationReportDraft(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId);
         assertFinalMutationReportFinalizationBoundary(
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
@@ -1739,6 +1800,19 @@ class LocalAgentToolGatewayServiceTest {
                 "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
         )));
         when(repository.findLatestPatchDryRunOutputForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        when(repository.findLatestAcceptedMutationObservationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.ofEntries(
+                Map.entry("schema", "learnbot.local-agent.accepted-mutation-observation.v1"),
+                Map.entry("status", "ACCEPTED"),
+                Map.entry("accepted", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("sourceRequestId", requestId.toString()),
+                Map.entry("releaseAttemptId", attemptId.toString()),
+                Map.entry("acceptedObservationPersistenceEnabled", false),
+                Map.entry("resultAggregationEnabled", false),
+                Map.entry("publicationEnabled", false),
+                Map.entry("acknowledgementSaveEnabled", false),
+                Map.entry("ragFreshnessUpdateEnabled", false)
+        )));
         when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
                 attemptId,
                 requestId,
@@ -1764,6 +1838,21 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("expiresAt", attemptCreatedAt.plusSeconds(120));
         assertFreshObservationRequirements(readiness.releaseAttemptModel().latestAttempt(), attemptCreatedAt);
         assertFreshObservationRequestPlan(readiness.releaseAttemptModel().latestAttempt(), attemptId, requestId, attemptCreatedAt);
+        assertThat(readiness.releaseAttemptModel().latestAttempt().get("acceptedMutationObservationReadiness")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationReadiness = (Map<String, Object>) readiness.releaseAttemptModel().latestAttempt()
+                .get("acceptedMutationObservationReadiness");
+        assertThat(observationReadiness)
+                .containsEntry("schema", "learnbot.local-agent.accepted-mutation-observation-readiness.v1")
+                .containsEntry("status", "OBSERVED_INTAKE_DISABLED")
+                .containsEntry("observed", true)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("resultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationAllowed", false);
+        assertThat(observationReadiness.get("latestObservation")).isInstanceOf(Map.class);
         assertReleaseAttemptFinalReadiness(
                 readiness.releaseAttemptModel().latestAttempt(),
                 attemptId,
@@ -1795,7 +1884,7 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
-    void releaseHeldPatchForExecutionCreatesDisabledAttemptAndRefusesWhileReleaseFlagIsDisabled() {
+    void releaseHeldPatchForExecutionCreatesDisabledAttemptAndRefusesWithoutFreshLinkedEvidence() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
@@ -1832,7 +1921,7 @@ class LocalAgentToolGatewayServiceTest {
 
         assertThatThrownBy(() -> service.releaseHeldPatchForExecution(userId, requestId))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("release is disabled");
+                .hasMessageContaining("requires fresh release-attempt-linked evidence before claim");
 
         var sourceCaptor = forClass(LocalAgentToolExecution.class);
         var attemptIdCaptor = forClass(UUID.class);
@@ -1867,6 +1956,71 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(reasonsCaptor.getValue()).contains("Patch execution release is disabled; attempt remains non-claimable.");
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).releaseApprovedHeldPatchWithMutationInput(any(), any(), any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void releaseHeldPatchForExecutionRefusesOnlyOnReleaseFlagWhenFreshLinkedEvidenceIsReady() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest request = patchRequest(userId, agentId, workspaceId);
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        )));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+        when(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Fresh linked repository observation matched.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+
+        assertThatThrownBy(() -> service.releaseHeldPatchForExecution(userId, requestId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("release is disabled");
+
+        verify(releaseAttemptRepository, never()).createDisabled(any(), any(), anyInt(), any(), any());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).releaseApprovedHeldPatchWithMutationInput(any(), any(), any(), any());
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -1958,7 +2112,12 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("claimable", false)
                 .containsEntry("mutationAllowed", false);
         assertThat(boundary.blockingReasons())
-                .contains("release gate is disabled", "held patch request remains non-claimable", "Local Agent request creation and push remain disabled");
+                .contains(
+                        "fresh release-attempt-linked evidence is required before claim",
+                        "release gate is disabled",
+                        "held patch request remains non-claimable",
+                        "Local Agent request creation and push remain disabled"
+                );
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(toolPusher, never()).sendToolRequest(any());
@@ -2400,6 +2559,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("dryRun", true)
                 .containsEntry("mutationApplied", false)
                 .containsEntry("sourceRequestId", sourceRequestId.toString());
+        verify(mutationObservationIntakeRepository, never()).saveAcceptedObservation(any(), any());
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).updateApprovalDecision(
                 eq(sourceRequestId),
@@ -2410,6 +2570,177 @@ class LocalAgentToolGatewayServiceTest {
         );
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeMutationPatchResultAddsAuditOnlyIntakeCandidateWithoutOpeningFollowupWork() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "releaseAttemptId", releaseAttemptId.toString(),
+                        "dryRunOnly", false,
+                        "mutationAllowed", true
+                ),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("mutation execution")
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.SUCCEEDED
+        )));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                request.sessionId(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "mutationApplied", true,
+                        "snapshotManifestId", "snap-123",
+                        "rollbackAvailable", true
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("mutation applied")
+        );
+
+        service.complete(response);
+
+        var responseCaptor = forClass(LocalAgentToolResponse.class);
+        verify(repository).complete(responseCaptor.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> candidate = (Map<String, Object>) responseCaptor.getValue().output()
+                .get("mutationResultIntakeCandidate");
+        assertThat(candidate)
+                .containsEntry("schema", "learnbot.local-agent.mutation-result-intake-candidate.v1")
+                .containsEntry("status", "OBSERVED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                .containsEntry("mutationApplied", true)
+                .containsEntry("snapshotManifestId", "snap-123")
+                .containsEntry("acceptanceStatus", "ACCEPTED")
+                .containsEntry("resultIntakeEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> accepted = (Map<String, Object>) responseCaptor.getValue().output()
+                .get("acceptedMutationObservation");
+        assertThat(accepted)
+                .containsEntry("schema", "learnbot.local-agent.accepted-mutation-observation.v1")
+                .containsEntry("status", "ACCEPTED")
+                .containsEntry("accepted", true)
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("resultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false);
+        verify(mutationObservationIntakeRepository).saveAcceptedObservation(eq(responseCaptor.getValue()), eq(request.input()));
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).releaseApprovedHeldPatchWithMutationInput(any(), any(), any(), any());
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void claimNextExpiresTimedOutLeasesBeforeClaimingNextRequest() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID expiredRequestId = UUID.randomUUID();
+        UUID nextRequestId = UUID.randomUUID();
+        LocalAgentToolRequest expiredRequest = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "repositoryId", repositoryId.toString(),
+                        "loopId", loopId.toString(),
+                        "dryRunOnly", true,
+                        "mutationAllowed", false
+                ),
+                LocalAgentApprovalState.APPROVED,
+                OffsetDateTime.now().minusMinutes(10),
+                List.of("lease candidate")
+        );
+        LocalAgentToolRequest nextRequest = request(
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.FILE_READ,
+                LocalAgentApprovalState.NOT_REQUIRED
+        );
+        LocalAgentToolExecution expired = new LocalAgentToolExecution(
+                expiredRequestId,
+                expiredRequest.sessionId(),
+                expiredRequest.userId(),
+                expiredRequest.agentId(),
+                expiredRequest.workspaceId(),
+                expiredRequest.executionTarget(),
+                expiredRequest.toolName(),
+                expiredRequest.approvalState(),
+                LocalAgentToolStatus.TIMED_OUT,
+                expiredRequest.input(),
+                Map.of(),
+                LocalAgentFailureCode.TIMEOUT,
+                "Local Agent tool execution lease timed out before completion.",
+                expiredRequest.warnings(),
+                List.of("Local Agent tool execution lease timed out before completion."),
+                expiredRequest.createdAt(),
+                OffsetDateTime.now().minusMinutes(9),
+                OffsetDateTime.now().minusMinutes(4)
+        );
+        when(repository.expireTimedOutLeases()).thenReturn(List.of(expired));
+        when(repository.claimNext(userId, agentId)).thenReturn(java.util.Optional.of(execution(
+                nextRequestId,
+                nextRequest,
+                LocalAgentApprovalState.NOT_REQUIRED,
+                LocalAgentToolStatus.RUNNING
+        )));
+
+        var queued = service.claimNext(userId, agentId).orElseThrow();
+
+        assertThat(queued.requestId()).isEqualTo(nextRequestId);
+        verify(repository).expireTimedOutLeases();
+        verify(repository).claimNext(userId, agentId);
+        verify(loopTimelineRepository).appendTimedOutStopOutcome(
+                eq(userId),
+                eq(repositoryId),
+                eq(loopId),
+                any(LocalAgentToolResponse.class),
+                eq(expiredRequest.input())
+        );
+        verify(repository, never()).complete(any(LocalAgentToolResponse.class));
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -2473,6 +2804,182 @@ class LocalAgentToolGatewayServiceTest {
 
         verify(repository).complete(response);
         verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeAppendsAuditOnlyStopOutcomeWhenObservationFails() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "repositoryId", repositoryId.toString(),
+                        "loopId", loopId.toString(),
+                        "dryRunOnly", true,
+                        "mutationAllowed", false
+                ),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("dry-run observation only")
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.FAILED
+        )));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                request.sessionId(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.FAILED,
+                Map.of(
+                        "dryRun", true,
+                        "mutationApplied", false
+                ),
+                LocalAgentFailureCode.TOOL_FAILED,
+                "Local Agent reported failure.",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("dry-run failed without mutation")
+        );
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
+        verify(loopTimelineRepository).appendToolFailedStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                response,
+                request.input()
+        );
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeAppendsAuditOnlyTimeoutStopOutcomeWhenObservationTimesOut() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("dry-run observation only")
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.TIMED_OUT
+        )));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                request.sessionId(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.TIMED_OUT,
+                Map.of("dryRun", true, "mutationApplied", false),
+                LocalAgentFailureCode.TIMEOUT,
+                "Local Agent tool timed out.",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("timed out without mutation")
+        );
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
+        verify(loopTimelineRepository).appendTimedOutStopOutcome(userId, repositoryId, loopId, response, request.input());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeAppendsAuditOnlyCancellationStopOutcomeWhenObservationIsCancelled() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("dry-run observation only")
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.CANCELLED
+        )));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                request.sessionId(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.CANCELLED,
+                Map.of("dryRun", true, "mutationApplied", false),
+                null,
+                "Local Agent tool was cancelled.",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("cancelled without mutation")
+        );
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
+        verify(loopTimelineRepository).appendCancellationStopOutcome(userId, repositoryId, loopId, response, request.input());
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
         verify(repository, never()).claimNext(any(), any());
@@ -3805,6 +4312,18 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationResultIntakePersistenceGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationResultIntakePersistenceGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> acceptedReadiness = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationReadiness");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
+        boolean acceptedObservationObserved = Boolean.TRUE.equals(acceptedReadiness.get("observed"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> latestAcceptedObservation = acceptedReadiness.get("latestObservation") instanceof Map<?, ?>
+                ? (Map<String, Object>) acceptedReadiness.get("latestObservation")
+                : Map.of();
+        String acceptedObservationStatus = acceptedObservationObserved
+                ? String.valueOf(latestAcceptedObservation.getOrDefault("status", "UNKNOWN"))
+                : "MISSING";
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-result-intake-persistence-gate.v1")
                 .containsEntry("status", status)
@@ -3824,7 +4343,42 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceObservationAcceptanceGateUserId", userId)
                 .containsEntry("sourceObservationAcceptanceGateAgentId", agentId)
                 .containsEntry("sourceObservationAcceptanceGateWorkspaceId", workspaceId)
+                .containsEntry("sourceAcceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("sourceAcceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("sourceAcceptedMutationObservationSummaryObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("sourceAcceptedMutationObservationSummaryAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("sourceAcceptedMutationObservationSummaryRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("sourceAcceptedMutationObservationSummaryTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("sourceAcceptedMutationObservationSummaryMissingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("sourceAcceptedMutationObservationSummaryStaleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateSchema", observationSummary.get("publicationGateSchema"))
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateStatus", observationSummary.get("publicationGateStatus"))
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateSessionId", observationSummary.get("publicationGateSessionId"))
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateUserId", observationSummary.get("publicationGateUserId"))
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateAgentId", observationSummary.get("publicationGateAgentId"))
+                .containsEntry("sourceAcceptedMutationObservationPublicationGateWorkspaceId", observationSummary.get("publicationGateWorkspaceId"))
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryStatus", observationSummary.get("status"))
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryMissingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("sourceAcceptedMutationObservationRollbackSummaryStaleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
+                .containsEntry("sourceAcceptedMutationObservationReadinessSchema", "learnbot.local-agent.accepted-mutation-observation-readiness.v1")
+                .containsEntry("sourceAcceptedMutationObservationReadinessStatus", acceptedReadiness.get("status"))
+                .containsEntry("sourceAcceptedMutationObservationObserved", acceptedObservationObserved)
+                .containsEntry("sourceAcceptedMutationObservationReadinessSessionId", sessionId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessUserId", userId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessAgentId", agentId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessWorkspaceId", workspaceId)
                 .containsEntry("intakePersistencePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("acceptedMutationObservationAuditStatus", acceptedObservationObserved ? "OBSERVED" : "MISSING")
+                .containsEntry("latestAcceptedMutationObservationStatus", acceptedObservationStatus)
+                .containsEntry("latestAcceptedMutationObservationAccepted", Boolean.TRUE.equals(latestAcceptedObservation.get("accepted")))
+                .containsEntry("latestAcceptedMutationObservationRejected", acceptedObservationStatus.startsWith("REJECTED_"))
+                .containsEntry("latestAcceptedMutationObservationTerminalFailureAccepted", "ACCEPTED_TERMINAL_FAILURE".equals(acceptedObservationStatus))
+                .containsEntry("latestAcceptedMutationObservationToolName", latestAcceptedObservation.get("toolName"))
+                .containsEntry("latestAcceptedMutationObservationVerificationStatus", latestAcceptedObservation.get("verificationStatus"))
+                .containsEntry("latestAcceptedMutationObservation", latestAcceptedObservation)
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
                 .containsEntry("acceptedResultCount", 0)
@@ -3860,6 +4414,21 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation result intake persistence is explicitly refused: no accepted observation persistence, rollback fallback, RAG freshness update, aggregation, publication, or final answer is enabled."
                         : "Local Agent mutation result intake persistence is blocked because the disabled observation acceptance gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        assertThat(gate.get("acceptedObservationAudit")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> acceptedObservationAudit = (List<Map<String, Object>>) gate.get("acceptedObservationAudit");
+        assertThat(acceptedObservationAudit)
+                .extracting(item -> item.get("key"))
+                .containsExactly("acceptedMutationObservationReadiness", "acceptedMutationObservationStatus");
+        assertThat(acceptedObservationAudit).allSatisfy(item -> assertThat(item)
+                .containsEntry("blocking", false)
+                .containsEntry("intakePersistenceEnabled", false)
+                .containsEntry("acceptedObservationPersistenceEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationAllowed", false));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
         assertThat(policyChecks)
@@ -3934,6 +4503,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationRollbackFallbackGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationRollbackFallbackGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> intakeGate = (Map<String, Object>) latestAttempt.get("mutationResultIntakePersistenceGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-rollback-fallback-gate.v1")
                 .containsEntry("status", status)
@@ -3953,6 +4524,31 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceResultIntakePersistenceGateUserId", userId)
                 .containsEntry("sourceResultIntakePersistenceGateAgentId", agentId)
                 .containsEntry("sourceResultIntakePersistenceGateWorkspaceId", workspaceId)
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationAuditStatus", intakeGate.get("acceptedMutationObservationAuditStatus"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationStatus", intakeGate.get("latestAcceptedMutationObservationStatus"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationAccepted", intakeGate.get("latestAcceptedMutationObservationAccepted"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationRejected", intakeGate.get("latestAcceptedMutationObservationRejected"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationTerminalFailureAccepted", intakeGate.get("latestAcceptedMutationObservationTerminalFailureAccepted"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationToolName", intakeGate.get("latestAcceptedMutationObservationToolName"))
+                .containsEntry("sourceResultIntakePersistenceGateLatestAcceptedObservationVerificationStatus", intakeGate.get("latestAcceptedMutationObservationVerificationStatus"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryStatus", intakeGate.get("sourceAcceptedMutationObservationSummaryStatus"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryObservationCount", intakeGate.get("sourceAcceptedMutationObservationSummaryObservationCount"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryAcceptedCount", intakeGate.get("sourceAcceptedMutationObservationSummaryAcceptedCount"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryRejectedCount", intakeGate.get("sourceAcceptedMutationObservationSummaryRejectedCount"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryMissingMutationResultRiskVisible", intakeGate.get("sourceAcceptedMutationObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceResultIntakePersistenceGateAcceptedObservationSummaryStaleIndexRiskVisible", intakeGate.get("sourceAcceptedMutationObservationSummaryStaleIndexRiskVisible"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateSchema", intakeGate.get("sourceAcceptedMutationObservationPublicationGateSchema"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateStatus", intakeGate.get("sourceAcceptedMutationObservationPublicationGateStatus"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateSessionId", intakeGate.get("sourceAcceptedMutationObservationPublicationGateSessionId"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateUserId", intakeGate.get("sourceAcceptedMutationObservationPublicationGateUserId"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateAgentId", intakeGate.get("sourceAcceptedMutationObservationPublicationGateAgentId"))
+                .containsEntry("sourceResultIntakePersistenceGatePublicationGateWorkspaceId", intakeGate.get("sourceAcceptedMutationObservationPublicationGateWorkspaceId"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStatus", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryStatus"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryObservationCount", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryObservationCount"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryAcceptedCount", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryAcceptedCount"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryRejectedCount", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryRejectedCount"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", intakeGate.get("sourceAcceptedMutationObservationRollbackSummaryStaleIndexRiskVisible"))
                 .containsEntry("rollbackFallbackPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("rollbackFallbackInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -4058,6 +4654,10 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationRagFreshnessGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationRagFreshnessGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rollbackFallbackGate = (Map<String, Object>) latestAttempt.get("mutationRollbackFallbackGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-rag-freshness-gate.v1")
                 .containsEntry("status", status)
@@ -4077,8 +4677,43 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceRollbackFallbackGateUserId", userId)
                 .containsEntry("sourceRollbackFallbackGateAgentId", agentId)
                 .containsEntry("sourceRollbackFallbackGateWorkspaceId", workspaceId)
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationAuditStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationAuditStatus"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationStatus"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationAccepted", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationAccepted"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationRejected", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationRejected"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationTerminalFailureAccepted", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationTerminalFailureAccepted"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationToolName", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationToolName"))
+                .containsEntry("sourceRollbackFallbackGateLatestAcceptedObservationVerificationStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryObservationCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryAcceptedCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryRejectedCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryMissingMutationResultRiskVisible", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceRollbackFallbackGateAcceptedObservationSummaryStaleIndexRiskVisible", rollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryStaleIndexRiskVisible"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateSchema", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateSchema"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateStatus"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateSessionId", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateSessionId"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateUserId", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateUserId"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateAgentId", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateAgentId"))
+                .containsEntry("sourceRollbackFallbackGatePublicationGateWorkspaceId", rollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStatus", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryObservationCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryAcceptedCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryRejectedCount", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", rollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("ragFreshnessUpdateInvocationEnabled", false)
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
+                .containsEntry("missingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("staleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
                 .containsEntry("acceptedResultCount", 0)
@@ -4178,6 +4813,18 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationResultAggregationGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationResultAggregationGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ragFreshnessGate = (Map<String, Object>) latestAttempt.get("mutationRagFreshnessGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> acceptedReadiness = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationReadiness");
+        boolean acceptedObservationObserved = Boolean.TRUE.equals(acceptedReadiness.get("observed"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> latestAcceptedObservation = acceptedReadiness.get("latestObservation") instanceof Map<?, ?>
+                ? (Map<String, Object>) acceptedReadiness.get("latestObservation")
+                : Map.of();
+        String acceptedObservationStatus = acceptedObservationObserved
+                ? String.valueOf(latestAcceptedObservation.getOrDefault("status", "UNKNOWN"))
+                : "MISSING";
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-result-aggregation-gate.v1")
                 .containsEntry("status", status)
@@ -4197,8 +4844,44 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceRagFreshnessGateUserId", userId)
                 .containsEntry("sourceRagFreshnessGateAgentId", agentId)
                 .containsEntry("sourceRagFreshnessGateWorkspaceId", workspaceId)
+                .containsEntry("sourceRagFreshnessGateAcceptedObservationSummaryStatus", ragFreshnessGate.get("acceptedMutationObservationSummaryStatus"))
+                .containsEntry("sourceRagFreshnessGateAcceptedObservationCount", ragFreshnessGate.get("acceptedMutationObservationCount"))
+                .containsEntry("sourceRagFreshnessGateAcceptedObservationAcceptedCount", ragFreshnessGate.get("acceptedMutationObservationAcceptedCount"))
+                .containsEntry("sourceRagFreshnessGateAcceptedObservationRejectedCount", ragFreshnessGate.get("acceptedMutationObservationRejectedCount"))
+                .containsEntry("sourceRagFreshnessGateMissingMutationResultRiskVisible", ragFreshnessGate.get("missingMutationResultRiskVisible"))
+                .containsEntry("sourceRagFreshnessGateStaleIndexRiskVisible", ragFreshnessGate.get("staleIndexRiskVisible"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateSchema", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateSchema"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateStatus", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateStatus"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateSessionId", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateSessionId"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateUserId", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateUserId"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateAgentId", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateAgentId"))
+                .containsEntry("sourceRagFreshnessGatePublicationGateWorkspaceId", ragFreshnessGate.get("sourceRollbackFallbackGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceRagFreshnessGateLatestAcceptedObservationStatus", ragFreshnessGate.get("sourceRollbackFallbackGateLatestAcceptedObservationStatus"))
+                .containsEntry("sourceRagFreshnessGateLatestAcceptedObservationToolName", ragFreshnessGate.get("sourceRollbackFallbackGateLatestAcceptedObservationToolName"))
+                .containsEntry("sourceRagFreshnessGateLatestAcceptedObservationVerificationStatus", ragFreshnessGate.get("sourceRollbackFallbackGateLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryStatus", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryObservationCount", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryAcceptedCount", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryRejectedCount", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceRagFreshnessGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", ragFreshnessGate.get("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
+                .containsEntry("sourceAcceptedMutationObservationReadinessSchema", "learnbot.local-agent.accepted-mutation-observation-readiness.v1")
+                .containsEntry("sourceAcceptedMutationObservationReadinessStatus", acceptedReadiness.get("status"))
+                .containsEntry("sourceAcceptedMutationObservationObserved", acceptedObservationObserved)
+                .containsEntry("sourceAcceptedMutationObservationReadinessSessionId", sessionId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessUserId", userId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessAgentId", agentId)
+                .containsEntry("sourceAcceptedMutationObservationReadinessWorkspaceId", workspaceId)
                 .containsEntry("resultAggregationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("resultAggregationInvocationEnabled", false)
+                .containsEntry("acceptedMutationObservationAuditStatus", acceptedObservationObserved ? "OBSERVED" : "MISSING")
+                .containsEntry("latestAcceptedMutationObservationStatus", acceptedObservationStatus)
+                .containsEntry("latestAcceptedMutationObservationAccepted", Boolean.TRUE.equals(latestAcceptedObservation.get("accepted")))
+                .containsEntry("latestAcceptedMutationObservationRejected", acceptedObservationStatus.startsWith("REJECTED_"))
+                .containsEntry("latestAcceptedMutationObservationTerminalFailureAccepted", "ACCEPTED_TERMINAL_FAILURE".equals(acceptedObservationStatus))
+                .containsEntry("latestAcceptedMutationObservationToolName", latestAcceptedObservation.get("toolName"))
+                .containsEntry("latestAcceptedMutationObservationVerificationStatus", latestAcceptedObservation.get("verificationStatus"))
+                .containsEntry("latestAcceptedMutationObservation", latestAcceptedObservation)
                 .containsEntry("expectedResultCount", expectedResultCount)
                 .containsEntry("completedResultCount", 0)
                 .containsEntry("acceptedResultCount", 0)
@@ -4234,6 +4917,20 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation result aggregation is explicitly refused: no aggregation, publication, or final answer is enabled."
                         : "Local Agent mutation result aggregation is blocked because the disabled RAG freshness gate is incomplete.");
         assertThat(gate.get("policyChecks")).isInstanceOf(List.class);
+        assertThat(gate.get("acceptedObservationAudit")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> acceptedObservationAudit = (List<Map<String, Object>>) gate.get("acceptedObservationAudit");
+        assertThat(acceptedObservationAudit)
+                .extracting(item -> item.get("key"))
+                .containsExactly("acceptedMutationObservationReadiness", "acceptedMutationObservationStatus");
+        assertThat(acceptedObservationAudit).allSatisfy(item -> assertThat(item)
+                .containsEntry("blocking", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("acknowledgementSaveEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationAllowed", false));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> policyChecks = (List<Map<String, Object>>) gate.get("policyChecks");
         assertThat(policyChecks)
@@ -4294,6 +4991,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationPublicationGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationPublicationGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resultAggregationGate = (Map<String, Object>) latestAttempt.get("mutationResultAggregationGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-publication-gate.v1")
                 .containsEntry("status", status)
@@ -4315,6 +5014,27 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceResultAggregationGateUserId", userId)
                 .containsEntry("sourceResultAggregationGateAgentId", agentId)
                 .containsEntry("sourceResultAggregationGateWorkspaceId", workspaceId)
+                .containsEntry("sourceResultAggregationGateAcceptedObservationSummaryStatus", resultAggregationGate.get("sourceRagFreshnessGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceResultAggregationGateAcceptedObservationCount", resultAggregationGate.get("sourceRagFreshnessGateAcceptedObservationCount"))
+                .containsEntry("sourceResultAggregationGateAcceptedObservationAcceptedCount", resultAggregationGate.get("sourceRagFreshnessGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceResultAggregationGateAcceptedObservationRejectedCount", resultAggregationGate.get("sourceRagFreshnessGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceResultAggregationGateMissingMutationResultRiskVisible", resultAggregationGate.get("sourceRagFreshnessGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceResultAggregationGateStaleIndexRiskVisible", resultAggregationGate.get("sourceRagFreshnessGateStaleIndexRiskVisible"))
+                .containsEntry("sourceResultAggregationGatePublicationGateSchema", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateSchema"))
+                .containsEntry("sourceResultAggregationGatePublicationGateStatus", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateStatus"))
+                .containsEntry("sourceResultAggregationGatePublicationGateSessionId", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateSessionId"))
+                .containsEntry("sourceResultAggregationGatePublicationGateUserId", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateUserId"))
+                .containsEntry("sourceResultAggregationGatePublicationGateAgentId", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateAgentId"))
+                .containsEntry("sourceResultAggregationGatePublicationGateWorkspaceId", resultAggregationGate.get("sourceRagFreshnessGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceResultAggregationGateLatestAcceptedObservationStatus", resultAggregationGate.get("sourceRagFreshnessGateLatestAcceptedObservationStatus"))
+                .containsEntry("sourceResultAggregationGateLatestAcceptedObservationToolName", resultAggregationGate.get("sourceRagFreshnessGateLatestAcceptedObservationToolName"))
+                .containsEntry("sourceResultAggregationGateLatestAcceptedObservationVerificationStatus", resultAggregationGate.get("sourceRagFreshnessGateLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryStatus", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryObservationCount", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryAcceptedCount", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryRejectedCount", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceResultAggregationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", resultAggregationGate.get("sourceRagFreshnessGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("publicationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("publicationInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -4409,6 +5129,10 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerGenerationGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerGenerationGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> publicationGate = (Map<String, Object>) latestAttempt.get("mutationPublicationGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> publicationBoundary = (Map<String, Object>) latestAttempt.get("finalAnswerPublicationBoundary");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-generation-gate.v1")
                 .containsEntry("status", status)
@@ -4430,6 +5154,32 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourcePublicationGateUserId", userId)
                 .containsEntry("sourcePublicationGateAgentId", agentId)
                 .containsEntry("sourcePublicationGateWorkspaceId", workspaceId)
+                .containsEntry("sourcePublicationGateAcceptedObservationSummaryStatus", publicationGate.get("sourceResultAggregationGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourcePublicationGateAcceptedObservationCount", publicationGate.get("sourceResultAggregationGateAcceptedObservationCount"))
+                .containsEntry("sourcePublicationGateAcceptedObservationAcceptedCount", publicationGate.get("sourceResultAggregationGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourcePublicationGateAcceptedObservationRejectedCount", publicationGate.get("sourceResultAggregationGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourcePublicationGateMissingMutationResultRiskVisible", publicationGate.get("sourceResultAggregationGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourcePublicationGateStaleIndexRiskVisible", publicationGate.get("sourceResultAggregationGateStaleIndexRiskVisible"))
+                .containsEntry("sourcePublicationGateLatestAcceptedObservationStatus", publicationGate.get("sourceResultAggregationGateLatestAcceptedObservationStatus"))
+                .containsEntry("sourcePublicationGateLatestAcceptedObservationToolName", publicationGate.get("sourceResultAggregationGateLatestAcceptedObservationToolName"))
+                .containsEntry("sourcePublicationGateLatestAcceptedObservationVerificationStatus", publicationGate.get("sourceResultAggregationGateLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryStatus", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryObservationCount", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryAcceptedCount", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryRejectedCount", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourcePublicationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", publicationGate.get("sourceResultAggregationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerPublicationBoundarySchema", "learnbot.local-agent.final-answer-publication-boundary.v1")
+                .containsEntry("sourceFinalAnswerPublicationBoundaryStatus", publicationBoundary.get("status"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryPrerequisitesPassed", publicationBoundary.get("prerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryDraftStatus", publicationBoundary.get("finalMutationReportDraftStatus"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryAcceptedObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("sourceFinalAnswerPublicationBoundaryAcceptedObservationSummaryStatus", publicationBoundary.get("acceptedMutationObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryAcceptedObservationCount", publicationBoundary.get("acceptedMutationObservationCount"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryAcceptedObservationAcceptedCount", publicationBoundary.get("acceptedMutationObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryAcceptedObservationRejectedCount", publicationBoundary.get("acceptedMutationObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryMissingMutationResultRiskVisible", publicationBoundary.get("missingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerPublicationBoundaryStaleIndexRiskVisible", publicationBoundary.get("staleIndexRiskVisible"))
                 .containsEntry("finalAnswerGenerationPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerGenerationInvocationEnabled", false)
                 .containsEntry("expectedResultCount", expectedResultCount)
@@ -4473,6 +5223,7 @@ class LocalAgentToolGatewayServiceTest {
                 .extracting(item -> item.get("key"))
                 .containsExactly(
                         "mutationPublicationGate",
+                        "finalAnswerPublicationBoundary",
                         "finalAnswerGenerationPolicy",
                         "finalAnswerGeneration"
                 );
@@ -4521,6 +5272,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerCompletionGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerCompletionGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerGenerationGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerGenerationGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-completion-gate.v1")
                 .containsEntry("status", status)
@@ -4542,6 +5295,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerGenerationGateUserId", userId)
                 .containsEntry("sourceFinalAnswerGenerationGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerGenerationGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateSchema", finalAnswerGenerationGate.get("sourcePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateStatus", finalAnswerGenerationGate.get("sourcePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateSessionId", finalAnswerGenerationGate.get("sourcePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateUserId", finalAnswerGenerationGate.get("sourcePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateAgentId", finalAnswerGenerationGate.get("sourcePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationGateWorkspaceId", finalAnswerGenerationGate.get("sourcePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationBoundaryStatus", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationBoundaryPrerequisitesPassed", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationBoundaryDraftStatus", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationBoundaryDraftSections", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerGenerationGateAcceptedObservationSummaryStatus", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGateAcceptedObservationCount", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerGenerationGateAcceptedObservationAcceptedCount", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGateAcceptedObservationRejectedCount", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGateMissingMutationResultRiskVisible", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerGenerationGateStaleIndexRiskVisible", finalAnswerGenerationGate.get("sourceFinalAnswerPublicationBoundaryStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationAcceptedObservationSummaryStatus", finalAnswerGenerationGate.get("sourcePublicationGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationAcceptedObservationCount", finalAnswerGenerationGate.get("sourcePublicationGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationAcceptedObservationAcceptedCount", finalAnswerGenerationGate.get("sourcePublicationGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationAcceptedObservationRejectedCount", finalAnswerGenerationGate.get("sourcePublicationGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationMissingMutationResultRiskVisible", finalAnswerGenerationGate.get("sourcePublicationGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationStaleIndexRiskVisible", finalAnswerGenerationGate.get("sourcePublicationGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationStatus", finalAnswerGenerationGate.get("sourcePublicationGateLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationToolName", finalAnswerGenerationGate.get("sourcePublicationGateLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerGenerationGate.get("sourcePublicationGateLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerGenerationGate.get("sourcePublicationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("finalAnswerCompletionPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerCompletionInvocationEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
@@ -4636,6 +5420,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerPersistenceGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerPersistenceGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerCompletionGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerCompletionGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-persistence-gate.v1")
                 .containsEntry("status", status)
@@ -4657,6 +5443,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerCompletionGateUserId", userId)
                 .containsEntry("sourceFinalAnswerCompletionGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerCompletionGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateSchema", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateSessionId", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateUserId", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateAgentId", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationGateWorkspaceId", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationBoundaryStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationBoundaryPrerequisitesPassed", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationBoundaryDraftStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationBoundaryDraftSections", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerCompletionGateAcceptedObservationSummaryStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGateAcceptedObservationCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerCompletionGateAcceptedObservationAcceptedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGateAcceptedObservationRejectedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGateMissingMutationResultRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerCompletionGateStaleIndexRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationAcceptedObservationSummaryStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationAcceptedObservationCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationAcceptedObservationAcceptedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationAcceptedObservationRejectedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationMissingMutationResultRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationStaleIndexRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationToolName", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerCompletionGate.get("sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("finalAnswerPersistencePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerPersistenceInvocationEnabled", false)
                 .containsEntry("conversationTurnSaveEnabled", false)
@@ -4761,6 +5578,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerConversationSaveGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerConversationSaveGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerPersistenceGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerPersistenceGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-conversation-save-gate.v1")
                 .containsEntry("status", status)
@@ -4782,6 +5601,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerPersistenceGateUserId", userId)
                 .containsEntry("sourceFinalAnswerPersistenceGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerPersistenceGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateSchema", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateSessionId", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateUserId", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateAgentId", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationGateWorkspaceId", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationBoundaryStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationBoundaryPrerequisitesPassed", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationBoundaryDraftStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationBoundaryDraftSections", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerPersistenceGateAcceptedObservationSummaryStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGateAcceptedObservationCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGateAcceptedObservationAcceptedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGateAcceptedObservationRejectedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGateMissingMutationResultRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerPersistenceGateStaleIndexRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationSummaryStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationAcceptedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationRejectedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationMissingMutationResultRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationStaleIndexRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationToolName", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerPersistenceGate.get("sourceFinalAnswerCompletionGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("finalAnswerConversationSavePolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("conversationTurnSaveEnabled", false)
                 .containsEntry("conversationTurnSaveInvocationEnabled", false)
@@ -4886,6 +5736,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerUserVisibleCompletionGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerUserVisibleCompletionGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerConversationSaveGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerConversationSaveGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-user-visible-completion-gate.v1")
                 .containsEntry("status", status)
@@ -4907,6 +5759,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerConversationSaveGateUserId", userId)
                 .containsEntry("sourceFinalAnswerConversationSaveGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerConversationSaveGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateSchema", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateSessionId", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateUserId", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateAgentId", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationGateWorkspaceId", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationBoundaryStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationBoundaryPrerequisitesPassed", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftSections", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateAcceptedObservationSummaryStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateAcceptedObservationCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateAcceptedObservationAcceptedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateAcceptedObservationRejectedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateMissingMutationResultRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerConversationSaveGateStaleIndexRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationSummaryStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationAcceptedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationRejectedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationMissingMutationResultRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationStaleIndexRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationToolName", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerConversationSaveGate.get("sourceFinalAnswerPersistenceGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("userVisibleCompletionPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("userVisibleCompletionEnabled", false)
                 .containsEntry("finalResponseHandoffEnabled", false)
@@ -5010,6 +5893,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalResponseHandoffGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalResponseHandoffGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerUserVisibleCompletionGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerUserVisibleCompletionGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-response-handoff-gate.v1")
                 .containsEntry("status", status)
@@ -5031,6 +5916,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerUserVisibleCompletionGateUserId", userId)
                 .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerUserVisibleCompletionGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateSchema", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateSessionId", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateUserId", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateAgentId", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationGateWorkspaceId", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryPrerequisitesPassed", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryDraftStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryDraftSections", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationSummaryStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationAcceptedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationRejectedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateMissingMutationResultRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGateStaleIndexRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationSummaryStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationAcceptedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationRejectedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationMissingMutationResultRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationStaleIndexRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationToolName", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerUserVisibleCompletionGate.get("sourceFinalAnswerConversationSaveGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("finalResponseHandoffPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalResponseHandoffEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
@@ -5138,6 +6054,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerDeliveryGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalResponseHandoffGate = (Map<String, Object>) latestAttempt.get("mutationFinalResponseHandoffGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-delivery-gate.v1")
                 .containsEntry("status", status)
@@ -5159,6 +6077,37 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalResponseHandoffGateUserId", userId)
                 .containsEntry("sourceFinalResponseHandoffGateAgentId", agentId)
                 .containsEntry("sourceFinalResponseHandoffGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateSchema", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateSchema"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateSessionId", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateUserId", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateUserId"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateAgentId", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationGateWorkspaceId", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationBoundaryStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationBoundaryPrerequisitesPassed", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationBoundaryDraftStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationBoundaryDraftSections", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalResponseHandoffGateAcceptedObservationSummaryStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalResponseHandoffGateAcceptedObservationCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalResponseHandoffGateAcceptedObservationAcceptedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalResponseHandoffGateAcceptedObservationRejectedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalResponseHandoffGateMissingMutationResultRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalResponseHandoffGateStaleIndexRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationAcceptedObservationSummaryStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationAcceptedObservationCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationAcceptedObservationAcceptedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationAcceptedObservationRejectedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationMissingMutationResultRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationStaleIndexRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationToolName", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationVerificationStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStatus", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalResponseHandoffGate.get("sourceFinalAnswerUserVisibleCompletionGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("finalAnswerDeliveryPolicy", "DISABLED_AUDIT_ONLY")
                 .containsEntry("finalAnswerDeliveryEnabled", false)
                 .containsEntry("deliveryHandoffEnabled", false)
@@ -5265,6 +6214,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationFinalAnswerDeliveryReceiptGate")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> gate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryReceiptGate");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> finalAnswerDeliveryGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryGate");
         assertThat(gate)
                 .containsEntry("schema", "learnbot.local-agent.mutation-final-answer-delivery-receipt-gate.v1")
                 .containsEntry("status", status)
@@ -5286,7 +6237,40 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerDeliveryGateUserId", userId)
                 .containsEntry("sourceFinalAnswerDeliveryGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerDeliveryGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateSchema", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateSessionId", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateUserId", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateAgentId", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationGateWorkspaceId", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationBoundaryStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationBoundaryPrerequisitesPassed", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryPrerequisitesPassed"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryDraftStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftSections", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationBoundaryDraftSections"))
+                .containsEntry("sourceFinalAnswerDeliveryGateAcceptedObservationSummaryStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGateAcceptedObservationCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGateAcceptedObservationAcceptedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGateAcceptedObservationRejectedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGateMissingMutationResultRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryGateStaleIndexRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGateStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationSummaryStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationAcceptedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationRejectedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationMissingMutationResultRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationStaleIndexRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationToolName", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationVerificationStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStatus", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryObservationCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryRejectedCount", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", finalAnswerDeliveryGate.get("sourceFinalResponseHandoffGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("deliveryReceiptPolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("acknowledgementSavePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("acknowledgementSaveReady", false)
                 .containsEntry("deliveryReceiptEnabled", false)
                 .containsEntry("acknowledgementSaveEnabled", false)
                 .containsEntry("finalAnswerDeliveryEnabled", false)
@@ -5334,6 +6318,7 @@ class LocalAgentToolGatewayServiceTest {
                         "mutationFinalAnswerDeliveryGate",
                         "deliveryReceiptPolicy",
                         "deliveryReceipt",
+                        "acknowledgementSave",
                         "finalAnswerDelivery",
                         "deliveryHandoff"
                 );
@@ -5361,6 +6346,7 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(gate.get("blockingKeys")).asList().contains(
                 "deliveryReceiptPolicy",
                 "deliveryReceipt",
+                "acknowledgementSave",
                 "finalAnswerDelivery",
                 "deliveryHandoff",
                 "deliveryReceiptEnabled",
@@ -5465,6 +6451,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("finalMutationReportContract")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> contract = (Map<String, Object>) latestAttempt.get("finalMutationReportContract");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
         assertThat(contract)
                 .containsEntry("schema", "learnbot.local-agent.final-mutation-report.v1")
                 .containsEntry("status", "CONTRACT_DISABLED")
@@ -5472,6 +6460,14 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceRequestId", sourceRequestId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("postMutationResultSchema", "learnbot.local-agent.post-mutation-result.v1")
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
                 .containsEntry("rollbackReadinessStatus", rollbackReadinessStatus)
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
@@ -5481,7 +6477,8 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("applyEnabled", false)
                 .containsEntry("testEnabled", false)
                 .containsEntry("rollbackRestoreEnabled", false)
-                .containsEntry("ragFreshnessUpdateEnabled", false);
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("acceptedObservationAggregationEnabled", false);
         assertThat(contract.get("expectedOutcomeKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
         List<String> expectedOutcomeKeys = (List<String>) contract.get("expectedOutcomeKeys");
@@ -5539,6 +6536,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationResultAggregationPlan")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> plan = (Map<String, Object>) latestAttempt.get("mutationResultAggregationPlan");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
         assertThat(plan)
                 .containsEntry("schema", "learnbot.local-agent.mutation-result-aggregation-plan.v1")
                 .containsEntry("status", "READY_AGGREGATION_DISABLED")
@@ -5549,6 +6548,14 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("postMutationResultSchema", "learnbot.local-agent.post-mutation-result.v1")
                 .containsEntry("finalMutationReportSchema", "learnbot.local-agent.final-mutation-report.v1")
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
                 .containsEntry("pushEnabled", false)
@@ -5561,6 +6568,7 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("rollbackRestoreEnabled", false)
                 .containsEntry("ragFreshnessUpdateEnabled", false)
                 .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("acceptedObservationAggregationEnabled", false)
                 .containsEntry("finalAnswerGenerationEnabled", false);
         assertThat(plan.get("sourceOutcomeKeys")).isInstanceOf(List.class);
         @SuppressWarnings("unchecked")
@@ -5621,6 +6629,100 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(blockingKeys).isEmpty();
     }
 
+    private void assertFinalMutationReportDraft(
+            Map<String, Object> latestAttempt,
+            UUID attemptId,
+            UUID sourceRequestId
+    ) {
+        assertThat(latestAttempt.get("finalMutationReportDraft")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> draft = (Map<String, Object>) latestAttempt.get("finalMutationReportDraft");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
+        assertThat(draft)
+                .containsEntry("schema", "learnbot.local-agent.final-mutation-report-draft.v1")
+                .containsEntry("status", "READY_DRAFT_DISABLED")
+                .containsEntry("prerequisitesPassed", true)
+                .containsEntry("blocking", true)
+                .containsEntry("releaseAttemptId", attemptId)
+                .containsEntry("sourceRequestId", sourceRequestId)
+                .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("aggregationPlanSchema", "learnbot.local-agent.mutation-result-aggregation-plan.v1")
+                .containsEntry("aggregationPlanStatus", "READY_AGGREGATION_DISABLED")
+                .containsEntry("finalMutationReportSchema", "learnbot.local-agent.final-mutation-report.v1")
+                .containsEntry("finalMutationReportStatus", "CONTRACT_DISABLED")
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
+                .containsEntry("missingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("staleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("writeHelperEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("applyEnabled", false)
+                .containsEntry("testEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("acceptedObservationAggregationEnabled", false)
+                .containsEntry("finalMutationReportDraftEnabled", false)
+                .containsEntry("finalReportGenerationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("publicationEnabled", false);
+        assertThat(draft.get("sections")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> sections = (List<Map<String, Object>>) draft.get("sections");
+        assertThat(sections)
+                .extracting(item -> item.get("key"))
+                .containsExactly(
+                        "changedFiles",
+                        "verificationOutcome",
+                        "postWriteRepositoryObservation",
+                        "rollbackState",
+                        "ragFreshnessState",
+                        "residualRisks",
+                        "evidenceAndCitations"
+                );
+        assertThat(sections).allSatisfy(item -> assertThat(item)
+                .containsEntry("status", "PENDING_RESULT_DISABLED")
+                .containsEntry("sourceOutcomeModeled", true)
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("mutationResultAggregationEnabled", false)
+                .containsEntry("finalReportGenerationEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false));
+        assertThat(sections.get(0))
+                .containsEntry("sourceOutcomeKey", "patchApplyOutcome")
+                .containsEntry("aggregationSourceOutcomeKey", "patchApplyOutcome")
+                .containsEntry("aggregationStepStatus", "PLANNED_DISABLED");
+        assertThat(sections.get(5))
+                .containsEntry("sourceOutcomeKey", null)
+                .containsEntry("aggregationSourceOutcomeKey", null);
+        assertThat(draft.get("blockingKeys")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> blockingKeys = (List<String>) draft.get("blockingKeys");
+        assertThat(blockingKeys).containsExactly(
+                "mutationResultAggregationEnabled",
+                "finalReportGenerationEnabled",
+                "publicationEnabled"
+        );
+        assertThat(draft.get("message").toString())
+                .contains("final mutation report draft", "aggregation", "publication");
+    }
+
     private void assertFinalMutationReportFinalizationBoundary(
             Map<String, Object> latestAttempt,
             UUID attemptId,
@@ -5632,6 +6734,8 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("finalMutationReportFinalizationBoundary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("finalMutationReportFinalizationBoundary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
         assertThat(boundary)
                 .containsEntry("schema", "learnbot.local-agent.finalization-boundary.v1")
                 .containsEntry("status", status)
@@ -5640,6 +6744,16 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("releaseAttemptId", attemptId)
                 .containsEntry("sourceRequestId", sourceRequestId)
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
+                .containsEntry("missingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("staleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
                 .containsEntry("pushEnabled", false)
@@ -5687,6 +6801,10 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("finalAnswerPublicationBoundary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("finalAnswerPublicationBoundary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> observationSummary = (Map<String, Object>) latestAttempt.get("acceptedMutationObservationSummary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> draft = (Map<String, Object>) latestAttempt.get("finalMutationReportDraft");
         assertThat(boundary)
                 .containsEntry("schema", "learnbot.local-agent.final-answer-publication-boundary.v1")
                 .containsEntry("status", status)
@@ -5697,6 +6815,18 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name())
                 .containsEntry("finalMutationReportSchema", "learnbot.local-agent.final-mutation-report.v1")
                 .containsEntry("aggregationPlanSchema", "learnbot.local-agent.mutation-result-aggregation-plan.v1")
+                .containsEntry("finalMutationReportDraftSchema", "learnbot.local-agent.final-mutation-report-draft.v1")
+                .containsEntry("finalMutationReportDraftStatus", draft.get("status"))
+                .containsEntry("acceptedMutationObservationSummarySchema", "learnbot.local-agent.accepted-mutation-observation-summary.v1")
+                .containsEntry("acceptedMutationObservationSummaryStatus", observationSummary.get("status"))
+                .containsEntry("acceptedMutationObservationCount", observationSummary.get("observationCount"))
+                .containsEntry("acceptedMutationObservationAcceptedCount", observationSummary.get("acceptedCount"))
+                .containsEntry("acceptedMutationObservationRejectedCount", observationSummary.get("rejectedCount"))
+                .containsEntry("acceptedMutationObservationTerminalFailureAcceptedCount", observationSummary.get("terminalFailureAcceptedCount"))
+                .containsEntry("acceptedMutationObservationToolCounts", observationSummary.get("toolObservationCounts"))
+                .containsEntry("acceptedMutationObservationStatusCounts", observationSummary.get("statusObservationCounts"))
+                .containsEntry("missingMutationResultRiskVisible", ((Number) observationSummary.get("observationCount")).intValue() == 0)
+                .containsEntry("staleIndexRiskVisible", ((Number) observationSummary.get("acceptedCount")).intValue() > 0)
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
                 .containsEntry("pushEnabled", false)
@@ -5723,6 +6853,18 @@ class LocalAgentToolGatewayServiceTest {
                 "residualRisks",
                 "evidenceAndCitations"
         );
+        assertThat(boundary.get("finalMutationReportDraftSections")).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<String> draftSections = (List<String>) boundary.get("finalMutationReportDraftSections");
+        assertThat(draftSections).containsExactly(
+                "changedFiles",
+                "verificationOutcome",
+                "postWriteRepositoryObservation",
+                "rollbackState",
+                "ragFreshnessState",
+                "residualRisks",
+                "evidenceAndCitations"
+        );
         assertThat(boundary.get("answerQualityGuardrails")).isInstanceOf(List.class);
         assertThat(boundary.get("answerQualityGuardrails").toString())
                 .contains("must not claim files changed", "failed or skipped verification", "RAG freshness", "rollback state");
@@ -5735,6 +6877,7 @@ class LocalAgentToolGatewayServiceTest {
                         "releaseAttemptReady",
                         "aggregationPlanModeled",
                         "finalReportContractModeled",
+                        "finalReportDraftModeled",
                         "answerQualityGuardrailsModeled"
                 );
         assertThat(requirements).allSatisfy(item -> assertThat(item)
@@ -5819,9 +6962,12 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationCompletionSummary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("mutationCompletionSummary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> deliveryReceiptGate = (Map<String, Object>) latestAttempt.get("mutationFinalAnswerDeliveryReceiptGate");
         String sourceDeliveryReceiptGateStatus = List.of(expectedBlockingKeys).contains("mutationFinalAnswerDeliveryReceiptGate")
                 ? "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED"
                 : "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED";
+        String expectedPublicationStatus = prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED";
         assertThat(summary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-completion-summary.v1")
                 .containsEntry("status", status)
@@ -5840,6 +6986,32 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceFinalAnswerDeliveryReceiptGateUserId", userId)
                 .containsEntry("sourceFinalAnswerDeliveryReceiptGateAgentId", agentId)
                 .containsEntry("sourceFinalAnswerDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSavePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled", false)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateSchema", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateSchema"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateStatus", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateSessionId", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateSessionId"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateUserId", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateUserId"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateAgentId", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateAgentId"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationGateWorkspaceId", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryStatus", expectedPublicationStatus)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryDraftStatus", "READY_DRAFT_DISABLED")
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationStaleIndexRiskVisible", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", deliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("releaseGateEnabled", false)
                 .containsEntry("requestCreationEnabled", false)
                 .containsEntry("pushEnabled", false)
@@ -5867,6 +7039,35 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation completion prerequisites are modeled, but execution, aggregation, publication, and final-answer generation remain disabled."
                         : "Local Agent mutation completion prerequisites are incomplete, and execution, aggregation, publication, and final-answer generation remain disabled.");
         assertThat(summary.get("items")).isInstanceOf(List.class);
+        assertThat(summary).containsKeys(
+                "sourceFinalAnswerDeliveryReceiptGateAcceptedObservationSummaryStatus",
+                "sourceFinalAnswerDeliveryReceiptGateAcceptedObservationCount",
+                "sourceFinalAnswerDeliveryReceiptGateAcceptedObservationAcceptedCount",
+                "sourceFinalAnswerDeliveryReceiptGateAcceptedObservationRejectedCount",
+                "sourceFinalAnswerDeliveryReceiptGateMissingMutationResultRiskVisible",
+                "sourceFinalAnswerDeliveryReceiptGateStaleIndexRiskVisible",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateSchema",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateStatus",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateSessionId",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateUserId",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateAgentId",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationGateWorkspaceId",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationRejectedCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationMissingMutationResultRiskVisible",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationStaleIndexRiskVisible",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationStatus",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationToolName",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible",
+                "sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"
+        );
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) summary.get("items");
         assertThat(items)
@@ -5876,6 +7077,7 @@ class LocalAgentToolGatewayServiceTest {
                         "mutationExecutionSequencePlan",
                         "mutationResultIntakeBoundary",
                         "mutationResultAggregationPlan",
+                        "finalMutationReportDraft",
                         "finalMutationReportContract",
                         "finalMutationReportFinalizationBoundary",
                         "finalAnswerPublicationBoundary",
@@ -5904,6 +7106,7 @@ class LocalAgentToolGatewayServiceTest {
                         "mutationFinalResponseHandoffGate",
                         "mutationFinalAnswerDeliveryGate",
                         "mutationFinalAnswerDeliveryReceiptGate",
+                        "acknowledgementSaveRefusal",
                         "rollbackReadiness",
                         "ragFreshnessRequirement"
                 );
@@ -5946,9 +7149,12 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationHandoffSummary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> summary = (Map<String, Object>) latestAttempt.get("mutationHandoffSummary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> completionSummary = (Map<String, Object>) latestAttempt.get("mutationCompletionSummary");
         String sourceDeliveryReceiptGateStatus = List.of(expectedBlockingKeys).contains("mutationFinalAnswerDeliveryReceiptGate")
                 ? "BLOCKED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED"
                 : "REFUSED_FINAL_ANSWER_DELIVERY_RECEIPT_DISABLED";
+        String expectedPublicationStatus = prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED";
         assertThat(summary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-handoff-summary.v1")
                 .containsEntry("status", status)
@@ -5974,10 +7180,65 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceCompletionSummaryDeliveryReceiptGateUserId", userId)
                 .containsEntry("sourceCompletionSummaryDeliveryReceiptGateAgentId", agentId)
                 .containsEntry("sourceCompletionSummaryDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy", "DISABLED_AUDIT_ONLY")
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled", false)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateSchema"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateStatus"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateSessionId"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateUserId"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateAgentId"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryStatus", expectedPublicationStatus)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus", "READY_DRAFT_DISABLED")
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("message", prerequisitesPassed
                         ? "Local Agent mutation handoff prerequisites are modeled, but release, request creation, push, claim, execution, result handling, final response, delivery, and mutation remain disabled."
                         : "Local Agent mutation handoff is blocked by incomplete disabled readiness inputs, and all handoff controls remain disabled.");
         assertThat(summary.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(summary).containsKeys(
+                "sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationSummaryStatus",
+                "sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationCount",
+                "sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount",
+                "sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationRejectedCount",
+                "sourceCompletionSummaryDeliveryReceiptGateMissingMutationResultRiskVisible",
+                "sourceCompletionSummaryDeliveryReceiptGateStaleIndexRiskVisible",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible",
+                "sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"
+        );
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) summary.get("blockingKeys");
         assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
@@ -6023,7 +7284,8 @@ class LocalAgentToolGatewayServiceTest {
                         "toolExecution",
                         "resultIntake",
                         "finalResponse",
-                        "deliveryReceipt"
+                        "deliveryReceipt",
+                        "acknowledgementSave"
                 );
         assertThat(stages).allSatisfy(stage -> assertThat(stage)
                 .containsEntry("status", prerequisitesPassed ? "MODELED_DISABLED" : "BLOCKED_DISABLED")
@@ -6056,6 +7318,9 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationExecutionReadinessBoundary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationExecutionReadinessBoundary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> handoffSummary = (Map<String, Object>) latestAttempt.get("mutationHandoffSummary");
+        String expectedPublicationStatus = prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED";
         assertThat(boundary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-execution-readiness-boundary.v1")
                 .containsEntry("status", status)
@@ -6080,6 +7345,30 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceHandoffSummaryDeliveryReceiptGateUserId", userId)
                 .containsEntry("sourceHandoffSummaryDeliveryReceiptGateAgentId", agentId)
                 .containsEntry("sourceHandoffSummaryDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateSessionId", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateUserId", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateAgentId", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationGateWorkspaceId", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryStatus", expectedPublicationStatus)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus", "READY_DRAFT_DISABLED")
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", handoffSummary.get("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
                 .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
                 .containsEntry("sourceExecutionGateSessionId", sessionId)
@@ -6118,6 +7407,35 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation execution inputs are modeled, but runtime execution, request creation, push, claim, write helper, apply, test, rollback restore, result intake, final response handoff, delivery receipt, and mutation remain disabled."
                         : "Local Agent mutation execution readiness is blocked by incomplete disabled handoff, execution, or write-helper inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(boundary).containsKeys(
+                "sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationSummaryStatus",
+                "sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationCount",
+                "sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount",
+                "sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationRejectedCount",
+                "sourceHandoffSummaryDeliveryReceiptGateMissingMutationResultRiskVisible",
+                "sourceHandoffSummaryDeliveryReceiptGateStaleIndexRiskVisible",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateSessionId",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateUserId",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateAgentId",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationGateWorkspaceId",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible",
+                "sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"
+        );
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
         assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
@@ -6165,6 +7483,9 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationToolRunnerBoundary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationToolRunnerBoundary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> executionReadinessBoundary = (Map<String, Object>) latestAttempt.get("mutationExecutionReadinessBoundary");
+        String expectedPublicationStatus = prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED";
         assertThat(boundary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-tool-runner-boundary.v1")
                 .containsEntry("status", status)
@@ -6189,6 +7510,30 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateUserId", userId)
                 .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateAgentId", agentId)
                 .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSchema", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateStatus", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSessionId", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateSessionId"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateUserId", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateUserId"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateAgentId", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateAgentId"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateWorkspaceId", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationBoundaryStatus", expectedPublicationStatus)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationBoundaryDraftStatus", "READY_DRAFT_DISABLED")
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", executionReadinessBoundary.get("sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("sourceExecutionGateSchema", "learnbot.local-agent.mutation-execution-gate.v1")
                 .containsEntry("sourceExecutionGateStatus", "REFUSED_EXECUTION_DISABLED")
                 .containsEntry("sourceExecutionGateSessionId", sessionId)
@@ -6224,6 +7569,35 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation tool-runner inputs are modeled, but runner invocation, running transition, result completion, write helper, apply, test, rollback restore, result intake, and mutation remain disabled."
                         : "Local Agent mutation tool-runner boundary is blocked by incomplete disabled execution readiness or execution gate inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(boundary).containsKeys(
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateAcceptedObservationSummaryStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateAcceptedObservationCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateAcceptedObservationAcceptedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateAcceptedObservationRejectedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateMissingMutationResultRiskVisible",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGateStaleIndexRiskVisible",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSchema",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSessionId",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateUserId",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateAgentId",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateWorkspaceId",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible",
+                "sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"
+        );
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
         assertThat(blockingKeys).containsExactly(expectedBlockingKeys);
@@ -6272,6 +7646,9 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(latestAttempt.get("mutationResultCompletionBoundary")).isInstanceOf(Map.class);
         @SuppressWarnings("unchecked")
         Map<String, Object> boundary = (Map<String, Object>) latestAttempt.get("mutationResultCompletionBoundary");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> toolRunnerBoundary = (Map<String, Object>) latestAttempt.get("mutationToolRunnerBoundary");
+        String expectedPublicationStatus = prerequisitesPassed ? "READY_PUBLICATION_DISABLED" : "BLOCKED_PUBLICATION_DISABLED";
         assertThat(boundary)
                 .containsEntry("schema", "learnbot.local-agent.mutation-result-completion-boundary.v1")
                 .containsEntry("status", status)
@@ -6296,6 +7673,30 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateUserId", userId)
                 .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateAgentId", agentId)
                 .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGateWorkspaceId", workspaceId)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSchema", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSchema"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateStatus", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateStatus"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSessionId", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateSessionId"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateUserId", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateUserId"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateAgentId", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateAgentId"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateWorkspaceId", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationGateWorkspaceId"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationBoundaryStatus", expectedPublicationStatus)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", prerequisitesPassed)
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationBoundaryDraftStatus", "READY_DRAFT_DISABLED")
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"))
+                .containsEntry("sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", toolRunnerBoundary.get("sourceExecutionReadinessBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"))
                 .containsEntry("sourcePostExecutionObservationGateSchema", "learnbot.local-agent.mutation-post-execution-observation-gate.v1")
                 .containsEntry("sourcePostExecutionObservationGateStatus", "REFUSED_POST_EXECUTION_OBSERVATION_DISABLED")
                 .containsEntry("sourcePostExecutionObservationGateSessionId", sessionId)
@@ -6335,6 +7736,35 @@ class LocalAgentToolGatewayServiceTest {
                         ? "Local Agent mutation result-completion inputs are modeled, but completed transition, result persistence, observation capture, result intake, and mutation remain disabled."
                         : "Local Agent mutation result completion is blocked by incomplete disabled tool-runner or post-execution observation inputs.");
         assertThat(boundary.get("blockingKeys")).isInstanceOf(List.class);
+        assertThat(boundary).containsKeys(
+                "sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationSummaryStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationAcceptedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationRejectedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGateMissingMutationResultRiskVisible",
+                "sourceToolRunnerBoundaryDeliveryReceiptGateStaleIndexRiskVisible",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSchema",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSessionId",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateUserId",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateAgentId",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateWorkspaceId",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible",
+                "sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"
+        );
         @SuppressWarnings("unchecked")
         List<String> blockingKeys = (List<String>) boundary.get("blockingKeys");
         assertThat(blockingKeys).containsExactly(expectedBlockingKeys);

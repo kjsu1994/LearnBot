@@ -7,6 +7,34 @@ const view = buildMutationResultCompletionBoundaryView({
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
   sourceToolRunnerBoundaryStatus: 'REFUSED_TOOL_RUNNER_DISABLED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateSessionId: 'session-1',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateUserId: 'user-1',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateAgentId: 'agent-1',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationAcceptedCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGateAcceptedObservationRejectedCount: 0,
+  sourceToolRunnerBoundaryDeliveryReceiptGateMissingMutationResultRiskVisible: false,
+  sourceToolRunnerBoundaryDeliveryReceiptGateStaleIndexRiskVisible: true,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible: false,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationStaleIndexRiskVisible: true,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceToolRunnerBoundaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourcePostExecutionObservationGateStatus: 'REFUSED_POST_EXECUTION_OBSERVATION_DISABLED',
   completionPolicy: 'DISABLED_AUDIT_ONLY',
   expectedResultCount: 4,
@@ -122,6 +150,10 @@ assert.equal(
 assert.equal(
   view.sourceText,
   'mutation result completion sources: tool runner REFUSED_TOOL_RUNNER_DISABLED / observation REFUSED_POST_EXECUTION_OBSERVATION_DISABLED / completion policy DISABLED_AUDIT_ONLY'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation result completion source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication READY_PUBLICATION_DISABLED / draft READY_DRAFT_DISABLED / observations 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

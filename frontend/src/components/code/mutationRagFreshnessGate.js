@@ -1,3 +1,5 @@
+import { buildAcceptedMutationObservationSummaryText } from './mutationObservationSummary.js';
+
 const DISABLED_CONTROL_LABELS = [
   ['ragFreshnessUpdateEnabled', 'rag freshness'],
   ['ragFreshnessUpdateInvocationEnabled', 'freshness invocation'],
@@ -46,6 +48,8 @@ export function buildMutationRagFreshnessGateView(gate = null) {
       headerText: '',
       idsText: '',
       countsText: '',
+      observationSummaryText: '',
+      sourceContextText: '',
       disabledText: '',
       policyLines: [],
       blockingText: '',
@@ -61,6 +65,8 @@ export function buildMutationRagFreshnessGateView(gate = null) {
     headerText: ragFreshnessHeaderText(gate),
     idsText: ragFreshnessIdsText(gate),
     countsText: ragFreshnessCountsText(gate),
+    observationSummaryText: buildAcceptedMutationObservationSummaryText(gate, 'mutation RAG freshness accepted observations'),
+    sourceContextText: ragFreshnessSourceContextText(gate),
     disabledText: `mutation RAG freshness disabled:${disabledControlSuffix(gate)}`,
     policyLines: policyChecks.map(ragFreshnessPolicyText),
     blockingText: blockingKeys.length ? `mutation RAG freshness blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -102,6 +108,9 @@ function ragFreshnessIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }
@@ -129,6 +138,40 @@ function ragFreshnessCountsText(gate) {
     text += ` / intake persisted ${String(gate.intakePersistedResultCount)}`;
   }
   return text;
+}
+
+function ragFreshnessSourceContextText(gate) {
+  const parts = [
+    ['publication gate', gate.sourceRollbackFallbackGatePublicationGateStatus],
+    ['publication schema', gate.sourceRollbackFallbackGatePublicationGateSchema],
+    ['publication session', gate.sourceRollbackFallbackGatePublicationGateSessionId],
+    ['publication user', gate.sourceRollbackFallbackGatePublicationGateUserId],
+    ['publication agent', gate.sourceRollbackFallbackGatePublicationGateAgentId],
+    ['publication workspace', gate.sourceRollbackFallbackGatePublicationGateWorkspaceId],
+    ['rollback latest', gate.sourceRollbackFallbackGateLatestAcceptedObservationStatus],
+    ['accepted', gate.sourceRollbackFallbackGateLatestAcceptedObservationAccepted],
+    ['rejected', gate.sourceRollbackFallbackGateLatestAcceptedObservationRejected],
+    ['terminal failure accepted', gate.sourceRollbackFallbackGateLatestAcceptedObservationTerminalFailureAccepted],
+    ['tool', gate.sourceRollbackFallbackGateLatestAcceptedObservationToolName],
+    ['verification', gate.sourceRollbackFallbackGateLatestAcceptedObservationVerificationStatus],
+    ['missing result risk', gate.missingMutationResultRiskVisible],
+    ['stale index risk', gate.staleIndexRiskVisible],
+    ['summary observations', gate.sourceRollbackFallbackGateAcceptedObservationSummaryStatus],
+    ['summary count', gate.sourceRollbackFallbackGateAcceptedObservationSummaryObservationCount],
+    ['summary accepted', gate.sourceRollbackFallbackGateAcceptedObservationSummaryAcceptedCount],
+    ['summary rejected', gate.sourceRollbackFallbackGateAcceptedObservationSummaryRejectedCount],
+    ['summary missing result risk', gate.sourceRollbackFallbackGateAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['summary stale index risk', gate.sourceRollbackFallbackGateAcceptedObservationSummaryStaleIndexRiskVisible],
+    ['rollback summary observations', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStatus],
+    ['rollback summary count', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryObservationCount],
+    ['rollback summary accepted', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryAcceptedCount],
+    ['rollback summary rejected', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryRejectedCount],
+    ['rollback summary missing result risk', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['rollback summary stale index risk', gate.sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation RAG freshness source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(gate) {

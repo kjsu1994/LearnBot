@@ -42,6 +42,7 @@ export function buildMutationHandoffSummaryView(summary = null) {
     return {
       show: false,
       headerText: '',
+      sourceContextText: '',
       disabledText: '',
       stageLines: [],
       blockingText: '',
@@ -56,6 +57,7 @@ export function buildMutationHandoffSummaryView(summary = null) {
   return {
     show: true,
     headerText: mutationHandoffHeaderText(summary),
+    sourceContextText: mutationHandoffSourceContextText(summary),
     disabledText: `mutation handoff disabled:${disabledControlSuffix(disabledControls)}`,
     stageLines: stages.map(mutationHandoffStageText),
     blockingText: blockingKeys.length ? `mutation handoff blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -77,7 +79,52 @@ function mutationHandoffHeaderText(summary) {
   if (summary.sourceCompletionSummaryStatus) {
     text += ` / completion ${summary.sourceCompletionSummaryStatus}`;
   }
+  if (summary.sourceCompletionSummaryDeliveryReceiptGateStatus) {
+    text += ` / receipt ${summary.sourceCompletionSummaryDeliveryReceiptGateStatus}`;
+  }
+  if (summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy) {
+    text += ` / acknowledgement ${summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy}`;
+  }
+  if (summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled !== undefined) {
+    text += ` / acknowledgement save ${String(summary.sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled)}`;
+  }
   return text;
+}
+
+function mutationHandoffSourceContextText(summary) {
+  const parts = [
+    ['publication gate', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus],
+    ['publication schema', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema],
+    ['publication session', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId],
+    ['publication user', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId],
+    ['publication agent', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId],
+    ['publication workspace', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId],
+    ['publication', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryStatus],
+    ['draft', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus],
+    ['observations', summary.sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationCount],
+    ['accepted', summary.sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount],
+    ['rejected', summary.sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationRejectedCount],
+    ['missing result risk', summary.sourceCompletionSummaryDeliveryReceiptGateMissingMutationResultRiskVisible],
+    ['stale index risk', summary.sourceCompletionSummaryDeliveryReceiptGateStaleIndexRiskVisible],
+    ['publication observations', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus],
+    ['publication count', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount],
+    ['publication accepted', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount],
+    ['publication rejected', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount],
+    ['publication missing result risk', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible],
+    ['publication stale index risk', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible],
+    ['publication latest', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus],
+    ['publication tool', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName],
+    ['publication verification', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus],
+    ['publication rollback summary observations', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus],
+    ['publication rollback summary count', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount],
+    ['publication rollback summary accepted', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount],
+    ['publication rollback summary rejected', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount],
+    ['publication rollback summary missing result risk', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['publication rollback summary stale index risk', summary.sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${Array.isArray(value) ? value.join(',') : String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation handoff source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(disabledControls) {

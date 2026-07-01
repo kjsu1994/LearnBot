@@ -7,6 +7,34 @@ const view = buildMutationExecutionReadinessBoundaryView({
   prerequisitesPassed: true,
   executionTarget: 'USER_LOCAL_AGENT',
   sourceHandoffSummaryStatus: 'READY_HANDOFF_DISABLED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateSessionId: 'session-1',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateUserId: 'user-1',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateAgentId: 'agent-1',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGateAcceptedObservationRejectedCount: 0,
+  sourceHandoffSummaryDeliveryReceiptGateMissingMutationResultRiskVisible: false,
+  sourceHandoffSummaryDeliveryReceiptGateStaleIndexRiskVisible: true,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible: false,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible: true,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceHandoffSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceExecutionGateStatus: 'REFUSED_EXECUTION_DISABLED',
   sourceWriteHelperSafetyGateStatus: 'REFUSED_WRITE_HELPER_DISABLED',
   expectedRequestCount: 4,
@@ -133,6 +161,10 @@ assert.equal(
 assert.equal(
   view.sourceText,
   'mutation execution readiness sources: handoff READY_HANDOFF_DISABLED / execution gate REFUSED_EXECUTION_DISABLED / write helper REFUSED_WRITE_HELPER_DISABLED'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation execution readiness source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication READY_PUBLICATION_DISABLED / draft READY_DRAFT_DISABLED / observations 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / publication observations OBSERVED / publication count 2 / publication accepted 2 / publication rejected 0 / publication missing result risk false / publication stale index risk true / publication latest ACCEPTED / publication tool patch.apply / publication verification PASSED / publication rollback summary observations OBSERVED / publication rollback summary count 2 / publication rollback summary accepted 2 / publication rollback summary rejected 0 / publication rollback summary missing result risk false / publication rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

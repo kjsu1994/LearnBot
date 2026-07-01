@@ -53,6 +53,7 @@ export function buildMutationResultAggregationGateView(gate = null) {
       headerText: '',
       idsText: '',
       countsText: '',
+      sourceContextText: '',
       disabledText: '',
       policyLines: [],
       blockingText: '',
@@ -68,6 +69,7 @@ export function buildMutationResultAggregationGateView(gate = null) {
     headerText: resultAggregationHeaderText(gate),
     idsText: resultAggregationIdsText(gate),
     countsText: resultAggregationCountsText(gate),
+    sourceContextText: resultAggregationSourceContextText(gate),
     disabledText: `mutation result aggregation disabled:${disabledControlSuffix(gate)}`,
     policyLines: policyChecks.map(resultAggregationPolicyText),
     blockingText: blockingKeys.length ? `mutation result aggregation blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -109,6 +111,9 @@ function resultAggregationIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }
@@ -136,6 +141,35 @@ function resultAggregationCountsText(gate) {
     text += ` / intake persisted ${String(gate.intakePersistedResultCount)}`;
   }
   return text;
+}
+
+function resultAggregationSourceContextText(gate) {
+  const parts = [
+    ['publication gate', gate.sourceRagFreshnessGatePublicationGateStatus],
+    ['publication schema', gate.sourceRagFreshnessGatePublicationGateSchema],
+    ['publication session', gate.sourceRagFreshnessGatePublicationGateSessionId],
+    ['publication user', gate.sourceRagFreshnessGatePublicationGateUserId],
+    ['publication agent', gate.sourceRagFreshnessGatePublicationGateAgentId],
+    ['publication workspace', gate.sourceRagFreshnessGatePublicationGateWorkspaceId],
+    ['RAG observations', gate.sourceRagFreshnessGateAcceptedObservationSummaryStatus],
+    ['count', gate.sourceRagFreshnessGateAcceptedObservationCount],
+    ['accepted', gate.sourceRagFreshnessGateAcceptedObservationAcceptedCount],
+    ['rejected', gate.sourceRagFreshnessGateAcceptedObservationRejectedCount],
+    ['missing result risk', gate.sourceRagFreshnessGateMissingMutationResultRiskVisible],
+    ['stale index risk', gate.sourceRagFreshnessGateStaleIndexRiskVisible],
+    ['latest', gate.sourceRagFreshnessGateLatestAcceptedObservationStatus],
+    ['tool', gate.sourceRagFreshnessGateLatestAcceptedObservationToolName],
+    ['verification', gate.sourceRagFreshnessGateLatestAcceptedObservationVerificationStatus],
+    ['rollback summary observations', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryStatus],
+    ['rollback summary count', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryObservationCount],
+    ['rollback summary accepted', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryAcceptedCount],
+    ['rollback summary rejected', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryRejectedCount],
+    ['rollback summary missing result risk', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['rollback summary stale index risk', gate.sourceRagFreshnessGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation result aggregation source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(gate) {

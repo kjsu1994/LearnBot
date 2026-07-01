@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 var app = new LearnBotLocalAgent();
 return await app.Run(args);
 
-internal sealed class LearnBotLocalAgent
+internal sealed partial class LearnBotLocalAgent
 {
     private const string Version = "0.1.0";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -561,7 +561,7 @@ internal sealed class LearnBotLocalAgent
         {
             agentId = config.AgentId,
             version = config.Version,
-            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff" },
+            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff", "command.runAllowed" },
             workspaces = config.Workspaces.Select(workspace => new
             {
                 workspace.WorkspaceId,
@@ -689,16 +689,30 @@ internal sealed class LearnBotLocalAgent
                 }
                 break;
             case "patch.apply":
-                var patch = DryRunPatchApply(config, TryGuid(request, "workspaceId"), request);
+                var patch = HandlePatchApply(config, TryGuid(request, "workspaceId"), request);
                 foreach (var item in patch.Output) output[item.Key] = item.Value;
                 status = patch.Status;
                 failureCode = patch.FailureCode;
                 error = patch.Error;
                 break;
+            case "rollback.restore":
+                var rollback = RestoreRollbackSnapshot(config, TryGuid(request, "workspaceId"), request);
+                foreach (var item in rollback.Output) output[item.Key] = item.Value;
+                status = rollback.Status;
+                failureCode = rollback.FailureCode;
+                error = rollback.Error;
+                break;
+            case "command.runAllowed":
+                var command = RunAllowedCommand(config, TryGuid(request, "workspaceId"), request);
+                foreach (var item in command.Output) output[item.Key] = item.Value;
+                status = command.Status;
+                failureCode = command.FailureCode;
+                error = command.Error;
+                break;
             default:
                 status = "REJECTED";
                 failureCode = "UNSAFE_TOOL";
-                error = "This Local Agent skeleton rejects file, git, command, patch, and rollback tools by default.";
+                error = "This Local Agent skeleton rejects unknown tools and arbitrary file, git, command, patch, test, and rollback operations by default.";
                 break;
         }
 
@@ -2205,6 +2219,10 @@ internal sealed class LearnBotLocalAgent
         {
             return SelfTestPatchDryRunContract();
         }
+        if (string.Equals(args[0], "patch-apply-mutation-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchApplyMutationContract();
+        }
         if (string.Equals(args[0], "tool-response-contract", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestToolResponseContract();
@@ -2212,6 +2230,14 @@ internal sealed class LearnBotLocalAgent
         if (string.Equals(args[0], "patch-write-sequence", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestPatchWriteSequence();
+        }
+        if (string.Equals(args[0], "rollback-restore-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestRollbackRestoreContract();
+        }
+        if (string.Equals(args[0], "allowed-test-runner-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestAllowedTestRunnerContract();
         }
         if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
         {

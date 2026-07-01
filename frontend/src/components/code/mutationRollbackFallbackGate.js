@@ -48,6 +48,7 @@ export function buildMutationRollbackFallbackGateView(gate = null) {
       headerText: '',
       idsText: '',
       countsText: '',
+      sourceContextText: '',
       disabledText: '',
       policyLines: [],
       blockingText: '',
@@ -63,6 +64,7 @@ export function buildMutationRollbackFallbackGateView(gate = null) {
     headerText: rollbackFallbackHeaderText(gate),
     idsText: rollbackFallbackIdsText(gate),
     countsText: rollbackFallbackCountsText(gate),
+    sourceContextText: rollbackFallbackSourceContextText(gate),
     disabledText: `mutation rollback fallback disabled:${disabledControlSuffix(gate)}`,
     policyLines: policyChecks.map(rollbackFallbackPolicyText),
     blockingText: blockingKeys.length ? `mutation rollback fallback blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -104,6 +106,9 @@ function rollbackFallbackIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }
@@ -131,6 +136,39 @@ function rollbackFallbackCountsText(gate) {
     text += ` / intake persisted ${String(gate.intakePersistedResultCount)}`;
   }
   return text;
+}
+
+function rollbackFallbackSourceContextText(gate) {
+  const parts = [
+    ['publication gate', gate.sourceResultIntakePersistenceGatePublicationGateStatus],
+    ['publication schema', gate.sourceResultIntakePersistenceGatePublicationGateSchema],
+    ['publication session', gate.sourceResultIntakePersistenceGatePublicationGateSessionId],
+    ['publication user', gate.sourceResultIntakePersistenceGatePublicationGateUserId],
+    ['publication agent', gate.sourceResultIntakePersistenceGatePublicationGateAgentId],
+    ['publication workspace', gate.sourceResultIntakePersistenceGatePublicationGateWorkspaceId],
+    ['intake audit', gate.sourceResultIntakePersistenceGateAcceptedObservationAuditStatus],
+    ['latest', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationStatus],
+    ['accepted', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationAccepted],
+    ['rejected', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationRejected],
+    ['terminal failure accepted', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationTerminalFailureAccepted],
+    ['tool', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationToolName],
+    ['verification', gate.sourceResultIntakePersistenceGateLatestAcceptedObservationVerificationStatus],
+    ['summary observations', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryStatus],
+    ['summary count', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryObservationCount],
+    ['summary accepted', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryAcceptedCount],
+    ['summary rejected', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryRejectedCount],
+    ['summary missing result risk', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['summary stale index risk', gate.sourceResultIntakePersistenceGateAcceptedObservationSummaryStaleIndexRiskVisible],
+    ['rollback summary observations', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStatus],
+    ['rollback summary count', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryObservationCount],
+    ['rollback summary accepted', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryAcceptedCount],
+    ['rollback summary rejected', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryRejectedCount],
+    ['rollback summary missing result risk', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible],
+    ['rollback summary stale index risk', gate.sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation rollback fallback source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(gate) {

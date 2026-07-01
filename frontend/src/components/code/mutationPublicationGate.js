@@ -54,6 +54,7 @@ export function buildMutationPublicationGateView(gate = null) {
       idsText: '',
       countsText: '',
       disabledText: '',
+      sourceContextText: '',
       policyLines: [],
       blockingText: '',
       message: '',
@@ -69,6 +70,7 @@ export function buildMutationPublicationGateView(gate = null) {
     idsText: publicationIdsText(gate),
     countsText: publicationCountsText(gate),
     disabledText: `mutation publication disabled:${disabledControlSuffix(gate)}`,
+    sourceContextText: publicationSourceContextText(gate),
     policyLines: policyChecks.map(publicationPolicyText),
     blockingText: blockingKeys.length ? `mutation publication blocking keys: ${blockingKeys.join(', ')}` : '',
     message: gate.message || '',
@@ -112,6 +114,9 @@ function publicationIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }
@@ -137,6 +142,79 @@ function publicationCountsText(gate) {
   }
   if (gate.intakePersistedResultCount !== undefined) {
     text += ` / intake persisted ${String(gate.intakePersistedResultCount)}`;
+  }
+  return text;
+}
+
+function publicationSourceContextText(gate) {
+  if (!gate.sourceResultAggregationGatePublicationGateStatus
+    && !gate.sourceResultAggregationGateAcceptedObservationSummaryStatus
+    && !gate.sourceResultAggregationGateLatestAcceptedObservationStatus) {
+    return '';
+  }
+  let text = 'mutation publication source context:';
+  if (gate.sourceResultAggregationGatePublicationGateStatus) {
+    text += ` publication gate ${gate.sourceResultAggregationGatePublicationGateStatus}`;
+  }
+  if (gate.sourceResultAggregationGatePublicationGateSchema) {
+    text += ` / publication schema ${gate.sourceResultAggregationGatePublicationGateSchema}`;
+  }
+  if (gate.sourceResultAggregationGatePublicationGateSessionId) {
+    text += ` / publication session ${gate.sourceResultAggregationGatePublicationGateSessionId}`;
+  }
+  if (gate.sourceResultAggregationGatePublicationGateUserId) {
+    text += ` / publication user ${gate.sourceResultAggregationGatePublicationGateUserId}`;
+  }
+  if (gate.sourceResultAggregationGatePublicationGateAgentId) {
+    text += ` / publication agent ${gate.sourceResultAggregationGatePublicationGateAgentId}`;
+  }
+  if (gate.sourceResultAggregationGatePublicationGateWorkspaceId) {
+    text += ` / publication workspace ${gate.sourceResultAggregationGatePublicationGateWorkspaceId}`;
+  }
+  if (gate.sourceResultAggregationGateAcceptedObservationSummaryStatus) {
+    text += `${gate.sourceResultAggregationGatePublicationGateStatus ? ' /' : ''} observations ${gate.sourceResultAggregationGateAcceptedObservationSummaryStatus}`;
+  }
+  if (gate.sourceResultAggregationGateAcceptedObservationCount !== undefined) {
+    text += ` / count ${String(gate.sourceResultAggregationGateAcceptedObservationCount)}`;
+  }
+  if (gate.sourceResultAggregationGateAcceptedObservationAcceptedCount !== undefined) {
+    text += ` / accepted ${String(gate.sourceResultAggregationGateAcceptedObservationAcceptedCount)}`;
+  }
+  if (gate.sourceResultAggregationGateAcceptedObservationRejectedCount !== undefined) {
+    text += ` / rejected ${String(gate.sourceResultAggregationGateAcceptedObservationRejectedCount)}`;
+  }
+  if (gate.sourceResultAggregationGateMissingMutationResultRiskVisible !== undefined) {
+    text += ` / missing result risk ${String(gate.sourceResultAggregationGateMissingMutationResultRiskVisible)}`;
+  }
+  if (gate.sourceResultAggregationGateStaleIndexRiskVisible !== undefined) {
+    text += ` / stale index risk ${String(gate.sourceResultAggregationGateStaleIndexRiskVisible)}`;
+  }
+  if (gate.sourceResultAggregationGateLatestAcceptedObservationStatus) {
+    text += ` / latest ${gate.sourceResultAggregationGateLatestAcceptedObservationStatus}`;
+  }
+  if (gate.sourceResultAggregationGateLatestAcceptedObservationToolName) {
+    text += ` / tool ${gate.sourceResultAggregationGateLatestAcceptedObservationToolName}`;
+  }
+  if (gate.sourceResultAggregationGateLatestAcceptedObservationVerificationStatus) {
+    text += ` / verification ${gate.sourceResultAggregationGateLatestAcceptedObservationVerificationStatus}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryStatus) {
+    text += ` / rollback summary observations ${gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryStatus}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryObservationCount !== undefined) {
+    text += ` / rollback summary count ${String(gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryObservationCount)}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryAcceptedCount !== undefined) {
+    text += ` / rollback summary accepted ${String(gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryAcceptedCount)}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryRejectedCount !== undefined) {
+    text += ` / rollback summary rejected ${String(gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryRejectedCount)}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible !== undefined) {
+    text += ` / rollback summary missing result risk ${String(gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible)}`;
+  }
+  if (gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible !== undefined) {
+    text += ` / rollback summary stale index risk ${String(gate.sourceResultAggregationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible)}`;
   }
   return text;
 }

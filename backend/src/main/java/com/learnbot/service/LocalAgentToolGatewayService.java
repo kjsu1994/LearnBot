@@ -8,6 +8,7 @@ import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptEvidenceRequirement;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
 import com.learnbot.dto.LocalAgentApprovalState;
+import com.learnbot.dto.LocalAgentFailureCode;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentStatusResponse;
 import com.learnbot.dto.LocalAgentToolExecutionResponse;
@@ -17,8 +18,11 @@ import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
+import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
+import com.learnbot.service.localagent.LocalAgentFinalMutationReportDraftBuilder;
+import com.learnbot.service.localagent.LocalAgentMutationResultClassifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +39,7 @@ import java.util.stream.Collectors;
 @Service
 public class LocalAgentToolGatewayService {
     private final LocalAgentToolExecutionRepository repository;
+    private final LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository;
     private final LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository;
     private final CodeAgentLoopTimelineRepository loopTimelineRepository;
     private final LocalAgentGatewayService gatewayService;
@@ -80,12 +85,14 @@ public class LocalAgentToolGatewayService {
 
     public LocalAgentToolGatewayService(
             LocalAgentToolExecutionRepository repository,
+            LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository,
             LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository,
             CodeAgentLoopTimelineRepository loopTimelineRepository,
             LocalAgentGatewayService gatewayService,
             LocalAgentToolPusher toolPusher
     ) {
         this.repository = repository;
+        this.mutationObservationIntakeRepository = mutationObservationIntakeRepository;
         this.releaseAttemptRepository = releaseAttemptRepository;
         this.loopTimelineRepository = loopTimelineRepository;
         this.gatewayService = gatewayService;
@@ -101,6 +108,7 @@ public class LocalAgentToolGatewayService {
             throw new IllegalArgumentException("Side-effectful Local Agent tools must be approved before routing.");
         }
         if (!gatewayService.isConnected(request.userId(), request.agentId())) {
+            appendAgentUnavailableStopOutcome(request);
             throw new IllegalStateException("Local Agent is not connected.");
         }
         if (request.workspaceId() != null && !gatewayService.hasApprovedWorkspace(request.userId(), request.workspaceId())) {
@@ -135,6 +143,7 @@ public class LocalAgentToolGatewayService {
             throw new IllegalArgumentException("Approval requests must start with REQUIRED approval state.");
         }
         if (!gatewayService.isConnected(request.userId(), request.agentId())) {
+            appendAgentUnavailableStopOutcome(request);
             throw new IllegalStateException("Local Agent is not connected.");
         }
         if (request.workspaceId() != null && !gatewayService.hasApprovedWorkspace(request.userId(), request.workspaceId())) {
@@ -415,7 +424,8 @@ public class LocalAgentToolGatewayService {
         Map<String, Object> releaseEnablementChecklist = latestAttempt.get("releaseEnablementChecklist") instanceof Map<?, ?> checklist
                 ? copyMap(checklist)
                 : Map.of();
-        List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed);
+        boolean releaseAttemptReadyForClaim = releaseAttemptReadyForClaim(readiness);
+        List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed, releaseAttemptReadyForClaim);
         return new LocalAgentPatchReleaseBoundaryResponse(
                 requestId,
                 preconditionsPassed ? "RELEASE_REFUSED_GATE_DISABLED" : "RELEASE_REFUSED_PRECONDITIONS_BLOCKED",
@@ -444,11 +454,15 @@ public class LocalAgentToolGatewayService {
     private List<String> releaseBoundaryBlockingReasons(
             LocalAgentPatchExecutionReadinessResponse readiness,
             Map<String, Object> releaseEnablementChecklist,
-            boolean preconditionsPassed
+            boolean preconditionsPassed,
+            boolean releaseAttemptReadyForClaim
     ) {
         List<String> reasons = new ArrayList<>();
         if (!preconditionsPassed) {
             reasons.add("patch execution preconditions are incomplete");
+        }
+        if (preconditionsPassed && !releaseAttemptReadyForClaim) {
+            reasons.add("fresh release-attempt-linked evidence is required before claim");
         }
         if (releaseEnablementChecklist.get("blockingKeys") instanceof List<?> blockingKeys && !blockingKeys.isEmpty()) {
             reasons.add("release enablement checklist is blocked: " + blockingKeys.stream()
@@ -471,17 +485,88 @@ public class LocalAgentToolGatewayService {
         if (!Boolean.TRUE.equals(gate.get("preconditionsPassed"))) {
             throw new IllegalStateException("Patch execution gate is not ready.");
         }
+        if (!releaseAttemptReadyForClaim(readiness)) {
+            createDisabledReleaseAttemptIfMissing(userId, requestId, readiness);
+            throw new IllegalStateException("Patch execution release requires fresh release-attempt-linked evidence before claim.");
+        }
         if (!patchExecutionReleaseEnabled()) {
             createDisabledReleaseAttemptIfMissing(userId, requestId, readiness);
             throw new IllegalStateException("Patch execution release is disabled.");
         }
-        return repository.releaseApprovedHeldPatch(
+        LocalAgentToolExecution source = repository.find(requestId)
+                .filter(candidate -> candidate.userId().equals(userId))
+                .orElseThrow(() -> new IllegalArgumentException("Local Agent patch request was not found."));
+        Map<String, Object> latestAttempt = readiness.releaseAttemptModel().latestAttempt();
+        UUID releaseAttemptId = releaseAttemptId(latestAttempt)
+                .orElseThrow(() -> new IllegalStateException("A release attempt with linked fresh evidence is required before patch mutation release."));
+        Map<String, Object> linkedDryRun = latestPatchDryRunOutput(userId, requestId, Optional.of(new LocalAgentPatchReleaseAttempt(
+                releaseAttemptId,
+                requestId,
+                source.sessionId(),
+                source.userId(),
+                source.agentId(),
+                source.workspaceId(),
+                String.valueOf(latestAttempt.get("status")),
+                Boolean.TRUE.equals(latestAttempt.get("claimable")),
+                readiness.releaseAttemptModel().staleWindowSeconds(),
+                Map.of(),
+                List.of(),
+                null,
+                null,
+                null
+        ))).orElseThrow(() -> new IllegalStateException("Linked patch dry-run output is required before release."));
+        Map<String, Object> mutationInput = LocalAgentPatchMutationInputBuilder.build(
+                source.input(),
+                linkedDryRun,
+                requestId,
+                releaseAttemptId
+        );
+        return repository.releaseApprovedHeldPatchWithMutationInput(
                         requestId,
                         userId,
+                        mutationInput,
                         "Patch execution release gate passed. Request is now claimable by the selected Local Agent."
                 )
                 .map(this::toResponse)
                 .orElseThrow(() -> new IllegalArgumentException("Held patch request is no longer releasable."));
+    }
+
+    private Optional<UUID> releaseAttemptId(Map<String, Object> latestAttempt) {
+        if (latestAttempt == null || latestAttempt.isEmpty()) {
+            return Optional.empty();
+        }
+        Object value = latestAttempt.get("id");
+        if (value instanceof UUID id) {
+            return Optional.of(id);
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Optional.of(UUID.fromString(text));
+            } catch (IllegalArgumentException ignored) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
+    }
+
+    private boolean releaseAttemptReadyForClaim(LocalAgentPatchExecutionReadinessResponse readiness) {
+        if (readiness == null || readiness.releaseAttemptModel() == null) {
+            return false;
+        }
+        Map<String, Object> latestAttempt = readiness.releaseAttemptModel().latestAttempt();
+        if (latestAttempt == null || latestAttempt.isEmpty()) {
+            return false;
+        }
+        if (!releaseAttemptId(latestAttempt).isPresent()) {
+            return false;
+        }
+        if (latestAttempt.get("releaseAttemptFinalReadiness") instanceof Map<?, ?> finalReadiness
+                && Boolean.TRUE.equals(finalReadiness.get("ready"))
+                && "READY_RELEASE_DISABLED".equals(finalReadiness.get("status"))
+                && "ALL_LINKED_RELEASE_DISABLED".equals(finalReadiness.get("evidenceCompletenessStatus"))) {
+            return true;
+        }
+        return false;
     }
 
     private void createDisabledReleaseAttemptIfMissing(
@@ -737,6 +822,10 @@ public class LocalAgentToolGatewayService {
 
     @Transactional
     public Optional<LocalAgentQueuedToolRequest> claimNext(UUID userId, UUID agentId) {
+        List<LocalAgentToolExecution> timedOut = repository.expireTimedOutLeases();
+        if (timedOut != null) {
+            timedOut.forEach(this::appendLeaseTimeoutStopOutcome);
+        }
         return repository.claimNext(userId, agentId)
                 .map(this::toQueuedRequest);
     }
@@ -744,7 +833,9 @@ public class LocalAgentToolGatewayService {
     @Transactional
     public void complete(LocalAgentToolResponse response) {
         LocalAgentToolResponse enriched = enrichRepositoryVerification(response);
+        enriched = enrichMutationResultIntakeCandidate(enriched);
         repository.complete(enriched);
+        persistAcceptedMutationObservation(enriched);
         appendLoopObservationEvent(enriched);
     }
 
@@ -951,30 +1042,46 @@ public class LocalAgentToolGatewayService {
                 postMutationResultContract
         );
         result.put("mutationResultIntakeBoundary", mutationResultIntakeBoundary);
+        Map<String, Object> acceptedMutationObservationSummary = releaseAttemptAcceptedMutationObservationSummary(attempt);
+        result.put("acceptedMutationObservationSummary", acceptedMutationObservationSummary);
         Map<String, Object> finalMutationReportContract = releaseAttemptFinalMutationReportContract(
                 attempt,
                 postMutationResultContract,
-                rollbackReadiness
+                rollbackReadiness,
+                acceptedMutationObservationSummary
         );
         result.put("finalMutationReportContract", finalMutationReportContract);
+        Map<String, Object> acceptedMutationObservationReadiness = releaseAttemptAcceptedMutationObservationReadiness(attempt);
+        result.put("acceptedMutationObservationReadiness", acceptedMutationObservationReadiness);
         Map<String, Object> mutationResultAggregationPlan = releaseAttemptMutationResultAggregationPlan(
                 attempt,
                 postMutationResultContract,
-                finalMutationReportContract
+                finalMutationReportContract,
+                acceptedMutationObservationSummary
         );
         result.put("mutationResultAggregationPlan", mutationResultAggregationPlan);
+        Map<String, Object> finalMutationReportDraft = LocalAgentFinalMutationReportDraftBuilder.build(
+                attempt,
+                mutationResultAggregationPlan,
+                finalMutationReportContract,
+                acceptedMutationObservationSummary
+        );
+        result.put("finalMutationReportDraft", finalMutationReportDraft);
         Map<String, Object> finalMutationReportFinalizationBoundary = releaseAttemptFinalMutationReportFinalizationBoundary(
                 attempt,
                 releaseAttemptFinalReadiness,
                 postMutationResultContract,
-                finalMutationReportContract
+                finalMutationReportContract,
+                acceptedMutationObservationSummary
         );
         result.put("finalMutationReportFinalizationBoundary", finalMutationReportFinalizationBoundary);
         Map<String, Object> finalAnswerPublicationBoundary = releaseAttemptFinalAnswerPublicationBoundary(
                 attempt,
                 releaseAttemptFinalReadiness,
                 finalMutationReportContract,
-                mutationResultAggregationPlan
+                mutationResultAggregationPlan,
+                finalMutationReportDraft,
+                acceptedMutationObservationSummary
         );
         result.put("finalAnswerPublicationBoundary", finalAnswerPublicationBoundary);
         Map<String, Object> releaseEnablementChecklist = releaseAttemptEnablementChecklist(
@@ -1049,7 +1156,9 @@ public class LocalAgentToolGatewayService {
         result.put("mutationObservationAcceptanceGate", mutationObservationAcceptanceGate);
         Map<String, Object> mutationResultIntakePersistenceGate = resultIntakePersistenceGateBuilder.build(
                 attempt,
-                mutationObservationAcceptanceGate
+                mutationObservationAcceptanceGate,
+                acceptedMutationObservationSummary,
+                acceptedMutationObservationReadiness
         );
         result.put("mutationResultIntakePersistenceGate", mutationResultIntakePersistenceGate);
         Map<String, Object> mutationRollbackFallbackGate = rollbackFallbackGateBuilder.build(
@@ -1059,12 +1168,14 @@ public class LocalAgentToolGatewayService {
         result.put("mutationRollbackFallbackGate", mutationRollbackFallbackGate);
         Map<String, Object> mutationRagFreshnessGate = ragFreshnessGateBuilder.build(
                 attempt,
-                mutationRollbackFallbackGate
+                mutationRollbackFallbackGate,
+                acceptedMutationObservationSummary
         );
         result.put("mutationRagFreshnessGate", mutationRagFreshnessGate);
         Map<String, Object> mutationResultAggregationGate = resultAggregationGateBuilder.build(
                 attempt,
-                mutationRagFreshnessGate
+                mutationRagFreshnessGate,
+                acceptedMutationObservationReadiness
         );
         result.put("mutationResultAggregationGate", mutationResultAggregationGate);
         Map<String, Object> mutationPublicationGate = publicationGateBuilder.build(
@@ -1074,7 +1185,8 @@ public class LocalAgentToolGatewayService {
         result.put("mutationPublicationGate", mutationPublicationGate);
         Map<String, Object> mutationFinalAnswerGenerationGate = generationGateBuilder.build(
                 attempt,
-                mutationPublicationGate
+                mutationPublicationGate,
+                finalAnswerPublicationBoundary
         );
         result.put("mutationFinalAnswerGenerationGate", mutationFinalAnswerGenerationGate);
         Map<String, Object> mutationFinalAnswerCompletionGate = completionGateBuilder.build(
@@ -1118,6 +1230,7 @@ public class LocalAgentToolGatewayService {
                 mutationSequencePlan,
                 mutationResultIntakeBoundary,
                 mutationResultAggregationPlan,
+                finalMutationReportDraft,
                 finalMutationReportContract,
                 finalMutationReportFinalizationBoundary,
                 finalAnswerPublicationBoundary,
@@ -1174,6 +1287,119 @@ public class LocalAgentToolGatewayService {
                 mutationPostExecutionObservationGate
         ));
         return result;
+    }
+
+    private Map<String, Object> releaseAttemptAcceptedMutationObservationReadiness(LocalAgentPatchReleaseAttempt attempt) {
+        Optional<Map<String, Object>> latest = Optional
+                .ofNullable(mutationObservationIntakeRepository.findLatestAcceptedMutationObservationForReleaseAttempt(
+                        attempt.userId(),
+                        attempt.sourceRequestId(),
+                        attempt.id()
+                ))
+                .flatMap(item -> item)
+                .or(() -> Optional
+                        .ofNullable(repository.findLatestAcceptedMutationObservationForReleaseAttempt(
+                                attempt.userId(),
+                                attempt.sourceRequestId(),
+                                attempt.id()
+                        ))
+                        .flatMap(item -> item));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.accepted-mutation-observation-readiness.v1");
+        result.put("status", latest.isPresent() ? "OBSERVED_INTAKE_DISABLED" : "MISSING_INTAKE_DISABLED");
+        result.put("observed", latest.isPresent());
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("acceptedObservationPersistenceEnabled", false);
+        result.put("resultIntakeEnabled", false);
+        result.put("resultAggregationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationAllowed", false);
+        result.put("latestObservation", latest.orElse(Map.of()));
+        result.put("message", latest.isPresent()
+                ? "Latest accepted mutation observation is visible for audit, but dedicated intake persistence, aggregation, publication, acknowledgement save, RAG freshness update, and mutation remain disabled."
+                : "No accepted mutation observation is available for this release attempt; intake persistence, aggregation, publication, acknowledgement save, RAG freshness update, and mutation remain disabled.");
+        return result;
+    }
+
+    private Map<String, Object> releaseAttemptAcceptedMutationObservationSummary(LocalAgentPatchReleaseAttempt attempt) {
+        List<Map<String, Object>> observations = mutationObservationIntakeRepository.findAcceptedMutationObservationsForReleaseAttempt(
+                attempt.userId(),
+                attempt.sourceRequestId(),
+                attempt.id()
+        );
+        if (observations == null) {
+            observations = List.of();
+        }
+        Map<String, Integer> byToolName = new LinkedHashMap<>();
+        Map<String, Integer> byStatus = new LinkedHashMap<>();
+        int acceptedCount = 0;
+        int rejectedCount = 0;
+        int terminalFailureAcceptedCount = 0;
+        for (Map<String, Object> observation : observations) {
+            String toolName = String.valueOf(observation.getOrDefault("toolName", "UNKNOWN"));
+            byToolName.put(toolName, byToolName.getOrDefault(toolName, 0) + 1);
+            String status = String.valueOf(observation.getOrDefault("status", "UNKNOWN"));
+            byStatus.put(status, byStatus.getOrDefault(status, 0) + 1);
+            if (Boolean.TRUE.equals(observation.get("accepted"))) {
+                acceptedCount++;
+            }
+            if (status.startsWith("REJECTED_")) {
+                rejectedCount++;
+            }
+            if ("ACCEPTED_TERMINAL_FAILURE".equals(status)) {
+                terminalFailureAcceptedCount++;
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.accepted-mutation-observation-summary.v1");
+        result.put("status", observations.isEmpty() ? "MISSING_OBSERVATIONS_DISABLED" : "OBSERVED_SUMMARY_DISABLED");
+        result.put("observed", !observations.isEmpty());
+        result.put("blocking", true);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("publicationGateSchema", "learnbot.local-agent.mutation-publication-gate.v1");
+        result.put("publicationGateStatus", "REFUSED_PUBLICATION_DISABLED");
+        result.put("publicationGateSessionId", attempt.sessionId());
+        result.put("publicationGateUserId", attempt.userId());
+        result.put("publicationGateAgentId", attempt.agentId());
+        result.put("publicationGateWorkspaceId", attempt.workspaceId());
+        result.put("observationCount", observations.size());
+        result.put("acceptedCount", acceptedCount);
+        result.put("rejectedCount", rejectedCount);
+        result.put("terminalFailureAcceptedCount", terminalFailureAcceptedCount);
+        result.put("toolObservationCounts", byToolName);
+        result.put("statusObservationCounts", byStatus);
+        result.put("observations", observations);
+        result.put("aggregationEnabled", false);
+        result.put("finalReportGenerationEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("mutationAllowed", false);
+        result.put("message", observations.isEmpty()
+                ? "No durable accepted mutation observations are available for summary; aggregation, final reporting, publication, acknowledgement save, RAG freshness update, and mutation remain disabled."
+                : "Durable accepted mutation observations are summarized for audit only; aggregation, final reporting, publication, acknowledgement save, RAG freshness update, and mutation remain disabled.");
+        return result;
+    }
+
+    private void persistAcceptedMutationObservation(LocalAgentToolResponse response) {
+        LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        mutationObservationIntakeRepository.saveAcceptedObservation(response, execution.input());
     }
 
     private Map<String, Object> releaseAttemptMutationDispatchDecisionModel(
@@ -2174,6 +2400,7 @@ public class LocalAgentToolGatewayService {
             List<Map<String, Object>> mutationSequencePlan,
             Map<String, Object> mutationResultIntakeBoundary,
             Map<String, Object> mutationResultAggregationPlan,
+            Map<String, Object> finalMutationReportDraft,
             Map<String, Object> finalMutationReportContract,
             Map<String, Object> finalMutationReportFinalizationBoundary,
             Map<String, Object> finalAnswerPublicationBoundary,
@@ -2230,6 +2457,12 @@ public class LocalAgentToolGatewayService {
                 "READY_AGGREGATION_DISABLED".equals(mutationResultAggregationPlan.get("status")),
                 String.valueOf(mutationResultAggregationPlan.getOrDefault("status", "UNKNOWN")),
                 "Accepted mutation outcomes must have an aggregation plan for the final mutation report."
+        ));
+        items.add(mutationCompletionSummaryItem(
+                "finalMutationReportDraft",
+                "READY_DRAFT_DISABLED".equals(finalMutationReportDraft.get("status")),
+                String.valueOf(finalMutationReportDraft.getOrDefault("status", "UNKNOWN")),
+                "A disabled final mutation report draft must be modeled before finalization can be considered."
         ));
         items.add(mutationCompletionSummaryItem(
                 "finalMutationReportContract",
@@ -2400,6 +2633,13 @@ public class LocalAgentToolGatewayService {
                 "Future mutation final-answer delivery receipt must pass through a disabled receipt gate that refuses delivery receipt and acknowledgement."
         ));
         items.add(mutationCompletionSummaryItem(
+                "acknowledgementSaveRefusal",
+                "DISABLED_AUDIT_ONLY".equals(mutationFinalAnswerDeliveryReceiptGate.get("acknowledgementSavePolicy"))
+                        && Boolean.FALSE.equals(mutationFinalAnswerDeliveryReceiptGate.get("acknowledgementSaveEnabled")),
+                String.valueOf(mutationFinalAnswerDeliveryReceiptGate.getOrDefault("acknowledgementSavePolicy", "UNKNOWN")),
+                "Future acknowledgement save must remain explicitly refused until final-answer delivery receipt is enabled."
+        ));
+        items.add(mutationCompletionSummaryItem(
                 "rollbackReadiness",
                 rollbackReadiness != null && "RESTORE_VALIDATED".equals(rollbackReadiness.get("status")),
                 rollbackReadiness == null ? "MISSING" : String.valueOf(rollbackReadiness.getOrDefault("status", "UNKNOWN")),
@@ -2432,6 +2672,39 @@ public class LocalAgentToolGatewayService {
         result.put("sourceFinalAnswerDeliveryReceiptGateUserId", mutationFinalAnswerDeliveryReceiptGate.get("userId"));
         result.put("sourceFinalAnswerDeliveryReceiptGateAgentId", mutationFinalAnswerDeliveryReceiptGate.get("agentId"));
         result.put("sourceFinalAnswerDeliveryReceiptGateWorkspaceId", mutationFinalAnswerDeliveryReceiptGate.get("workspaceId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSavePolicy", mutationFinalAnswerDeliveryReceiptGate.get("acknowledgementSavePolicy"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled", mutationFinalAnswerDeliveryReceiptGate.get("acknowledgementSaveEnabled"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateSchema", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateSchema"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateSessionId", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateSessionId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateUserId", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateUserId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateAgentId", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateAgentId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationGateWorkspaceId", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationGateWorkspaceId"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationBoundaryStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationBoundaryPrerequisitesPassed"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryDraftStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryDraftSections", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationBoundaryDraftSections"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateAcceptedObservationCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationAcceptedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateAcceptedObservationAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationRejectedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateAcceptedObservationRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryReceiptGateStaleIndexRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGateStaleIndexRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationAcceptedObservationRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationStaleIndexRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationStaleIndexRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationToolName"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationLatestAcceptedObservationVerificationStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStatus"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryObservationCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryRejectedCount"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"));
+        result.put("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", mutationFinalAnswerDeliveryReceiptGate.get("sourceFinalAnswerDeliveryGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"));
         result.put("releaseGateEnabled", false);
         result.put("requestCreationEnabled", false);
         result.put("pushEnabled", false);
@@ -2558,6 +2831,39 @@ public class LocalAgentToolGatewayService {
         result.put("sourceCompletionSummaryDeliveryReceiptGateUserId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateUserId"));
         result.put("sourceCompletionSummaryDeliveryReceiptGateAgentId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAgentId"));
         result.put("sourceCompletionSummaryDeliveryReceiptGateWorkspaceId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateWorkspaceId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSavePolicy", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSavePolicy"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcknowledgementSaveEnabled", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcknowledgementSaveEnabled"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSchema", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateSchema"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateSessionId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateSessionId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateUserId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateUserId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateAgentId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateAgentId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationGateWorkspaceId", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationGateWorkspaceId"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryPrerequisitesPassed"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryDraftStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryDraftStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationBoundaryDraftSections", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationBoundaryDraftSections"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationSummaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationSummaryStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationAcceptedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationAcceptedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateAcceptedObservationRejectedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateAcceptedObservationRejectedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateMissingMutationResultRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateMissingMutationResultRiskVisible"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGateStaleIndexRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGateStaleIndexRiskVisible"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationSummaryStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationAcceptedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationAcceptedObservationRejectedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationAcceptedObservationRejectedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationMissingMutationResultRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationMissingMutationResultRiskVisible"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationStaleIndexRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationStaleIndexRiskVisible"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationToolName", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationToolName"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationLatestAcceptedObservationVerificationStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStatus"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryObservationCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryAcceptedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryRejectedCount"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"));
+        result.put("sourceCompletionSummaryDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible", completionSummary.get("sourceFinalAnswerDeliveryReceiptGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible"));
         result.put("disabledControls", disabledControls);
         result.put("blockingKeys", completionReady ? List.of("releaseGateEnabled", "requestCreationEnabled", "pushEnabled", "claimEnabled", "mutationAllowed") : blockingKeys);
         result.put("handoffStages", List.of(
@@ -2568,7 +2874,8 @@ public class LocalAgentToolGatewayService {
                 mutationHandoffStage("toolExecution", "mutationExecutionGate", completionReady),
                 mutationHandoffStage("resultIntake", "mutationResultIntakePersistenceGate", completionReady),
                 mutationHandoffStage("finalResponse", "mutationFinalResponseHandoffGate", completionReady),
-                mutationHandoffStage("deliveryReceipt", "mutationFinalAnswerDeliveryReceiptGate", completionReady)
+                mutationHandoffStage("deliveryReceipt", "mutationFinalAnswerDeliveryReceiptGate", completionReady),
+                mutationHandoffStage("acknowledgementSave", "mutationFinalAnswerDeliveryReceiptGate", completionReady)
         ));
         result.put("message", completionReady
                 ? "Local Agent mutation handoff prerequisites are modeled, but release, request creation, push, claim, execution, result handling, final response, delivery, and mutation remain disabled."
@@ -2815,7 +3122,8 @@ public class LocalAgentToolGatewayService {
     private Map<String, Object> releaseAttemptFinalMutationReportContract(
             LocalAgentPatchReleaseAttempt attempt,
             Map<String, Object> postMutationResultContract,
-            Map<String, Object> rollbackReadiness
+            Map<String, Object> rollbackReadiness,
+            Map<String, Object> acceptedMutationObservationSummary
     ) {
         List<String> expectedOutcomeKeys = postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
                 .map(item -> String.valueOf(item.get("key")))
@@ -2827,6 +3135,14 @@ public class LocalAgentToolGatewayService {
         result.put("sourceRequestId", attempt.sourceRequestId());
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
+        result.put("acceptedMutationObservationSummarySchema", acceptedMutationObservationSummary.get("schema"));
+        result.put("acceptedMutationObservationSummaryStatus", acceptedMutationObservationSummary.get("status"));
+        result.put("acceptedMutationObservationCount", acceptedMutationObservationSummary.get("observationCount"));
+        result.put("acceptedMutationObservationAcceptedCount", acceptedMutationObservationSummary.get("acceptedCount"));
+        result.put("acceptedMutationObservationRejectedCount", acceptedMutationObservationSummary.get("rejectedCount"));
+        result.put("acceptedMutationObservationTerminalFailureAcceptedCount", acceptedMutationObservationSummary.get("terminalFailureAcceptedCount"));
+        result.put("acceptedMutationObservationToolCounts", acceptedMutationObservationSummary.get("toolObservationCounts"));
+        result.put("acceptedMutationObservationStatusCounts", acceptedMutationObservationSummary.get("statusObservationCounts"));
         result.put("expectedOutcomeKeys", expectedOutcomeKeys);
         result.put("rollbackReadinessStatus", rollbackReadiness == null ? "UNKNOWN" : rollbackReadiness.getOrDefault("status", "UNKNOWN"));
         result.put("releaseGateEnabled", false);
@@ -2838,6 +3154,7 @@ public class LocalAgentToolGatewayService {
         result.put("testEnabled", false);
         result.put("rollbackRestoreEnabled", false);
         result.put("ragFreshnessUpdateEnabled", false);
+        result.put("acceptedObservationAggregationEnabled", false);
         result.put("message", "Future final mutation report is modeled for audit only; no Local Agent mutation, verification, rollback, RAG freshness update, or final-answer generation is enabled.");
         result.put("requiredSections", List.of(
                 finalMutationReportSection(
@@ -2888,7 +3205,8 @@ public class LocalAgentToolGatewayService {
     private Map<String, Object> releaseAttemptMutationResultAggregationPlan(
             LocalAgentPatchReleaseAttempt attempt,
             Map<String, Object> postMutationResultContract,
-            Map<String, Object> finalMutationReportContract
+            Map<String, Object> finalMutationReportContract,
+            Map<String, Object> acceptedMutationObservationSummary
     ) {
         List<String> outcomeKeys = postMutationResultContractExpectedOutcomes(postMutationResultContract).stream()
                 .map(item -> String.valueOf(item.get("key")))
@@ -2949,6 +3267,14 @@ public class LocalAgentToolGatewayService {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("postMutationResultSchema", postMutationResultContract.get("schema"));
         result.put("finalMutationReportSchema", finalMutationReportContract.get("schema"));
+        result.put("acceptedMutationObservationSummarySchema", acceptedMutationObservationSummary.get("schema"));
+        result.put("acceptedMutationObservationSummaryStatus", acceptedMutationObservationSummary.get("status"));
+        result.put("acceptedMutationObservationCount", acceptedMutationObservationSummary.get("observationCount"));
+        result.put("acceptedMutationObservationAcceptedCount", acceptedMutationObservationSummary.get("acceptedCount"));
+        result.put("acceptedMutationObservationRejectedCount", acceptedMutationObservationSummary.get("rejectedCount"));
+        result.put("acceptedMutationObservationTerminalFailureAcceptedCount", acceptedMutationObservationSummary.get("terminalFailureAcceptedCount"));
+        result.put("acceptedMutationObservationToolCounts", acceptedMutationObservationSummary.get("toolObservationCounts"));
+        result.put("acceptedMutationObservationStatusCounts", acceptedMutationObservationSummary.get("statusObservationCounts"));
         result.put("sourceOutcomeKeys", outcomeKeys);
         result.put("targetReportSections", requiredSections.stream()
                 .map(item -> String.valueOf(item.get("key")))
@@ -2965,6 +3291,7 @@ public class LocalAgentToolGatewayService {
         result.put("rollbackRestoreEnabled", false);
         result.put("ragFreshnessUpdateEnabled", false);
         result.put("mutationResultAggregationEnabled", false);
+        result.put("acceptedObservationAggregationEnabled", false);
         result.put("finalAnswerGenerationEnabled", false);
         result.put("steps", steps);
         result.put("blockingKeys", prerequisitesPassed ? List.of() : List.of("aggregationPrerequisites"));
@@ -3025,10 +3352,13 @@ public class LocalAgentToolGatewayService {
             LocalAgentPatchReleaseAttempt attempt,
             Map<String, Object> finalReadiness,
             Map<String, Object> postMutationResultContract,
-            Map<String, Object> finalMutationReportContract
+            Map<String, Object> finalMutationReportContract,
+            Map<String, Object> acceptedMutationObservationSummary
     ) {
         List<Map<String, Object>> requiredSections = finalMutationReportContractRequiredSections(finalMutationReportContract);
         List<String> guardrails = finalMutationReportContractGuardrails(finalMutationReportContract);
+        int observationCount = numericValue(acceptedMutationObservationSummary.get("observationCount"));
+        int acceptedObservationCount = numericValue(acceptedMutationObservationSummary.get("acceptedCount"));
         List<Map<String, Object>> requirements = List.of(
                 finalizationRequirement(
                         "releaseAttemptReady",
@@ -3064,6 +3394,16 @@ public class LocalAgentToolGatewayService {
         result.put("releaseAttemptId", attempt.id());
         result.put("sourceRequestId", attempt.sourceRequestId());
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("acceptedMutationObservationSummarySchema", acceptedMutationObservationSummary.get("schema"));
+        result.put("acceptedMutationObservationSummaryStatus", acceptedMutationObservationSummary.get("status"));
+        result.put("acceptedMutationObservationCount", observationCount);
+        result.put("acceptedMutationObservationAcceptedCount", acceptedObservationCount);
+        result.put("acceptedMutationObservationRejectedCount", acceptedMutationObservationSummary.get("rejectedCount"));
+        result.put("acceptedMutationObservationTerminalFailureAcceptedCount", acceptedMutationObservationSummary.get("terminalFailureAcceptedCount"));
+        result.put("acceptedMutationObservationToolCounts", acceptedMutationObservationSummary.get("toolObservationCounts"));
+        result.put("acceptedMutationObservationStatusCounts", acceptedMutationObservationSummary.get("statusObservationCounts"));
+        result.put("missingMutationResultRiskVisible", observationCount == 0);
+        result.put("staleIndexRiskVisible", acceptedObservationCount > 0);
         result.put("releaseGateEnabled", false);
         result.put("requestCreationEnabled", false);
         result.put("pushEnabled", false);
@@ -3091,11 +3431,16 @@ public class LocalAgentToolGatewayService {
             LocalAgentPatchReleaseAttempt attempt,
             Map<String, Object> finalReadiness,
             Map<String, Object> finalMutationReportContract,
-            Object aggregationPlan
+            Object aggregationPlan,
+            Map<String, Object> finalMutationReportDraft,
+            Map<String, Object> acceptedMutationObservationSummary
     ) {
         Map<String, Object> aggregation = aggregationPlan instanceof Map<?, ?> map ? copyMap(map) : Map.of();
         List<Map<String, Object>> requiredSections = finalMutationReportContractRequiredSections(finalMutationReportContract);
+        List<Map<String, Object>> draftSections = finalMutationReportDraftSections(finalMutationReportDraft);
         List<String> guardrails = finalMutationReportContractGuardrails(finalMutationReportContract);
+        int observationCount = numericValue(acceptedMutationObservationSummary.get("observationCount"));
+        int acceptedObservationCount = numericValue(acceptedMutationObservationSummary.get("acceptedCount"));
         List<Map<String, Object>> requirements = List.of(
                 publicationRequirement(
                         "releaseAttemptReady",
@@ -3116,6 +3461,12 @@ public class LocalAgentToolGatewayService {
                         "Publication requires changed files, verification, repository observation, rollback, RAG freshness, residual risk, and evidence sections."
                 ),
                 publicationRequirement(
+                        "finalReportDraftModeled",
+                        "READY_DRAFT_DISABLED".equals(finalMutationReportDraft.get("status")) && draftSections.size() == 7,
+                        String.valueOf(finalMutationReportDraft.getOrDefault("status", "UNKNOWN")),
+                        "Publication requires the disabled final mutation report draft to map aggregation outcomes into report sections."
+                ),
+                publicationRequirement(
                         "answerQualityGuardrailsModeled",
                         guardrails.size() >= 4,
                         "GUARDRAILS_MODELED",
@@ -3133,6 +3484,21 @@ public class LocalAgentToolGatewayService {
         result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
         result.put("finalMutationReportSchema", finalMutationReportContract.get("schema"));
         result.put("aggregationPlanSchema", aggregation.get("schema"));
+        result.put("finalMutationReportDraftSchema", finalMutationReportDraft.get("schema"));
+        result.put("finalMutationReportDraftStatus", finalMutationReportDraft.get("status"));
+        result.put("finalMutationReportDraftSections", draftSections.stream()
+                .map(item -> String.valueOf(item.get("key")))
+                .toList());
+        result.put("acceptedMutationObservationSummarySchema", acceptedMutationObservationSummary.get("schema"));
+        result.put("acceptedMutationObservationSummaryStatus", acceptedMutationObservationSummary.get("status"));
+        result.put("acceptedMutationObservationCount", observationCount);
+        result.put("acceptedMutationObservationAcceptedCount", acceptedObservationCount);
+        result.put("acceptedMutationObservationRejectedCount", acceptedMutationObservationSummary.get("rejectedCount"));
+        result.put("acceptedMutationObservationTerminalFailureAcceptedCount", acceptedMutationObservationSummary.get("terminalFailureAcceptedCount"));
+        result.put("acceptedMutationObservationToolCounts", acceptedMutationObservationSummary.get("toolObservationCounts"));
+        result.put("acceptedMutationObservationStatusCounts", acceptedMutationObservationSummary.get("statusObservationCounts"));
+        result.put("missingMutationResultRiskVisible", observationCount == 0);
+        result.put("staleIndexRiskVisible", acceptedObservationCount > 0);
         result.put("requiredReportSections", requiredSections.stream()
                 .map(item -> String.valueOf(item.get("key")))
                 .toList());
@@ -3208,6 +3574,16 @@ public class LocalAgentToolGatewayService {
 
     private List<Map<String, Object>> finalMutationReportContractRequiredSections(Map<String, Object> contract) {
         if (contract.get("requiredSections") instanceof List<?> sections) {
+            return sections.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> copyMap((Map<?, ?>) item))
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<Map<String, Object>> finalMutationReportDraftSections(Map<String, Object> draft) {
+        if (draft.get("sections") instanceof List<?> sections) {
             return sections.stream()
                     .filter(Map.class::isInstance)
                     .map(item -> copyMap((Map<?, ?>) item))
@@ -4107,6 +4483,14 @@ public class LocalAgentToolGatewayService {
         );
     }
 
+    private LocalAgentToolResponse enrichMutationResultIntakeCandidate(LocalAgentToolResponse response) {
+        LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
+        if (execution == null) {
+            return response;
+        }
+        return LocalAgentMutationResultClassifier.enrich(response, execution.input());
+    }
+
     private void appendLoopObservationEvent(LocalAgentToolResponse response) {
         LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
         if (execution == null) {
@@ -4116,7 +4500,9 @@ public class LocalAgentToolGatewayService {
         if (repositoryId == null) {
             return;
         }
-        loopTimelineRepository.appendObservationResult(response.userId(), repositoryId, loopId(execution.input()), response, execution.input());
+        UUID loopId = loopId(execution.input());
+        loopTimelineRepository.appendObservationResult(response.userId(), repositoryId, loopId, response, execution.input());
+        appendObservationStopOutcome(response, repositoryId, loopId, execution.input());
     }
 
     private LocalAgentToolExecution appendLoopApprovalDecisionEvent(LocalAgentToolExecution execution) {
@@ -4138,7 +4524,103 @@ public class LocalAgentToolGatewayService {
                 loopId(execution.input()),
                 execution.input()
         );
+        if (execution.approvalState() == LocalAgentApprovalState.DENIED) {
+            loopTimelineRepository.appendApprovalDeniedStopOutcome(
+                    execution.userId(),
+                    repositoryId,
+                    loopId(execution.input()),
+                    execution.id(),
+                    execution.sessionId(),
+                    execution.agentId(),
+                    execution.workspaceId(),
+                    execution.approvalState().name(),
+                    execution.status().name(),
+                    execution.input()
+            );
+        }
         return execution;
+    }
+
+    private void appendAgentUnavailableStopOutcome(LocalAgentToolRequest request) {
+        UUID repositoryId = repositoryId(request.input());
+        if (repositoryId == null) {
+            return;
+        }
+        loopTimelineRepository.appendAgentUnavailableStopOutcome(
+                request.userId(),
+                repositoryId,
+                loopId(request.input()),
+                request
+        );
+    }
+
+    private void appendLeaseTimeoutStopOutcome(LocalAgentToolExecution execution) {
+        UUID repositoryId = repositoryId(execution.input());
+        if (repositoryId == null) {
+            return;
+        }
+        loopTimelineRepository.appendTimedOutStopOutcome(
+                execution.userId(),
+                repositoryId,
+                loopId(execution.input()),
+                new LocalAgentToolResponse(
+                        execution.sessionId(),
+                        execution.id(),
+                        execution.userId(),
+                        execution.agentId(),
+                        execution.workspaceId(),
+                        execution.executionTarget(),
+                        execution.toolName(),
+                        LocalAgentToolStatus.TIMED_OUT,
+                        Map.of("leaseTimedOut", true),
+                        LocalAgentFailureCode.TIMEOUT,
+                        execution.error(),
+                        execution.startedAt(),
+                        execution.finishedAt(),
+                        execution.responseWarnings()
+                ),
+                execution.input()
+        );
+    }
+
+    private void appendObservationStopOutcome(
+            LocalAgentToolResponse response,
+            UUID repositoryId,
+            UUID loopId,
+            Map<String, Object> requestInput
+    ) {
+        switch (response.status()) {
+            case SUCCEEDED -> {
+            }
+            case TIMED_OUT -> loopTimelineRepository.appendTimedOutStopOutcome(
+                    response.userId(),
+                    repositoryId,
+                    loopId,
+                    response,
+                    requestInput
+            );
+            case CANCELLED -> loopTimelineRepository.appendCancellationStopOutcome(
+                    response.userId(),
+                    repositoryId,
+                    loopId,
+                    response,
+                    requestInput
+            );
+            case DISCONNECTED -> loopTimelineRepository.appendDisconnectedStopOutcome(
+                    response.userId(),
+                    repositoryId,
+                    loopId,
+                    response,
+                    requestInput
+            );
+            default -> loopTimelineRepository.appendToolFailedStopOutcome(
+                    response.userId(),
+                    repositoryId,
+                    loopId,
+                    response,
+                    requestInput
+            );
+        }
     }
 
     private UUID repositoryId(Map<String, Object> input) {

@@ -11,7 +11,8 @@ class LocalAgentRagFreshnessGateBuilder {
 
     Map<String, Object> build(
             LocalAgentPatchReleaseAttempt attempt,
-            Map<String, Object> mutationRollbackFallbackGate
+            Map<String, Object> mutationRollbackFallbackGate,
+            Map<String, Object> acceptedMutationObservationSummary
     ) {
         boolean rollbackFallbackReady = "REFUSED_ROLLBACK_FALLBACK_DISABLED".equals(mutationRollbackFallbackGate.get("status"))
                 && Boolean.TRUE.equals(mutationRollbackFallbackGate.get("prerequisitesPassed"));
@@ -20,6 +21,10 @@ class LocalAgentRagFreshnessGateBuilder {
         int acceptedResultCount = numericValue(mutationRollbackFallbackGate.get("acceptedResultCount"));
         int rejectedResultCount = numericValue(mutationRollbackFallbackGate.get("rejectedResultCount"));
         int intakePersistedResultCount = numericValue(mutationRollbackFallbackGate.get("intakePersistedResultCount"));
+        int observationCount = numericValue(acceptedMutationObservationSummary.get("observationCount"));
+        int acceptedObservationCount = numericValue(acceptedMutationObservationSummary.get("acceptedCount"));
+        int rejectedObservationCount = numericValue(acceptedMutationObservationSummary.get("rejectedCount"));
+        int terminalFailureAcceptedObservationCount = numericValue(acceptedMutationObservationSummary.get("terminalFailureAcceptedCount"));
         List<Map<String, Object>> policyChecks = List.of(
                 policyCheck(
                         "mutationRollbackFallbackGate",
@@ -98,8 +103,43 @@ class LocalAgentRagFreshnessGateBuilder {
         result.put("sourceRollbackFallbackGateUserId", mutationRollbackFallbackGate.get("userId"));
         result.put("sourceRollbackFallbackGateAgentId", mutationRollbackFallbackGate.get("agentId"));
         result.put("sourceRollbackFallbackGateWorkspaceId", mutationRollbackFallbackGate.get("workspaceId"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationAuditStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationAuditStatus"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationStatus"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationAccepted", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationAccepted"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationRejected", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationRejected"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationTerminalFailureAccepted", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationTerminalFailureAccepted"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationToolName", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationToolName"));
+        result.put("sourceRollbackFallbackGateLatestAcceptedObservationVerificationStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateLatestAcceptedObservationVerificationStatus"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryStatus"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryObservationCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryObservationCount"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryAcceptedCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryAcceptedCount"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryRejectedCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryRejectedCount"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryMissingMutationResultRiskVisible", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryMissingMutationResultRiskVisible"));
+        result.put("sourceRollbackFallbackGateAcceptedObservationSummaryStaleIndexRiskVisible", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateAcceptedObservationSummaryStaleIndexRiskVisible"));
+        result.put("sourceRollbackFallbackGatePublicationGateSchema", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateSchema"));
+        result.put("sourceRollbackFallbackGatePublicationGateStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateStatus"));
+        result.put("sourceRollbackFallbackGatePublicationGateSessionId", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateSessionId"));
+        result.put("sourceRollbackFallbackGatePublicationGateUserId", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateUserId"));
+        result.put("sourceRollbackFallbackGatePublicationGateAgentId", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateAgentId"));
+        result.put("sourceRollbackFallbackGatePublicationGateWorkspaceId", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGatePublicationGateWorkspaceId"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStatus", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStatus"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryObservationCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryObservationCount"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryAcceptedCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryAcceptedCount"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryRejectedCount", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryRejectedCount"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible"));
+        result.put("sourceRollbackFallbackGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible", mutationRollbackFallbackGate.get("sourceResultIntakePersistenceGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible"));
         result.put("ragFreshnessPolicy", "DISABLED_AUDIT_ONLY");
         result.put("ragFreshnessUpdateInvocationEnabled", false);
+        result.put("acceptedMutationObservationSummarySchema", acceptedMutationObservationSummary.get("schema"));
+        result.put("acceptedMutationObservationSummaryStatus", acceptedMutationObservationSummary.get("status"));
+        result.put("acceptedMutationObservationCount", observationCount);
+        result.put("acceptedMutationObservationAcceptedCount", acceptedObservationCount);
+        result.put("acceptedMutationObservationRejectedCount", rejectedObservationCount);
+        result.put("acceptedMutationObservationTerminalFailureAcceptedCount", terminalFailureAcceptedObservationCount);
+        result.put("acceptedMutationObservationToolCounts", acceptedMutationObservationSummary.get("toolObservationCounts"));
+        result.put("acceptedMutationObservationStatusCounts", acceptedMutationObservationSummary.get("statusObservationCounts"));
+        result.put("missingMutationResultRiskVisible", observationCount == 0);
+        result.put("staleIndexRiskVisible", acceptedObservationCount > 0);
         result.put("expectedResultCount", expectedResultCount);
         result.put("completedResultCount", completedResultCount);
         result.put("acceptedResultCount", acceptedResultCount);

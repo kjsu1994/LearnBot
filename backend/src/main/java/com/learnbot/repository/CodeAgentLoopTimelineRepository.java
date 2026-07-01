@@ -9,6 +9,7 @@ import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentToolName;
+import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -113,6 +114,150 @@ public class CodeAgentLoopTimelineRepository {
                 toolName,
                 true,
                 approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput)
+        );
+    }
+
+    public int appendStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            String stopKey,
+            String outcome,
+            String action,
+            Map<String, Object> sourceDetails
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "RECORDED");
+        details.put("stopKey", stopKey);
+        details.put("outcome", outcome);
+        details.put("action", action);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("source", sourceDetails == null ? Map.of() : sourceDetails);
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "STOP_OUTCOME_RECORDED",
+                "COMPLETE_OR_PAUSE",
+                null,
+                null,
+                false,
+                details
+        );
+    }
+
+    public int appendToolFailedStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolResponse response,
+            Map<String, Object> requestInput
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "TOOL_FAILED",
+                "REPORT_TOOL_FAILURE",
+                "Report the failed tool observation and keep mutation disabled.",
+                observationDetails(response, requestInput)
+        );
+    }
+
+    public int appendTimedOutStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolResponse response,
+            Map<String, Object> requestInput
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "TIMEOUT",
+                "REPORT_TIMEOUT",
+                "Report the timed-out Local Agent observation and keep mutation disabled.",
+                observationDetails(response, requestInput)
+        );
+    }
+
+    public int appendCancellationStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolResponse response,
+            Map<String, Object> requestInput
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "CANCELLATION",
+                "REPORT_CANCELLATION",
+                "Report the cancelled Local Agent observation and keep mutation disabled.",
+                observationDetails(response, requestInput)
+        );
+    }
+
+    public int appendDisconnectedStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolResponse response,
+            Map<String, Object> requestInput
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "AGENT_UNAVAILABLE",
+                "WAIT_FOR_LOCAL_AGENT",
+                "Stop until the selected Local Agent is connected and workspace-ready.",
+                observationDetails(response, requestInput)
+        );
+    }
+
+    public int appendApprovalDeniedStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID requestId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            String approvalState,
+            String status,
+            Map<String, Object> requestInput
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "APPROVAL_DENIED",
+                "REPORT_APPROVAL_DENIED",
+                "Stop after approval denial without creating claimable work.",
+                approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput)
+        );
+    }
+
+    public int appendAgentUnavailableStopOutcome(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolRequest request
+    ) {
+        return appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "AGENT_UNAVAILABLE",
+                "WAIT_FOR_LOCAL_AGENT",
+                "Stop until the selected Local Agent is connected and workspace-ready.",
+                requestDetails(request, "AGENT_UNAVAILABLE", "Local Agent is not connected.")
         );
     }
 
@@ -432,6 +577,22 @@ public class CodeAgentLoopTimelineRepository {
         details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), null));
         details.put("releaseAttemptId", stringValue(requestInput.get("releaseAttemptId"), null));
         details.put("freshObservationOnly", booleanValue(requestInput.get("freshObservationOnly"), null));
+        return details;
+    }
+
+    private Map<String, Object> requestDetails(LocalAgentToolRequest request, String status, String error) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("sessionId", request.sessionId() == null ? null : request.sessionId().toString());
+        details.put("agentId", request.agentId() == null ? null : request.agentId().toString());
+        details.put("workspaceId", request.workspaceId() == null ? null : request.workspaceId().toString());
+        details.put("executionTarget", request.executionTarget() == null ? null : request.executionTarget().name());
+        details.put("toolName", request.toolName() == null ? null : request.toolName().wireName());
+        details.put("approvalState", request.approvalState() == null ? null : request.approvalState().name());
+        details.put("status", status);
+        details.put("error", error);
+        details.put("sourceRequestId", stringValue(request.input().get("sourceRequestId"), null));
+        details.put("releaseAttemptId", stringValue(request.input().get("releaseAttemptId"), null));
+        details.put("freshObservationOnly", booleanValue(request.input().get("freshObservationOnly"), null));
         return details;
     }
 

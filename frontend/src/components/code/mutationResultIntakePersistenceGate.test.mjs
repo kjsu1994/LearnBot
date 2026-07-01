@@ -9,9 +9,37 @@ const view = buildMutationResultIntakePersistenceGateView({
   executionTarget: 'USER_LOCAL_AGENT',
   intakePersistencePolicy: 'DISABLED_AUDIT_ONLY',
   sourceObservationAcceptanceGateStatus: 'REFUSED_OBSERVATION_ACCEPTANCE_DISABLED',
+  sourceAcceptedMutationObservationPublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceAcceptedMutationObservationPublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceAcceptedMutationObservationPublicationGateSessionId: 'session-1',
+  sourceAcceptedMutationObservationPublicationGateUserId: 'user-1',
+  sourceAcceptedMutationObservationPublicationGateAgentId: 'agent-1',
+  sourceAcceptedMutationObservationPublicationGateWorkspaceId: 'workspace-1',
+  sourceAcceptedMutationObservationReadinessStatus: 'OBSERVED_INTAKE_DISABLED',
+  sourceAcceptedMutationObservationObserved: true,
+  acceptedMutationObservationAuditStatus: 'OBSERVED',
+  latestAcceptedMutationObservationStatus: 'ACCEPTED',
+  latestAcceptedMutationObservationAccepted: true,
+  latestAcceptedMutationObservationRejected: false,
+  latestAcceptedMutationObservationTerminalFailureAccepted: false,
+  latestAcceptedMutationObservationToolName: 'patch.apply',
+  latestAcceptedMutationObservationVerificationStatus: 'PASSED',
+  sourceAcceptedMutationObservationSummaryStatus: 'OBSERVED',
+  sourceAcceptedMutationObservationSummaryObservationCount: 2,
+  sourceAcceptedMutationObservationSummaryAcceptedCount: 2,
+  sourceAcceptedMutationObservationSummaryRejectedCount: 0,
+  sourceAcceptedMutationObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceAcceptedMutationObservationSummaryStaleIndexRiskVisible: true,
+  sourceAcceptedMutationObservationRollbackSummaryStatus: 'OBSERVED',
+  sourceAcceptedMutationObservationRollbackSummaryObservationCount: 2,
+  sourceAcceptedMutationObservationRollbackSummaryAcceptedCount: 2,
+  sourceAcceptedMutationObservationRollbackSummaryRejectedCount: 0,
+  sourceAcceptedMutationObservationRollbackSummaryMissingMutationResultRiskVisible: false,
+  sourceAcceptedMutationObservationRollbackSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -205,11 +233,15 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation result intake persistence ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation result intake persistence ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,
   'mutation result intake persistence counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation result intake persistence source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / accepted observation readiness OBSERVED_INTAKE_DISABLED / observed true / audit OBSERVED / latest ACCEPTED / accepted true / rejected false / terminal failure accepted false / tool patch.apply / verification PASSED / summary observations OBSERVED / summary count 2 / summary accepted 2 / summary rejected 0 / summary missing result risk false / summary stale index risk true / rollback summary observations OBSERVED / rollback summary count 2 / rollback summary accepted 2 / rollback summary rejected 0 / rollback summary missing result risk false / rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

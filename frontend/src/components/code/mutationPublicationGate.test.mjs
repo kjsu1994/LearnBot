@@ -10,9 +10,31 @@ const view = buildMutationPublicationGateView({
   publicationPolicy: 'DISABLED_AUDIT_ONLY',
   sourceResultAggregationGateStatus: 'REFUSED_RESULT_AGGREGATION_DISABLED',
   sourceResultAggregationGateSchema: 'learnbot.local-agent.mutation-result-aggregation-gate.v1',
+  sourceResultAggregationGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceResultAggregationGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceResultAggregationGatePublicationGateSessionId: 'session-1',
+  sourceResultAggregationGatePublicationGateUserId: 'user-1',
+  sourceResultAggregationGatePublicationGateAgentId: 'agent-1',
+  sourceResultAggregationGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceResultAggregationGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceResultAggregationGateAcceptedObservationCount: 2,
+  sourceResultAggregationGateAcceptedObservationAcceptedCount: 2,
+  sourceResultAggregationGateAcceptedObservationRejectedCount: 0,
+  sourceResultAggregationGateMissingMutationResultRiskVisible: false,
+  sourceResultAggregationGateStaleIndexRiskVisible: true,
+  sourceResultAggregationGateLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceResultAggregationGateLatestAcceptedObservationToolName: 'patch.apply',
+  sourceResultAggregationGateLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceResultAggregationGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -160,7 +182,7 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation publication ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation publication ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,
@@ -169,6 +191,10 @@ assert.equal(
 assert.equal(
   view.disabledText,
   'mutation publication disabled: publication false / publication invocation false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / result aggregation false / rag freshness false / rollback fallback false / intake persistence false / accepted observation persistence false / post-execution observation false / result persistence false / acceptance false / release gate false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / apply false / test false / rollback restore false'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation publication source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / observations OBSERVED / count 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / latest ACCEPTED / tool patch.apply / verification PASSED / rollback summary observations OBSERVED / rollback summary count 2 / rollback summary accepted 2 / rollback summary rejected 0 / rollback summary missing result risk false / rollback summary stale index risk true'
 );
 assert.deepEqual(view.policyLines, [
   'publication policy mutationResultAggregationGate: REFUSED_RESULT_AGGREGATION_DISABLED / passed true / blocking false / request creation false / push false / claim false / execution false / write helper false / claimable false / mutation false / result aggregation false / publication false / final answer false / final-answer completion false / final-answer delivery false / final-response handoff false / delivery receipt false / acknowledgement save false / A disabled result aggregation gate must refuse aggregation before publication can be considered.',
@@ -202,3 +228,4 @@ assert.deepEqual(blocked.policyLines, [
 const hidden = buildMutationPublicationGateView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.policyLines, []);
+assert.equal(hidden.sourceContextText, '');

@@ -9,9 +9,31 @@ const view = buildMutationResultAggregationGateView({
   executionTarget: 'USER_LOCAL_AGENT',
   resultAggregationPolicy: 'DISABLED_AUDIT_ONLY',
   sourceRagFreshnessGateStatus: 'REFUSED_RAG_FRESHNESS_DISABLED',
+  sourceRagFreshnessGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceRagFreshnessGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceRagFreshnessGatePublicationGateSessionId: 'session-1',
+  sourceRagFreshnessGatePublicationGateUserId: 'user-1',
+  sourceRagFreshnessGatePublicationGateAgentId: 'agent-1',
+  sourceRagFreshnessGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceRagFreshnessGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceRagFreshnessGateAcceptedObservationCount: 2,
+  sourceRagFreshnessGateAcceptedObservationAcceptedCount: 2,
+  sourceRagFreshnessGateAcceptedObservationRejectedCount: 0,
+  sourceRagFreshnessGateMissingMutationResultRiskVisible: false,
+  sourceRagFreshnessGateStaleIndexRiskVisible: true,
+  sourceRagFreshnessGateLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceRagFreshnessGateLatestAcceptedObservationToolName: 'patch.apply',
+  sourceRagFreshnessGateLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceRagFreshnessGateRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -183,11 +205,15 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation result aggregation ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation result aggregation ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,
   'mutation result aggregation counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation result aggregation source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / RAG observations OBSERVED / count 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / latest ACCEPTED / tool patch.apply / verification PASSED / rollback summary observations OBSERVED / rollback summary count 2 / rollback summary accepted 2 / rollback summary rejected 0 / rollback summary missing result risk false / rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,

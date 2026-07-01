@@ -7,6 +7,7 @@ import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopStopCondition;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentToolName;
+import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import org.junit.jupiter.api.Test;
@@ -245,5 +246,90 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains(workspaceId.toString())
                 .contains("\"approvalState\":\"APPROVED\"")
                 .contains("\"status\":\"APPROVED_HELD\"");
+    }
+
+    @Test
+    void appendStopOutcomePersistsAuditOnlyRecordedStopEventForLatestTimeline() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+
+        repository.appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                "APPROVAL_DENIED",
+                "REPORT_APPROVAL_DENIED",
+                "Stop after approval denial without creating claimable work.",
+                Map.of("requestId", requestId.toString(), "status", "REJECTED")
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("STOP_OUTCOME_RECORDED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(params.getValue().getValue("executionTarget")).isNull();
+        assertThat(params.getValue().getValue("toolName")).isNull();
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(false);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"status\":\"RECORDED\"")
+                .contains("\"stopKey\":\"APPROVAL_DENIED\"")
+                .contains("\"outcome\":\"REPORT_APPROVAL_DENIED\"")
+                .contains("\"finalResultEnabled\":false")
+                .contains("\"publicationEnabled\":false")
+                .contains("\"acknowledgementEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains(requestId.toString());
+    }
+
+    @Test
+    void appendAgentUnavailableStopOutcomePersistsRequestContextWithoutCreatingWork() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        LocalAgentToolRequest request = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString()),
+                com.learnbot.dto.LocalAgentApprovalState.REQUIRED,
+                null,
+                List.of()
+        );
+
+        repository.appendAgentUnavailableStopOutcome(userId, repositoryId, loopId, request);
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("STOP_OUTCOME_RECORDED");
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"stopKey\":\"AGENT_UNAVAILABLE\"")
+                .contains("\"outcome\":\"WAIT_FOR_LOCAL_AGENT\"")
+                .contains("\"finalResultEnabled\":false")
+                .contains("\"publicationEnabled\":false")
+                .contains("\"acknowledgementEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains(agentId.toString())
+                .contains(workspaceId.toString())
+                .contains("\"toolName\":\"patch.apply\"")
+                .contains("\"approvalState\":\"REQUIRED\"");
     }
 }

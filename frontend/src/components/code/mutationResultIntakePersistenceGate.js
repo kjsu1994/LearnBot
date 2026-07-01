@@ -48,6 +48,7 @@ export function buildMutationResultIntakePersistenceGateView(gate = null) {
       headerText: '',
       idsText: '',
       countsText: '',
+      sourceContextText: '',
       disabledText: '',
       policyLines: [],
       blockingText: '',
@@ -63,6 +64,7 @@ export function buildMutationResultIntakePersistenceGateView(gate = null) {
     headerText: mutationResultIntakePersistenceHeaderText(gate),
     idsText: mutationResultIntakePersistenceIdsText(gate),
     countsText: mutationResultIntakePersistenceCountsText(gate),
+    sourceContextText: mutationResultIntakePersistenceSourceContextText(gate),
     disabledText: `mutation result intake persistence disabled:${disabledControlSuffix(gate)}`,
     policyLines: policyChecks.map(mutationResultIntakePersistencePolicyText),
     blockingText: blockingKeys.length ? `mutation result intake persistence blocking keys: ${blockingKeys.join(', ')}` : '',
@@ -104,6 +106,9 @@ function mutationResultIntakePersistenceIdsText(gate) {
   if (gate.sessionId) {
     text += ` / session ${gate.sessionId}`;
   }
+  if (gate.userId) {
+    text += ` / user ${gate.userId}`;
+  }
   if (gate.agentId) {
     text += ` / agent ${gate.agentId}`;
   }
@@ -131,6 +136,41 @@ function mutationResultIntakePersistenceCountsText(gate) {
     text += ` / intake persisted ${String(gate.intakePersistedResultCount)}`;
   }
   return text;
+}
+
+function mutationResultIntakePersistenceSourceContextText(gate) {
+  const parts = [
+    ['publication gate', gate.sourceAcceptedMutationObservationPublicationGateStatus],
+    ['publication schema', gate.sourceAcceptedMutationObservationPublicationGateSchema],
+    ['publication session', gate.sourceAcceptedMutationObservationPublicationGateSessionId],
+    ['publication user', gate.sourceAcceptedMutationObservationPublicationGateUserId],
+    ['publication agent', gate.sourceAcceptedMutationObservationPublicationGateAgentId],
+    ['publication workspace', gate.sourceAcceptedMutationObservationPublicationGateWorkspaceId],
+    ['accepted observation readiness', gate.sourceAcceptedMutationObservationReadinessStatus],
+    ['observed', gate.sourceAcceptedMutationObservationObserved],
+    ['audit', gate.acceptedMutationObservationAuditStatus],
+    ['latest', gate.latestAcceptedMutationObservationStatus],
+    ['accepted', gate.latestAcceptedMutationObservationAccepted],
+    ['rejected', gate.latestAcceptedMutationObservationRejected],
+    ['terminal failure accepted', gate.latestAcceptedMutationObservationTerminalFailureAccepted],
+    ['tool', gate.latestAcceptedMutationObservationToolName],
+    ['verification', gate.latestAcceptedMutationObservationVerificationStatus],
+    ['summary observations', gate.sourceAcceptedMutationObservationSummaryStatus],
+    ['summary count', gate.sourceAcceptedMutationObservationSummaryObservationCount],
+    ['summary accepted', gate.sourceAcceptedMutationObservationSummaryAcceptedCount],
+    ['summary rejected', gate.sourceAcceptedMutationObservationSummaryRejectedCount],
+    ['summary missing result risk', gate.sourceAcceptedMutationObservationSummaryMissingMutationResultRiskVisible],
+    ['summary stale index risk', gate.sourceAcceptedMutationObservationSummaryStaleIndexRiskVisible],
+    ['rollback summary observations', gate.sourceAcceptedMutationObservationRollbackSummaryStatus],
+    ['rollback summary count', gate.sourceAcceptedMutationObservationRollbackSummaryObservationCount],
+    ['rollback summary accepted', gate.sourceAcceptedMutationObservationRollbackSummaryAcceptedCount],
+    ['rollback summary rejected', gate.sourceAcceptedMutationObservationRollbackSummaryRejectedCount],
+    ['rollback summary missing result risk', gate.sourceAcceptedMutationObservationRollbackSummaryMissingMutationResultRiskVisible],
+    ['rollback summary stale index risk', gate.sourceAcceptedMutationObservationRollbackSummaryStaleIndexRiskVisible],
+  ]
+    .map(([label, value]) => value === undefined ? null : `${label} ${String(value)}`)
+    .filter(Boolean);
+  return parts.length ? `mutation result intake persistence source context: ${parts.join(' / ')}` : '';
 }
 
 function disabledControlSuffix(gate) {

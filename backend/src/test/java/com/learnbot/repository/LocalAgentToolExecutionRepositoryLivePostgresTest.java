@@ -81,6 +81,12 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     .containsEntry("sourceRequestId", sourceRequestId.toString())
                     .containsEntry("dryRunOnly", true)
                     .containsEntry("mutationAllowed", false);
+            OffsetDateTime leaseExpiresAt = jdbc.queryForObject("""
+                    SELECT lease_expires_at
+                    FROM local_agent_tool_executions
+                    WHERE id = :id
+                    """, new MapSqlParameterSource().addValue("id", dryRunRequestId), OffsetDateTime.class);
+            assertThat(leaseExpiresAt).isAfter(OffsetDateTime.now());
             repository.complete(new LocalAgentToolResponse(
                     sessionId,
                     dryRunRequestId,
@@ -115,6 +121,148 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             assertThat(repository.claimNext(userId, agentId)).isEmpty();
         } finally {
             cleanup(jdbc, dryRunRequestId, sourceRequestId, userId);
+        }
+    }
+
+    @Test
+    void lateCompletionDoesNotOverwriteTimedOutExecution() {
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository repository = new LocalAgentToolExecutionRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            LocalAgentToolRequest request = new LocalAgentToolRequest(
+                    sessionId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.FILE_READ,
+                    Map.of("path", "README.md"),
+                    LocalAgentApprovalState.NOT_REQUIRED,
+                    OffsetDateTime.now(),
+                    List.of()
+            );
+            repository.create(requestId, request);
+            repository.claimNext(userId, agentId).orElseThrow();
+            jdbc.update("""
+                    UPDATE local_agent_tool_executions
+                    SET status = 'TIMED_OUT',
+                        failure_code = 'TIMEOUT',
+                        error = 'lease timed out',
+                        finished_at = now()
+                    WHERE id = :id
+                    """, new MapSqlParameterSource().addValue("id", requestId));
+
+            repository.complete(new LocalAgentToolResponse(
+                    sessionId,
+                    requestId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.FILE_READ,
+                    LocalAgentToolStatus.SUCCEEDED,
+                    Map.of("content", "late"),
+                    null,
+                    null,
+                    OffsetDateTime.now().minusSeconds(1),
+                    OffsetDateTime.now(),
+                    List.of("late success")
+            ));
+
+            var completed = repository.find(requestId).orElseThrow();
+            assertThat(completed.status()).isEqualTo(LocalAgentToolStatus.TIMED_OUT);
+            assertThat(completed.error()).isEqualTo("lease timed out");
+        } finally {
+            cleanup(jdbc, requestId, requestId, userId);
+        }
+    }
+
+    @Test
+    void findsLatestAcceptedMutationObservationForReleaseAttempt() {
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository repository = new LocalAgentToolExecutionRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            LocalAgentToolRequest request = new LocalAgentToolRequest(
+                    sessionId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    Map.of(
+                            "sourceRequestId", sourceRequestId.toString(),
+                            "releaseAttemptId", releaseAttemptId.toString(),
+                            "mutationAllowed", true,
+                            "dryRunOnly", false
+                    ),
+                    LocalAgentApprovalState.APPROVED,
+                    OffsetDateTime.now(),
+                    List.of("mutation result observation")
+            );
+            repository.create(requestId, request);
+            repository.claimNext(userId, agentId).orElseThrow();
+            repository.complete(new LocalAgentToolResponse(
+                    sessionId,
+                    requestId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    LocalAgentToolStatus.SUCCEEDED,
+                    Map.of(
+                            "acceptedMutationObservation", Map.ofEntries(
+                                    Map.entry("schema", "learnbot.local-agent.accepted-mutation-observation.v1"),
+                                    Map.entry("status", "ACCEPTED"),
+                                    Map.entry("accepted", true),
+                                    Map.entry("toolName", "patch.apply"),
+                                    Map.entry("sourceRequestId", sourceRequestId.toString()),
+                                    Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                                    Map.entry("acceptedObservationPersistenceEnabled", false),
+                                    Map.entry("resultAggregationEnabled", false),
+                                    Map.entry("publicationEnabled", false),
+                                    Map.entry("acknowledgementSaveEnabled", false),
+                                    Map.entry("ragFreshnessUpdateEnabled", false)
+                            )
+                    ),
+                    null,
+                    null,
+                    OffsetDateTime.now().minusSeconds(1),
+                    OffsetDateTime.now(),
+                    List.of("accepted observation stored in response output")
+            ));
+
+            var observation = repository.findLatestAcceptedMutationObservationForReleaseAttempt(
+                    userId,
+                    sourceRequestId,
+                    releaseAttemptId
+            ).orElseThrow();
+
+            assertThat(observation)
+                    .containsEntry("schema", "learnbot.local-agent.accepted-mutation-observation.v1")
+                    .containsEntry("status", "ACCEPTED")
+                    .containsEntry("accepted", true)
+                    .containsEntry("sourceRequestId", sourceRequestId.toString())
+                    .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                    .containsEntry("acceptedObservationPersistenceEnabled", false)
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("ragFreshnessUpdateEnabled", false);
+        } finally {
+            cleanup(jdbc, requestId, requestId, userId);
         }
     }
 

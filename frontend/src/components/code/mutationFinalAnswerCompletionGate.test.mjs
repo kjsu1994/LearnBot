@@ -10,9 +10,41 @@ const view = buildMutationFinalAnswerCompletionGateView({
   finalAnswerCompletionPolicy: 'DISABLED_AUDIT_ONLY',
   sourceFinalAnswerGenerationGateStatus: 'REFUSED_FINAL_ANSWER_GENERATION_DISABLED',
   sourceFinalAnswerGenerationGateSchema: 'learnbot.local-agent.mutation-final-answer-generation-gate.v1',
+  sourceFinalAnswerGenerationGatePublicationGateStatus: 'REFUSED_PUBLICATION_DISABLED',
+  sourceFinalAnswerGenerationGatePublicationGateSchema: 'learnbot.local-agent.mutation-publication-gate.v1',
+  sourceFinalAnswerGenerationGatePublicationGateSessionId: 'session-1',
+  sourceFinalAnswerGenerationGatePublicationGateUserId: 'user-1',
+  sourceFinalAnswerGenerationGatePublicationGateAgentId: 'agent-1',
+  sourceFinalAnswerGenerationGatePublicationGateWorkspaceId: 'workspace-1',
+  sourceFinalAnswerGenerationGatePublicationBoundaryStatus: 'READY_PUBLICATION_DISABLED',
+  sourceFinalAnswerGenerationGatePublicationBoundaryPrerequisitesPassed: true,
+  sourceFinalAnswerGenerationGatePublicationBoundaryDraftStatus: 'READY_DRAFT_DISABLED',
+  sourceFinalAnswerGenerationGatePublicationBoundaryDraftSections: ['changedFiles', 'verificationOutcome', 'rollbackState', 'ragFreshnessState'],
+  sourceFinalAnswerGenerationGateAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerGenerationGateAcceptedObservationCount: 2,
+  sourceFinalAnswerGenerationGateAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerGenerationGateAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerGenerationGateMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerGenerationGateStaleIndexRiskVisible: true,
+  sourceFinalAnswerGenerationGatePublicationAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerGenerationGatePublicationAcceptedObservationCount: 2,
+  sourceFinalAnswerGenerationGatePublicationAcceptedObservationAcceptedCount: 2,
+  sourceFinalAnswerGenerationGatePublicationAcceptedObservationRejectedCount: 0,
+  sourceFinalAnswerGenerationGatePublicationMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerGenerationGatePublicationStaleIndexRiskVisible: true,
+  sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationStatus: 'ACCEPTED',
+  sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationToolName: 'patch.apply',
+  sourceFinalAnswerGenerationGatePublicationLatestAcceptedObservationVerificationStatus: 'PASSED',
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStatus: 'OBSERVED',
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryObservationCount: 2,
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryAcceptedCount: 2,
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryRejectedCount: 0,
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryMissingMutationResultRiskVisible: false,
+  sourceFinalAnswerGenerationGatePublicationRollbackAcceptedObservationSummaryStaleIndexRiskVisible: true,
   sourceRequestId: 'request-123',
   releaseAttemptId: 'attempt-1234567890',
   sessionId: 'session-1',
+  userId: 'user-1',
   agentId: 'agent-1',
   workspaceId: 'workspace-1',
   expectedResultCount: 4,
@@ -155,11 +187,19 @@ assert.equal(
 );
 assert.equal(
   view.idsText,
-  'mutation final-answer completion ids: source request-123 / release attempt- / session session-1 / agent agent-1 / workspace workspace-1'
+  'mutation final-answer completion ids: source request-123 / release attempt- / session session-1 / user user-1 / agent agent-1 / workspace workspace-1'
 );
 assert.equal(
   view.countsText,
   'mutation final-answer completion counts: expected 4 / completed 0 / accepted 0 / rejected 0 / intake persisted 0'
+);
+assert.equal(
+  view.generationContextText,
+  'mutation final-answer completion generation context: publication boundary READY_PUBLICATION_DISABLED / publication prerequisites true / draft READY_DRAFT_DISABLED / sections changedFiles, verificationOutcome, rollbackState, ragFreshnessState / observations OBSERVED / observed 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true'
+);
+assert.equal(
+  view.sourceContextText,
+  'mutation final-answer completion source context: publication gate REFUSED_PUBLICATION_DISABLED / publication schema learnbot.local-agent.mutation-publication-gate.v1 / publication session session-1 / publication user user-1 / publication agent agent-1 / publication workspace workspace-1 / publication observations OBSERVED / count 2 / accepted 2 / rejected 0 / missing result risk false / stale index risk true / latest ACCEPTED / tool patch.apply / verification PASSED / rollback summary observations OBSERVED / rollback summary count 2 / rollback summary accepted 2 / rollback summary rejected 0 / rollback summary missing result risk false / rollback summary stale index risk true'
 );
 assert.equal(
   view.disabledText,
@@ -197,3 +237,4 @@ assert.deepEqual(blocked.policyLines, [
 const hidden = buildMutationFinalAnswerCompletionGateView(null);
 assert.equal(hidden.show, false);
 assert.deepEqual(hidden.policyLines, []);
+assert.equal(hidden.sourceContextText, '');
