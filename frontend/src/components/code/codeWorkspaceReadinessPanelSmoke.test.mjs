@@ -3850,6 +3850,11 @@ try {
   assert.match(markup, /1 PLAN: Retrieve code evidence and form a bounded repair plan\. \/ SERVER_LOCAL \/ approval false \/ may mutate false \/ enabled true/);
   assert.match(markup, /3 REQUEST_APPROVAL: Require explicit user approval before any side-effectful tool can run\. \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true/);
   assert.match(markup, /MUTATION_DISABLED: Do not apply patches, run tests, restore rollback, update RAG freshness, or publish a mutation result in this preview slice\./);
+  assert.match(markup, /agent loop runner handoff: READY_HANDOFF_CREATION_DISABLED \/ learnbot\.code-agent\.creation-disabled-handoff-summary\.v1 \/ runner NOT_ENQUEUED \/ summary runner WAIT_CREATION_GATE_DISABLED \/ boundary RELEASE_REFUSED_GATE_DISABLED/);
+  assert.match(markup, /agent loop runner handoff counts: expected 4 \/ durable mutation rows 0 \/ persisted 0 \/ pushed 0 \/ claimable 0/);
+  assert.match(markup, /agent loop runner handoff disabled: request creation false \/ enqueue false \/ push false \/ claim false \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/);
+  assert.match(markup, /agent loop runner nested preview: WAIT_CREATION_GATE_DISABLED \/ READY_HANDOFF_CREATION_DISABLED \/ request creation false \/ push false \/ claim false \/ mutation false/);
+  assert.match(markup, /Mutation handoff is ready, but Local Agent mutation request creation is disabled/);
   assert.match(markup, /recent agent loop timelines: 1/);
   assert.match(markup, /timeline state: mutation false \/ persistence true \/ cancellation false/);
   assert.match(markup, /1 LOOP_PREVIEW_CREATED \/ approval false \/ may mutate false \/ enabled false/);

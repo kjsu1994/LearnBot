@@ -2243,6 +2243,10 @@ internal sealed partial class LearnBotLocalAgent
         {
             return SelfTestApprovedExecutionFlowContract(GetOption(args, "--report"));
         }
+        if (string.Equals(args[0], "approved-server-queue-flow-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestApprovedServerQueueFlowContract(GetOption(args, "--report"));
+        }
         if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
         {
             return Unknown("self-test " + string.Join(' ', args));

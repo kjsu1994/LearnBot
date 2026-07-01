@@ -59,6 +59,7 @@ import { buildDryRunResultSummaryView } from './dryRunResultSummary.js';
 import { buildDryRunPatchFilesSummaryView } from './dryRunPatchFilesSummary.js';
 import { buildAgentLoopPreviewSummaryView } from './agentLoopPreviewSummary.js';
 import { buildAgentLoopTimelineHistoryView } from './agentLoopTimelineSummary.js';
+import { buildAgentLoopRunnerHandoffSummaryView } from './agentLoopRunnerHandoffSummary.js';
 import { buildApprovedExecutionFlowInspectionView } from './approvedExecutionFlowInspectionSummary.js';
 
 function CodeWorkspace(props) {
@@ -85,6 +86,9 @@ function CodeWorkspace(props) {
     codeAgentMutationPolicy,
     codeAgentLoopPreview,
     codeAgentLoopTimelines = [],
+    codeAgentLoopRunnerPreview,
+    codeAgentLoopRunnerEnqueueResult,
+    codeAgentLoopRunnerQueuedObservationResult,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -109,6 +113,10 @@ function CodeWorkspace(props) {
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
     previewCodeAgentLoop = () => {},
+    previewCodeAgentLoopRunner = () => {},
+    enqueueCodeAgentLoopRunnerReadOnly = () => {},
+    enqueueCodeAgentLoopRunnerSelectedReadOnly = () => {},
+    refreshCodeAgentLoopRunnerQueuedObservation = () => {},
     refreshCodeAgentLoopTimelines = () => {},
     generateCodeAgentPatch = () => {},
     prepareCodeAgentLocalPatchRequest = () => {},
@@ -212,6 +220,9 @@ function CodeWorkspace(props) {
           mutationPolicy={codeAgentMutationPolicy}
           loopPreview={codeAgentLoopPreview}
           loopTimelines={codeAgentLoopTimelines}
+          loopRunnerPreview={codeAgentLoopRunnerPreview}
+          loopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
+          loopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
           localPatchRequest={codeAgentLocalPatchRequest}
           localPatchReadiness={codeAgentLocalPatchReadiness}
           localPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
@@ -225,6 +236,10 @@ function CodeWorkspace(props) {
           loading={loading}
           onPlan={generateCodeAgentPlan}
           onLoopPreview={previewCodeAgentLoop}
+          onLoopRunnerPreview={previewCodeAgentLoopRunner}
+          onLoopRunnerEnqueueReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
+          onLoopRunnerEnqueueSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
+          onRefreshLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
           onRefreshLoopTimelines={refreshCodeAgentLoopTimelines}
           onPatch={generateCodeAgentPatch}
           onPrepareLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
@@ -366,6 +381,9 @@ function CodeAgentPanel({
   mutationPolicy,
   loopPreview,
   loopTimelines = [],
+  loopRunnerPreview,
+  loopRunnerEnqueueResult,
+  loopRunnerQueuedObservationResult,
   localPatchRequest,
   localPatchReadiness,
   localPatchDryRunRequest,
@@ -379,6 +397,10 @@ function CodeAgentPanel({
   loading = () => false,
   onPlan = (event) => event.preventDefault(),
   onLoopPreview = () => {},
+  onLoopRunnerPreview = () => {},
+  onLoopRunnerEnqueueReadOnly = () => {},
+  onLoopRunnerEnqueueSelectedReadOnly = () => {},
+  onRefreshLoopRunnerQueuedObservation = () => {},
   onRefreshLoopTimelines = () => {},
   onPatch = () => {},
   onPrepareLocalPatchRequest = () => {},
@@ -400,6 +422,27 @@ function CodeAgentPanel({
   const targetFiles = plan?.targetFiles || [];
   const canPlan = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-plan');
   const canPreviewLoop = Boolean(selectedRepositoryId && instruction.trim()) && !loading('code-agent-loop-preview');
+  const canPreviewRunner = Boolean(selectedRepositoryId && loopPreview?.loopId) && !loading('code-agent-loop-runner-preview');
+  const canCheckRunnerEnqueueRefusal = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && (
+      loopRunnerPreview?.actionKey === 'READY_HANDOFF_CREATION_DISABLED'
+      || loopRunnerPreview?.actionKey === 'WAIT_FOR_RELEASE_GATE'
+      || loopRunnerPreview?.runnerDecision === 'WAIT_RELEASE_GATE_FRESH_OBSERVATIONS'
+    )
+  ) && !loading('code-agent-loop-runner-enqueue-read-only');
+  const canEnqueueSelectedReadOnlyRunner = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && loopRunnerPreview?.runnerDecision === 'PREPARED_READ_ONLY_CANDIDATE'
+    && loopRunnerPreview?.candidate?.toolName === 'git.status'
+    && loopRunnerPreview?.candidate?.approvalState === 'NOT_REQUIRED'
+    && loopRunnerPreview?.candidate?.mutationAllowed === false
+  ) && !loading('code-agent-loop-runner-enqueue-selected-read-only');
+  const runnerQueuedRequestId = loopRunnerEnqueueResult?.queuedRequest?.requestId;
+  const canRefreshRunnerQueuedObservation = Boolean(runnerQueuedRequestId)
+    && !loading(`code-agent-loop-runner-queued-observation-${runnerQueuedRequestId}`);
   const canPatch = Boolean(selectedRepositoryId && instruction.trim() && targetFiles.length && !loading('code-agent-patch'));
   const canApply = false;
   const canRollback = false;
@@ -412,6 +455,10 @@ function CodeAgentPanel({
   const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
   const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
   const agentLoopTimelineHistoryView = buildAgentLoopTimelineHistoryView(loopTimelines);
+  const agentLoopRunnerHandoffSummaryView = buildAgentLoopRunnerHandoffSummaryView(
+    loopRunnerEnqueueResult || loopRunnerPreview,
+    loopRunnerQueuedObservationResult
+  );
   const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
   const canPrepareLocalPatchRequest = Boolean(
     patch?.valid
@@ -830,6 +877,36 @@ function CodeAgentPanel({
             {loading('code-agent-loop-preview') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
             Preview agent loop
           </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canPreviewRunner}
+            onClick={() => onLoopRunnerPreview(loopPreview)}
+            title="Preview-only runner state. This does not enqueue, create, push, claim, or execute any Local Agent request."
+          >
+            {loading('code-agent-loop-runner-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
+            Preview runner state
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canCheckRunnerEnqueueRefusal}
+            onClick={() => onLoopRunnerEnqueueReadOnly(loopPreview)}
+            title="Checks the disabled runner handoff boundary for creation-disabled or release-gate states. It does not create, push, claim, or execute a Local Agent request."
+          >
+            {loading('code-agent-loop-runner-enqueue-read-only') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
+            Check enqueue refusal
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canEnqueueSelectedReadOnlyRunner}
+            onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
+            title="Queues only the prepared read-only Local Agent git.status observation. It does not claim, mutate, publish, or acknowledge final results."
+          >
+            {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+            Queue read-only step
+          </button>
           <button type="button" className="ghost-button" disabled={!selectedRepositoryId || loading('code-agent-loop-timelines')} onClick={() => onRefreshLoopTimelines(selectedRepositoryId)}>
             {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
             Refresh loop history
@@ -883,6 +960,45 @@ function CodeAgentPanel({
               )}
             </div>
           ))}
+        </div>
+      )}
+      {agentLoopRunnerHandoffSummaryView.show && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopRunnerHandoffSummaryView.headerText}</strong>
+            <Badge variant="secondary">{agentLoopRunnerHandoffSummaryView.badgeText}</Badge>
+          </div>
+          {agentLoopRunnerHandoffSummaryView.countsText && (
+            <small>{agentLoopRunnerHandoffSummaryView.countsText}</small>
+          )}
+          <small>{agentLoopRunnerHandoffSummaryView.disabledText}</small>
+          {agentLoopRunnerHandoffSummaryView.nestedPreviewText && (
+            <small>{agentLoopRunnerHandoffSummaryView.nestedPreviewText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.sourceText && (
+            <small>{agentLoopRunnerHandoffSummaryView.sourceText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.routeText && (
+            <small>{agentLoopRunnerHandoffSummaryView.routeText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.observationText && (
+            <small>{agentLoopRunnerHandoffSummaryView.observationText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.message && (
+            <small>{agentLoopRunnerHandoffSummaryView.message}</small>
+          )}
+          {runnerQueuedRequestId && (
+            <button
+              type="button"
+              className="ghost-button compact-action"
+              disabled={!canRefreshRunnerQueuedObservation}
+              onClick={() => onRefreshLoopRunnerQueuedObservation(runnerQueuedRequestId)}
+              title="Refreshes the queued read-only Local Agent result and then refreshes the agent-loop timeline. It does not claim, mutate, publish, or acknowledge final results."
+            >
+              {loading(`code-agent-loop-runner-queued-observation-${runnerQueuedRequestId}`) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+              Refresh read-only observation
+            </button>
+          )}
         </div>
       )}
       {plan && (

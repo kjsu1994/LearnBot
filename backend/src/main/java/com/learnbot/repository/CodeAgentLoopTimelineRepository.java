@@ -8,6 +8,8 @@ import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
+import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
+import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
@@ -104,6 +106,23 @@ public class CodeAgentLoopTimelineRepository {
             UUID loopId,
             Map<String, Object> requestInput
     ) {
+        Map<String, Object> details = approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput);
+        details.put("decisionKey", "APPROVED".equals(approvalState) && "APPROVED_HELD".equals(status)
+                ? "APPROVAL_APPROVED_HELD"
+                : "APPROVAL_DECISION_RECORDED");
+        details.put("nextAction", "APPROVED".equals(approvalState) && "APPROVED_HELD".equals(status)
+                ? "Inspect release readiness and queue fresh release-attempt observations before any claimable mutation transition."
+                : "Wait for approval completion or stop if approval was denied.");
+        details.put("approvalRequestHeld", "APPROVED_HELD".equals(status));
+        details.put("releaseRequired", "APPROVED".equals(approvalState));
+        details.put("releaseGateEnabled", false);
+        details.put("requestCreationEnabled", false);
+        details.put("pushEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
         return appendLatestEvent(
                 userId,
                 repositoryId,
@@ -113,7 +132,108 @@ public class CodeAgentLoopTimelineRepository {
                 executionTarget,
                 toolName,
                 true,
-                approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput)
+                details
+        );
+    }
+
+    public int appendApprovalRequestCreated(
+            UUID userId,
+            UUID repositoryId,
+            UUID requestId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            AgentExecutionTarget executionTarget,
+            LocalAgentToolName toolName,
+            String approvalState,
+            String status,
+            UUID loopId,
+            Map<String, Object> requestInput
+    ) {
+        Map<String, Object> details = approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput);
+        details.put("decisionKey", "APPROVAL_REQUEST_CREATED");
+        details.put("nextAction", "Wait for explicit user approval before release, claim, or mutation.");
+        details.put("approvalRequestCreated", true);
+        details.put("releaseRequired", true);
+        details.put("releaseEvidenceRequired", true);
+        details.put("releaseGateEnabled", false);
+        details.put("requestCreationEnabled", false);
+        details.put("pushEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_APPROVAL_REQUEST_CREATED",
+                "REQUEST_APPROVAL",
+                executionTarget,
+                toolName,
+                true,
+                details
+        );
+    }
+
+    public int appendReleaseBoundaryRefusal(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            AgentExecutionTarget executionTarget,
+            LocalAgentToolName toolName,
+            LocalAgentPatchReleaseBoundaryResponse boundary,
+            Map<String, Object> requestInput
+    ) {
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED",
+                "COMPLETE_OR_PAUSE",
+                executionTarget,
+                toolName,
+                true,
+                releaseBoundaryDetails(boundary, sessionId, agentId, workspaceId, requestInput)
+        );
+    }
+
+    public int appendFreshObservationRequestsEnqueued(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            AgentExecutionTarget executionTarget,
+            LocalAgentToolName sourceToolName,
+            List<LocalAgentQueuedToolRequest> queuedRequests,
+            Map<String, Object> requestInput
+    ) {
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_ENQUEUED",
+                "OBSERVE",
+                executionTarget,
+                sourceToolName,
+                true,
+                freshObservationEnqueueDetails(
+                        sourceRequestId,
+                        releaseAttemptId,
+                        sessionId,
+                        agentId,
+                        workspaceId,
+                        queuedRequests,
+                        requestInput
+                )
         );
     }
 
@@ -143,6 +263,47 @@ public class CodeAgentLoopTimelineRepository {
                 "STOP_OUTCOME_RECORDED",
                 "COMPLETE_OR_PAUSE",
                 null,
+                null,
+                false,
+                details
+        );
+    }
+
+    public int appendNextDecision(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentToolResponse response,
+            Map<String, Object> requestInput
+    ) {
+        boolean succeeded = response.status() != null && "SUCCEEDED".equals(response.status().name());
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "RECORDED");
+        details.put("decisionKey", succeeded ? "OBSERVATION_ACCEPTED" : "STOP_AFTER_OBSERVATION");
+        details.put("nextAction", succeeded
+                ? "Evaluate the Local Agent observation before selecting another typed tool or asking for approval."
+                : "Stop the loop after the failed Local Agent observation and report the blocking state.");
+        details.put("observationStatus", response.status() == null ? null : response.status().name());
+        details.put("requestId", response.requestId() == null ? null : response.requestId().toString());
+        details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), response.output().get("sourceRequestId")));
+        details.put("releaseAttemptId", stringValue(requestInput.get("releaseAttemptId"), response.output().get("releaseAttemptId")));
+        details.put("followUpToolSelectionEnabled", succeeded);
+        details.put("approvalRequiredBeforeSideEffects", true);
+        details.put("requestCreationEnabled", false);
+        details.put("pushEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("source", observationDetails(response, requestInput));
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOOP_NEXT_DECISION_RECORDED",
+                "COMPLETE_OR_PAUSE",
+                AgentExecutionTarget.SERVER_LOCAL,
                 null,
                 false,
                 details
@@ -577,6 +738,88 @@ public class CodeAgentLoopTimelineRepository {
         details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), null));
         details.put("releaseAttemptId", stringValue(requestInput.get("releaseAttemptId"), null));
         details.put("freshObservationOnly", booleanValue(requestInput.get("freshObservationOnly"), null));
+        return details;
+    }
+
+    private Map<String, Object> releaseBoundaryDetails(
+            LocalAgentPatchReleaseBoundaryResponse boundary,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            Map<String, Object> requestInput
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "RECORDED");
+        details.put("decisionKey", "RELEASE_BOUNDARY_REFUSED");
+        details.put("nextAction", "Wait for release gate enablement or report that mutation remains disabled.");
+        details.put("requestId", boundary.requestId() == null ? null : boundary.requestId().toString());
+        details.put("sessionId", sessionId == null ? null : sessionId.toString());
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("boundaryStatus", boundary.status());
+        details.put("actionMode", boundary.actionMode());
+        details.put("message", boundary.message());
+        details.put("blockingReasons", boundary.blockingReasons());
+        details.put("releaseGateEnabled", boundary.releaseGateEnabled());
+        details.put("requestCreationEnabled", boundary.requestCreationEnabled());
+        details.put("pushEnabled", boundary.pushEnabled());
+        details.put("claimEnabled", boundary.claimEnabled());
+        details.put("claimable", boundary.claimable());
+        details.put("mutationEnabled", boundary.mutationAllowed());
+        details.put("mutationAllowed", boundary.mutationAllowed());
+        details.put("applyEnabled", boundary.applyEnabled());
+        details.put("testEnabled", boundary.testEnabled());
+        details.put("rollbackRestoreEnabled", boundary.rollbackRestoreEnabled());
+        details.put("ragFreshnessUpdateEnabled", boundary.ragFreshnessUpdateEnabled());
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), null));
+        details.put("releaseAttemptId", stringValue(requestInput.get("releaseAttemptId"), null));
+        details.put("patchExecutionGate", boundary.patchExecutionGate());
+        details.put("releaseEnablementChecklist", boundary.releaseEnablementChecklist());
+        details.put("releaseAttemptModel", boundary.releaseAttemptModel());
+        return details;
+    }
+
+    private Map<String, Object> freshObservationEnqueueDetails(
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            List<LocalAgentQueuedToolRequest> queuedRequests,
+            Map<String, Object> requestInput
+    ) {
+        List<LocalAgentQueuedToolRequest> requests = queuedRequests == null ? List.of() : queuedRequests;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "FRESH_OBSERVATIONS_ENQUEUED");
+        details.put("decisionKey", "WAIT_FOR_FRESH_OBSERVATION_RESULTS");
+        details.put("nextAction", "Wait for fresh release-attempt Local Agent observations before any release or claimable mutation transition.");
+        details.put("sourceRequestId", sourceRequestId == null ? stringValue(requestInput.get("sourceRequestId"), null) : sourceRequestId.toString());
+        details.put("releaseAttemptId", releaseAttemptId == null ? stringValue(requestInput.get("releaseAttemptId"), null) : releaseAttemptId.toString());
+        details.put("sessionId", sessionId == null ? null : sessionId.toString());
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("queuedRequestCount", requests.size());
+        details.put("queuedRequestIds", requests.stream().map(request -> request.requestId().toString()).toList());
+        details.put("queuedToolNames", requests.stream().map(request -> request.request().toolName().wireName()).toList());
+        details.put("queuedApprovalStates", requests.stream().map(request -> request.request().approvalState().name()).toList());
+        details.put("freshObservationOnly", true);
+        details.put("observationResultsRequired", true);
+        details.put("releaseGateEnabled", false);
+        details.put("sourcePatchClaimEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("verificationCommandExecutionEnabled", false);
+        details.put("rollbackRestoreEnabled", false);
+        details.put("ragFreshnessUpdateEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("finalAnswerGenerationEnabled", false);
+        details.put("deliveryEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("source", requestInput == null ? Map.of() : requestInput);
         return details;
     }
 

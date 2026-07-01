@@ -151,7 +151,9 @@ public class LocalAgentToolGatewayService {
             throw new IllegalStateException("Workspace is not approved by the Local Agent.");
         }
         UUID requestId = UUID.randomUUID();
-        return toResponse(repository.create(requestId, request));
+        LocalAgentToolExecution execution = repository.create(requestId, request);
+        appendLoopApprovalRequestCreatedEvent(execution);
+        return toResponse(execution);
     }
 
     @Transactional
@@ -427,7 +429,7 @@ public class LocalAgentToolGatewayService {
                 : Map.of();
         boolean releaseAttemptReadyForClaim = releaseAttemptReadyForClaim(readiness);
         List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed, releaseAttemptReadyForClaim);
-        return new LocalAgentPatchReleaseBoundaryResponse(
+        LocalAgentPatchReleaseBoundaryResponse boundary = new LocalAgentPatchReleaseBoundaryResponse(
                 requestId,
                 preconditionsPassed ? "RELEASE_REFUSED_GATE_DISABLED" : "RELEASE_REFUSED_PRECONDITIONS_BLOCKED",
                 "REFUSAL_ONLY",
@@ -450,6 +452,8 @@ public class LocalAgentToolGatewayService {
                 releaseEnablementChecklist,
                 readiness.releaseAttemptModel()
         );
+        appendLoopReleaseBoundaryRefusalEvent(userId, requestId, boundary);
+        return boundary;
     }
 
     private List<String> releaseBoundaryBlockingReasons(
@@ -797,6 +801,7 @@ public class LocalAgentToolGatewayService {
             queued.add(toQueuedRequest(execution));
         }
         queued.forEach(toolPusher::sendToolRequest);
+        appendLoopFreshObservationRequestsEnqueuedEvent(source, attempt.id(), queued);
         return List.copyOf(queued);
     }
 
@@ -1602,6 +1607,7 @@ public class LocalAgentToolGatewayService {
         boolean decisionRefused = "REFUSED_DISPATCH_DISABLED".equals(mutationDispatchDecisionModel.get("status"))
                 && "REFUSE_DISPATCH".equals(mutationDispatchDecisionModel.get("decision"));
         List<Map<String, Object>> orderedToolRequests = mutationDispatchBlueprintToolRequests(
+                attempt,
                 mutationDispatchEnvelopeContract,
                 postMutationResultContract
         );
@@ -1691,6 +1697,10 @@ public class LocalAgentToolGatewayService {
         int expectedRequestCount = orderedToolRequestsValue instanceof List<?> orderedToolRequests
                 ? orderedToolRequests.size()
                 : 0;
+        int durableMutationExecutionRowCount = repository.countMutationEnabledExecutionRowsForReleaseAttempt(
+                attempt.userId(),
+                attempt.id()
+        );
         List<Map<String, Object>> policyChecks = List.of(
                 mutationRequestCreationPolicyCheck(
                         "mutationRequestBlueprint",
@@ -1745,6 +1755,7 @@ public class LocalAgentToolGatewayService {
         result.put("releaseGateState", "DISABLED");
         result.put("requestCreationPolicy", "DISABLED_AUDIT_ONLY");
         result.put("expectedRequestCount", expectedRequestCount);
+        result.put("durableMutationExecutionRowCount", durableMutationExecutionRowCount);
         result.put("persistedRequestCount", 0);
         result.put("pushedRequestCount", 0);
         result.put("claimableRequestCount", 0);
@@ -2163,6 +2174,7 @@ public class LocalAgentToolGatewayService {
     }
 
     private List<Map<String, Object>> mutationDispatchBlueprintToolRequests(
+            LocalAgentPatchReleaseAttempt attempt,
             Map<String, Object> mutationDispatchEnvelopeContract,
             Map<String, Object> postMutationResultContract
     ) {
@@ -2176,26 +2188,34 @@ public class LocalAgentToolGatewayService {
         return sequence.stream()
                 .filter(Map.class::isInstance)
                 .map(Map.class::cast)
-                .map(item -> mutationDispatchBlueprintToolRequest(item, expectedOutputKeys))
+                .map(item -> mutationDispatchBlueprintToolRequest(attempt, item, expectedOutputKeys))
                 .toList();
     }
 
     private Map<String, Object> mutationDispatchBlueprintToolRequest(
+            LocalAgentPatchReleaseAttempt attempt,
             Map<?, ?> sequenceItem,
             List<String> expectedOutputKeys
     ) {
         String key = String.valueOf(sequenceItem.get("key"));
         String toolName = String.valueOf(sequenceItem.get("toolName"));
+        String approvalState = String.valueOf(sequenceItem.get("approvalState"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("order", sequenceItem.get("order"));
         result.put("key", key);
         result.put("status", "REQUEST_BLUEPRINT_DISABLED");
         result.put("toolName", toolName);
-        result.put("approvalState", sequenceItem.get("approvalState"));
+        result.put("approvalState", approvalState);
         result.put("sideEffectful", sequenceItem.get("sideEffectful"));
         result.put("rollbackFallback", sequenceItem.get("rollbackFallback"));
         result.put("expectedInput", mutationDispatchBlueprintExpectedInput(key, toolName));
         result.put("expectedOutputKeys", mutationDispatchBlueprintExpectedOutputKeys(key, expectedOutputKeys));
+        result.put("expectedExecutionRow", mutationDispatchBlueprintExpectedExecutionRow(
+                attempt,
+                key,
+                toolName,
+                approvalState
+        ));
         result.put("releaseGateEnabled", false);
         result.put("dispatchDecisionEnabled", false);
         result.put("requestCreationEnabled", false);
@@ -2206,6 +2226,62 @@ public class LocalAgentToolGatewayService {
         result.put("applyEnabled", false);
         result.put("testEnabled", false);
         result.put("rollbackRestoreEnabled", false);
+        return result;
+    }
+
+    private Map<String, Object> mutationDispatchBlueprintExpectedExecutionRow(
+            LocalAgentPatchReleaseAttempt attempt,
+            String key,
+            String toolName,
+            String approvalState
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.expected-mutation-execution-row.v1");
+        result.put("requestIdAllocation", "SERVER_GENERATED_ON_CREATION");
+        result.put("created", false);
+        result.put("persisted", false);
+        result.put("pushed", false);
+        result.put("claimable", false);
+        result.put("mutationAllowed", false);
+        result.put("releaseAttemptId", attempt.id());
+        result.put("sourceRequestId", attempt.sourceRequestId());
+        result.put("sessionId", attempt.sessionId());
+        result.put("userId", attempt.userId());
+        result.put("agentId", attempt.agentId());
+        result.put("workspaceId", attempt.workspaceId());
+        result.put("executionTarget", AgentExecutionTarget.USER_LOCAL_AGENT.name());
+        result.put("toolName", toolName);
+        result.put("approvalState", approvalState);
+        result.put("initialStatus", mutationDispatchBlueprintInitialStatus(approvalState));
+        result.put("inputContract", mutationDispatchBlueprintInputContract(key));
+        result.put("message", "This row is a disabled creation blueprint only; no Local Agent tool execution row is inserted, pushed, claimable, or executable.");
+        return result;
+    }
+
+    private String mutationDispatchBlueprintInitialStatus(String approvalState) {
+        if (LocalAgentApprovalState.APPROVED.name().equals(approvalState)) {
+            return LocalAgentToolStatus.APPROVED.name();
+        }
+        if (LocalAgentApprovalState.REQUIRED.name().equals(approvalState)) {
+            return LocalAgentToolStatus.APPROVAL_REQUIRED.name();
+        }
+        return LocalAgentToolStatus.PENDING.name();
+    }
+
+    private Map<String, Object> mutationDispatchBlueprintInputContract(String key) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sourceRequestIdRequired", true);
+        result.put("releaseAttemptIdRequired", true);
+        result.put("sessionIdRequired", true);
+        result.put("workspaceIdRequired", true);
+        result.put("createdFromApprovedHeldPatch", true);
+        result.put("freshObservationOnly", false);
+        result.put("dryRunOnly", false);
+        result.put("mutationAllowedWhileCreationDisabled", false);
+        result.put("mutationAllowedWhenGateOpens", !"postWriteObservation".equals(key));
+        result.put("requiresRollbackFallbackLink", "rollbackFallback".equals(key));
+        result.put("requiresAllowlistedCommand", "allowlistedVerification".equals(key));
+        result.put("requiresPostWriteRepositoryObservation", "postWriteObservation".equals(key));
         return result;
     }
 
@@ -4586,6 +4662,7 @@ public class LocalAgentToolGatewayService {
         }
         UUID loopId = loopId(execution.input());
         loopTimelineRepository.appendObservationResult(response.userId(), repositoryId, loopId, response, execution.input());
+        loopTimelineRepository.appendNextDecision(response.userId(), repositoryId, loopId, response, execution.input());
         appendObservationStopOutcome(response, repositoryId, loopId, execution.input());
     }
 
@@ -4623,6 +4700,80 @@ public class LocalAgentToolGatewayService {
             );
         }
         return execution;
+    }
+
+    private LocalAgentToolExecution appendLoopApprovalRequestCreatedEvent(LocalAgentToolExecution execution) {
+        UUID repositoryId = repositoryId(execution.input());
+        if (repositoryId == null) {
+            return execution;
+        }
+        loopTimelineRepository.appendApprovalRequestCreated(
+                execution.userId(),
+                repositoryId,
+                execution.id(),
+                execution.sessionId(),
+                execution.agentId(),
+                execution.workspaceId(),
+                execution.executionTarget(),
+                execution.toolName(),
+                execution.approvalState().name(),
+                execution.status().name(),
+                loopId(execution.input()),
+                execution.input()
+        );
+        return execution;
+    }
+
+    private void appendLoopReleaseBoundaryRefusalEvent(
+            UUID userId,
+            UUID requestId,
+            LocalAgentPatchReleaseBoundaryResponse boundary
+    ) {
+        LocalAgentToolExecution execution = repository.find(requestId).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        UUID repositoryId = repositoryId(execution.input());
+        if (repositoryId == null) {
+            return;
+        }
+        loopTimelineRepository.appendReleaseBoundaryRefusal(
+                userId,
+                repositoryId,
+                loopId(execution.input()),
+                execution.sessionId(),
+                execution.agentId(),
+                execution.workspaceId(),
+                execution.executionTarget(),
+                execution.toolName(),
+                boundary,
+                execution.input()
+        );
+    }
+
+    private void appendLoopFreshObservationRequestsEnqueuedEvent(
+            LocalAgentToolExecution source,
+            UUID releaseAttemptId,
+            List<LocalAgentQueuedToolRequest> queued
+    ) {
+        UUID repositoryId = repositoryId(source.input());
+        if (repositoryId == null) {
+            return;
+        }
+        loopTimelineRepository.appendFreshObservationRequestsEnqueued(
+                source.userId(),
+                repositoryId,
+                loopId(source.input()),
+                source.id(),
+                releaseAttemptId,
+                source.sessionId(),
+                source.agentId(),
+                source.workspaceId(),
+                source.executionTarget(),
+                source.toolName(),
+                queued,
+                source.input()
+        );
     }
 
     private void appendAgentUnavailableStopOutcome(LocalAgentToolRequest request) {

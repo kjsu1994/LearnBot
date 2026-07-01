@@ -2,6 +2,7 @@ param(
     [switch]$IncludeFrontendBuild,
     [switch]$IncludeBackendFullTest,
     [switch]$IncludeLiveLocalAgentSmoke,
+    [switch]$IncludeLiveRunnerReadOnlyPostgres,
     [ValidateSet("polling", "websocket")]
     [string]$LiveLocalAgentTransport = "polling",
     [string]$Server = "http://localhost:8083",
@@ -316,6 +317,24 @@ try {
         -Coverage @("local-agent-runtime", "approved-execution-flow", "rollbackability", "local-agent-safety")
 
     Invoke-HarnessStep `
+        -Name "local-agent-approved-server-queue-flow-contract" `
+        -WorkingDirectory $root `
+        -Command "dotnet run --project local-agent -- self-test approved-server-queue-flow-contract --report .tmp\quality\local-agent-approved-flow\approved-server-queue-flow-report.json" `
+        -Coverage @("local-agent-runtime", "approved-execution-flow", "rollbackability", "local-agent-safety", "local-agent-smoke-contract")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-approved-server-queue-flow-report" `
+        -WorkingDirectory $root `
+        -Command "node scripts\quality\local-agent-flow\assert-approved-execution-flow-report.mjs --report .tmp\quality\local-agent-approved-flow\approved-server-queue-flow-report.json" `
+        -Coverage @("local-agent-runtime", "approved-execution-flow", "rollbackability", "local-agent-safety", "local-agent-smoke-contract")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-approved-flow-seed-contract" `
+        -WorkingDirectory $root `
+        -Command "node scripts\quality\local-agent-flow\seed-approved-tool-executions.test.mjs" `
+        -Coverage @("local-agent-runtime", "approved-execution-flow", "rollbackability", "local-agent-safety", "local-agent-smoke-contract")
+
+    Invoke-HarnessStep `
         -Name "local-agent-live-smoke-contract" `
         -WorkingDirectory $root `
         -Command ".\scripts\quality\local-agent-smoke\assert-local-agent-smoke-contract.ps1" `
@@ -343,6 +362,14 @@ try {
             -WorkingDirectory $root `
             -Command ".\scripts\local-agent-smoke.ps1 -Server $Server -WorkspacePath `"$WorkspacePath`" -ToolName git.status -Transport $LiveLocalAgentTransport" `
             -Coverage @("local-agent-live-smoke", "local-agent-runtime", "local-agent-safety")
+    }
+
+    if ($IncludeLiveRunnerReadOnlyPostgres) {
+        Invoke-HarnessStep `
+            -Name "local-agent-runner-read-only-live-postgres" `
+            -WorkingDirectory $root `
+            -Command "powershell.exe -ExecutionPolicy Bypass -File .\scripts\quality\local-agent-flow\run-runner-read-only-live-postgres.ps1" `
+            -Coverage @("local-agent-runner-loop", "local-agent-live-postgres", "approved-execution-flow", "local-agent-safety")
     }
 } finally {
     $finishedAt = Get-Date
@@ -383,6 +410,7 @@ try {
         includeFrontendBuild = [bool]$IncludeFrontendBuild
         includeBackendFullTest = [bool]$IncludeBackendFullTest
         includeLiveLocalAgentSmoke = [bool]$IncludeLiveLocalAgentSmoke
+        includeLiveRunnerReadOnlyPostgres = [bool]$IncludeLiveRunnerReadOnlyPostgres
         liveLocalAgentTransport = $LiveLocalAgentTransport
         results = $allResults
         passed = ($failedResults.Count -eq 0 -and $blockedQualitySignals.Count -eq 0)

@@ -210,6 +210,9 @@ export default function App() {
     codeAgentMutationPolicy,
     codeAgentLoopPreview,
     codeAgentLoopTimelines,
+    codeAgentLoopRunnerPreview,
+    codeAgentLoopRunnerEnqueueResult,
+    codeAgentLoopRunnerQueuedObservationResult,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -251,6 +254,10 @@ export default function App() {
     cancelCodeAsk,
     generateCodeAgentPlan,
     previewCodeAgentLoop,
+    previewCodeAgentLoopRunner,
+    enqueueCodeAgentLoopRunnerReadOnly,
+    enqueueCodeAgentLoopRunnerSelectedReadOnly,
+    refreshCodeAgentLoopRunnerQueuedObservation,
     refreshCodeAgentLoopTimelines,
     generateCodeAgentPatch,
     prepareCodeAgentLocalPatchRequest,
@@ -1014,6 +1021,9 @@ export default function App() {
             codeAgentMutationPolicy={codeAgentMutationPolicy}
             codeAgentLoopPreview={codeAgentLoopPreview}
             codeAgentLoopTimelines={codeAgentLoopTimelines}
+            codeAgentLoopRunnerPreview={codeAgentLoopRunnerPreview}
+            codeAgentLoopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
+            codeAgentLoopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
             codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
             codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
             codeAgentLocalPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
@@ -1056,6 +1066,10 @@ export default function App() {
             cancelCodeAsk={cancelCodeAsk}
             generateCodeAgentPlan={generateCodeAgentPlan}
             previewCodeAgentLoop={previewCodeAgentLoop}
+            previewCodeAgentLoopRunner={previewCodeAgentLoopRunner}
+            enqueueCodeAgentLoopRunnerReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
+            enqueueCodeAgentLoopRunnerSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
+            refreshCodeAgentLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
             refreshCodeAgentLoopTimelines={refreshCodeAgentLoopTimelines}
             generateCodeAgentPatch={generateCodeAgentPatch}
             prepareCodeAgentLocalPatchRequest={prepareCodeAgentLocalPatchRequest}

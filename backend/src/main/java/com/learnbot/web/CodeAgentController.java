@@ -3,6 +3,7 @@ package com.learnbot.web;
 import com.learnbot.dto.CodeAgentApplyRequest;
 import com.learnbot.dto.CodeAgentApplyResponse;
 import com.learnbot.dto.CodeAgentLocalPatchRequest;
+import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopPreviewRequest;
 import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
@@ -18,6 +19,15 @@ import com.learnbot.dto.CodeAgentTestResponse;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolExecutionResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
+import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalPayloadRequest;
+import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
+import com.learnbot.dto.loop.CodeAgentLoopSideEffectBoundaryResponse;
+import com.learnbot.dto.loop.CodeAgentLoopToolSelectionResponse;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
@@ -26,6 +36,8 @@ import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
+import com.learnbot.service.agentloop.CodeAgentLoopRunnerService;
+import com.learnbot.service.agentloop.CodeAgentLoopToolSelectionService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,6 +58,8 @@ public class CodeAgentController {
     private final CodeAgentApplyService codeAgentApplyService;
     private final CodeAgentLocalPatchRequestService localPatchRequestService;
     private final CodeAgentLoopPreviewService loopPreviewService;
+    private final CodeAgentLoopRunnerService loopRunnerService;
+    private final CodeAgentLoopToolSelectionService loopToolSelectionService;
     private final CodeIndexingService indexingService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
@@ -56,6 +70,8 @@ public class CodeAgentController {
             CodeAgentApplyService codeAgentApplyService,
             CodeAgentLocalPatchRequestService localPatchRequestService,
             CodeAgentLoopPreviewService loopPreviewService,
+            CodeAgentLoopRunnerService loopRunnerService,
+            CodeAgentLoopToolSelectionService loopToolSelectionService,
             CodeIndexingService indexingService,
             AuthService authService,
             CurrentUserProvider currentUserProvider,
@@ -65,6 +81,8 @@ public class CodeAgentController {
         this.codeAgentApplyService = codeAgentApplyService;
         this.localPatchRequestService = localPatchRequestService;
         this.loopPreviewService = loopPreviewService;
+        this.loopRunnerService = loopRunnerService;
+        this.loopToolSelectionService = loopToolSelectionService;
         this.indexingService = indexingService;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
@@ -167,6 +185,135 @@ public class CodeAgentController {
         UUID repositorySpaceId = indexingService.repositorySpace(user, repositoryId);
         authService.requireSpace(user, repositorySpaceId);
         return loopPreviewService.recentTimelines(user.id(), repositoryId, limit);
+    }
+
+    @GetMapping("/loop/next-action")
+    CodeAgentLoopNextActionResponse loopNextAction(
+            @RequestParam UUID repositoryId,
+            @RequestParam(required = false) UUID loopId
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, repositoryId);
+        authService.requireSpace(user, repositorySpaceId);
+        return loopPreviewService.nextAction(user.id(), repositoryId, loopId);
+    }
+
+    @PostMapping("/loop/runner/preview")
+    CodeAgentLoopRunnerPreviewResponse loopRunnerPreview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.previewNextStep(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/enqueue-read-only")
+    CodeAgentLoopRunnerEnqueueResponse loopRunnerEnqueueReadOnly(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.enqueueReadOnlyNextStep(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/select-tool-preview")
+    CodeAgentLoopToolSelectionResponse loopRunnerSelectToolPreview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.selectNextToolPreview(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/enqueue-selected-read-only")
+    CodeAgentLoopSelectedToolEnqueueResponse loopRunnerEnqueueSelectedReadOnly(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.enqueueSelectedReadOnlyNextStep(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/side-effect-boundary-preview")
+    CodeAgentLoopSideEffectBoundaryResponse loopRunnerSideEffectBoundaryPreview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.previewSideEffectBoundary(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-approval-preview")
+    CodeAgentLoopApprovalRequestPreviewResponse loopRunnerPatchApprovalPreview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.previewPatchApprovalRequest(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-approval-request")
+    CodeAgentLoopPatchApprovalRequestResponse loopRunnerPatchApprovalRequest(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.createPatchApprovalRequest(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/validated-patch-approval-request")
+    CodeAgentLoopPatchApprovalRequestResponse loopRunnerValidatedPatchApprovalRequest(@Valid @RequestBody CodeAgentLoopPatchApprovalPayloadRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopToolSelectionService.createValidatedPatchApprovalRequest(
+                user.id(),
+                request.repositoryId(),
+                selectedSpaceId,
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId(),
+                request.instruction(),
+                request.diff(),
+                request.targetFiles()
+        );
     }
 
     @PostMapping("/apply")

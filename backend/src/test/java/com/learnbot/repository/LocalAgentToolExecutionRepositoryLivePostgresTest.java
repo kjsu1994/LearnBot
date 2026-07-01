@@ -2,12 +2,20 @@ package com.learnbot.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AgentExecutionTarget;
+import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.dto.LocalAgentWorkspaceSummary;
+import com.learnbot.service.CodeAgentLoopPreviewService;
+import com.learnbot.service.LocalAgentGatewayService;
+import com.learnbot.service.LocalAgentPatchReleaseAttempt;
+import com.learnbot.service.LocalAgentToolGatewayService;
+import com.learnbot.service.LocalAgentToolPusher;
 import com.learnbot.service.LocalAgentToolExecution;
+import com.learnbot.service.agentloop.CodeAgentLoopRunnerService;
 import com.learnbot.service.localagent.LocalAgentApprovedExecutionFlowContract;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -21,6 +29,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @EnabledIfSystemProperty(named = "learnbot.live-postgres-tests", matches = "true")
 class LocalAgentToolExecutionRepositoryLivePostgresTest {
@@ -116,6 +126,127 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             assertThat(repository.claimNext(userId, agentId)).isEmpty();
         } finally {
             cleanup(jdbc, requestIds, userId);
+        }
+    }
+
+    @Test
+    void runnerReadOnlyQueuePersistsClaimCompletionAndLoopTimelineEvents() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository toolRepository = new LocalAgentToolExecutionRepository(jdbc, objectMapper);
+        CodeAgentLoopTimelineRepository timelineRepository = new CodeAgentLoopTimelineRepository(jdbc, objectMapper);
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
+        LocalAgentToolGatewayService gateway = new LocalAgentToolGatewayService(
+                toolRepository,
+                mock(LocalAgentMutationObservationIntakeRepository.class),
+                mock(LocalAgentPatchReleaseAttemptRepository.class),
+                timelineRepository,
+                gatewayService,
+                toolPusher
+        );
+        CodeAgentLoopRunnerService runner = new CodeAgentLoopRunnerService(
+                new CodeAgentLoopPreviewService(timelineRepository),
+                gateway
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            timelineRepository.createPreview(userId, "live runner read-only observation", new CodeAgentLoopPreviewResponse(
+                    loopId,
+                    repositoryId,
+                    null,
+                    "PREVIEW_ONLY",
+                    6,
+                    120,
+                    false,
+                    true,
+                    false,
+                    List.of(),
+                    List.of(),
+                    List.of("live runner read-only queue contract")
+            ));
+            timelineRepository.appendNextDecision(
+                    userId,
+                    repositoryId,
+                    loopId,
+                    new LocalAgentToolResponse(
+                            loopId,
+                            UUID.randomUUID(),
+                            userId,
+                            agentId,
+                            workspaceId,
+                            AgentExecutionTarget.USER_LOCAL_AGENT,
+                            LocalAgentToolName.GIT_STATUS,
+                            LocalAgentToolStatus.SUCCEEDED,
+                            Map.of("clean", true),
+                            null,
+                            null,
+                            OffsetDateTime.now().minusSeconds(2),
+                            OffsetDateTime.now().minusSeconds(1),
+                            List.of()
+                    ),
+                    Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString())
+            );
+            when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
+            when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+
+            var enqueued = runner.enqueueReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+            var claimed = gateway.claimNext(userId, agentId).orElseThrow();
+            LocalAgentToolResponse response = new LocalAgentToolResponse(
+                    loopId,
+                    claimed.requestId(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.GIT_STATUS,
+                    LocalAgentToolStatus.SUCCEEDED,
+                    Map.of("clean", true, "branch", "main"),
+                    null,
+                    null,
+                    OffsetDateTime.now().minusSeconds(1),
+                    OffsetDateTime.now(),
+                    List.of("live runner read-only observation completed")
+            );
+
+            gateway.complete(response);
+
+            var completed = toolRepository.find(claimed.requestId()).orElseThrow();
+            List<String> latestEvents = jdbc.query("""
+                    SELECT event_type
+                    FROM code_agent_loop_timeline_events
+                    WHERE timeline_id = :loopId
+                    ORDER BY sequence_number DESC
+                    LIMIT 2
+                    """, new MapSqlParameterSource().addValue("loopId", loopId), (rs, rowNum) -> rs.getString("event_type"));
+            Integer nextDecisionCount = jdbc.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM code_agent_loop_timeline_events
+                    WHERE timeline_id = :loopId
+                      AND event_type = 'LOOP_NEXT_DECISION_RECORDED'
+                    """, new MapSqlParameterSource().addValue("loopId", loopId), Integer.class);
+
+            assertThat(enqueued.runnerDecision()).isEqualTo("ENQUEUED_READ_ONLY_OBSERVATION");
+            assertThat(claimed.request().toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
+            assertThat(completed.status()).isEqualTo(LocalAgentToolStatus.SUCCEEDED);
+            assertThat(completed.input())
+                    .containsEntry("repositoryId", repositoryId.toString())
+                    .containsEntry("loopId", loopId.toString())
+                    .containsEntry("freshObservationOnly", true)
+                    .containsEntry("mutationAllowed", false);
+            assertThat(latestEvents).containsExactly(
+                    "LOOP_NEXT_DECISION_RECORDED",
+                    "LOCAL_AGENT_OBSERVATION_RESULT"
+            );
+            assertThat(nextDecisionCount).isGreaterThanOrEqualTo(2);
+        } finally {
+            cleanupLoop(jdbc, loopId);
+            cleanup(jdbc, List.of(), userId);
         }
     }
 
@@ -217,6 +348,282 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             assertThat(repository.claimNext(userId, agentId)).isEmpty();
         } finally {
             cleanup(jdbc, dryRunRequestId, sourceRequestId, userId);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void durableFreshObservationsFeedReadinessWhileSourcePatchStaysHeld() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository toolRepository = new LocalAgentToolExecutionRepository(jdbc, objectMapper);
+        LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = new LocalAgentPatchReleaseAttemptRepository(jdbc, objectMapper);
+        LocalAgentGatewayService gatewayService = new LocalAgentGatewayService();
+        LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
+        LocalAgentToolGatewayService gateway = new LocalAgentToolGatewayService(
+                toolRepository,
+                mock(LocalAgentMutationObservationIntakeRepository.class),
+                releaseAttemptRepository,
+                mock(CodeAgentLoopTimelineRepository.class),
+                gatewayService,
+                toolPusher
+        );
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            gatewayService.registerHeartbeat(
+                    userId,
+                    agentId,
+                    "0.1.0",
+                    List.of(LocalAgentToolName.PATCH_APPLY.wireName(), LocalAgentToolName.ROLLBACK_RESTORE.wireName()),
+                    List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true))
+            );
+            LocalAgentToolRequest sourceRequest = new LocalAgentToolRequest(
+                    sessionId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    validatedPatchInput(),
+                    LocalAgentApprovalState.REQUIRED,
+                    OffsetDateTime.now().minusSeconds(5),
+                    List.of("validated approved-held source")
+            );
+            LocalAgentToolExecution source = toolRepository.create(sourceRequestId, sourceRequest);
+            source = toolRepository.updateApprovalDecision(
+                    sourceRequestId,
+                    userId,
+                    LocalAgentApprovalState.APPROVED,
+                    LocalAgentToolStatus.APPROVED_HELD,
+                    "approved-held source for durable linked-evidence smoke"
+            ).orElseThrow();
+            LocalAgentPatchReleaseAttempt attempt = releaseAttemptRepository.createDisabled(
+                    releaseAttemptId,
+                    source,
+                    120,
+                    Map.of("sourceRequestId", sourceRequestId.toString(), "claimable", false),
+                    List.of("release gate disabled")
+            );
+
+            List<UUID> freshRequestIds = gateway.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId)
+                    .stream()
+                    .map(item -> item.requestId())
+                    .toList();
+
+            assertThat(freshRequestIds).hasSize(2);
+            assertThat(freshRequestIds).doesNotContain(sourceRequestId);
+            LocalAgentToolExecution repositoryObservation = toolRepository.find(freshRequestIds.get(0)).orElseThrow();
+            LocalAgentToolExecution patchDryRun = toolRepository.find(freshRequestIds.get(1)).orElseThrow();
+            assertThat(repositoryObservation.toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
+            assertThat(repositoryObservation.status()).isEqualTo(LocalAgentToolStatus.PENDING);
+            assertThat(patchDryRun.toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+            assertThat(patchDryRun.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
+            assertThat(patchDryRun.input())
+                    .containsEntry("sourceRequestId", sourceRequestId.toString())
+                    .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                    .containsEntry("dryRunOnly", true)
+                    .containsEntry("mutationAllowed", false)
+                    .containsEntry("freshObservationOnly", true);
+
+            completeClaimed(gateway, freshRequestIds.get(0), sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                    Map.of(
+                            "clean", true,
+                            "repositoryIdentity", Map.of(
+                                    "branch", "main",
+                                    "headCommit", "abc123",
+                                    "remoteUrl", "https://example.com/acme/learnbot.git"
+                            )
+                    ));
+            completeClaimed(gateway, freshRequestIds.get(1), sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                    patchDryRunOutput("src/App.java"));
+
+            var readiness = gateway.inspectPatchExecutionReadiness(userId, sourceRequestId);
+            LocalAgentToolExecution heldSource = toolRepository.find(sourceRequestId).orElseThrow();
+            Map<String, Object> repositoryVerification = readiness.repositoryVerification();
+            Map<String, Object> repositoryLinkage = (Map<String, Object>) repositoryVerification.get("observationLinkage");
+            Map<String, Object> snapshotLinkage = (Map<String, Object>) readiness.snapshotReadiness().get("observationLinkage");
+
+            assertThat(readiness.readyToRelease()).isFalse();
+            assertThat(readiness.checks())
+                    .filteredOn(check -> List.of(
+                            "approvedHeld",
+                            "diffPresent",
+                            "targetFilesPresent",
+                            "expectedFilesPresent",
+                            "snapshotManifestPreview",
+                            "rollbackRestorePreconditions",
+                            "workspaceRepositoryVerified"
+                    ).contains(check.key()))
+                    .allMatch(check -> check.passed());
+            assertThat(readiness.checks())
+                    .filteredOn(check -> "releaseGateEnabled".equals(check.key()))
+                    .singleElement()
+                    .matches(check -> !check.passed());
+            assertThat(repositoryLinkage)
+                    .containsEntry("status", "RELEASE_ATTEMPT_LINKED")
+                    .containsEntry("releaseAttemptLinked", true)
+                    .containsEntry("sourceRequestId", sourceRequestId)
+                    .containsEntry("releaseAttemptId", releaseAttemptId);
+            assertThat(snapshotLinkage)
+                    .containsEntry("status", "RELEASE_ATTEMPT_LINKED")
+                    .containsEntry("releaseAttemptLinked", true);
+            assertThat(readiness.snapshotReadiness()).containsEntry("status", "CREATED");
+            assertThat(readiness.rollbackReadiness()).containsEntry("status", "RESTORE_VALIDATED");
+            assertThat(readiness.patchExecutionGate())
+                    .containsEntry("releaseGateEnabled", false)
+                    .containsEntry("claimEnabled", false)
+                    .containsEntry("mutationEnabled", false);
+            assertThat(readiness.releaseAttemptModel().latestAttempt())
+                    .containsEntry("id", releaseAttemptId)
+                    .containsEntry("status", LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS)
+                    .containsEntry("claimable", false);
+            assertThat(heldSource.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+            assertThat(heldSource.status()).isEqualTo(LocalAgentToolStatus.APPROVED_HELD);
+            assertThat(toolRepository.claimNext(userId, agentId)).isEmpty();
+            assertThat(attempt.claimable()).isFalse();
+        } finally {
+            cleanupReleaseAttempt(jdbc, releaseAttemptId);
+            cleanup(jdbc, List.of(), userId);
+        }
+    }
+
+    @Test
+    void durableLinkedEvidenceReleaseBoundaryRefusesGateDisabledWithoutClaimingSource() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository toolRepository = new LocalAgentToolExecutionRepository(jdbc, objectMapper);
+        LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = new LocalAgentPatchReleaseAttemptRepository(jdbc, objectMapper);
+        LocalAgentGatewayService gatewayService = new LocalAgentGatewayService();
+        LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
+        LocalAgentToolGatewayService gateway = new LocalAgentToolGatewayService(
+                toolRepository,
+                mock(LocalAgentMutationObservationIntakeRepository.class),
+                releaseAttemptRepository,
+                mock(CodeAgentLoopTimelineRepository.class),
+                gatewayService,
+                toolPusher
+        );
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            gatewayService.registerHeartbeat(
+                    userId,
+                    agentId,
+                    "0.1.0",
+                    List.of(LocalAgentToolName.PATCH_APPLY.wireName(), LocalAgentToolName.ROLLBACK_RESTORE.wireName()),
+                    List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true))
+            );
+            LocalAgentToolRequest sourceRequest = new LocalAgentToolRequest(
+                    sessionId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    validatedPatchInput(),
+                    LocalAgentApprovalState.REQUIRED,
+                    OffsetDateTime.now().minusSeconds(5),
+                    List.of("validated approved-held source")
+            );
+            LocalAgentToolExecution source = toolRepository.create(sourceRequestId, sourceRequest);
+            source = toolRepository.updateApprovalDecision(
+                    sourceRequestId,
+                    userId,
+                    LocalAgentApprovalState.APPROVED,
+                    LocalAgentToolStatus.APPROVED_HELD,
+                    "approved-held source for durable release-boundary smoke"
+            ).orElseThrow();
+            releaseAttemptRepository.createDisabled(
+                    releaseAttemptId,
+                    source,
+                    120,
+                    Map.of("sourceRequestId", sourceRequestId.toString(), "claimable", false),
+                    List.of("release gate disabled")
+            );
+            List<UUID> freshRequestIds = gateway.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId)
+                    .stream()
+                    .map(item -> item.requestId())
+                    .toList();
+            completeClaimed(gateway, freshRequestIds.get(0), sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                    Map.of(
+                            "clean", true,
+                            "repositoryIdentity", Map.of(
+                                    "branch", "main",
+                                    "headCommit", "abc123",
+                                    "remoteUrl", "https://example.com/acme/learnbot.git"
+                            )
+                    ));
+            completeClaimed(gateway, freshRequestIds.get(1), sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                    patchDryRunOutput("src/App.java"));
+
+            var boundary = gateway.inspectPatchReleaseBoundary(userId, sourceRequestId);
+            LocalAgentToolExecution heldSource = toolRepository.find(sourceRequestId).orElseThrow();
+
+            assertThat(boundary.status()).isEqualTo("RELEASE_REFUSED_GATE_DISABLED");
+            assertThat(boundary.actionMode()).isEqualTo("REFUSAL_ONLY");
+            assertThat(boundary.releaseGateEnabled()).isFalse();
+            assertThat(boundary.claimEnabled()).isFalse();
+            assertThat(boundary.writeHelperEnabled()).isFalse();
+            assertThat(boundary.requestCreationEnabled()).isFalse();
+            assertThat(boundary.pushEnabled()).isFalse();
+            assertThat(boundary.claimable()).isFalse();
+            assertThat(boundary.mutationAllowed()).isFalse();
+            assertThat(boundary.applyEnabled()).isFalse();
+            assertThat(boundary.testEnabled()).isFalse();
+            assertThat(boundary.rollbackRestoreEnabled()).isFalse();
+            assertThat(boundary.ragFreshnessUpdateEnabled()).isFalse();
+            assertThat(boundary.patchExecutionGate())
+                    .containsEntry("preconditionsPassed", true)
+                    .containsEntry("releaseGateEnabled", false)
+                    .containsEntry("claimEnabled", false)
+                    .containsEntry("mutationEnabled", false);
+            assertThat(boundary.releaseAttemptModel().created()).isTrue();
+            assertThat(boundary.releaseAttemptModel().claimable()).isFalse();
+            assertThat(boundary.releaseAttemptModel().latestAttempt())
+                    .containsEntry("id", releaseAttemptId)
+                    .containsEntry("status", LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS)
+                    .containsEntry("claimable", false);
+            assertThat(boundary.releaseAttemptModel().latestAttempt().get("mutationRequestCreationGate"))
+                    .isInstanceOf(Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> creationGate = (Map<String, Object>) boundary.releaseAttemptModel()
+                    .latestAttempt()
+                    .get("mutationRequestCreationGate");
+            assertThat(creationGate)
+                    .containsEntry("expectedRequestCount", 4)
+                    .containsEntry("durableMutationExecutionRowCount", 0)
+                    .containsEntry("persistedRequestCount", 0)
+                    .containsEntry("pushedRequestCount", 0)
+                    .containsEntry("claimableRequestCount", 0);
+            assertThat(boundary.releaseEnablementChecklist())
+                    .containsEntry("releaseGateEnabled", false)
+                    .containsEntry("claimable", false)
+                    .containsEntry("mutationAllowed", false);
+            assertThat(boundary.blockingReasons())
+                    .contains(
+                            "release gate is disabled",
+                            "held patch request remains non-claimable",
+                            "Local Agent request creation and push remain disabled"
+                    );
+            assertThat(heldSource.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+            assertThat(heldSource.status()).isEqualTo(LocalAgentToolStatus.APPROVED_HELD);
+            assertThat(toolRepository.countMutationEnabledExecutionRowsForReleaseAttempt(userId, releaseAttemptId))
+                    .isZero();
+            assertThat(toolRepository.claimNext(userId, agentId)).isEmpty();
+        } finally {
+            cleanupReleaseAttempt(jdbc, releaseAttemptId);
+            cleanup(jdbc, List.of(), userId);
         }
     }
 
@@ -420,6 +827,8 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
 
             List<LocalAgentToolExecution> rows = repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId);
 
+            assertThat(repository.countMutationEnabledExecutionRowsForReleaseAttempt(userId, releaseAttemptId))
+                    .isEqualTo(6);
             assertThat(rows)
                     .extracting(LocalAgentToolExecution::id)
                     .containsExactly(latestPatchId, commandId, statusId, rollbackId);
@@ -542,6 +951,120 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
         ));
     }
 
+    private void completeClaimed(
+            LocalAgentToolGatewayService gateway,
+            UUID expectedRequestId,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            Map<String, Object> output
+    ) {
+        var claimed = gateway.claimNext(userId, agentId).orElseThrow();
+        assertThat(claimed.requestId()).isEqualTo(expectedRequestId);
+        assertThat(claimed.request().toolName()).isEqualTo(toolName);
+        gateway.complete(new LocalAgentToolResponse(
+                sessionId,
+                expectedRequestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                LocalAgentToolStatus.SUCCEEDED,
+                output,
+                null,
+                null,
+                OffsetDateTime.now().minusSeconds(1),
+                OffsetDateTime.now(),
+                List.of("durable linked-evidence observation completed")
+        ));
+    }
+
+    private Map<String, Object> validatedPatchInput() {
+        return Map.ofEntries(
+                Map.entry("schemaVersion", 1),
+                Map.entry("repositoryId", UUID.randomUUID().toString()),
+                Map.entry("sourceRepository", Map.of(
+                        "id", UUID.randomUUID().toString(),
+                        "name", "learnbot",
+                        "sourceType", "GIT",
+                        "gitUrl", "https://example.com/acme/learnbot.git",
+                        "branch", "main",
+                        "lastIndexedCommit", "abc123"
+                )),
+                Map.entry("workspaceVerification", Map.of(
+                        "status", "UNVERIFIED",
+                        "blocking", true
+                )),
+                Map.entry("instruction", "fix"),
+                Map.entry("diff", "--- a/src/App.java\n+++ b/src/App.java\n@@ -1 +1 @@\n-class App {}\n+class App { /* ok */ }\n"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("expectedFiles", List.of(Map.of(
+                        "path", "src/App.java",
+                        "sha256", "abc123",
+                        "bytes", 13
+                ))),
+                Map.entry("requiresSnapshot", true),
+                Map.entry("snapshotPolicy", Map.of(
+                        "required", true,
+                        "scope", "TARGET_FILES",
+                        "location", "LOCAL_AGENT_MANAGED",
+                        "createBeforeMutation", true,
+                        "includeExpectedHashes", true
+                )),
+                Map.entry("rollbackPolicy", Map.of(
+                        "required", true,
+                        "tool", LocalAgentToolName.ROLLBACK_RESTORE.wireName(),
+                        "restoreScope", "SNAPSHOT_TARGET_FILES",
+                        "requiresUserApproval", true
+                )),
+                Map.entry("staleIndexPolicy", "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH")
+        );
+    }
+
+    private Map<String, Object> patchDryRunOutput(String path) {
+        return Map.of(
+                "dryRun", true,
+                "preflightPassed", true,
+                "mutationApplied", false,
+                "snapshotCreated", true,
+                "snapshotObservation", Map.of(
+                        "manifestPreview", Map.of(
+                                "id", "snap-1234",
+                                "version", 1,
+                                "schema", "learnbot.local-agent.snapshot-manifest.v1",
+                                "relativeManifestPath", "snap-1234/manifest.json",
+                                "contentStrategy", "COPY_TARGET_FILES_BEFORE_MUTATION",
+                                "created", true,
+                                "writesPlanned", true,
+                                "writesCompleted", true,
+                                "files", List.of(Map.of(
+                                        "path", path,
+                                        "snapshotRelativePath", "files/" + path,
+                                        "actualSha256", "abc123"
+                                ))
+                        )
+                ),
+                "rollbackObservation", Map.of(
+                        "restored", false,
+                        "restorePreconditions", List.of(
+                                Map.of(
+                                        "key", "snapshotManifestExists",
+                                        "required", true,
+                                        "previewOnly", true
+                                ),
+                                Map.of(
+                                        "key", "userApprovalRequired",
+                                        "required", true,
+                                        "previewOnly", true
+                                )
+                        )
+                )
+        );
+    }
+
     private LocalAgentApprovedExecutionFlowContract.Step persistedStep(LocalAgentToolExecution execution) {
         return new LocalAgentApprovedExecutionFlowContract.Step(
                 new LocalAgentToolResponse(
@@ -565,10 +1088,29 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
     }
 
     private void cleanup(NamedParameterJdbcTemplate jdbc, List<UUID> requestIds, UUID userId) {
-        jdbc.update("DELETE FROM local_agent_tool_executions WHERE id IN (:requestIds)",
-                new MapSqlParameterSource().addValue("requestIds", requestIds));
+        if (!requestIds.isEmpty()) {
+            jdbc.update("DELETE FROM local_agent_tool_executions WHERE id IN (:requestIds)",
+                    new MapSqlParameterSource().addValue("requestIds", requestIds));
+        } else {
+            jdbc.update("DELETE FROM local_agent_tool_executions WHERE user_id = :userId",
+                    new MapSqlParameterSource().addValue("userId", userId));
+        }
         jdbc.update("DELETE FROM app_users WHERE id = :userId",
                 new MapSqlParameterSource().addValue("userId", userId));
+    }
+
+    private void cleanupLoop(NamedParameterJdbcTemplate jdbc, UUID loopId) {
+        jdbc.update("DELETE FROM code_agent_loop_timeline_events WHERE timeline_id = :loopId",
+                new MapSqlParameterSource().addValue("loopId", loopId));
+        jdbc.update("DELETE FROM code_agent_loop_timelines WHERE id = :loopId",
+                new MapSqlParameterSource().addValue("loopId", loopId));
+    }
+
+    private void cleanupReleaseAttempt(NamedParameterJdbcTemplate jdbc, UUID releaseAttemptId) {
+        jdbc.update("DELETE FROM local_agent_mutation_observation_intake WHERE release_attempt_id = :releaseAttemptId",
+                new MapSqlParameterSource().addValue("releaseAttemptId", releaseAttemptId));
+        jdbc.update("DELETE FROM local_agent_patch_release_attempts WHERE id = :releaseAttemptId",
+                new MapSqlParameterSource().addValue("releaseAttemptId", releaseAttemptId));
     }
 
     private void cleanup(NamedParameterJdbcTemplate jdbc, UUID dryRunRequestId, UUID sourceRequestId, UUID userId) {

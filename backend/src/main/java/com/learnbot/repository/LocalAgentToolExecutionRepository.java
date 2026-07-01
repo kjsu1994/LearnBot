@@ -158,13 +158,28 @@ public class LocalAgentToolExecutionRepository {
                 this::mapExecution);
     }
 
+    public int countMutationEnabledExecutionRowsForReleaseAttempt(UUID userId, UUID releaseAttemptId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND input ->> 'releaseAttemptId' = :releaseAttemptId
+                  AND input ->> 'mutationAllowed' = 'true'
+                  AND execution_target = 'USER_LOCAL_AGENT'
+                  AND tool_name IN ('patch.apply', 'command.runAllowed', 'git.status', 'rollback.restore')
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("releaseAttemptId", releaseAttemptId.toString()), Integer.class);
+        return count == null ? 0 : count;
+    }
+
     public Optional<Map<String, Object>> findLatestRepositoryVerificationForSourceRequest(UUID userId, UUID sourceRequestId) {
         List<Map<String, Object>> results = jdbc.query("""
                 SELECT output -> 'repositoryVerification' AS repository_verification
                 FROM local_agent_tool_executions
                 WHERE user_id = :userId
                   AND input ->> 'sourceRequestId' = :sourceRequestId
-                  AND output ? 'repositoryVerification'
+                  AND jsonb_exists(output, 'repositoryVerification')
                 ORDER BY finished_at DESC NULLS LAST, created_at DESC
                 LIMIT 1
                 """, new MapSqlParameterSource()
@@ -185,7 +200,7 @@ public class LocalAgentToolExecutionRepository {
                 WHERE user_id = :userId
                   AND input ->> 'sourceRequestId' = :sourceRequestId
                   AND input ->> 'releaseAttemptId' = :releaseAttemptId
-                  AND output ? 'repositoryVerification'
+                  AND jsonb_exists(output, 'repositoryVerification')
                 ORDER BY finished_at DESC NULLS LAST, created_at DESC
                 LIMIT 1
                 """, new MapSqlParameterSource()
@@ -247,7 +262,7 @@ public class LocalAgentToolExecutionRepository {
                 WHERE user_id = :userId
                   AND input ->> 'sourceRequestId' = :sourceRequestId
                   AND input ->> 'releaseAttemptId' = :releaseAttemptId
-                  AND output ? 'acceptedMutationObservation'
+                  AND jsonb_exists(output, 'acceptedMutationObservation')
                 ORDER BY finished_at DESC NULLS LAST, created_at DESC
                 LIMIT 1
                 """, new MapSqlParameterSource()

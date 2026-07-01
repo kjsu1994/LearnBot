@@ -6,6 +6,10 @@ import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopStopCondition;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
+import com.learnbot.dto.LocalAgentApprovalState;
+import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
+import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
+import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
@@ -245,7 +249,153 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains(agentId.toString())
                 .contains(workspaceId.toString())
                 .contains("\"approvalState\":\"APPROVED\"")
-                .contains("\"status\":\"APPROVED_HELD\"");
+                .contains("\"status\":\"APPROVED_HELD\"")
+                .contains("\"decisionKey\":\"APPROVAL_APPROVED_HELD\"")
+                .contains("\"approvalRequestHeld\":true")
+                .contains("\"releaseRequired\":true")
+                .contains("\"releaseGateEnabled\":false")
+                .contains("\"requestCreationEnabled\":false")
+                .contains("\"pushEnabled\":false")
+                .contains("\"claimEnabled\":false")
+                .contains("\"mutationEnabled\":false");
+    }
+
+    @Test
+    void appendApprovalRequestCreatedPersistsWaitForApprovalEventForLatestTimeline() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+
+        repository.appendApprovalRequestCreated(
+                userId,
+                repositoryId,
+                requestId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                "REQUIRED",
+                "APPROVAL_REQUIRED",
+                loopId,
+                Map.of("mutationAllowed", false)
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_APPROVAL_REQUEST_CREATED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("REQUEST_APPROVAL");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("USER_LOCAL_AGENT");
+        assertThat(params.getValue().getValue("toolName")).isEqualTo("patch.apply");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains(requestId.toString())
+                .contains(sessionId.toString())
+                .contains(agentId.toString())
+                .contains(workspaceId.toString())
+                .contains("\"decisionKey\":\"APPROVAL_REQUEST_CREATED\"")
+                .contains("\"approvalRequestCreated\":true")
+                .contains("\"releaseRequired\":true")
+                .contains("\"requestCreationEnabled\":false")
+                .contains("\"pushEnabled\":false")
+                .contains("\"claimEnabled\":false")
+                .contains("\"mutationEnabled\":false");
+    }
+
+    @Test
+    void appendFreshObservationRequestsEnqueuedPersistsQueuedRequestIdsWithoutOpeningMutation() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID gitStatusRequestId = UUID.randomUUID();
+        UUID patchDryRunRequestId = UUID.randomUUID();
+        List<LocalAgentQueuedToolRequest> queued = List.of(
+                new LocalAgentQueuedToolRequest(gitStatusRequestId, new LocalAgentToolRequest(
+                        sessionId,
+                        userId,
+                        agentId,
+                        workspaceId,
+                        AgentExecutionTarget.USER_LOCAL_AGENT,
+                        LocalAgentToolName.GIT_STATUS,
+                        Map.of("freshObservationOnly", true),
+                        LocalAgentApprovalState.NOT_REQUIRED,
+                        null,
+                        List.of()
+                )),
+                new LocalAgentQueuedToolRequest(patchDryRunRequestId, new LocalAgentToolRequest(
+                        sessionId,
+                        userId,
+                        agentId,
+                        workspaceId,
+                        AgentExecutionTarget.USER_LOCAL_AGENT,
+                        LocalAgentToolName.PATCH_APPLY,
+                        Map.of("freshObservationOnly", true, "dryRunOnly", true, "mutationAllowed", false),
+                        LocalAgentApprovalState.APPROVED,
+                        null,
+                        List.of()
+                ))
+        );
+
+        repository.appendFreshObservationRequestsEnqueued(
+                userId,
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                releaseAttemptId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                queued,
+                Map.of("repositoryId", repositoryId.toString(), "loopId", loopId.toString())
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_ENQUEUED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("OBSERVE");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("USER_LOCAL_AGENT");
+        assertThat(params.getValue().getValue("toolName")).isEqualTo("patch.apply");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"status\":\"FRESH_OBSERVATIONS_ENQUEUED\"")
+                .contains("\"decisionKey\":\"WAIT_FOR_FRESH_OBSERVATION_RESULTS\"")
+                .contains(sourceRequestId.toString())
+                .contains(releaseAttemptId.toString())
+                .contains(gitStatusRequestId.toString())
+                .contains(patchDryRunRequestId.toString())
+                .contains("\"queuedToolNames\":[\"git.status\",\"patch.apply\"]")
+                .contains("\"queuedApprovalStates\":[\"NOT_REQUIRED\",\"APPROVED\"]")
+                .contains("\"observationResultsRequired\":true")
+                .contains("\"sourcePatchClaimEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains("\"verificationCommandExecutionEnabled\":false")
+                .contains("\"rollbackRestoreEnabled\":false")
+                .contains("\"ragFreshnessUpdateEnabled\":false")
+                .contains("\"finalAnswerGenerationEnabled\":false")
+                .contains("\"deliveryEnabled\":false");
     }
 
     @Test
@@ -287,6 +437,148 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains("\"acknowledgementEnabled\":false")
                 .contains("\"mutationEnabled\":false")
                 .contains(requestId.toString());
+    }
+
+    @Test
+    void appendNextDecisionPersistsAuditOnlyDecisionAfterObservation() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                UUID.randomUUID(),
+                requestId,
+                userId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.GIT_STATUS,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of("clean", false),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of()
+        );
+
+        repository.appendNextDecision(userId, repositoryId, loopId, response, Map.of(
+                "sourceRequestId", sourceRequestId.toString(),
+                "releaseAttemptId", releaseAttemptId.toString()
+        ));
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOOP_NEXT_DECISION_RECORDED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("SERVER_LOCAL");
+        assertThat(params.getValue().getValue("toolName")).isNull();
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(false);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"decisionKey\":\"OBSERVATION_ACCEPTED\"")
+                .contains("\"followUpToolSelectionEnabled\":true")
+                .contains("\"approvalRequiredBeforeSideEffects\":true")
+                .contains("\"requestCreationEnabled\":false")
+                .contains("\"pushEnabled\":false")
+                .contains("\"claimEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains("\"finalResultEnabled\":false")
+                .contains("\"publicationEnabled\":false")
+                .contains("\"acknowledgementEnabled\":false")
+                .contains(requestId.toString())
+                .contains(sourceRequestId.toString())
+                .contains(releaseAttemptId.toString());
+    }
+
+    @Test
+    void appendReleaseBoundaryRefusalPersistsClosedLoopDecisionForLatestTimeline() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        LocalAgentPatchReleaseBoundaryResponse boundary = new LocalAgentPatchReleaseBoundaryResponse(
+                requestId,
+                "RELEASE_REFUSED_GATE_DISABLED",
+                "REFUSAL_ONLY",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of("release gate is disabled"),
+                "Release action is modeled, but the release gate is disabled so the held patch remains non-claimable.",
+                Map.of("preconditionsPassed", true),
+                Map.of("status", "BLOCKED_ENABLEMENT_DISABLED"),
+                new LocalAgentPatchReleaseAttemptModel(
+                        "local-agent.patch-release-attempt.v1",
+                        "DISABLED_RELEASE_ATTEMPT_EXISTS",
+                        true,
+                        false,
+                        120,
+                        List.of(),
+                        Map.of("claimable", false),
+                        "Release attempt remains disabled."
+                )
+        );
+
+        repository.appendReleaseBoundaryRefusal(
+                userId,
+                repositoryId,
+                loopId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                boundary,
+                Map.of()
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("USER_LOCAL_AGENT");
+        assertThat(params.getValue().getValue("toolName")).isEqualTo("patch.apply");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"decisionKey\":\"RELEASE_BOUNDARY_REFUSED\"")
+                .contains("\"boundaryStatus\":\"RELEASE_REFUSED_GATE_DISABLED\"")
+                .contains("\"releaseGateEnabled\":false")
+                .contains("\"requestCreationEnabled\":false")
+                .contains("\"pushEnabled\":false")
+                .contains("\"claimEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains("\"finalResultEnabled\":false")
+                .contains("\"publicationEnabled\":false")
+                .contains("\"acknowledgementEnabled\":false")
+                .contains(requestId.toString())
+                .contains(sessionId.toString())
+                .contains(agentId.toString())
+                .contains(workspaceId.toString());
     }
 
     @Test
