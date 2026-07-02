@@ -117,6 +117,141 @@ const runnerEnqueueResponse = {
   },
 };
 
+const validatedDryRunIntentRunnerPreviewResponse = {
+  status: 'APPROVAL_REQUIRED',
+  actionKey: 'WAIT_FOR_APPROVAL',
+  runnerDecision: 'WAIT_FOR_APPROVAL',
+  reason: 'Review the persisted validated dry-run intent before any future claimable non-mutating dry-run.',
+  requestCreationEnabled: false,
+  pushEnabled: false,
+  claimEnabled: false,
+  mutationEnabled: false,
+  nextAction: {
+    actionKey: 'WAIT_FOR_APPROVAL',
+    handoffSummary: {
+      schema: 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1',
+      status: 'VALIDATED_DRY_RUN_INTENT_REVIEW',
+      sourceEventType: 'LOCAL_AGENT_APPROVAL_REQUEST_CREATED',
+      sourceSequenceNumber: 13,
+      sourceRequestId: 'dry-run-intent-1',
+      approvalState: 'REQUIRED',
+      validatedDryRunIntent: true,
+      dryRunIntentPersisted: true,
+      reviewSurface: 'CODE_WORKSPACE_LOOP_REVIEW',
+      requestPersisted: true,
+      eligibilityRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/eligibility',
+      requestCreationEnabled: false,
+      queueEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      claimable: false,
+      dryRunOnly: true,
+      mutationAllowed: false,
+      approvalBypassAllowed: false,
+      message: 'Review the persisted validated dry-run intent eligibility before any future claimable non-mutating dry-run.',
+    },
+  },
+};
+
+const validatedDryRunIntentEligibilityResponse = {
+  schema: 'learnbot.server.validated-revised-patch-dry-run-eligibility.v1',
+  status: 'READY_DRY_RUN_RELEASE_DISABLED',
+  requestId: 'dry-run-intent-1',
+  sessionId: 'session-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
+  toolName: 'patch.apply',
+  executionTarget: 'USER_LOCAL_AGENT',
+  approvalState: 'REQUIRED',
+  requestStatus: 'APPROVAL_REQUIRED',
+  validatedDryRunIntent: true,
+  dryRunIntentPersisted: true,
+  requestPersisted: true,
+  requestCreationEnabled: false,
+  queueEnabled: false,
+  pushEnabled: false,
+  claimEnabled: false,
+  claimable: false,
+  dryRunOnly: true,
+  mutationAllowed: false,
+  approvalBypassAllowed: false,
+  prerequisitesPassed: true,
+  targetFiles: ['README.md'],
+  blockingKeys: [],
+  checks: [
+    { key: 'patchApplyTool', passed: true, message: 'Persisted intent must be a patch.apply Local Agent request.' },
+    { key: 'mutationDisabled', passed: true, message: 'Mutation must remain disabled for this dry-run intent.' },
+  ],
+  futureDryRunReleaseGate: {
+    schema: 'learnbot.server.validated-revised-patch-dry-run-release-gate.v1',
+    status: 'READY_RELEASE_DISABLED',
+    prerequisitesPassed: true,
+    requestCreationEnabled: false,
+    queueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    dryRunOnly: true,
+    mutationAllowed: false,
+    approvalBypassAllowed: false,
+  },
+  message: 'This is a disabled eligibility read model only; it creates no request, pushes nothing, and makes no Local Agent work claimable.',
+};
+
+const validatedDryRunIntentTransitionPreviewResponse = {
+  schema: 'learnbot.server.validated-revised-patch-dry-run-transition-preview.v1',
+  status: 'READY_CLAIMABLE_DRY_RUN_TRANSITION_DISABLED',
+  sourceRequestId: 'dry-run-intent-1',
+  sessionId: 'session-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
+  prerequisitesPassed: true,
+  requestPersisted: false,
+  requestCreationEnabled: false,
+  queueEnabled: false,
+  pushEnabled: false,
+  claimEnabled: false,
+  claimable: false,
+  dryRunOnly: true,
+  mutationAllowed: false,
+  approvalBypassAllowed: false,
+  transitionGate: {
+    schema: 'learnbot.server.validated-revised-patch-dry-run-transition-gate.v1',
+    status: 'READY_TRANSITION_DISABLED',
+    prerequisitesPassed: true,
+    requestCreationEnabled: false,
+    queueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    dryRunOnly: true,
+    mutationAllowed: false,
+    approvalBypassAllowed: false,
+  },
+  eligibility: validatedDryRunIntentEligibilityResponse,
+  wouldBeClaimableDryRunRequest: {
+    schema: 'learnbot.server.validated-revised-patch-claimable-dry-run-request-preview.v1',
+    status: 'READY_REQUEST_PREVIEW_ONLY',
+    sourceRequestId: 'dry-run-intent-1',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalState: 'NOT_REQUIRED',
+    requestPersisted: false,
+    requestCreationEnabled: false,
+    queueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    dryRunOnly: true,
+    mutationAllowed: false,
+    approvalBypassAllowed: false,
+    input: {
+      targetFiles: ['README.md'],
+    },
+  },
+  message: 'This is a disabled transition preview only; it creates no request, pushes nothing, and makes no Local Agent work claimable.',
+};
+
 const releaseGateRunnerPreviewResponse = {
   status: 'RECORDED',
   actionKey: 'WAIT_FOR_RELEASE_GATE',
@@ -422,17 +557,33 @@ const completedFlowRunnerPreviewResponse = {
     ordered: true,
     identityConsistent: true,
     releaseAttemptLinked: true,
+    approvalRequestLinked: true,
     allTerminal: true,
     allSucceeded: true,
+    postRetryVerificationPassed: true,
+    postRetryVerificationPartialReindexMarkerRequired: true,
     finalMutationReportSummaryStatus: 'READY_SUMMARY_AUDIT_ONLY',
     ragFreshnessMarkerStatus: 'STALE_INDEX_WARNING_REQUIRED',
+    partialReindexPlanStatus: 'PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED',
+    partialReindexEnqueueBoundaryStatus: 'READY_ENQUEUE_DISABLED',
+    partialReindexEnqueueReady: true,
     finalAnswerPublicationHandoffStatus: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
     acknowledgementSaveHandoffStatus: 'READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED',
     finalResultHandoff: {
       schema: 'learnbot.code-agent.approved-execution-flow-final-result-handoff.v1',
       status: 'READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED',
       finalMutationReportSummaryStatus: 'READY_SUMMARY_AUDIT_ONLY',
+      postRetryVerificationPassed: true,
+      postRetryVerificationApprovalLinked: true,
+      postRetryVerificationReleaseLinked: true,
+      postRetryVerificationPartialReindexMarkerRequired: true,
       ragFreshnessMarkerStatus: 'STALE_INDEX_WARNING_REQUIRED',
+      partialReindexPlanStatus: 'PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED',
+      partialReindexPlanFreshnessAction: 'PARTIAL_REINDEX_TARGET_FILES_AFTER_APPROVED_RETRY',
+      partialReindexPlanTargetFiles: ['README.md'],
+      partialReindexEnqueueBoundaryStatus: 'READY_ENQUEUE_DISABLED',
+      partialReindexEnqueueReady: true,
+      partialReindexRepositoryId: 'repo-1',
       finalAnswerPublicationHandoffStatus: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
       acknowledgementSaveHandoffStatus: 'READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED',
       staleIndexDisclosureModeled: true,
@@ -529,6 +680,7 @@ try {
   const releaseReviewRequests = [];
   const finalResultPublicationRequests = [];
   const m8EntryReadinessRequests = [];
+  const validatedDryRunIntentTransitionRequests = [];
   let runnerPreview = null;
   let enqueueResult = 'stale';
   let releaseReviewResult = 'stale';
@@ -659,6 +811,10 @@ try {
       });
       return m8EntryReadiness;
     },
+    previewCodeAgentValidatedDryRunIntentTransition: async ({ requestId, eligibilityRoute, transitionRoute } = {}) => {
+      validatedDryRunIntentTransitionRequests.push({ requestId, eligibilityRoute, transitionRoute });
+      return validatedDryRunIntentTransitionPreviewResponse;
+    },
   };
 
   assert.equal(assertNoForbiddenTrueFlags(runnerPreviewResponse, 'runnerPreviewResponse'), true);
@@ -736,6 +892,63 @@ try {
     updatedMarkup,
     /Mutation handoff is ready, but Local Agent mutation request creation is disabled/
   );
+
+  const validatedDryRunIntentMarkup = renderToStaticMarkup(React.createElement(CodeWorkspace, {
+    ...props,
+    codeAgentLoopRunnerPreview: validatedDryRunIntentRunnerPreviewResponse,
+    codeAgentValidatedDryRunIntentEligibility: validatedDryRunIntentEligibilityResponse,
+    codeAgentValidatedDryRunIntentTransitionPreview: validatedDryRunIntentTransitionPreviewResponse,
+  }));
+  assert.match(validatedDryRunIntentMarkup, /dry-run review/);
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /agent loop runner release handoff routes: eligibility GET \/api\/code-agent\/local-patch-request\/dry-run-intent\/dry-run-intent-1\/eligibility/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /<button\b(?=[^>]*class="ghost-button compact-action")(?![^>]*disabled)[^>]*>(?:(?!<\/button>)[\s\S])*Inspect dry-run eligibility(?:(?!<\/button>)[\s\S])*<\/button>/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /<button\b(?=[^>]*class="ghost-button compact-action")(?![^>]*\sdisabled=)[^>]*>(?:(?!<\/button>)[\s\S])*Preview claimable dry-run transition(?:(?!<\/button>)[\s\S])*<\/button>/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /validated dry-run intent eligibility: READY_DRY_RUN_RELEASE_DISABLED \/ learnbot\.server\.validated-revised-patch-dry-run-eligibility\.v1/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /validated dry-run controls disabled: request creation false \/ queue false \/ push false \/ claim false \/ claimable false \/ dry-run only true \/ mutation false \/ approval bypass false/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /future dry-run release gate: READY_RELEASE_DISABLED \/ prerequisites true \/ request creation false \/ queue false \/ push false \/ claim false \/ claimable false \/ dry-run only true \/ mutation false \/ approval bypass false/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /validated dry-run transition preview: READY_CLAIMABLE_DRY_RUN_TRANSITION_DISABLED \/ learnbot\.server\.validated-revised-patch-dry-run-transition-preview\.v1/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /validated dry-run transition controls disabled: request creation false \/ request persisted false \/ queue false \/ push false \/ claim false \/ claimable false \/ dry-run only true \/ mutation false \/ approval bypass false/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /would-be claimable dry-run request: READY_REQUEST_PREVIEW_ONLY \/ learnbot\.server\.validated-revised-patch-claimable-dry-run-request-preview\.v1 \/ source intent dry-run-intent-1 \/ tool patch\.apply \/ approval NOT_REQUIRED \/ target USER_LOCAL_AGENT/
+  );
+
+  await props.previewCodeAgentValidatedDryRunIntentTransition({
+    requestId: 'dry-run-intent-1',
+    eligibilityRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/eligibility',
+    transitionRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/claimable-dry-run-preview',
+  });
+  assert.deepEqual(validatedDryRunIntentTransitionRequests, [
+    {
+      requestId: 'dry-run-intent-1',
+      eligibilityRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/eligibility',
+      transitionRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/claimable-dry-run-preview',
+    },
+  ]);
 
   await props.enqueueCodeAgentLoopRunnerReadOnly(props.codeAgentLoopPreview);
 
@@ -860,7 +1073,7 @@ try {
   );
   assert.match(
     releaseReadinessRefreshMarkup,
-    /agent loop runner handoff disabled: runner auto-enqueue false \/ fresh observation auto-enqueue false \/ source patch request creation false \/ source patch push false \/ source patch claim false \/ claim false \/ verification command execution false \/ rollback restore false \/ RAG freshness update false \/ final result false \/ publication false \/ final answer generation false \/ delivery false \/ acknowledgement false \/ mutation false/
+    /agent loop runner handoff disabled: runner auto-enqueue false \/ fresh observation auto-enqueue false \/ source patch request creation false \/ source patch push false \/ source patch claim false \/ claim false \/ claimable false \/ verification command execution false \/ rollback restore false \/ RAG freshness update false \/ final result false \/ publication false \/ final answer generation false \/ delivery false \/ acknowledgement false \/ mutation false/
   );
 
   await props.reviewCodeAgentLoopRunnerReleaseGate(props.codeAgentLoopPreview);
@@ -950,11 +1163,11 @@ try {
   );
   assert.match(
     completedFlowMarkup,
-    /agent loop runner approved execution flow complete: status APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED \/ request id source durableCompletedRows \/ steps 4 \/ ordered true \/ identity consistent true \/ release linked true \/ terminal true \/ succeeded true \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ final result false \/ publication false \/ RAG freshness update false \/ acknowledgement false \/ follow-up mutation false \/ mutation false/
+    /agent loop runner approved execution flow complete: status APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED \/ request id source durableCompletedRows \/ steps 4 \/ ordered true \/ identity consistent true \/ release linked true \/ approval linked true \/ terminal true \/ succeeded true \/ post-retry verification passed true \/ partial reindex marker required true \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ partial reindex plan PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED \/ partial reindex enqueue READY_ENQUEUE_DISABLED \/ partial reindex ready true \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ final result false \/ publication false \/ RAG freshness update false \/ acknowledgement false \/ follow-up mutation false \/ mutation false/
   );
   assert.match(
     completedFlowMarkup,
-    /agent loop runner final-result handoff: schema learnbot\.code-agent\.approved-execution-flow-final-result-handoff\.v1 \/ status READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ stale disclosure modeled true \/ delivery false \/ final answer generation false \/ publication false \/ acknowledgement save false \/ RAG freshness update false \/ partial reindex false \/ follow-up mutation false \/ mutation false/
+    /agent loop runner final-result handoff: schema learnbot\.code-agent\.approved-execution-flow-final-result-handoff\.v1 \/ status READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ post-retry verification passed true \/ post-retry approval linked true \/ post-retry release linked true \/ partial reindex marker required true \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ partial reindex plan PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED \/ partial reindex action PARTIAL_REINDEX_TARGET_FILES_AFTER_APPROVED_RETRY \/ partial reindex files README\.md \/ partial reindex enqueue READY_ENQUEUE_DISABLED \/ partial reindex ready true \/ partial reindex repository repo-1 \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ stale disclosure modeled true \/ delivery false \/ final answer generation false \/ publication false \/ acknowledgement save false \/ RAG freshness update false \/ partial reindex false \/ follow-up mutation false \/ mutation false/
   );
 
   await props.previewCodeAgentLoopRunnerFinalResultPublication(props.codeAgentLoopPreview);

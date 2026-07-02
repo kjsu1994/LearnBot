@@ -16,6 +16,7 @@ import com.learnbot.dto.CodeAgentRollbackRequest;
 import com.learnbot.dto.CodeAgentRollbackResponse;
 import com.learnbot.dto.CodeAgentTestRequest;
 import com.learnbot.dto.CodeAgentTestResponse;
+import com.learnbot.dto.CodeAgentValidatedPatchDryRunPreviewRequest;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolExecutionResponse;
@@ -46,6 +47,7 @@ import com.learnbot.service.agentloop.CodeAgentLoopToolSelectionService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -55,6 +57,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/code-agent")
@@ -163,6 +166,60 @@ public class CodeAgentController {
                 request.diff(),
                 request.targetFiles()
         );
+    }
+
+    @PostMapping("/local-patch-request/dry-run-preview")
+    Map<String, Object> localPatchDryRunPreview(@Valid @RequestBody CodeAgentValidatedPatchDryRunPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return localPatchRequestService.previewValidatedDryRunRequest(
+                request.repositoryId(),
+                selectedSpaceId,
+                user.id(),
+                request.agentId(),
+                request.workspaceId(),
+                request.loopId(),
+                request.validatedHandoff()
+        );
+    }
+
+    @PostMapping("/local-patch-request/dry-run-intent")
+    Map<String, Object> localPatchDryRunIntent(@Valid @RequestBody CodeAgentValidatedPatchDryRunPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return localPatchRequestService.persistValidatedDryRunIntent(
+                request.repositoryId(),
+                selectedSpaceId,
+                user.id(),
+                request.agentId(),
+                request.workspaceId(),
+                request.loopId(),
+                request.validatedHandoff()
+        );
+    }
+
+    @GetMapping("/local-patch-request/dry-run-intent/{requestId}/eligibility")
+    Map<String, Object> localPatchDryRunIntentEligibility(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return localPatchRequestService.inspectValidatedDryRunIntentEligibility(user.id(), requestId);
+    }
+
+    @GetMapping("/local-patch-request/dry-run-intent/{requestId}/claimable-dry-run-preview")
+    Map<String, Object> localPatchDryRunIntentClaimableDryRunPreview(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return localPatchRequestService.previewValidatedDryRunIntentClaimableDryRun(user.id(), requestId);
+    }
+
+    @PostMapping("/local-patch-request/dry-run-intent/{requestId}/claimable-dry-run-release")
+    Map<String, Object> localPatchDryRunIntentClaimableDryRunRelease(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return localPatchRequestService.releaseValidatedDryRunIntentClaimableDryRun(user.id(), requestId);
     }
 
     @PostMapping("/loop/preview")

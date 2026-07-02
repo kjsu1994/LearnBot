@@ -5,9 +5,12 @@ const DISABLED_CONTROL_LABELS = [
   ['sourcePatchPushEnabled', 'source patch push'],
   ['sourcePatchClaimEnabled', 'source patch claim'],
   ['requestCreationEnabled', 'request creation'],
+  ['queueEnabled', 'queue'],
   ['enqueueEnabled', 'enqueue'],
   ['pushEnabled', 'push'],
   ['claimEnabled', 'claim'],
+  ['claimable', 'claimable'],
+  ['approvalBypassAllowed', 'approval bypass'],
   ['verificationCommandExecutionEnabled', 'verification command execution'],
   ['rollbackRestoreEnabled', 'rollback restore'],
   ['ragFreshnessUpdateEnabled', 'RAG freshness update'],
@@ -95,6 +98,12 @@ function buildSelectedReadOnlyQueueView(response, queuedObservation) {
 }
 
 function runnerHandoffBadgeText(response, summary) {
+  if (
+    summary?.schema === 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1'
+    || summary?.status === 'VALIDATED_DRY_RUN_INTENT_REVIEW'
+  ) {
+    return 'dry-run review';
+  }
   if (
     summary?.schema === 'learnbot.code-agent.approved-execution-flow-completed-handoff.v1'
     || summary?.status === 'APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED'
@@ -212,6 +221,7 @@ function runnerHandoffSourceText(summary) {
 
 function runnerHandoffRouteText(summary) {
   const parts = [
+    ['eligibility', summary.eligibilityRoute],
     ['readiness', summary.readinessRoute],
     ['fresh observations', summary.freshObservationsRoute],
     ['release boundary', summary.releaseBoundaryRoute],
@@ -246,6 +256,13 @@ function runnerHandoffFreshObservationText(summary) {
 
 function runnerHandoffReadinessText(summary) {
   const parts = [
+    ['validated dry-run intent', summary.validatedDryRunIntent],
+    ['dry-run intent persisted', summary.dryRunIntentPersisted],
+    ['review surface', summary.reviewSurface],
+    ['request persisted', summary.requestPersisted],
+    ['dry-run only', summary.dryRunOnly],
+    ['mutation allowed', summary.mutationAllowed],
+    ['approval bypass', summary.approvalBypassAllowed],
     ['ready to release', summary.readyToRelease],
     ['readiness message', summary.readinessMessage],
     ['warnings', summary.warningCount],
@@ -328,10 +345,16 @@ function runnerApprovedExecutionFlowCompletedText(summary) {
     ['ordered', summary.ordered],
     ['identity consistent', summary.identityConsistent],
     ['release linked', summary.releaseAttemptLinked],
+    ['approval linked', summary.approvalRequestLinked],
     ['terminal', summary.allTerminal],
     ['succeeded', summary.allSucceeded],
+    ['post-retry verification passed', summary.postRetryVerificationPassed],
+    ['partial reindex marker required', summary.postRetryVerificationPartialReindexMarkerRequired],
     ['final report summary', summary.finalMutationReportSummaryStatus],
     ['RAG marker', summary.ragFreshnessMarkerStatus],
+    ['partial reindex plan', summary.partialReindexPlanStatus],
+    ['partial reindex enqueue', summary.partialReindexEnqueueBoundaryStatus],
+    ['partial reindex ready', summary.partialReindexEnqueueReady],
     ['publication handoff', summary.finalAnswerPublicationHandoffStatus],
     ['acknowledgement handoff', summary.acknowledgementSaveHandoffStatus],
     ['final result', summary.finalResultEnabled],
@@ -355,7 +378,17 @@ function runnerApprovedExecutionFinalResultHandoffText(summary) {
     ['schema', handoff.schema],
     ['status', handoff.status],
     ['final report summary', handoff.finalMutationReportSummaryStatus],
+    ['post-retry verification passed', handoff.postRetryVerificationPassed],
+    ['post-retry approval linked', handoff.postRetryVerificationApprovalLinked],
+    ['post-retry release linked', handoff.postRetryVerificationReleaseLinked],
+    ['partial reindex marker required', handoff.postRetryVerificationPartialReindexMarkerRequired],
     ['RAG marker', handoff.ragFreshnessMarkerStatus],
+    ['partial reindex plan', handoff.partialReindexPlanStatus],
+    ['partial reindex action', handoff.partialReindexPlanFreshnessAction],
+    ['partial reindex files', joinSummaryList(handoff.partialReindexPlanTargetFiles || handoff.partialReindexPlan?.targetFiles)],
+    ['partial reindex enqueue', handoff.partialReindexEnqueueBoundaryStatus],
+    ['partial reindex ready', handoff.partialReindexEnqueueReady],
+    ['partial reindex repository', handoff.partialReindexRepositoryId],
     ['publication handoff', handoff.finalAnswerPublicationHandoffStatus],
     ['acknowledgement handoff', handoff.acknowledgementSaveHandoffStatus],
     ['stale disclosure modeled', handoff.staleIndexDisclosureModeled],

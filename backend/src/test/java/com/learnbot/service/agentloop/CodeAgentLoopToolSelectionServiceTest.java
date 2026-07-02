@@ -574,6 +574,14 @@ class CodeAgentLoopToolSelectionServiceTest {
         assertThat(result.guardrails()).containsEntry("createdStatus", "APPROVAL_REQUIRED")
                 .containsEntry("claimEnabled", false)
                 .containsEntry("mutationAllowed", false);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> approvalPersistence = (Map<String, Object>) result.guardrails().get("approvalPersistence");
+        assertThat(approvalPersistence)
+                .containsEntry("approvalRequestId", null)
+                .containsEntry("approvalRequestIdPresent", false)
+                .containsEntry("approvalPersistenceRequired", false)
+                .containsEntry("approvalPersisted", false)
+                .containsEntry("releaseBlockingReason", "Fresh Local Agent release evidence is required before this approval can become a claimable mutation.");
         verify(toolGatewayService).createApprovalRequest(argThat(request ->
                 request.toolName() == LocalAgentToolName.PATCH_APPLY
                         && request.approvalState() == LocalAgentApprovalState.REQUIRED
@@ -641,15 +649,18 @@ class CodeAgentLoopToolSelectionServiceTest {
                 LocalAgentToolName.PATCH_APPLY,
                 LocalAgentApprovalState.REQUIRED,
                 LocalAgentToolStatus.APPROVAL_REQUIRED,
-                Map.of(
-                        "repositoryId", repositoryId.toString(),
-                        "spaceId", spaceId.toString(),
-                        "loopId", loopId.toString(),
-                        "diff", diff,
-                        "targetFiles", targetFiles,
-                        "expectedFiles", List.of(Map.of("path", "src/App.java", "sha256", "abc123", "bytes", 7)),
-                        "requiresSnapshot", true,
-                        "workspaceVerification", Map.of("status", "UNVERIFIED", "blocking", true)
+                Map.ofEntries(
+                        Map.entry("repositoryId", repositoryId.toString()),
+                        Map.entry("spaceId", spaceId.toString()),
+                        Map.entry("loopId", loopId.toString()),
+                        Map.entry("approvalRequestId", "apr-test1234567890"),
+                        Map.entry("approvalPersistenceRequired", true),
+                        Map.entry("approvalPersisted", true),
+                        Map.entry("diff", diff),
+                        Map.entry("targetFiles", targetFiles),
+                        Map.entry("expectedFiles", List.of(Map.of("path", "src/App.java", "sha256", "abc123", "bytes", 7))),
+                        Map.entry("requiresSnapshot", true),
+                        Map.entry("workspaceVerification", Map.of("status", "UNVERIFIED", "blocking", true))
                 ),
                 Map.of(),
                 null,
@@ -682,8 +693,19 @@ class CodeAgentLoopToolSelectionServiceTest {
         assertThat(result.approvalRequest().input())
                 .containsEntry("diff", diff)
                 .containsEntry("targetFiles", targetFiles)
+                .containsEntry("approvalRequestId", "apr-test1234567890")
+                .containsEntry("approvalPersistenceRequired", true)
+                .containsEntry("approvalPersisted", true)
                 .containsEntry("requiresSnapshot", true);
         assertThat(result.approvalRequest().input().get("expectedFiles")).asList().isNotEmpty();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> approvalPersistence = (Map<String, Object>) result.guardrails().get("approvalPersistence");
+        assertThat(approvalPersistence)
+                .containsEntry("approvalRequestId", "apr-test1234567890")
+                .containsEntry("approvalRequestIdPresent", true)
+                .containsEntry("approvalPersistenceRequired", true)
+                .containsEntry("approvalPersisted", true)
+                .containsEntry("releaseBlockingReason", "Fresh Local Agent release evidence is required before this approval can become a claimable mutation.");
         verify(localPatchRequestService).prepare(
                 repositoryId,
                 spaceId,

@@ -762,7 +762,7 @@ public class CodeAgentLoopToolSelectionService {
                 false,
                 preview,
                 approvalRequest,
-                patchApprovalRequestGuardrails()
+                patchApprovalRequestGuardrails(approvalRequest)
         );
     }
 
@@ -806,10 +806,11 @@ public class CodeAgentLoopToolSelectionService {
         return Map.copyOf(guardrails);
     }
 
-    private Map<String, Object> patchApprovalRequestGuardrails() {
+    private Map<String, Object> patchApprovalRequestGuardrails(LocalAgentToolExecutionResponse approvalRequest) {
         Map<String, Object> guardrails = new LinkedHashMap<>();
         guardrails.put("approvalRequestCreationEnabled", true);
         guardrails.put("approvalRequiredBeforeSideEffects", true);
+        guardrails.put("approvalPersistence", approvalPersistenceSummary(approvalRequest));
         guardrails.put("createdStatus", "APPROVAL_REQUIRED");
         guardrails.put("claimableStatuses", java.util.List.of("PENDING", "APPROVED"));
         guardrails.put("releaseEvidenceRequired", true);
@@ -820,6 +821,21 @@ public class CodeAgentLoopToolSelectionService {
         guardrails.put("claimEnabled", false);
         guardrails.put("mutationAllowed", false);
         return Map.copyOf(guardrails);
+    }
+
+    private Map<String, Object> approvalPersistenceSummary(LocalAgentToolExecutionResponse approvalRequest) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> input = approvalRequest == null ? Map.of() : approvalRequest.input();
+        Object approvalRequestId = input == null ? null : input.get("approvalRequestId");
+        result.put("schema", "learnbot.code-agent.patch-approval-persistence.v1");
+        result.put("approvalRequestId", approvalRequestId);
+        result.put("approvalRequestIdPresent", approvalRequestId instanceof String text && !text.isBlank());
+        result.put("approvalPersistenceRequired", input != null && Boolean.TRUE.equals(input.get("approvalPersistenceRequired")));
+        result.put("approvalPersisted", approvalRequest != null && input != null && Boolean.TRUE.equals(input.get("approvalPersisted")));
+        result.put("releaseBlockingReason", approvalRequest == null
+                ? "No persisted approval request exists yet."
+                : "Fresh Local Agent release evidence is required before this approval can become a claimable mutation.");
+        return result;
     }
 
     private Map<String, Object> modelMap(JsonNode root) {

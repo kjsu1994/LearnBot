@@ -44,11 +44,41 @@ function eventText(event = {}) {
   if (event.details?.freshObservationOnly !== undefined) {
     text += ` / fresh observation ${String(event.details.freshObservationOnly)}`;
   }
+  if (event.details?.validatedDryRunIntent !== undefined) {
+    text += ` / validated dry-run intent ${String(event.details.validatedDryRunIntent)}`;
+  }
+  if (event.details?.dryRunIntentPersisted !== undefined) {
+    text += ` / dry-run intent persisted ${String(event.details.dryRunIntentPersisted)}`;
+  }
+  if (event.details?.reviewSurface) {
+    text += ` / review surface ${event.details.reviewSurface}`;
+  }
+  if (event.details?.requestPersisted !== undefined) {
+    text += ` / request persisted ${String(event.details.requestPersisted)}`;
+  }
+  if (event.details?.queueEnabled !== undefined) {
+    text += ` / queue ${String(event.details.queueEnabled)}`;
+  }
+  if (event.details?.pushEnabled !== undefined) {
+    text += ` / push ${String(event.details.pushEnabled)}`;
+  }
+  if (event.details?.claimable !== undefined) {
+    text += ` / claimable ${String(event.details.claimable)}`;
+  }
+  if (event.details?.dryRunOnly !== undefined) {
+    text += ` / dry-run only ${String(event.details.dryRunOnly)}`;
+  }
   if (event.details?.dryRun !== undefined) {
     text += ` / dry-run ${String(event.details.dryRun)}`;
   }
+  if (event.details?.mutationAllowed !== undefined) {
+    text += ` / mutation allowed ${String(event.details.mutationAllowed)}`;
+  }
   if (event.details?.mutationApplied !== undefined) {
     text += ` / mutation applied ${String(event.details.mutationApplied)}`;
+  }
+  if (event.details?.dryRunIntentReviewRequired !== undefined) {
+    text += ` / dry-run intent review required ${String(event.details.dryRunIntentReviewRequired)}`;
   }
   if (event.details?.timeoutSeconds !== undefined) {
     text += ` / timeout ${event.details.timeoutSeconds}s`;

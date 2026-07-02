@@ -177,6 +177,73 @@ class CodeAgentLoopPreviewServiceTest {
     }
 
     @Test
+    void nextActionSurfacesPersistedValidatedDryRunIntentReviewFromApprovalRequestEvent() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestEventId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        CodeAgentLoopTimelineEventSummary approvalRequest = event(
+                requestEventId,
+                13,
+                "LOCAL_AGENT_APPROVAL_REQUEST_CREATED",
+                Map.ofEntries(
+                        Map.entry("status", "APPROVAL_REQUIRED"),
+                        Map.entry("requestId", requestId.toString()),
+                        Map.entry("decisionKey", "VALIDATED_DRY_RUN_INTENT_REVIEW"),
+                        Map.entry("nextAction", "Review the persisted validated dry-run intent before any future claimable non-mutating dry-run."),
+                        Map.entry("approvalRequestCreated", true),
+                        Map.entry("validatedDryRunIntent", true),
+                        Map.entry("dryRunIntentPersisted", true),
+                        Map.entry("reviewSurface", "CODE_WORKSPACE_LOOP_REVIEW"),
+                        Map.entry("requestPersisted", true),
+                        Map.entry("queueEnabled", false),
+                        Map.entry("pushEnabled", false),
+                        Map.entry("claimable", false),
+                        Map.entry("dryRunOnly", true),
+                        Map.entry("mutationAllowed", false),
+                        Map.entry("requestCreationEnabled", false),
+                        Map.entry("claimEnabled", false),
+                        Map.entry("mutationEnabled", false)
+                )
+        );
+        when(timelineRepository.findRecent(userId, repositoryId, 20))
+                .thenReturn(List.of(timeline(loopId, repositoryId, List.of(approvalRequest))));
+
+        var result = service.nextAction(userId, repositoryId, loopId);
+
+        assertThat(result.actionKey()).isEqualTo("WAIT_FOR_APPROVAL");
+        assertThat(result.reason()).isEqualTo("Review the persisted validated dry-run intent before any future claimable non-mutating dry-run.");
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.pushEnabled()).isFalse();
+        assertThat(result.claimEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        assertThat(result.sourceEventId()).isEqualTo(requestEventId);
+        assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_APPROVAL_REQUEST_CREATED");
+        assertThat(result.sourceDetails()).containsEntry("decisionKey", "VALIDATED_DRY_RUN_INTENT_REVIEW")
+                .containsEntry("validatedDryRunIntent", true)
+                .containsEntry("dryRunIntentPersisted", true)
+                .containsEntry("reviewSurface", "CODE_WORKSPACE_LOOP_REVIEW")
+                .containsEntry("requestPersisted", true)
+                .containsEntry("queueEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false);
+        assertThat(result.handoffSummary()).containsEntry("schema", "learnbot.code-agent.validated-dry-run-intent-review-handoff.v1")
+                .containsEntry("status", "VALIDATED_DRY_RUN_INTENT_REVIEW")
+                .containsEntry("sourceRequestId", requestId.toString())
+                .containsEntry("eligibilityRoute", "GET /api/code-agent/local-patch-request/dry-run-intent/" + requestId + "/eligibility")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("queueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("approvalBypassAllowed", false);
+    }
+
+    @Test
     void nextActionWaitsForReleaseGateAfterApprovedHeldPatchDecision() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -685,6 +752,12 @@ class CodeAgentLoopPreviewServiceTest {
                 "ordered", true,
                 "identityConsistent", true,
                 "releaseAttemptLinked", true,
+                "approvalRequestLinked", true,
+                "postRetryVerification", Map.of(
+                        "schema", "learnbot.local-agent.post-retry-verification.v1",
+                        "passed", true,
+                        "partialReindexMarkerRequired", true
+                ),
                 "allTerminal", true,
                 "steps", List.of(
                         Map.of("toolName", "patch.apply", "status", "SUCCEEDED"),
@@ -697,7 +770,12 @@ class CodeAgentLoopPreviewServiceTest {
                 Map.entry("schema", "learnbot.code-agent.approved-execution-flow-final-result-handoff.v1"),
                 Map.entry("status", "READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED"),
                 Map.entry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY"),
+                Map.entry("postRetryVerificationPassed", true),
+                Map.entry("postRetryVerificationPartialReindexMarkerRequired", true),
                 Map.entry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED"),
+                Map.entry("partialReindexPlanStatus", "PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED"),
+                Map.entry("partialReindexEnqueueBoundaryStatus", "READY_ENQUEUE_DISABLED"),
+                Map.entry("partialReindexEnqueueReady", true),
                 Map.entry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED"),
                 Map.entry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED"),
                 Map.entry("finalResultEnabled", false),
@@ -724,11 +802,18 @@ class CodeAgentLoopPreviewServiceTest {
                         Map.entry("ordered", true),
                         Map.entry("identityConsistent", true),
                         Map.entry("releaseAttemptLinked", true),
+                        Map.entry("approvalRequestLinked", true),
+                        Map.entry("postRetryVerification", inspection.get("postRetryVerification")),
                         Map.entry("allTerminal", true),
                         Map.entry("allSucceeded", true),
                         Map.entry("finalResultHandoff", finalResultHandoff),
                         Map.entry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY"),
+                        Map.entry("postRetryVerificationPassed", true),
+                        Map.entry("postRetryVerificationPartialReindexMarkerRequired", true),
                         Map.entry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED"),
+                        Map.entry("partialReindexPlanStatus", "PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED"),
+                        Map.entry("partialReindexEnqueueBoundaryStatus", "READY_ENQUEUE_DISABLED"),
+                        Map.entry("partialReindexEnqueueReady", true),
                         Map.entry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED"),
                         Map.entry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED"),
                         Map.entry("nextAction", "Report the completed approved Local Agent execution flow while final result publication and acknowledgement save remain disabled."),
@@ -767,10 +852,16 @@ class CodeAgentLoopPreviewServiceTest {
                 .containsEntry("ordered", true)
                 .containsEntry("identityConsistent", true)
                 .containsEntry("releaseAttemptLinked", true)
+                .containsEntry("approvalRequestLinked", true)
                 .containsEntry("allTerminal", true)
                 .containsEntry("allSucceeded", true)
                 .containsEntry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY")
+                .containsEntry("postRetryVerificationPassed", true)
+                .containsEntry("postRetryVerificationPartialReindexMarkerRequired", true)
                 .containsEntry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED")
+                .containsEntry("partialReindexPlanStatus", "PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED")
+                .containsEntry("partialReindexEnqueueBoundaryStatus", "READY_ENQUEUE_DISABLED")
+                .containsEntry("partialReindexEnqueueReady", true)
                 .containsEntry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED")
                 .containsEntry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED")
                 .containsEntry("finalResultEnabled", false)
@@ -780,6 +871,7 @@ class CodeAgentLoopPreviewServiceTest {
                 .containsEntry("followUpMutationEnabled", false)
                 .containsEntry("mutationEnabled", false);
         assertThat(result.handoffSummary().get("approvedFlowInspection")).isEqualTo(inspection);
+        assertThat(result.handoffSummary().get("postRetryVerification")).isEqualTo(inspection.get("postRetryVerification"));
         assertThat(result.handoffSummary().get("finalResultHandoff")).isEqualTo(finalResultHandoff);
         assertThat(result.recommendedAction()).containsEntry("actionKey", "STOP_AND_REPORT");
     }

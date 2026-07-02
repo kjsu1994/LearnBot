@@ -31,8 +31,13 @@ final class LocalAgentPatchMutationInputBuilder {
         if (manifestId == null || manifestId.isBlank()) {
             throw new IllegalArgumentException("Patch mutation release requires a managed snapshot manifest id.");
         }
+        String approvalRequestId = stringValue(sourceInput.get("approvalRequestId"));
+        if (approvalRequestId == null || approvalRequestId.isBlank()) {
+            throw new IllegalArgumentException("Patch mutation release requires a persisted approval request id.");
+        }
 
         Map<String, Object> mutationInput = new LinkedHashMap<>(sourceInput);
+        mutationInput.put("approvalRequestId", approvalRequestId);
         mutationInput.put("dryRunOnly", false);
         mutationInput.put("mutationAllowed", true);
         mutationInput.put("manifestId", manifestId);
@@ -51,6 +56,10 @@ final class LocalAgentPatchMutationInputBuilder {
                 "manifestId", manifestId
         ));
         return Map.copyOf(mutationInput);
+    }
+
+    private static String stringValue(Object value) {
+        return value instanceof String text ? text : null;
     }
 
     @SuppressWarnings("unchecked")

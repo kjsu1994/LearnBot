@@ -211,14 +211,22 @@ export default function App() {
     codeAgentLoopPreview,
     codeAgentLoopTimelines,
     codeAgentLoopRunnerPreview,
+    codeAgentLoopRunnerToolSelectionPreview,
     codeAgentLoopRunnerEnqueueResult,
+    codeAgentLoopRunnerReleaseReviewResult,
+    codeAgentLoopRunnerFinalResultPublicationPreview,
+    codeAgentLoopRunnerM8EntryReadiness,
     codeAgentLoopRunnerQueuedObservationResult,
+    codeAgentLoopRunnerObservationContinuation,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
     codeAgentLocalPatchDryRunResult,
     codeAgentLocalRepositoryObservationRequest,
     codeAgentLocalRepositoryObservationResult,
+    codeAgentApprovedExecutionFlowInspection,
+    codeAgentValidatedDryRunIntentEligibility,
+    codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
     localAgentTokens,
     codeConversations,
@@ -255,7 +263,11 @@ export default function App() {
     generateCodeAgentPlan,
     previewCodeAgentLoop,
     previewCodeAgentLoopRunner,
+    previewCodeAgentLoopRunnerToolSelection,
     enqueueCodeAgentLoopRunnerReadOnly,
+    reviewCodeAgentLoopRunnerReleaseGate,
+    previewCodeAgentLoopRunnerFinalResultPublication,
+    previewCodeAgentLoopRunnerM8EntryReadiness,
     enqueueCodeAgentLoopRunnerSelectedReadOnly,
     refreshCodeAgentLoopRunnerQueuedObservation,
     refreshCodeAgentLoopTimelines,
@@ -265,9 +277,13 @@ export default function App() {
     refreshCodeAgentLocalPatchReadiness,
     queueCodeAgentLocalPatchDryRun,
     queueCodeAgentReleaseFreshObservations,
+    releaseCodeAgentLocalPatchForExecution,
     refreshCodeAgentLocalPatchDryRunResult,
     queueCodeAgentLocalRepositoryObservation,
     refreshCodeAgentLocalRepositoryObservationResult,
+    inspectCodeAgentApprovedExecutionFlow,
+    inspectCodeAgentValidatedDryRunIntentEligibility,
+    previewCodeAgentValidatedDryRunIntentTransition,
     refreshLocalAgentStatus,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
@@ -1022,14 +1038,22 @@ export default function App() {
             codeAgentLoopPreview={codeAgentLoopPreview}
             codeAgentLoopTimelines={codeAgentLoopTimelines}
             codeAgentLoopRunnerPreview={codeAgentLoopRunnerPreview}
+            codeAgentLoopRunnerToolSelectionPreview={codeAgentLoopRunnerToolSelectionPreview}
             codeAgentLoopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
+            codeAgentLoopRunnerReleaseReviewResult={codeAgentLoopRunnerReleaseReviewResult}
+            codeAgentLoopRunnerFinalResultPublicationPreview={codeAgentLoopRunnerFinalResultPublicationPreview}
+            codeAgentLoopRunnerM8EntryReadiness={codeAgentLoopRunnerM8EntryReadiness}
             codeAgentLoopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
+            codeAgentLoopRunnerObservationContinuation={codeAgentLoopRunnerObservationContinuation}
             codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
             codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
             codeAgentLocalPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
             codeAgentLocalPatchDryRunResult={codeAgentLocalPatchDryRunResult}
             codeAgentLocalRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
             codeAgentLocalRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
+            codeAgentApprovedExecutionFlowInspection={codeAgentApprovedExecutionFlowInspection}
+            codeAgentValidatedDryRunIntentEligibility={codeAgentValidatedDryRunIntentEligibility}
+            codeAgentValidatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
             localAgentStatus={localAgentStatus}
             localAgentTokens={localAgentTokens}
             codeConversations={codeConversations}
@@ -1067,7 +1091,11 @@ export default function App() {
             generateCodeAgentPlan={generateCodeAgentPlan}
             previewCodeAgentLoop={previewCodeAgentLoop}
             previewCodeAgentLoopRunner={previewCodeAgentLoopRunner}
+            previewCodeAgentLoopRunnerToolSelection={previewCodeAgentLoopRunnerToolSelection}
             enqueueCodeAgentLoopRunnerReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
+            reviewCodeAgentLoopRunnerReleaseGate={reviewCodeAgentLoopRunnerReleaseGate}
+            previewCodeAgentLoopRunnerFinalResultPublication={previewCodeAgentLoopRunnerFinalResultPublication}
+            previewCodeAgentLoopRunnerM8EntryReadiness={previewCodeAgentLoopRunnerM8EntryReadiness}
             enqueueCodeAgentLoopRunnerSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
             refreshCodeAgentLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
             refreshCodeAgentLoopTimelines={refreshCodeAgentLoopTimelines}
@@ -1077,9 +1105,13 @@ export default function App() {
             refreshCodeAgentLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
             queueCodeAgentLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
             queueCodeAgentReleaseFreshObservations={queueCodeAgentReleaseFreshObservations}
+            releaseCodeAgentLocalPatchForExecution={releaseCodeAgentLocalPatchForExecution}
             refreshCodeAgentLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
             queueCodeAgentLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
             refreshCodeAgentLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
+            inspectCodeAgentApprovedExecutionFlow={inspectCodeAgentApprovedExecutionFlow}
+            inspectCodeAgentValidatedDryRunIntentEligibility={inspectCodeAgentValidatedDryRunIntentEligibility}
+            previewCodeAgentValidatedDryRunIntentTransition={previewCodeAgentValidatedDryRunIntentTransition}
             refreshLocalAgentStatus={refreshLocalAgentStatus}
             refreshLocalAgentTokens={refreshLocalAgentTokens}
             revokeLocalAgentToken={revokeLocalAgentToken}

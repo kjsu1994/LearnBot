@@ -5,6 +5,7 @@ export function buildCodeWorkspaceReadinessSmokeProps({
   dryRunRequest = null,
   dryRunResult = null,
   approvedExecutionFlowInspection = null,
+  validatedDryRunIntentEligibility = null,
 }) {
   const resolvedDryRunRequest = dryRunRequest || (dryRunResult ? { requestId: dryRunResult.requestId } : null);
   return {
@@ -343,6 +344,7 @@ export function buildCodeWorkspaceReadinessSmokeProps({
     codeAgentLocalPatchDryRunRequest: resolvedDryRunRequest,
     codeAgentLocalPatchDryRunResult: dryRunResult,
     codeAgentApprovedExecutionFlowInspection: approvedExecutionFlowInspection,
+    codeAgentValidatedDryRunIntentEligibility: validatedDryRunIntentEligibility,
     codeAgentLocalPatchReadiness: {
       requestId,
       readyToRelease: false,

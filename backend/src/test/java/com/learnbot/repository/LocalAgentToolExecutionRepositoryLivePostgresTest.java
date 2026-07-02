@@ -45,6 +45,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
         UUID agentId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
         UUID sourceRequestId = UUID.randomUUID();
+        UUID approvalRequestId = UUID.randomUUID();
         UUID releaseAttemptId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
         List<UUID> requestIds = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
@@ -54,6 +55,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     LocalAgentToolName.PATCH_APPLY,
                     Map.of(
                             "sourceRequestId", sourceRequestId.toString(),
+                            "approvalRequestId", approvalRequestId.toString(),
                             "releaseAttemptId", releaseAttemptId.toString(),
                             "mutationAllowed", true,
                             "dryRunOnly", false,
@@ -63,6 +65,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     LocalAgentToolName.COMMAND_RUN_ALLOWED,
                     Map.of(
                             "sourceRequestId", sourceRequestId.toString(),
+                            "approvalRequestId", approvalRequestId.toString(),
                             "releaseAttemptId", releaseAttemptId.toString(),
                             "mutationAllowed", true,
                             "commandId", "maven.backend.test"
@@ -71,6 +74,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     LocalAgentToolName.GIT_STATUS,
                     Map.of(
                             "sourceRequestId", sourceRequestId.toString(),
+                            "approvalRequestId", approvalRequestId.toString(),
                             "releaseAttemptId", releaseAttemptId.toString(),
                             "mutationAllowed", true
                     ));
@@ -78,6 +82,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     LocalAgentToolName.ROLLBACK_RESTORE,
                     Map.of(
                             "sourceRequestId", sourceRequestId.toString(),
+                            "approvalRequestId", approvalRequestId.toString(),
                             "releaseAttemptId", releaseAttemptId.toString(),
                             "mutationAllowed", true,
                             "manifestId", "snap-flow"
@@ -111,6 +116,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                     .containsEntry("ordered", true)
                     .containsEntry("identityConsistent", true)
                     .containsEntry("releaseAttemptLinked", true)
+                    .containsEntry("approvalRequestLinked", true)
                     .containsEntry("allTerminal", true)
                     .containsEntry("requestCreationEnabled", false)
                     .containsEntry("pushEnabled", false)
@@ -124,6 +130,12 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             assertThat((List<Map<String, Object>>) summary.get("steps"))
                     .extracting(step -> step.get("verificationStatus"))
                     .containsExactly("APPLIED", "PASSED", "OBSERVED", "RESTORED");
+            Map<String, Object> postRetryVerification = (Map<String, Object>) summary.get("postRetryVerification");
+            assertThat(postRetryVerification)
+                    .containsEntry("passed", true)
+                    .containsEntry("approvalRequestLinked", true)
+                    .containsEntry("releaseAttemptLinked", true)
+                    .containsEntry("partialReindexMarkerRequired", true);
             assertThat(repository.claimNext(userId, agentId)).isEmpty();
         } finally {
             cleanup(jdbc, requestIds, userId);
@@ -1031,6 +1043,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
         UUID agentId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
         UUID sourceRequestId = UUID.randomUUID();
+        UUID approvalRequestId = UUID.randomUUID();
         UUID releaseAttemptId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
         UUID olderPatchId = UUID.randomUUID();
@@ -1054,6 +1067,7 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             insertUser(jdbc, otherUserId);
             Map<String, Object> input = Map.of(
                     "sourceRequestId", sourceRequestId.toString(),
+                    "approvalRequestId", approvalRequestId.toString(),
                     "releaseAttemptId", releaseAttemptId.toString(),
                     "mutationAllowed", true
             );
@@ -1254,6 +1268,9 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
                 Map.entry("instruction", "fix"),
                 Map.entry("diff", "--- a/src/App.java\n+++ b/src/App.java\n@@ -1 +1 @@\n-class App {}\n+class App { /* ok */ }\n"),
                 Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("approvalRequestId", "apr-live1234567890"),
+                Map.entry("approvalPersistenceRequired", true),
+                Map.entry("approvalPersisted", true),
                 Map.entry("expectedFiles", List.of(Map.of(
                         "path", "src/App.java",
                         "sha256", "abc123",

@@ -157,9 +157,14 @@ public class CodeAgentLoopTimelineRepository {
             Map<String, Object> requestInput
     ) {
         Map<String, Object> details = approvalDetails(requestId, sessionId, agentId, workspaceId, approvalState, status, requestInput);
-        details.put("decisionKey", "APPROVAL_REQUEST_CREATED");
-        details.put("nextAction", "Wait for explicit user approval before release, claim, or mutation.");
+        boolean validatedDryRunIntent = Boolean.TRUE.equals(booleanValue(requestInput.get("validatedDryRunIntent"), null));
+        details.put("decisionKey", validatedDryRunIntent ? "VALIDATED_DRY_RUN_INTENT_REVIEW" : "APPROVAL_REQUEST_CREATED");
+        details.put("nextAction", validatedDryRunIntent
+                ? "Review the persisted validated dry-run intent before any future claimable non-mutating dry-run."
+                : "Wait for explicit user approval before release, claim, or mutation.");
         details.put("approvalRequestCreated", true);
+        details.put("validatedDryRunIntent", validatedDryRunIntent);
+        details.put("reviewSurface", validatedDryRunIntent ? "CODE_WORKSPACE_LOOP_REVIEW" : "LOCAL_AGENT_APPROVAL");
         details.put("releaseRequired", true);
         details.put("releaseEvidenceRequired", true);
         details.put("releaseGateEnabled", false);
@@ -167,6 +172,10 @@ public class CodeAgentLoopTimelineRepository {
         details.put("pushEnabled", false);
         details.put("claimEnabled", false);
         details.put("mutationEnabled", false);
+        details.put("dryRunIntentReviewRequired", validatedDryRunIntent);
+        details.put("claimable", false);
+        details.put("dryRunOnly", booleanValue(requestInput.get("dryRunOnly"), null));
+        details.put("mutationAllowed", booleanValue(requestInput.get("mutationAllowed"), null));
         details.put("finalResultEnabled", false);
         details.put("publicationEnabled", false);
         details.put("acknowledgementEnabled", false);
@@ -337,11 +346,18 @@ public class CodeAgentLoopTimelineRepository {
         details.put("ordered", approvedFlowInspection == null ? null : approvedFlowInspection.get("ordered"));
         details.put("identityConsistent", approvedFlowInspection == null ? null : approvedFlowInspection.get("identityConsistent"));
         details.put("releaseAttemptLinked", approvedFlowInspection == null ? null : approvedFlowInspection.get("releaseAttemptLinked"));
+        details.put("approvalRequestLinked", approvedFlowInspection == null ? null : approvedFlowInspection.get("approvalRequestLinked"));
+        details.put("postRetryVerification", approvedFlowInspection == null ? Map.of() : approvedFlowInspection.get("postRetryVerification"));
         details.put("allTerminal", approvedFlowInspection == null ? null : approvedFlowInspection.get("allTerminal"));
         details.put("allSucceeded", allSucceeded(approvedFlowInspection));
         details.put("finalResultHandoff", finalResultHandoff == null ? Map.of() : finalResultHandoff);
         details.put("finalMutationReportSummaryStatus", finalResultHandoff == null ? null : finalResultHandoff.get("finalMutationReportSummaryStatus"));
+        details.put("postRetryVerificationPassed", finalResultHandoff == null ? null : finalResultHandoff.get("postRetryVerificationPassed"));
+        details.put("postRetryVerificationPartialReindexMarkerRequired", finalResultHandoff == null ? null : finalResultHandoff.get("postRetryVerificationPartialReindexMarkerRequired"));
         details.put("ragFreshnessMarkerStatus", finalResultHandoff == null ? null : finalResultHandoff.get("ragFreshnessMarkerStatus"));
+        details.put("partialReindexPlanStatus", finalResultHandoff == null ? null : finalResultHandoff.get("partialReindexPlanStatus"));
+        details.put("partialReindexEnqueueBoundaryStatus", finalResultHandoff == null ? null : finalResultHandoff.get("partialReindexEnqueueBoundaryStatus"));
+        details.put("partialReindexEnqueueReady", finalResultHandoff == null ? null : finalResultHandoff.get("partialReindexEnqueueReady"));
         details.put("finalAnswerPublicationHandoffStatus", finalResultHandoff == null ? null : finalResultHandoff.get("finalAnswerPublicationHandoffStatus"));
         details.put("acknowledgementSaveHandoffStatus", finalResultHandoff == null ? null : finalResultHandoff.get("acknowledgementSaveHandoffStatus"));
         details.put("nextAction", "Report the completed approved Local Agent execution flow while final result publication and acknowledgement save remain disabled.");
@@ -876,6 +892,15 @@ public class CodeAgentLoopTimelineRepository {
         details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), null));
         details.put("releaseAttemptId", stringValue(requestInput.get("releaseAttemptId"), null));
         details.put("freshObservationOnly", booleanValue(requestInput.get("freshObservationOnly"), null));
+        details.put("validatedDryRunIntent", booleanValue(requestInput.get("validatedDryRunIntent"), null));
+        details.put("dryRunIntentPersisted", booleanValue(requestInput.get("dryRunIntentPersisted"), null));
+        details.put("requestPersisted", booleanValue(requestInput.get("requestPersisted"), null));
+        details.put("queueEnabled", booleanValue(requestInput.get("queueEnabled"), null));
+        details.put("pushEnabled", booleanValue(requestInput.get("pushEnabled"), null));
+        details.put("claimable", booleanValue(requestInput.get("claimable"), null));
+        details.put("dryRunOnly", booleanValue(requestInput.get("dryRunOnly"), null));
+        details.put("mutationAllowed", booleanValue(requestInput.get("mutationAllowed"), null));
+        details.put("approvalRequestId", stringValue(requestInput.get("approvalRequestId"), null));
         return details;
     }
 

@@ -319,6 +319,73 @@ class CodeAgentLoopTimelineRepositoryTest {
     }
 
     @Test
+    void appendApprovalRequestCreatedMarksValidatedDryRunIntentReviewWithoutOpeningClaim() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+
+        repository.appendApprovalRequestCreated(
+                userId,
+                repositoryId,
+                requestId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                "REQUIRED",
+                "APPROVAL_REQUIRED",
+                loopId,
+                Map.of(
+                        "validatedDryRunIntent", true,
+                        "dryRunIntentPersisted", true,
+                        "requestPersisted", true,
+                        "queueEnabled", false,
+                        "pushEnabled", false,
+                        "claimable", false,
+                        "dryRunOnly", true,
+                        "mutationAllowed", false,
+                        "approvalRequestId", "apr-1234567890abcdef",
+                        "sourceRequestId", "source-request-1"
+                )
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_APPROVAL_REQUEST_CREATED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("REQUEST_APPROVAL");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains(requestId.toString())
+                .contains(sessionId.toString())
+                .contains("\"decisionKey\":\"VALIDATED_DRY_RUN_INTENT_REVIEW\"")
+                .contains("\"nextAction\":\"Review the persisted validated dry-run intent before any future claimable non-mutating dry-run.\"")
+                .contains("\"reviewSurface\":\"CODE_WORKSPACE_LOOP_REVIEW\"")
+                .contains("\"validatedDryRunIntent\":true")
+                .contains("\"dryRunIntentPersisted\":true")
+                .contains("\"requestPersisted\":true")
+                .contains("\"queueEnabled\":false")
+                .contains("\"pushEnabled\":false")
+                .contains("\"claimable\":false")
+                .contains("\"dryRunOnly\":true")
+                .contains("\"mutationAllowed\":false")
+                .contains("\"dryRunIntentReviewRequired\":true")
+                .contains("\"releaseGateEnabled\":false")
+                .contains("\"requestCreationEnabled\":false")
+                .contains("\"claimEnabled\":false")
+                .contains("\"finalResultEnabled\":false")
+                .contains("\"approvalRequestId\":\"apr-1234567890abcdef\"")
+                .contains("\"sourceRequestId\":\"source-request-1\"");
+    }
+
+    @Test
     void appendFreshObservationRequestsEnqueuedPersistsQueuedRequestIdsWithoutOpeningMutation() {
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());

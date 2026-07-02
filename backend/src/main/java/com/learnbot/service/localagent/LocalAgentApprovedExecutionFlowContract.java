@@ -43,6 +43,8 @@ public final class LocalAgentApprovedExecutionFlowContract {
         result.put("ordered", ordered(safeSteps));
         result.put("identityConsistent", identityConsistent(safeSteps));
         result.put("releaseAttemptLinked", releaseAttemptLinked(safeSteps));
+        result.put("approvalRequestLinked", approvalRequestLinked(safeSteps));
+        result.put("postRetryVerification", postRetryVerification(safeSteps));
         result.put("allTerminal", safeSteps.stream().allMatch(step -> step.response().finishedAt() != null));
         result.put("readyForServerOrchestration", false);
         result.put("message", "Approved Local Agent execution-flow responses are modeled for server-side contract verification only; request creation, push, claim, result intake, acknowledgement save, and follow-up mutation remain disabled.");
@@ -59,6 +61,7 @@ public final class LocalAgentApprovedExecutionFlowContract {
         result.put("requestId", step.response().requestId());
         result.put("sourceRequestId", step.requestInput().get("sourceRequestId"));
         result.put("releaseAttemptId", step.requestInput().get("releaseAttemptId"));
+        result.put("approvalRequestId", step.requestInput().get("approvalRequestId"));
         result.put("status", step.response().status().name());
         result.put("verificationStatus", candidate.get("verificationStatus"));
         result.put("acceptanceStatus", accepted.get("status"));
@@ -111,6 +114,51 @@ public final class LocalAgentApprovedExecutionFlowContract {
                 && steps.stream().allMatch(step ->
                 Objects.equals(step.requestInput().get("sourceRequestId"), sourceRequestId)
                         && Objects.equals(step.requestInput().get("releaseAttemptId"), releaseAttemptId));
+    }
+
+    private static boolean approvalRequestLinked(List<Step> steps) {
+        if (steps.isEmpty()) {
+            return false;
+        }
+        Object approvalRequestId = steps.get(0).requestInput().get("approvalRequestId");
+        return hasText(approvalRequestId)
+                && steps.stream().allMatch(step ->
+                Objects.equals(step.requestInput().get("approvalRequestId"), approvalRequestId));
+    }
+
+    private static Map<String, Object> postRetryVerification(List<Step> steps) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Step commandStep = steps.stream()
+                .filter(step -> step.response().toolName() == LocalAgentToolName.COMMAND_RUN_ALLOWED)
+                .findFirst()
+                .orElse(null);
+        boolean releaseLinked = releaseAttemptLinked(steps);
+        boolean approvalLinked = approvalRequestLinked(steps);
+        boolean terminal = commandStep != null && commandStep.response().finishedAt() != null;
+        boolean passed = commandStep != null
+                && "PASSED".equals(verificationStatus(commandStep));
+        result.put("schema", "learnbot.local-agent.post-retry-verification.v1");
+        result.put("toolName", LocalAgentToolName.COMMAND_RUN_ALLOWED.wireName());
+        result.put("observed", commandStep != null);
+        result.put("terminal", terminal);
+        result.put("passed", passed);
+        result.put("approvalRequestLinked", approvalLinked);
+        result.put("releaseAttemptLinked", releaseLinked);
+        result.put("approvalRequestId", commandStep == null ? null : commandStep.requestInput().get("approvalRequestId"));
+        result.put("releaseAttemptId", commandStep == null ? null : commandStep.requestInput().get("releaseAttemptId"));
+        result.put("sourceRequestId", commandStep == null ? null : commandStep.requestInput().get("sourceRequestId"));
+        result.put("partialReindexMarkerRequired", passed && approvalLinked && releaseLinked);
+        result.put("partialReindexEnabled", false);
+        result.put("message", passed && approvalLinked && releaseLinked
+                ? "Post-retry verification passed for the same approval and release id; partial reindex marker or stale-index warning is required before final reporting."
+                : "Post-retry verification is incomplete or not linked to the same approval/release id.");
+        return result;
+    }
+
+    private static Object verificationStatus(Step step) {
+        LocalAgentToolResponse enriched = LocalAgentMutationResultClassifier.enrich(step.response(), step.requestInput());
+        Map<String, Object> candidate = mapValue(enriched.output().get("mutationResultIntakeCandidate"));
+        return candidate.get("verificationStatus");
     }
 
     private static boolean hasText(Object value) {

@@ -122,6 +122,57 @@ assert.match(fallbackView.headerText, /READY_HANDOFF_CREATION_DISABLED/);
 assert.match(fallbackView.recommendedActionText, /action CHECK_ENQUEUE_REFUSAL/);
 assert.match(fallbackView.recommendedActionText, /mutation false/);
 
+const dryRunIntentReviewView = buildAgentLoopRunnerHandoffSummaryView({
+  nextAction: {
+    actionKey: 'WAIT_FOR_APPROVAL',
+    handoffSummary: {
+      schema: 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1',
+      status: 'VALIDATED_DRY_RUN_INTENT_REVIEW',
+      sourceEventType: 'LOCAL_AGENT_APPROVAL_REQUEST_CREATED',
+      sourceSequenceNumber: 13,
+      sourceRequestId: 'dry-run-intent-1',
+      approvalState: 'REQUIRED',
+      validatedDryRunIntent: true,
+      dryRunIntentPersisted: true,
+      reviewSurface: 'CODE_WORKSPACE_LOOP_REVIEW',
+      requestPersisted: true,
+      eligibilityRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/eligibility',
+      requestCreationEnabled: false,
+      queueEnabled: false,
+      pushEnabled: false,
+      claimEnabled: false,
+      claimable: false,
+      dryRunOnly: true,
+      mutationAllowed: false,
+      approvalBypassAllowed: false,
+      message: 'Review the persisted validated dry-run intent eligibility before any future claimable non-mutating dry-run.',
+    },
+  },
+});
+assert.equal(dryRunIntentReviewView.show, true);
+assert.equal(dryRunIntentReviewView.badgeText, 'dry-run review');
+assert.equal(
+  dryRunIntentReviewView.headerText,
+  'agent loop runner handoff: VALIDATED_DRY_RUN_INTENT_REVIEW / learnbot.code-agent.validated-dry-run-intent-review-handoff.v1'
+);
+assert.equal(
+  dryRunIntentReviewView.sourceText,
+  'agent loop runner release handoff source: source request dry-run-intent-1 / source event LOCAL_AGENT_APPROVAL_REQUEST_CREATED / sequence 13 / approval REQUIRED'
+);
+assert.equal(
+  dryRunIntentReviewView.routeText,
+  'agent loop runner release handoff routes: eligibility GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/eligibility'
+);
+assert.equal(
+  dryRunIntentReviewView.readinessText,
+  'agent loop runner release readiness: validated dry-run intent true / dry-run intent persisted true / review surface CODE_WORKSPACE_LOOP_REVIEW / request persisted true / dry-run only true / mutation allowed false / approval bypass false'
+);
+assert.equal(
+  dryRunIntentReviewView.disabledText,
+  'agent loop runner handoff disabled: request creation false / queue false / push false / claim false / claimable false / approval bypass false'
+);
+assert.match(dryRunIntentReviewView.message, /eligibility/);
+
 const hidden = buildAgentLoopRunnerHandoffSummaryView(null);
 assert.equal(hidden.show, false);
 assert.equal(hidden.countsText, '');
@@ -518,7 +569,7 @@ assert.match(
 );
 assert.match(
   releaseRefusalStopView.disabledText,
-  /request creation false \/ enqueue false \/ push false \/ claim false \/ verification command execution false \/ rollback restore false \/ RAG freshness update false \/ final result false \/ publication false \/ final answer generation false \/ delivery false \/ acknowledgement false \/ mutation false/
+  /request creation false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ verification command execution false \/ rollback restore false \/ RAG freshness update false \/ final result false \/ publication false \/ final answer generation false \/ delivery false \/ acknowledgement false \/ mutation false/
 );
 assert.equal(releaseRefusalStopView.message, 'Report that release was refused and mutation remains disabled.');
 
@@ -535,17 +586,33 @@ const completedFlowSummary = {
   ordered: true,
   identityConsistent: true,
   releaseAttemptLinked: true,
+  approvalRequestLinked: true,
   allTerminal: true,
   allSucceeded: true,
+  postRetryVerificationPassed: true,
+  postRetryVerificationPartialReindexMarkerRequired: true,
   finalMutationReportSummaryStatus: 'READY_SUMMARY_AUDIT_ONLY',
   ragFreshnessMarkerStatus: 'STALE_INDEX_WARNING_REQUIRED',
+  partialReindexPlanStatus: 'PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED',
+  partialReindexEnqueueBoundaryStatus: 'READY_ENQUEUE_DISABLED',
+  partialReindexEnqueueReady: true,
   finalAnswerPublicationHandoffStatus: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
   acknowledgementSaveHandoffStatus: 'READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED',
   finalResultHandoff: {
     schema: 'learnbot.code-agent.approved-execution-flow-final-result-handoff.v1',
     status: 'READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED',
     finalMutationReportSummaryStatus: 'READY_SUMMARY_AUDIT_ONLY',
+    postRetryVerificationPassed: true,
+    postRetryVerificationApprovalLinked: true,
+    postRetryVerificationReleaseLinked: true,
+    postRetryVerificationPartialReindexMarkerRequired: true,
     ragFreshnessMarkerStatus: 'STALE_INDEX_WARNING_REQUIRED',
+    partialReindexPlanStatus: 'PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED',
+    partialReindexPlanFreshnessAction: 'PARTIAL_REINDEX_TARGET_FILES_AFTER_APPROVED_RETRY',
+    partialReindexPlanTargetFiles: ['README.md'],
+    partialReindexEnqueueBoundaryStatus: 'READY_ENQUEUE_DISABLED',
+    partialReindexEnqueueReady: true,
+    partialReindexRepositoryId: 'repo-1',
     finalAnswerPublicationHandoffStatus: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
     acknowledgementSaveHandoffStatus: 'READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED',
     staleIndexDisclosureModeled: true,
@@ -592,11 +659,11 @@ assert.equal(
 );
 assert.match(
   completedFlowView.boundaryText,
-  /agent loop runner approved execution flow complete: status APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED \/ request id source durableCompletedRows \/ steps 4 \/ ordered true \/ identity consistent true \/ release linked true \/ terminal true \/ succeeded true \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ final result false \/ publication false \/ RAG freshness update false \/ acknowledgement false \/ follow-up mutation false \/ mutation false/
+  /agent loop runner approved execution flow complete: status APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED \/ request id source durableCompletedRows \/ steps 4 \/ ordered true \/ identity consistent true \/ release linked true \/ approval linked true \/ terminal true \/ succeeded true \/ post-retry verification passed true \/ partial reindex marker required true \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ partial reindex plan PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED \/ partial reindex enqueue READY_ENQUEUE_DISABLED \/ partial reindex ready true \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ final result false \/ publication false \/ RAG freshness update false \/ acknowledgement false \/ follow-up mutation false \/ mutation false/
 );
 assert.match(
   completedFlowView.finalResultText,
-  /agent loop runner final-result handoff: schema learnbot\.code-agent\.approved-execution-flow-final-result-handoff\.v1 \/ status READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ stale disclosure modeled true \/ delivery false \/ final answer generation false \/ publication false \/ acknowledgement save false \/ RAG freshness update false \/ partial reindex false \/ follow-up mutation false \/ mutation false/
+  /agent loop runner final-result handoff: schema learnbot\.code-agent\.approved-execution-flow-final-result-handoff\.v1 \/ status READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED \/ final report summary READY_SUMMARY_AUDIT_ONLY \/ post-retry verification passed true \/ post-retry approval linked true \/ post-retry release linked true \/ partial reindex marker required true \/ RAG marker STALE_INDEX_WARNING_REQUIRED \/ partial reindex plan PARTIAL_REINDEX_MARKER_REQUIRED_DISABLED \/ partial reindex action PARTIAL_REINDEX_TARGET_FILES_AFTER_APPROVED_RETRY \/ partial reindex files README\.md \/ partial reindex enqueue READY_ENQUEUE_DISABLED \/ partial reindex ready true \/ partial reindex repository repo-1 \/ publication handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ acknowledgement handoff READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ stale disclosure modeled true \/ delivery false \/ final answer generation false \/ publication false \/ acknowledgement save false \/ RAG freshness update false \/ partial reindex false \/ follow-up mutation false \/ mutation false/
 );
 assert.match(
   completedFlowView.disabledText,

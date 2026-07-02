@@ -21,6 +21,7 @@ class LocalAgentPatchMutationInputBuilderTest {
                         "diff", "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
                         "targetFiles", List.of("README.md"),
                         "expectedFiles", List.of(Map.of("path", "README.md", "sha256", "abc123")),
+                        "approvalRequestId", "apr-1234abcd5678ef90",
                         "dryRunOnly", true,
                         "mutationAllowed", false,
                         "freshObservationOnly", true
@@ -42,6 +43,7 @@ class LocalAgentPatchMutationInputBuilderTest {
         );
 
         assertThat(input)
+                .containsEntry("approvalRequestId", "apr-1234abcd5678ef90")
                 .containsEntry("dryRunOnly", false)
                 .containsEntry("mutationAllowed", true)
                 .containsEntry("manifestId", "snap-1234")
@@ -74,5 +76,24 @@ class LocalAgentPatchMutationInputBuilderTest {
                 UUID.randomUUID()
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("successful non-mutating dry-run");
+    }
+
+    @Test
+    void refusesMutationInputWithoutPersistedApprovalRequestId() {
+        assertThatThrownBy(() -> LocalAgentPatchMutationInputBuilder.build(
+                Map.of(
+                        "diff", "patch",
+                        "targetFiles", List.of("README.md")
+                ),
+                Map.of(
+                        "dryRun", true,
+                        "preflightPassed", true,
+                        "mutationApplied", false,
+                        "snapshotManifestId", "snap-1234"
+                ),
+                UUID.randomUUID(),
+                UUID.randomUUID()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("persisted approval request id");
     }
 }

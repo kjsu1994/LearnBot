@@ -61,6 +61,8 @@ import { buildAgentLoopPreviewSummaryView } from './agentLoopPreviewSummary.js';
 import { buildAgentLoopTimelineHistoryView } from './agentLoopTimelineSummary.js';
 import { buildAgentLoopRunnerHandoffSummaryView } from './agentLoopRunnerHandoffSummary.js';
 import { buildApprovedExecutionFlowInspectionView } from './approvedExecutionFlowInspectionSummary.js';
+import { buildValidatedDryRunIntentEligibilityView } from './validatedDryRunIntentEligibilitySummary.js';
+import { buildValidatedDryRunIntentTransitionPreviewView } from './validatedDryRunIntentTransitionPreviewSummary.js';
 
 function CodeWorkspace(props) {
   const {
@@ -101,6 +103,8 @@ function CodeWorkspace(props) {
     codeAgentLocalRepositoryObservationRequest,
     codeAgentLocalRepositoryObservationResult,
     codeAgentApprovedExecutionFlowInspection,
+    codeAgentValidatedDryRunIntentEligibility,
+    codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
     codeConversations = [],
     codeConversationId = '',
@@ -138,6 +142,8 @@ function CodeWorkspace(props) {
     queueCodeAgentLocalRepositoryObservation = () => {},
     refreshCodeAgentLocalRepositoryObservationResult = () => {},
     inspectCodeAgentApprovedExecutionFlow = () => {},
+    inspectCodeAgentValidatedDryRunIntentEligibility = () => {},
+    previewCodeAgentValidatedDryRunIntentTransition = () => {},
     refreshLocalAgentStatus = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
@@ -245,6 +251,8 @@ function CodeWorkspace(props) {
           localRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
           localRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
           approvedExecutionFlowInspection={codeAgentApprovedExecutionFlowInspection}
+          validatedDryRunIntentEligibility={codeAgentValidatedDryRunIntentEligibility}
+          validatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
           localAgentStatus={localAgentStatus}
           localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
@@ -271,6 +279,8 @@ function CodeWorkspace(props) {
           onQueueLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
           onRefreshLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
           onInspectApprovedExecutionFlow={inspectCodeAgentApprovedExecutionFlow}
+          onInspectValidatedDryRunIntentEligibility={inspectCodeAgentValidatedDryRunIntentEligibility}
+          onPreviewValidatedDryRunIntentTransition={previewCodeAgentValidatedDryRunIntentTransition}
           onRefreshLocalAgent={refreshLocalAgentStatus}
           onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
           onRevokeLocalAgentToken={props.revokeLocalAgentToken}
@@ -450,6 +460,8 @@ function CodeAgentPanel({
   localRepositoryObservationRequest,
   localRepositoryObservationResult,
   approvedExecutionFlowInspection,
+  validatedDryRunIntentEligibility,
+  validatedDryRunIntentTransitionPreview,
   localAgentStatus,
   localAgentTokens = [],
   selectedRepositoryId = '',
@@ -476,6 +488,8 @@ function CodeAgentPanel({
   onQueueLocalRepositoryObservation = () => {},
   onRefreshLocalRepositoryObservationResult = () => {},
   onInspectApprovedExecutionFlow = () => {},
+  onInspectValidatedDryRunIntentEligibility = () => {},
+  onPreviewValidatedDryRunIntentTransition = () => {},
   onRefreshLocalAgent = () => {},
   onRefreshLocalAgentTokens = () => {},
   onRevokeLocalAgentToken = () => {},
@@ -564,10 +578,32 @@ function CodeAgentPanel({
   const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
   const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
   const agentLoopTimelineHistoryView = buildAgentLoopTimelineHistoryView(loopTimelines);
+  const loopRunnerHandoffSource = loopRunnerM8EntryReadiness
+    || loopRunnerFinalResultPublicationPreview
+    || loopRunnerReleaseReviewResult
+    || loopRunnerEnqueueResult
+    || loopRunnerPreview;
   const agentLoopRunnerHandoffSummaryView = buildAgentLoopRunnerHandoffSummaryView(
-    loopRunnerM8EntryReadiness || loopRunnerFinalResultPublicationPreview || loopRunnerReleaseReviewResult || loopRunnerEnqueueResult || loopRunnerPreview,
+    loopRunnerHandoffSource,
     loopRunnerQueuedObservationResult
   );
+  const dryRunIntentHandoffSummary = loopRunnerHandoffSource?.handoffSummary
+    || loopRunnerHandoffSource?.preview?.handoffSummary
+    || loopRunnerHandoffSource?.nextAction?.handoffSummary
+    || null;
+  const dryRunIntentEligibilityRequestId = dryRunIntentHandoffSummary?.sourceRequestId || '';
+  const dryRunIntentEligibilityRoute = dryRunIntentHandoffSummary?.eligibilityRoute || '';
+  const dryRunIntentTransitionRoute = dryRunIntentEligibilityRequestId
+    ? `GET /api/code-agent/local-patch-request/dry-run-intent/${encodeURIComponent(dryRunIntentEligibilityRequestId)}/claimable-dry-run-preview`
+    : '';
+  const canInspectDryRunIntentEligibility = Boolean(
+    dryRunIntentHandoffSummary?.schema === 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1'
+    && (dryRunIntentEligibilityRequestId || dryRunIntentEligibilityRoute)
+  ) && !loading(`code-agent-validated-dry-run-intent-eligibility-${dryRunIntentEligibilityRequestId || 'route'}`);
+  const canPreviewDryRunIntentTransition = Boolean(
+    dryRunIntentHandoffSummary?.schema === 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1'
+    && (dryRunIntentEligibilityRequestId || dryRunIntentEligibilityRoute || dryRunIntentTransitionRoute)
+  ) && !loading(`code-agent-validated-dry-run-intent-transition-${dryRunIntentEligibilityRequestId || 'route'}`);
   const runnerToolSelectionPreviewView = buildAgentLoopRunnerToolSelectionPreviewView(loopRunnerToolSelectionPreview);
   const runnerObservationContinuationView = buildAgentLoopRunnerObservationContinuationView(loopRunnerObservationContinuation);
   const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
@@ -870,6 +906,8 @@ function CodeAgentPanel({
   const canInspectApprovedExecutionFlow = Boolean(approvedExecutionFlowInspectionKey)
     && !loading(`code-agent-approved-execution-flow-inspection-${approvedExecutionFlowInspectionKey}`);
   const approvedExecutionFlowInspectionView = buildApprovedExecutionFlowInspectionView(approvedExecutionFlowInspection);
+  const validatedDryRunIntentEligibilityView = buildValidatedDryRunIntentEligibilityView(validatedDryRunIntentEligibility);
+  const validatedDryRunIntentTransitionPreviewView = buildValidatedDryRunIntentTransitionPreviewView(validatedDryRunIntentTransitionPreview);
   const readinessReleaseBoundaryVisibility = localPatchRequest?.status === 'APPROVED_HELD'
     ? {
         status: 'RELEASE_REFUSAL_ONLY_VISIBLE',
@@ -1198,6 +1236,37 @@ function CodeAgentPanel({
           {agentLoopRunnerHandoffSummaryView.message && (
             <small>{agentLoopRunnerHandoffSummaryView.message}</small>
           )}
+          {dryRunIntentHandoffSummary?.schema === 'learnbot.code-agent.validated-dry-run-intent-review-handoff.v1' && (
+            <>
+              <button
+                type="button"
+                className="ghost-button compact-action"
+                disabled={!canInspectDryRunIntentEligibility}
+                onClick={() => onInspectValidatedDryRunIntentEligibility({
+                  requestId: dryRunIntentEligibilityRequestId,
+                  eligibilityRoute: dryRunIntentEligibilityRoute,
+                })}
+                title="Fetches the persisted validated dry-run intent eligibility read model only. It does not create, queue, push, claim, bypass approval, or mutate."
+              >
+                {loading(`code-agent-validated-dry-run-intent-eligibility-${dryRunIntentEligibilityRequestId || 'route'}`) ? <Loader2 className="spin" size={14} /> : <Eye size={14} />}
+                Inspect dry-run eligibility
+              </button>
+              <button
+                type="button"
+                className="ghost-button compact-action"
+                disabled={!canPreviewDryRunIntentTransition}
+                onClick={() => onPreviewValidatedDryRunIntentTransition({
+                  requestId: dryRunIntentEligibilityRequestId,
+                  eligibilityRoute: dryRunIntentEligibilityRoute,
+                  transitionRoute: dryRunIntentTransitionRoute,
+                })}
+                title="Fetches the disabled transition preview toward a future claimable dry-run request. It does not create, queue, push, claim, bypass approval, or mutate."
+              >
+                {loading(`code-agent-validated-dry-run-intent-transition-${dryRunIntentEligibilityRequestId || 'route'}`) ? <Loader2 className="spin" size={14} /> : <Eye size={14} />}
+                Preview claimable dry-run transition
+              </button>
+            </>
+          )}
           {runnerQueuedRequestId && (
             <button
               type="button"
@@ -1209,6 +1278,72 @@ function CodeAgentPanel({
               {loading(`code-agent-loop-runner-queued-observation-${runnerQueuedRequestId}`) ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
               Refresh read-only observation
             </button>
+          )}
+        </div>
+      )}
+      {validatedDryRunIntentEligibilityView.show && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{validatedDryRunIntentEligibilityView.headerText}</strong>
+            <Badge variant="outline">read only</Badge>
+          </div>
+          {validatedDryRunIntentEligibilityView.identityText && (
+            <small>{validatedDryRunIntentEligibilityView.identityText}</small>
+          )}
+          {validatedDryRunIntentEligibilityView.stateText && (
+            <small>{validatedDryRunIntentEligibilityView.stateText}</small>
+          )}
+          <small>{validatedDryRunIntentEligibilityView.disabledText}</small>
+          {validatedDryRunIntentEligibilityView.gateText && (
+            <small>{validatedDryRunIntentEligibilityView.gateText}</small>
+          )}
+          {validatedDryRunIntentEligibilityView.targetFilesText && (
+            <small>{validatedDryRunIntentEligibilityView.targetFilesText}</small>
+          )}
+          {validatedDryRunIntentEligibilityView.blockingText && (
+            <small>{validatedDryRunIntentEligibilityView.blockingText}</small>
+          )}
+          {validatedDryRunIntentEligibilityView.checkLines.map((line) => (
+            <small key={`validated-dry-run-eligibility-${line}`}>{line}</small>
+          ))}
+          {validatedDryRunIntentEligibilityView.message && (
+            <small>{validatedDryRunIntentEligibilityView.message}</small>
+          )}
+        </div>
+      )}
+      {validatedDryRunIntentTransitionPreviewView.show && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{validatedDryRunIntentTransitionPreviewView.headerText}</strong>
+            <Badge variant="outline">preview only</Badge>
+          </div>
+          {validatedDryRunIntentTransitionPreviewView.identityText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.identityText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.stateText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.stateText}</small>
+          )}
+          <small>{validatedDryRunIntentTransitionPreviewView.disabledText}</small>
+          {validatedDryRunIntentTransitionPreviewView.gateText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.gateText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.eligibilityText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.eligibilityText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.wouldBeText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.wouldBeText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.wouldBeDisabledText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.wouldBeDisabledText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.targetFilesText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.targetFilesText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.blockingText && (
+            <small>{validatedDryRunIntentTransitionPreviewView.blockingText}</small>
+          )}
+          {validatedDryRunIntentTransitionPreviewView.message && (
+            <small>{validatedDryRunIntentTransitionPreviewView.message}</small>
           )}
         </div>
       )}

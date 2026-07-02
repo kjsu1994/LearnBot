@@ -290,6 +290,11 @@ public class LocalAgentToolGatewayService {
                 "At least one target file must be present."
         ));
         checks.add(check(
+                "approvalRequestIdPresent",
+                hasText(input.get("approvalRequestId")),
+                "A persisted approval request id must be present before a patch mutation can be released."
+        ));
+        checks.add(check(
                 "expectedFilesPresent",
                 hasExpectedFiles(input.get("expectedFiles")),
                 "Expected file hashes must be present for context validation."
@@ -346,6 +351,7 @@ public class LocalAgentToolGatewayService {
                 .map(LocalAgentPatchExecutionReadinessCheck::message)
                 .toList();
         Map<String, Object> patchReleaseReadiness = patchReleaseReadiness(
+                input,
                 checks,
                 latestPatchDryRunOutput,
                 snapshotReadiness,
@@ -582,6 +588,13 @@ public class LocalAgentToolGatewayService {
         if (manifestId == null || manifestId.isBlank()) {
             throw new IllegalStateException("Approved execution sequence requires a managed snapshot manifest id.");
         }
+        String approvalRequestId = stringValue(mutationInput.get("approvalRequestId"));
+        String releasedApprovalRequestId = stringValue(releasedPatch.input().get("approvalRequestId"));
+        if (approvalRequestId == null || approvalRequestId.isBlank()
+                || releasedApprovalRequestId == null || releasedApprovalRequestId.isBlank()
+                || !approvalRequestId.equals(releasedApprovalRequestId)) {
+            throw new IllegalStateException("Approved execution sequence requires a matching persisted approval request id.");
+        }
         UUID sourceRequestId = releasedPatch.id();
         OffsetDateTime baseCreatedAt = OffsetDateTime.now();
         List<LocalAgentToolRequest> followUpRequests = List.of(
@@ -667,6 +680,7 @@ public class LocalAgentToolGatewayService {
         input.put("workspaceId", releasedPatch.workspaceId().toString());
         input.put("sourceRequestId", sourceRequestId.toString());
         input.put("releaseAttemptId", releaseAttemptId.toString());
+        input.put("approvalRequestId", stringValue(releasedPatch.input().get("approvalRequestId")));
         input.put("releaseExecutionSequenceSchema", "learnbot.local-agent.approved-execution-sequence.v1");
         input.put("publicationEnabled", false);
         input.put("acknowledgementSaveEnabled", false);
@@ -1079,6 +1093,7 @@ public class LocalAgentToolGatewayService {
     }
 
     private Map<String, Object> patchReleaseReadiness(
+            Map<String, Object> sourceInput,
             List<LocalAgentPatchExecutionReadinessCheck> checks,
             Map<String, Object> dryRunOutput,
             Map<String, Object> snapshotReadiness,
@@ -1090,6 +1105,11 @@ public class LocalAgentToolGatewayService {
                 "explicitApproval",
                 checkPassed(checks, "approvedHeld"),
                 "Patch request must be explicitly approved and held."
+        ));
+        prerequisites.add(releasePrerequisite(
+                "approvalRequestPersisted",
+                checkPassed(checks, "approvalRequestIdPresent"),
+                "Persisted approval request id must be visible before mutation release."
         ));
         prerequisites.add(releasePrerequisite(
                 "repositoryVerified",
@@ -1133,6 +1153,7 @@ public class LocalAgentToolGatewayService {
         result.put("releaseGateEnabled", false);
         result.put("mutationEnabled", false);
         result.put("blocking", true);
+        result.put("approvalPersistence", approvalPersistenceSummary(sourceInput));
         result.put("message", prerequisitesPassed
                 ? "All pre-apply safety prerequisites are visible, but patch execution remains disabled by the release gate."
                 : "Patch execution prerequisites are incomplete and the release gate remains disabled.");
@@ -1154,6 +1175,7 @@ public class LocalAgentToolGatewayService {
         result.put("writeHelperEnabled", false);
         result.put("mutationEnabled", false);
         result.put("blocking", true);
+        result.put("approvalPersistence", patchReleaseReadiness.get("approvalPersistence"));
         result.put("sourceRequestRelationship", dryRunOutput != null
                 ? "LINKED_DRY_RUN_OUTPUT_OBSERVED"
                 : "NOT_OBSERVED");
@@ -1169,6 +1191,22 @@ public class LocalAgentToolGatewayService {
                 "Keep rollback.restore validation and user approval mandatory.",
                 "Emit post-write hash observations and run allowlisted verification before final answer."
         ));
+        return result;
+    }
+
+    private Map<String, Object> approvalPersistenceSummary(Map<String, Object> sourceInput) {
+        Map<String, Object> input = sourceInput == null ? Map.of() : sourceInput;
+        Object approvalRequestId = input.get("approvalRequestId");
+        boolean approvalRequestIdPresent = approvalRequestId instanceof String text && !text.isBlank();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.local-agent.patch-approval-persistence.v1");
+        result.put("approvalRequestId", approvalRequestId);
+        result.put("approvalRequestIdPresent", approvalRequestIdPresent);
+        result.put("approvalPersistenceRequired", Boolean.TRUE.equals(input.get("approvalPersistenceRequired")));
+        result.put("approvalPersisted", Boolean.TRUE.equals(input.get("approvalPersisted")));
+        result.put("releaseBlockingReason", approvalRequestIdPresent
+                ? "Fresh Local Agent release evidence is required before the approved patch can become claimable."
+                : "Persisted approval request id is missing, so mutation release is blocked.");
         return result;
     }
 
@@ -5081,6 +5119,7 @@ public class LocalAgentToolGatewayService {
         if (!Boolean.TRUE.equals(inspection.get("ordered"))
                 || !Boolean.TRUE.equals(inspection.get("identityConsistent"))
                 || !Boolean.TRUE.equals(inspection.get("releaseAttemptLinked"))
+                || !Boolean.TRUE.equals(inspection.get("approvalRequestLinked"))
                 || !Boolean.TRUE.equals(inspection.get("allTerminal"))) {
             return;
         }
@@ -5100,7 +5139,7 @@ public class LocalAgentToolGatewayService {
         }
         Map<String, Object> finalResultHandoff = releaseAttemptRepository.find(releaseAttemptId)
                 .filter(attempt -> attempt.userId().equals(response.userId()))
-                .map(attempt -> approvedExecutionFlowFinalResultHandoff(attempt, source.input()))
+                .map(attempt -> approvedExecutionFlowFinalResultHandoff(attempt, source.input(), inspection))
                 .orElse(Map.of());
         loopTimelineRepository.appendApprovedExecutionFlowCompleted(
                 response.userId(),
@@ -5118,8 +5157,12 @@ public class LocalAgentToolGatewayService {
 
     private Map<String, Object> approvedExecutionFlowFinalResultHandoff(
             LocalAgentPatchReleaseAttempt attempt,
-            Map<String, Object> sourceInput
+            Map<String, Object> sourceInput,
+            Map<String, Object> approvedFlowInspection
     ) {
+        Map<String, Object> postRetryVerification = mapValue(
+                approvedFlowInspection == null ? null : approvedFlowInspection.get("postRetryVerification")
+        );
         Map<String, Object> acceptedSummary = releaseAttemptAcceptedMutationObservationSummary(attempt);
         Map<String, Object> acceptedReadiness = releaseAttemptAcceptedMutationObservationReadiness(attempt);
         Map<String, Object> finalMutationReportSummary = LocalAgentFinalMutationReportSummaryBuilder.build(
@@ -5130,7 +5173,8 @@ public class LocalAgentToolGatewayService {
         Map<String, Object> ragFreshnessMarker = LocalAgentRagFreshnessMarkerBuilder.build(
                 attempt,
                 sourceInput == null ? Map.of() : sourceInput,
-                finalMutationReportSummary
+                finalMutationReportSummary,
+                postRetryVerification
         );
         Map<String, Object> publicationHandoff = LocalAgentFinalAnswerPublicationHandoffBuilder.build(
                 attempt,
@@ -5155,10 +5199,26 @@ public class LocalAgentToolGatewayService {
         result.put("acceptedMutationObserved", finalMutationReportSummary.get("acceptedMutationObserved"));
         result.put("acceptedMutationObservationCount", finalMutationReportSummary.get("acceptedMutationObservationCount"));
         result.put("acceptedMutationObservationAcceptedCount", finalMutationReportSummary.get("acceptedMutationObservationAcceptedCount"));
+        result.put("postRetryVerification", postRetryVerification);
+        result.put("postRetryVerificationObserved", postRetryVerification.get("observed"));
+        result.put("postRetryVerificationPassed", postRetryVerification.get("passed"));
+        result.put("postRetryVerificationApprovalLinked", postRetryVerification.get("approvalRequestLinked"));
+        result.put("postRetryVerificationReleaseLinked", postRetryVerification.get("releaseAttemptLinked"));
+        result.put("postRetryVerificationPartialReindexMarkerRequired", postRetryVerification.get("partialReindexMarkerRequired"));
         result.put("ragFreshnessMarkerStatus", ragFreshnessMarker.get("status"));
         result.put("staleIndexRiskVisible", ragFreshnessMarker.get("staleIndexRiskVisible"));
         result.put("finalAnswerMustDiscloseStaleIndex", ragFreshnessMarker.get("finalAnswerMustDiscloseStaleIndex"));
         result.put("targetFiles", ragFreshnessMarker.get("targetFiles"));
+        Map<String, Object> partialReindexPlan = mapValue(ragFreshnessMarker.get("partialReindexPlan"));
+        result.put("partialReindexPlan", partialReindexPlan);
+        result.put("partialReindexPlanStatus", partialReindexPlan.get("status"));
+        result.put("partialReindexPlanTargetFiles", partialReindexPlan.get("targetFiles"));
+        result.put("partialReindexPlanFreshnessAction", partialReindexPlan.get("freshnessAction"));
+        Map<String, Object> partialReindexEnqueueBoundary = mapValue(partialReindexPlan.get("partialReindexEnqueueBoundary"));
+        result.put("partialReindexEnqueueBoundary", partialReindexEnqueueBoundary);
+        result.put("partialReindexEnqueueBoundaryStatus", partialReindexEnqueueBoundary.get("status"));
+        result.put("partialReindexEnqueueReady", partialReindexEnqueueBoundary.get("ready"));
+        result.put("partialReindexRepositoryId", partialReindexEnqueueBoundary.get("repositoryId"));
         result.put("finalAnswerPublicationHandoffStatus", publicationHandoff.get("status"));
         result.put("finalAnswerPublicationHandoffAvailable", publicationHandoff.get("handoffAvailable"));
         result.put("staleIndexDisclosureModeled", publicationHandoff.get("staleIndexDisclosureModeled"));
@@ -5176,6 +5236,11 @@ public class LocalAgentToolGatewayService {
         result.put("mutationEnabled", false);
         result.put("message", "Approved execution completed and audit-only final-result handoff context is modeled, but publication, final answer delivery, acknowledgement save, RAG freshness update, and follow-up mutation remain disabled.");
         return Map.copyOf(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
     }
 
     private void appendAgentUnavailableStopOutcome(LocalAgentToolRequest request) {

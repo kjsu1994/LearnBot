@@ -6,6 +6,7 @@ import com.learnbot.dto.CodeAgentLocalPatchRequest;
 import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopPreviewRequest;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
+import com.learnbot.dto.CodeAgentValidatedPatchDryRunPreviewRequest;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -1120,5 +1122,224 @@ class CodeAgentControllerTest {
                 "--- a/src/App.java\n+++ b/src/App.java\n",
                 List.of("src/App.java")
         );
+    }
+
+    @Test
+    void localPatchDryRunPreviewResolvesRepositorySpaceAndDelegatesValidatedHandoff() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                localPatchRequestService,
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> handoff = Map.of(
+                "schema", "learnbot.local-agent.validated-revised-patch-dry-run-handoff.v1",
+                "status", "READY_DRY_RUN_QUEUE_DISABLED",
+                "patchApplyInput", Map.of("dryRunOnly", true, "mutationAllowed", false)
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(localPatchRequestService.previewValidatedDryRunRequest(
+                repositoryId,
+                repositorySpaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                handoff
+        )).thenReturn(Map.of("status", "READY_QUEUE_PREVIEW_DISABLED"));
+
+        Map<String, Object> response = controller.localPatchDryRunPreview(new CodeAgentValidatedPatchDryRunPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                loopId,
+                agentId,
+                workspaceId,
+                handoff
+        ));
+
+        assertThat(response).containsEntry("status", "READY_QUEUE_PREVIEW_DISABLED");
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(localPatchRequestService).previewValidatedDryRunRequest(
+                repositoryId,
+                repositorySpaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                handoff
+        );
+    }
+
+    @Test
+    void localPatchDryRunIntentResolvesRepositorySpaceAndPersistsValidatedHandoffIntent() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                localPatchRequestService,
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> handoff = Map.of(
+                "schema", "learnbot.local-agent.validated-revised-patch-dry-run-handoff.v1",
+                "status", "READY_DRY_RUN_QUEUE_DISABLED",
+                "patchApplyInput", Map.of("dryRunOnly", true, "mutationAllowed", false)
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(localPatchRequestService.persistValidatedDryRunIntent(
+                repositoryId,
+                repositorySpaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                handoff
+        )).thenReturn(Map.of("status", "PERSISTED_APPROVAL_REQUIRED_NON_CLAIMABLE"));
+
+        Map<String, Object> response = controller.localPatchDryRunIntent(new CodeAgentValidatedPatchDryRunPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                loopId,
+                agentId,
+                workspaceId,
+                handoff
+        ));
+
+        assertThat(response).containsEntry("status", "PERSISTED_APPROVAL_REQUIRED_NON_CLAIMABLE");
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(localPatchRequestService).persistValidatedDryRunIntent(
+                repositoryId,
+                repositorySpaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                handoff
+        );
+    }
+
+    @Test
+    void localPatchDryRunIntentEligibilityDelegatesForCurrentUser() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                localPatchRequestService,
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                mock(CodeIndexingService.class),
+                mock(AuthService.class),
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(localPatchRequestService.inspectValidatedDryRunIntentEligibility(userId, requestId))
+                .thenReturn(Map.of("status", "READY_DRY_RUN_RELEASE_DISABLED"));
+
+        Map<String, Object> response = controller.localPatchDryRunIntentEligibility(requestId);
+
+        assertThat(response).containsEntry("status", "READY_DRY_RUN_RELEASE_DISABLED");
+        verify(localPatchRequestService).inspectValidatedDryRunIntentEligibility(userId, requestId);
+    }
+
+    @Test
+    void localPatchDryRunIntentClaimableDryRunPreviewDelegatesForCurrentUser() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                localPatchRequestService,
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                mock(CodeIndexingService.class),
+                mock(AuthService.class),
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(localPatchRequestService.previewValidatedDryRunIntentClaimableDryRun(userId, requestId))
+                .thenReturn(Map.of("status", "READY_CLAIMABLE_DRY_RUN_TRANSITION_DISABLED"));
+
+        Map<String, Object> response = controller.localPatchDryRunIntentClaimableDryRunPreview(requestId);
+
+        assertThat(response).containsEntry("status", "READY_CLAIMABLE_DRY_RUN_TRANSITION_DISABLED");
+        verify(localPatchRequestService).previewValidatedDryRunIntentClaimableDryRun(userId, requestId);
+    }
+
+    @Test
+    void localPatchDryRunIntentClaimableDryRunReleaseDelegatesForCurrentUser() {
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                localPatchRequestService,
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                mock(CodeIndexingService.class),
+                mock(AuthService.class),
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(localPatchRequestService.releaseValidatedDryRunIntentClaimableDryRun(userId, requestId))
+                .thenReturn(Map.of("status", "REFUSED_CLAIMABLE_DRY_RUN_CREATION_DISABLED"));
+
+        Map<String, Object> response = controller.localPatchDryRunIntentClaimableDryRunRelease(requestId);
+
+        assertThat(response).containsEntry("status", "REFUSED_CLAIMABLE_DRY_RUN_CREATION_DISABLED");
+        verify(localPatchRequestService).releaseValidatedDryRunIntentClaimableDryRun(userId, requestId);
     }
 }

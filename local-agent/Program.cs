@@ -36,7 +36,7 @@ internal sealed partial class LearnBotLocalAgent
             "status" => AgentStatus(),
             "doctor" => Doctor(),
             "open" => Open(),
-            "self-test" => SelfTest(args[1..]),
+            "self-test" => await SelfTest(args[1..]),
             "help" or "--help" or "-h" => Help(),
             _ => Unknown(args[0])
         };
@@ -55,13 +55,17 @@ internal sealed partial class LearnBotLocalAgent
         }
 
         var config = LoadConfigOrDefault();
-        config.ServerUrl = server.TrimEnd('/');
-        config.AgentId = parsedAgentId;
-        config.Token = token;
-        config.Version = Version;
-        config.Transport = transport;
-        SaveConfig(config);
-        await SendHeartbeat(config);
+        var candidate = new AgentConfig
+        {
+            ServerUrl = server.TrimEnd('/'),
+            AgentId = parsedAgentId,
+            Token = token,
+            Version = Version,
+            Transport = transport,
+            Workspaces = config.Workspaces
+        };
+        await SendHeartbeat(candidate);
+        SaveConfig(candidate);
         Console.WriteLine("paired");
         return 0;
     }
@@ -292,6 +296,8 @@ internal sealed partial class LearnBotLocalAgent
         return args[0].ToLowerInvariant() switch
         {
             "read" => FileReadCommand(args[1..]),
+            "tree" => FileTreeCommand(args[1..]),
+            "search" => FileSearchCommand(args[1..]),
             _ => Unknown("file " + args[0])
         };
     }
@@ -307,6 +313,57 @@ internal sealed partial class LearnBotLocalAgent
         }
 
         var result = ReadWorkspaceFile(LoadConfigOrDefault(), workspaceId, path, DefaultMaxReadBytes);
+        if (!result.Success)
+        {
+            Console.Error.WriteLine(result.Error);
+            return 1;
+        }
+        Console.WriteLine(JsonSerializer.Serialize(result.Output, JsonOptions));
+        return 0;
+    }
+
+    private int FileSearchCommand(string[] args)
+    {
+        var workspaceIdText = GetOption(args, "--workspace-id");
+        var query = GetOption(args, "--query");
+        if (!Guid.TryParse(workspaceIdText, out var workspaceId) || string.IsNullOrWhiteSpace(query))
+        {
+            Console.Error.WriteLine("Usage: learnbot file search --workspace-id <workspace-id> --query <text> [--path <relative-path>] [--max-matches <count>] [--max-files <count>]");
+            return 2;
+        }
+
+        var result = SearchWorkspaceText(
+            LoadConfigOrDefault(),
+            workspaceId,
+            query,
+            GetOption(args, "--path") ?? ".",
+            ParseInt(GetOption(args, "--max-matches"), DefaultMaxSearchMatches),
+            ParseInt(GetOption(args, "--max-files"), DefaultMaxSearchFiles),
+            ParseInt(GetOption(args, "--max-bytes-per-file"), DefaultMaxSearchFileBytes));
+        if (!result.Success)
+        {
+            Console.Error.WriteLine(result.Error);
+            return 1;
+        }
+        Console.WriteLine(JsonSerializer.Serialize(result.Output, JsonOptions));
+        return 0;
+    }
+
+    private int FileTreeCommand(string[] args)
+    {
+        var workspaceIdText = GetOption(args, "--workspace-id");
+        if (!Guid.TryParse(workspaceIdText, out var workspaceId))
+        {
+            Console.Error.WriteLine("Usage: learnbot file tree --workspace-id <workspace-id> [--path <relative-path>] [--max-entries <count>] [--max-depth <depth>]");
+            return 2;
+        }
+
+        var result = ReadWorkspaceTree(
+            LoadConfigOrDefault(),
+            workspaceId,
+            GetOption(args, "--path") ?? ".",
+            ParseInt(GetOption(args, "--max-entries"), DefaultMaxTreeEntries),
+            ParseInt(GetOption(args, "--max-depth"), DefaultMaxTreeDepth));
         if (!result.Success)
         {
             Console.Error.WriteLine(result.Error);
@@ -536,7 +593,7 @@ internal sealed partial class LearnBotLocalAgent
         {
             agentId = config.AgentId,
             version = config.Version,
-            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore" },
+            capabilities = new[] { "agent.status", "agent.doctor", "workspace.list", "workspace.tree", "workspace.search", "file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore" },
             workspaces = config.Workspaces.Select(workspace => new
             {
                 workspace.WorkspaceId,
@@ -615,6 +672,44 @@ internal sealed partial class LearnBotLocalAgent
                 break;
             case "workspace.list":
                 output["workspaces"] = config.Workspaces;
+                break;
+            case "workspace.tree":
+                var tree = ReadWorkspaceTree(
+                    config,
+                    TryGuid(request, "workspaceId"),
+                    TryInputString(request, "path") ?? ".",
+                    TryInputInt(request, "maxEntries") ?? DefaultMaxTreeEntries,
+                    TryInputInt(request, "maxDepth") ?? DefaultMaxTreeDepth);
+                if (tree.Success)
+                {
+                    foreach (var item in tree.Output) output[item.Key] = item.Value;
+                }
+                else
+                {
+                    status = tree.Status;
+                    failureCode = tree.FailureCode;
+                    error = tree.Error;
+                }
+                break;
+            case "workspace.search":
+                var search = SearchWorkspaceText(
+                    config,
+                    TryGuid(request, "workspaceId"),
+                    TryInputString(request, "query") ?? "",
+                    TryInputString(request, "path") ?? ".",
+                    TryInputInt(request, "maxMatches") ?? DefaultMaxSearchMatches,
+                    TryInputInt(request, "maxFiles") ?? DefaultMaxSearchFiles,
+                    TryInputInt(request, "maxBytesPerFile") ?? DefaultMaxSearchFileBytes);
+                if (search.Success)
+                {
+                    foreach (var item in search.Output) output[item.Key] = item.Value;
+                }
+                else
+                {
+                    status = search.Status;
+                    failureCode = search.FailureCode;
+                    error = search.Error;
+                }
                 break;
             case "file.read":
                 var read = ReadWorkspaceFile(
@@ -713,6 +808,328 @@ internal sealed partial class LearnBotLocalAgent
     private const int DefaultMaxDiffBytes = 200_000;
     private const int AbsoluteMaxDiffBytes = 512_000;
     private const int AbsoluteMaxPatchBytes = 512_000;
+    private const int DefaultMaxTreeEntries = 200;
+    private const int AbsoluteMaxTreeEntries = 1000;
+    private const int DefaultMaxTreeDepth = 4;
+    private const int AbsoluteMaxTreeDepth = 12;
+    private const int DefaultMaxSearchMatches = 25;
+    private const int AbsoluteMaxSearchMatches = 200;
+    private const int DefaultMaxSearchFiles = 300;
+    private const int AbsoluteMaxSearchFiles = 2000;
+    private const int DefaultMaxSearchFileBytes = 200_000;
+    private const int AbsoluteMaxSearchFileBytes = 512_000;
+
+    private static readonly HashSet<string> DefaultTreeExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git",
+        ".idea",
+        ".vs",
+        ".vscode",
+        "bin",
+        "build",
+        "dist",
+        "node_modules",
+        "obj",
+        "out",
+        "target"
+    };
+
+    private ToolResult ReadWorkspaceTree(AgentConfig config, Guid? workspaceId, string requestedPath, int maxEntries, int maxDepth)
+    {
+        var workspace = ResolveApprovedWorkspace(config, workspaceId);
+        if (!workspace.Success)
+        {
+            return ToolResult.Fail(workspace.Status, workspace.FailureCode!, workspace.Error!);
+        }
+
+        var root = workspace.Root!;
+        var target = Path.GetFullPath(Path.Combine(root, string.IsNullOrWhiteSpace(requestedPath) ? "." : requestedPath));
+        if (!IsWithin(root, target))
+        {
+            return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Requested path escapes the approved workspace.");
+        }
+        if (!Directory.Exists(target))
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "Tree path was not found or is not a directory.");
+        }
+
+        var cappedEntries = Math.Clamp(maxEntries <= 0 ? DefaultMaxTreeEntries : maxEntries, 1, AbsoluteMaxTreeEntries);
+        var cappedDepth = Math.Clamp(maxDepth <= 0 ? DefaultMaxTreeDepth : maxDepth, 0, AbsoluteMaxTreeDepth);
+        var entries = new List<Dictionary<string, object?>>();
+        var skippedDirectories = new List<string>();
+        var truncated = false;
+
+        WalkWorkspaceTree(root, target, 0, cappedDepth, cappedEntries, entries, skippedDirectories, ref truncated);
+
+        return ToolResult.Ok(new Dictionary<string, object?>
+        {
+            ["workspaceId"] = workspace.Workspace!.WorkspaceId,
+            ["path"] = target,
+            ["relativePath"] = RelativeWorkspacePath(root, target),
+            ["entries"] = entries,
+            ["entryCount"] = entries.Count,
+            ["maxEntries"] = cappedEntries,
+            ["maxDepth"] = cappedDepth,
+            ["truncated"] = truncated,
+            ["excludedDirectories"] = DefaultTreeExcludedDirectories.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+            ["skippedDirectories"] = skippedDirectories
+        });
+    }
+
+    private static void WalkWorkspaceTree(
+        string root,
+        string directory,
+        int depth,
+        int maxDepth,
+        int maxEntries,
+        List<Dictionary<string, object?>> entries,
+        List<string> skippedDirectories,
+        ref bool truncated)
+    {
+        if (entries.Count >= maxEntries)
+        {
+            truncated = true;
+            return;
+        }
+
+        IEnumerable<string> children;
+        try
+        {
+            children = Directory.EnumerateFileSystemEntries(directory)
+                .OrderBy(path => Directory.Exists(path) ? 0 : 1)
+                .ThenBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            skippedDirectories.Add(RelativeWorkspacePath(root, directory));
+            return;
+        }
+
+        foreach (var child in children)
+        {
+            if (entries.Count >= maxEntries)
+            {
+                truncated = true;
+                return;
+            }
+            if (!IsWithin(root, Path.GetFullPath(child)))
+            {
+                continue;
+            }
+
+            var isDirectory = Directory.Exists(child);
+            var relativePath = RelativeWorkspacePath(root, child);
+            if (isDirectory && DefaultTreeExcludedDirectories.Contains(Path.GetFileName(child)))
+            {
+                skippedDirectories.Add(relativePath);
+                continue;
+            }
+
+            entries.Add(new Dictionary<string, object?>
+            {
+                ["path"] = relativePath,
+                ["type"] = isDirectory ? "directory" : "file",
+                ["bytes"] = isDirectory ? null : SafeFileLength(child)
+            });
+
+            if (isDirectory)
+            {
+                if (depth >= maxDepth)
+                {
+                    truncated = true;
+                    continue;
+                }
+                WalkWorkspaceTree(root, child, depth + 1, maxDepth, maxEntries, entries, skippedDirectories, ref truncated);
+            }
+        }
+    }
+
+    private static long? SafeFileLength(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string RelativeWorkspacePath(string root, string path)
+    {
+        var relativePath = Path.GetRelativePath(root, path).Replace('\\', '/');
+        return relativePath == "." ? "." : relativePath;
+    }
+
+    private ToolResult SearchWorkspaceText(
+        AgentConfig config,
+        Guid? workspaceId,
+        string query,
+        string requestedPath,
+        int maxMatches,
+        int maxFiles,
+        int maxBytesPerFile)
+    {
+        var workspace = ResolveApprovedWorkspace(config, workspaceId);
+        if (!workspace.Success)
+        {
+            return ToolResult.Fail(workspace.Status, workspace.FailureCode!, workspace.Error!);
+        }
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "query is required.");
+        }
+
+        var root = workspace.Root!;
+        var target = Path.GetFullPath(Path.Combine(root, string.IsNullOrWhiteSpace(requestedPath) ? "." : requestedPath));
+        if (!IsWithin(root, target))
+        {
+            return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Requested path escapes the approved workspace.");
+        }
+
+        var cappedMatches = Math.Clamp(maxMatches <= 0 ? DefaultMaxSearchMatches : maxMatches, 1, AbsoluteMaxSearchMatches);
+        var cappedFiles = Math.Clamp(maxFiles <= 0 ? DefaultMaxSearchFiles : maxFiles, 1, AbsoluteMaxSearchFiles);
+        var cappedBytes = Math.Clamp(maxBytesPerFile <= 0 ? DefaultMaxSearchFileBytes : maxBytesPerFile, 1, AbsoluteMaxSearchFileBytes);
+        var files = Directory.Exists(target)
+            ? EnumerateSearchFiles(root, target, cappedFiles + 1).ToList()
+            : File.Exists(target)
+                ? [target]
+                : [];
+        if (files.Count == 0)
+        {
+            return ToolResult.Fail("FAILED", "TOOL_FAILED", "Search path was not found.");
+        }
+
+        var matches = new List<Dictionary<string, object?>>();
+        var scannedFiles = 0;
+        var skippedFiles = 0;
+        var truncated = files.Count > cappedFiles;
+        foreach (var file in files.Take(cappedFiles))
+        {
+            var length = SafeFileLength(file);
+            if (length is null || length.Value > cappedBytes)
+            {
+                skippedFiles++;
+                continue;
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(file);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                skippedFiles++;
+                continue;
+            }
+            if (bytes.Any(value => value == 0))
+            {
+                skippedFiles++;
+                continue;
+            }
+
+            scannedFiles++;
+            var text = Encoding.UTF8.GetString(bytes);
+            var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+            {
+                var line = lines[lineIndex];
+                var column = line.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+                if (column < 0)
+                {
+                    continue;
+                }
+
+                matches.Add(new Dictionary<string, object?>
+                {
+                    ["path"] = RelativeWorkspacePath(root, file),
+                    ["line"] = lineIndex + 1,
+                    ["column"] = column + 1,
+                    ["snippet"] = TrimSearchSnippet(line)
+                });
+                if (matches.Count >= cappedMatches)
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+            if (matches.Count >= cappedMatches)
+            {
+                break;
+            }
+        }
+
+        return ToolResult.Ok(new Dictionary<string, object?>
+        {
+            ["workspaceId"] = workspace.Workspace!.WorkspaceId,
+            ["path"] = target,
+            ["relativePath"] = RelativeWorkspacePath(root, target),
+            ["query"] = query,
+            ["matches"] = matches,
+            ["matchCount"] = matches.Count,
+            ["scannedFiles"] = scannedFiles,
+            ["skippedFiles"] = skippedFiles,
+            ["maxMatches"] = cappedMatches,
+            ["maxFiles"] = cappedFiles,
+            ["maxBytesPerFile"] = cappedBytes,
+            ["truncated"] = truncated
+        });
+    }
+
+    private static IEnumerable<string> EnumerateSearchFiles(string root, string directory, int maxFiles)
+    {
+        var pending = new Queue<string>();
+        pending.Enqueue(directory);
+        var yielded = 0;
+        while (pending.Count > 0 && yielded < maxFiles)
+        {
+            var current = pending.Dequeue();
+            IEnumerable<string> children;
+            try
+            {
+                children = Directory.EnumerateFileSystemEntries(current)
+                    .OrderBy(path => Directory.Exists(path) ? 0 : 1)
+                    .ThenBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                var fullPath = Path.GetFullPath(child);
+                if (!IsWithin(root, fullPath))
+                {
+                    continue;
+                }
+                if (Directory.Exists(fullPath))
+                {
+                    if (!DefaultTreeExcludedDirectories.Contains(Path.GetFileName(fullPath)))
+                    {
+                        pending.Enqueue(fullPath);
+                    }
+                    continue;
+                }
+                yielded++;
+                yield return fullPath;
+                if (yielded >= maxFiles)
+                {
+                    yield break;
+                }
+            }
+        }
+    }
+
+    private static string TrimSearchSnippet(string line)
+    {
+        var trimmed = line.Trim();
+        return trimmed.Length <= 240 ? trimmed : trimmed[..240];
+    }
 
     private ToolResult ReadWorkspaceFile(AgentConfig config, Guid? workspaceId, string requestedPath, int maxBytes)
     {
@@ -2176,7 +2593,7 @@ internal sealed partial class LearnBotLocalAgent
     private static bool PathEquals(string left, string right) =>
         string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
-    private static int SelfTest(string[] args)
+    private static async Task<int> SelfTest(string[] args)
     {
         if (args.Length == 0)
         {
@@ -2222,9 +2639,65 @@ internal sealed partial class LearnBotLocalAgent
         {
             return SelfTestApprovedServerQueueFlowContract(GetOption(args, "--report"));
         }
+        if (string.Equals(args[0], "approved-server-queue-second-attempt-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestApprovedServerQueueSecondAttemptContract();
+        }
         if (string.Equals(args[0], "cli-status-doctor-contract", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestCliStatusDoctorContract();
+        }
+        if (string.Equals(args[0], "pair-atomic-config-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return await SelfTestPairAtomicConfigContract();
+        }
+        if (string.Equals(args[0], "workspace-tree-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWorkspaceTreeContract();
+        }
+        if (string.Equals(args[0], "workspace-search-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWorkspaceSearchContract();
+        }
+        if (string.Equals(args[0], "read-only-candidate-selection-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestReadOnlyCandidateSelectionContract();
+        }
+        if (string.Equals(args[0], "multi-file-read-report-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestMultiFileReadReportContract();
+        }
+        if (string.Equals(args[0], "patch-test-retry-decision-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchTestRetryDecisionContract();
+        }
+        if (string.Equals(args[0], "revised-patch-proposal-plan-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestRevisedPatchProposalPlanContract();
+        }
+        if (string.Equals(args[0], "local-model-revised-patch-request-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestLocalModelRevisedPatchRequestContract();
+        }
+        if (string.Equals(args[0], "local-model-revised-patch-output-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestLocalModelRevisedPatchOutputContract();
+        }
+        if (string.Equals(args[0], "validated-revised-patch-dry-run-handoff-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestValidatedRevisedPatchDryRunHandoffContract();
+        }
+        if (string.Equals(args[0], "patch-test-second-attempt-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestPatchTestSecondAttemptContract();
+        }
+        if (string.Equals(args[0], "revised-patch-approval-request-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestRevisedPatchApprovalRequestContract();
+        }
+        if (string.Equals(args[0], "revised-patch-approval-gate-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestRevisedPatchApprovalGateContract();
         }
         if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
         {
@@ -2312,6 +2785,244 @@ internal sealed partial class LearnBotLocalAgent
                 catch
                 {
                     // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static async Task<int> SelfTestPairAtomicConfigContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-pair-atomic-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var configPath = Path.Combine(agentRoot, "agent.json");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", configPath);
+
+            var app = new LearnBotLocalAgent();
+            var failedWithoutExistingConfig = await ExpectPairHeartbeatFailure(app);
+            var noConfigWritten = !File.Exists(configPath);
+
+            var existing = new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "old-secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(Guid.Parse("33333333-3333-3333-3333-333333333333"), "workspace", root, true)]
+            };
+            app.SaveConfig(existing);
+
+            var failedWithExistingConfig = await ExpectPairHeartbeatFailure(app);
+            var preserved = app.LoadConfigOrDefault();
+            var existingConfigPreserved = preserved.ServerUrl == existing.ServerUrl
+                && preserved.AgentId == existing.AgentId
+                && preserved.Token == existing.Token
+                && preserved.Transport == existing.Transport
+                && preserved.Workspaces.Count == 1;
+
+            if (!failedWithoutExistingConfig || !noConfigWritten || !failedWithExistingConfig || !existingConfigPreserved)
+            {
+                Console.Error.WriteLine("pair atomic config contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("pair-atomic-config-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static async Task<bool> ExpectPairHeartbeatFailure(LearnBotLocalAgent app)
+    {
+        try
+        {
+            _ = await app.Run([
+                "pair",
+                "--server", "http://127.0.0.1:9",
+                "--agent-id", "11111111-1111-1111-1111-111111111111",
+                "--token", "new-secret-token",
+                "--transport", "polling"
+            ]);
+            return false;
+        }
+        catch (HttpRequestException)
+        {
+            return true;
+        }
+    }
+
+    private static int SelfTestWorkspaceTreeContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-workspace-tree-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "src", "Features"));
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, ".git"));
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "node_modules", "pkg"));
+            File.WriteAllText(Path.Combine(workspaceRoot, "README.md"), "# Project\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "src", "App.cs"), "class App {}\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "src", "Features", "Feature.cs"), "class Feature {}\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "node_modules", "pkg", "index.js"), "ignored\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(root, "agent", "agent.json"));
+            var config = new AgentConfig
+            {
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            };
+            var agent = new LearnBotLocalAgent();
+            var tree = agent.ReadWorkspaceTree(config, workspaceId, ".", 10, 3);
+            var limited = agent.ReadWorkspaceTree(config, workspaceId, ".", 2, 3);
+            var escaped = agent.ReadWorkspaceTree(config, workspaceId, "..", 10, 3);
+
+            var entries = tree.Output.TryGetValue("entries", out var rawEntries)
+                ? rawEntries as List<Dictionary<string, object?>>
+                : null;
+            var skipped = tree.Output.TryGetValue("skippedDirectories", out var rawSkipped)
+                ? rawSkipped as List<string>
+                : null;
+            var paths = entries?.Select(item => item.TryGetValue("path", out var value) ? value?.ToString() : null).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? [];
+
+            var ok = tree.Success
+                && entries is not null
+                && paths.Contains("README.md")
+                && paths.Contains("src")
+                && paths.Contains("src/App.cs")
+                && paths.Contains("src/Features/Feature.cs")
+                && !paths.Contains(".git")
+                && !paths.Contains("node_modules")
+                && skipped is not null
+                && skipped.Contains(".git")
+                && skipped.Contains("node_modules")
+                && limited.Success
+                && limited.Output.TryGetValue("truncated", out var truncated)
+                && truncated is true
+                && !escaped.Success
+                && escaped.FailureCode == "PATH_ESCAPE";
+            if (!ok)
+            {
+                Console.Error.WriteLine(tree.Error ?? limited.Error ?? escaped.Error ?? "workspace tree contract self-test failed");
+                return 1;
+            }
+
+            Console.WriteLine("workspace-tree-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWorkspaceSearchContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-workspace-search-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "src", "Features"));
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "node_modules", "pkg"));
+            File.WriteAllText(Path.Combine(workspaceRoot, "README.md"), "Search target lives here.\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "src", "App.cs"), "class App {\n    string SearchTarget = \"one\";\n}\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "src", "Features", "Feature.cs"), "class Feature {\n    string searchtarget = \"two\";\n}\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(Path.Combine(workspaceRoot, "node_modules", "pkg", "ignored.js"), "SearchTarget should not be returned.\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllBytes(Path.Combine(workspaceRoot, "binary.dat"), [0, 1, 2, 3]);
+
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(root, "agent", "agent.json"));
+            var config = new AgentConfig
+            {
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            };
+            var agent = new LearnBotLocalAgent();
+            var search = agent.SearchWorkspaceText(config, workspaceId, "SearchTarget", ".", 10, 20, 4096);
+            var limited = agent.SearchWorkspaceText(config, workspaceId, "SearchTarget", ".", 1, 20, 4096);
+            var escaped = agent.SearchWorkspaceText(config, workspaceId, "SearchTarget", "..", 10, 20, 4096);
+            var missingQuery = agent.SearchWorkspaceText(config, workspaceId, "", ".", 10, 20, 4096);
+
+            var matches = search.Output.TryGetValue("matches", out var rawMatches)
+                ? rawMatches as List<Dictionary<string, object?>>
+                : null;
+            var paths = matches?.Select(item => item.TryGetValue("path", out var value) ? value?.ToString() : null).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? [];
+
+            var ok = search.Success
+                && matches is not null
+                && paths.Contains("src/App.cs")
+                && paths.Contains("src/Features/Feature.cs")
+                && !paths.Contains("node_modules/pkg/ignored.js")
+                && search.Output.TryGetValue("skippedFiles", out var skippedFiles)
+                && skippedFiles is int skipped
+                && skipped >= 1
+                && limited.Success
+                && limited.Output.TryGetValue("matchCount", out var limitedCount)
+                && limitedCount is int count
+                && count == 1
+                && limited.Output.TryGetValue("truncated", out var truncated)
+                && truncated is true
+                && !escaped.Success
+                && escaped.FailureCode == "PATH_ESCAPE"
+                && !missingQuery.Success
+                && missingQuery.FailureCode == "TOOL_FAILED";
+            if (!ok)
+            {
+                Console.Error.WriteLine(search.Error ?? limited.Error ?? escaped.Error ?? missingQuery.Error ?? "workspace search contract self-test failed");
+                return 1;
+            }
+
+            Console.WriteLine("workspace-search-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
                 }
             }
         }
@@ -2762,6 +3473,8 @@ internal sealed partial class LearnBotLocalAgent
         learnbot agent logs [--tail 80]
         learnbot workspace add <path>
         learnbot workspace list
+        learnbot file tree --workspace-id <workspace-id> [--path <relative-path>] [--max-entries <count>] [--max-depth <depth>]
+        learnbot file search --workspace-id <workspace-id> --query <text> [--path <relative-path>] [--max-matches <count>] [--max-files <count>]
         learnbot file read --workspace-id <workspace-id> --path <relative-path>
         learnbot git status --workspace-id <workspace-id>
         learnbot git diff --workspace-id <workspace-id> [--path <relative-path>] [--max-bytes <bytes>]

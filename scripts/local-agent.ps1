@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("setup-plan", "setup", "start", "background-start", "background-stop", "status", "token", "logs", "doctor", "open")]
+    [ValidateSet("setup-plan", "setup-run-plan", "browser-pairing-plan", "pair-from-web-token-plan", "pair-from-web-token", "setup", "start", "background-start", "background-stop", "lifecycle-command", "lifecycle-status", "service-plan", "service-command-plan", "status", "token", "logs", "doctor", "open")]
     [string]$Action = "status",
     [string]$Server = "http://localhost:8083",
     [string]$LoginId = $env:LEARNBOT_AGENT_LOGIN_ID,
@@ -8,8 +8,14 @@ param(
     [int]$IntervalSeconds = 15,
     [ValidateSet("polling", "websocket", "auto")]
     [string]$Transport = "polling",
+    [string]$PairingAgentId = $env:LEARNBOT_PAIRING_AGENT_ID,
+    [string]$PairingToken = $env:LEARNBOT_PAIRING_TOKEN,
     [int]$Tail = 80,
     [switch]$Once,
+    [ValidateSet("background-start", "background-stop", "status", "logs", "doctor")]
+    [string]$LifecycleAction = "status",
+    [ValidateSet("install", "start", "stop", "uninstall")]
+    [string]$ServiceAction = "install",
     [string]$ConfigPath = $env:LEARNBOT_AGENT_CONFIG,
     [string]$AgentExe = $env:LEARNBOT_AGENT_EXE
 )
@@ -20,6 +26,14 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $localAgentProject = Join-Path $repoRoot "local-agent"
 $defaultAgentExe = Join-Path $env:USERPROFILE ".learnbot\bin\learnbot.exe"
 . (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentSetupPlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentSetupRunPlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentBrowserPairingPlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentPairFromWebTokenPlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentPairFromWebTokenResult.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentLifecycleStatus.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentLifecycleCommandResult.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServicePlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServiceCommandPlan.ps1")
 
 function Resolve-AgentExecutable {
     if (-not [string]::IsNullOrWhiteSpace($AgentExe)) {
@@ -79,6 +93,29 @@ function Invoke-AgentCapture {
         throw "learnbot local-agent command failed with exit code $LASTEXITCODE"
     }
     $output -join [Environment]::NewLine
+}
+
+function Invoke-AgentResult {
+    param([string[]]$Arguments)
+    Set-AgentConfigOverride
+    $resolvedExe = Resolve-AgentExecutable
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($resolvedExe)) {
+            $output = & $resolvedExe @Arguments 2>&1
+        } else {
+            $output = & dotnet run --project $localAgentProject -- @Arguments 2>&1
+        }
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+        [pscustomobject]@{
+            exitCode = $exitCode
+            output = ($output | Out-String).Trim()
+        }
+    } catch {
+        [pscustomobject]@{
+            exitCode = 1
+            output = $_.Exception.Message
+        }
+    }
 }
 
 function Start-AgentBackground {
@@ -171,14 +208,21 @@ function Setup-Agent {
     if ([string]::IsNullOrWhiteSpace($LoginId)) {
         $LoginId = Read-Host "LearnBot login id"
     }
+
+    $setupPlan = Get-LearnBotLocalAgentSetupPlan `
+        -Server $Server `
+        -WorkspacePath $WorkspacePath `
+        -LoginId $LoginId `
+        -Transport $Transport `
+        -AgentExe $AgentExe `
+        -ConfigPath $ConfigPath
+    $setupRunPlan = Get-LearnBotLocalAgentSetupRunPlan -SetupPlan $setupPlan
+    Assert-LearnBotLocalAgentSetupRunReady -SetupRunPlan $setupRunPlan
+
     if ([string]::IsNullOrWhiteSpace($Password)) {
         $secure = Read-Host "LearnBot password" -AsSecureString
         $Password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-    }
-
-    if (-not (Test-Path -LiteralPath $WorkspacePath -PathType Container)) {
-        throw "Workspace path does not exist: $WorkspacePath"
     }
 
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
@@ -204,6 +248,56 @@ function Setup-Agent {
     Write-Host "This helper is for the internal foreground pilot. Windows Service/MSI packaging is still future work."
 }
 
+function Pair-FromWebToken {
+    $pairingPlan = Get-LearnBotLocalAgentPairFromWebTokenPlan `
+        -Server $Server `
+        -WorkspacePath $WorkspacePath `
+        -AgentId $PairingAgentId `
+        -PairingToken $PairingToken `
+        -Transport $Transport `
+        -AgentExe $AgentExe `
+        -ConfigPath $ConfigPath
+
+    Invoke-LearnBotLocalAgentPairFromWebTokenResult `
+        -PairFromWebTokenPlan $pairingPlan `
+        -PairingToken $PairingToken `
+        -InvokeAgent { param([string[]]$Arguments) Invoke-AgentResult -Arguments $Arguments } | ConvertTo-Json -Depth 10
+}
+
+function Invoke-LifecycleCommand {
+    Invoke-LearnBotLocalAgentLifecycleCommandResult `
+        -LifecycleAction $LifecycleAction `
+        -InvokeCommand {
+            param([string]$LifecycleAction)
+            try {
+                switch ($LifecycleAction) {
+                    "background-start" {
+                        $output = & { Start-AgentBackground } 2>&1 | Out-String
+                        [pscustomobject]@{ exitCode = 0; output = $output.Trim() }
+                    }
+                    "background-stop" {
+                        $output = & { Stop-AgentBackground } 2>&1 | Out-String
+                        [pscustomobject]@{ exitCode = 0; output = $output.Trim() }
+                    }
+                    "status" {
+                        Invoke-AgentResult -Arguments @("agent", "status")
+                    }
+                    "logs" {
+                        Invoke-AgentResult -Arguments @("agent", "logs", "--tail", "$Tail")
+                    }
+                    "doctor" {
+                        Invoke-AgentResult -Arguments @("doctor")
+                    }
+                }
+            } catch {
+                [pscustomobject]@{
+                    exitCode = 1
+                    output = $_.Exception.Message
+                }
+            }
+        } | ConvertTo-Json -Depth 10
+}
+
 switch ($Action) {
     "setup-plan" {
         Get-LearnBotLocalAgentSetupPlan `
@@ -213,6 +307,39 @@ switch ($Action) {
             -Transport $Transport `
             -AgentExe $AgentExe `
             -ConfigPath $ConfigPath | ConvertTo-Json -Depth 10
+    }
+    "setup-run-plan" {
+        $plan = Get-LearnBotLocalAgentSetupPlan `
+            -Server $Server `
+            -WorkspacePath $WorkspacePath `
+            -LoginId $LoginId `
+            -Transport $Transport `
+            -AgentExe $AgentExe `
+            -ConfigPath $ConfigPath
+        Get-LearnBotLocalAgentSetupRunPlan -SetupPlan $plan | ConvertTo-Json -Depth 10
+    }
+    "browser-pairing-plan" {
+        $plan = Get-LearnBotLocalAgentSetupPlan `
+            -Server $Server `
+            -WorkspacePath $WorkspacePath `
+            -LoginId "browser-login" `
+            -Transport $Transport `
+            -AgentExe $AgentExe `
+            -ConfigPath $ConfigPath
+        Get-LearnBotLocalAgentBrowserPairingPlan -SetupPlan $plan | ConvertTo-Json -Depth 10
+    }
+    "pair-from-web-token-plan" {
+        Get-LearnBotLocalAgentPairFromWebTokenPlan `
+            -Server $Server `
+            -WorkspacePath $WorkspacePath `
+            -AgentId $PairingAgentId `
+            -PairingToken $PairingToken `
+            -Transport $Transport `
+            -AgentExe $AgentExe `
+            -ConfigPath $ConfigPath | ConvertTo-Json -Depth 10
+    }
+    "pair-from-web-token" {
+        Pair-FromWebToken
     }
     "setup" {
         Setup-Agent
@@ -229,6 +356,42 @@ switch ($Action) {
     }
     "background-stop" {
         Stop-AgentBackground
+    }
+    "lifecycle-command" {
+        Invoke-LifecycleCommand
+    }
+    "lifecycle-status" {
+        $agentStatus = Get-AgentStatus
+        Get-LearnBotLocalAgentLifecycleStatus `
+            -ConfigPath $agentStatus.configPath `
+            -StatePath $agentStatus.statePath `
+            -LogPath $agentStatus.logPath `
+            -AgentExe (Resolve-AgentExecutable) | ConvertTo-Json -Depth 10
+    }
+    "service-plan" {
+        $agentStatus = Get-AgentStatus
+        $resolvedExe = Resolve-AgentExecutable
+        $installDir = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { Split-Path -Parent $defaultAgentExe } else { Split-Path -Parent $resolvedExe }
+        $executable = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { $defaultAgentExe } else { $resolvedExe }
+        Get-LearnBotLocalAgentServicePlan `
+            -InstallDir $installDir `
+            -Executable $executable `
+            -ConfigPath $agentStatus.configPath `
+            -Transport $Transport `
+            -IntervalSeconds $IntervalSeconds | ConvertTo-Json -Depth 10
+    }
+    "service-command-plan" {
+        $agentStatus = Get-AgentStatus
+        $resolvedExe = Resolve-AgentExecutable
+        $installDir = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { Split-Path -Parent $defaultAgentExe } else { Split-Path -Parent $resolvedExe }
+        $executable = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { $defaultAgentExe } else { $resolvedExe }
+        $plan = Get-LearnBotLocalAgentServicePlan `
+            -InstallDir $installDir `
+            -Executable $executable `
+            -ConfigPath $agentStatus.configPath `
+            -Transport $Transport `
+            -IntervalSeconds $IntervalSeconds
+        Get-LearnBotLocalAgentServiceCommandPlan -ServiceAction $ServiceAction -ServicePlan $plan | ConvertTo-Json -Depth 10
     }
     "status" {
         Invoke-Agent -Arguments @("agent", "status")

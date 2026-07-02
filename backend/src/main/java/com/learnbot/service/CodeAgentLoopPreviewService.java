@@ -162,13 +162,18 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestApprovalRequest.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestStop.orElse(null))) {
+            CodeAgentLoopTimelineEventSummary event = latestApprovalRequest.get();
+            Map<String, Object> dryRunIntentHandoff = Boolean.TRUE.equals(event.details().get("validatedDryRunIntent"))
+                    ? validatedDryRunIntentHandoffSummary(event)
+                    : Map.of();
             return nextAction(
                     selected.id(),
                     selected.repositoryId(),
-                    stringDetail(latestApprovalRequest.get(), "status", "RECORDED"),
+                    stringDetail(event, "status", "RECORDED"),
                     "WAIT_FOR_APPROVAL",
-                    stringDetail(latestApprovalRequest.get(), "nextAction", "Wait for explicit user approval before release, claim, or mutation."),
-                    latestApprovalRequest.get()
+                    stringDetail(event, "nextAction", "Wait for explicit user approval before release, claim, or mutation."),
+                    event,
+                    dryRunIntentHandoff
             );
         }
         if (latestApproval.isPresent()
@@ -381,6 +386,32 @@ public class CodeAgentLoopPreviewService {
         return summary;
     }
 
+    private Map<String, Object> validatedDryRunIntentHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        Object requestId = event.details().get("requestId");
+        summary.put("schema", "learnbot.code-agent.validated-dry-run-intent-review-handoff.v1");
+        summary.put("status", "VALIDATED_DRY_RUN_INTENT_REVIEW");
+        summary.put("sourceEventType", event.eventType());
+        summary.put("sourceSequenceNumber", event.sequenceNumber());
+        summary.put("sourceRequestId", requestId);
+        summary.put("approvalState", event.details().get("approvalState"));
+        summary.put("validatedDryRunIntent", event.details().get("validatedDryRunIntent"));
+        summary.put("dryRunIntentPersisted", event.details().get("dryRunIntentPersisted"));
+        summary.put("reviewSurface", event.details().get("reviewSurface"));
+        summary.put("requestPersisted", event.details().get("requestPersisted"));
+        summary.put("eligibilityRoute", requestId == null ? null : "GET /api/code-agent/local-patch-request/dry-run-intent/" + requestId + "/eligibility");
+        summary.put("requestCreationEnabled", false);
+        summary.put("queueEnabled", false);
+        summary.put("pushEnabled", false);
+        summary.put("claimEnabled", false);
+        summary.put("claimable", false);
+        summary.put("dryRunOnly", event.details().get("dryRunOnly"));
+        summary.put("mutationAllowed", event.details().get("mutationAllowed"));
+        summary.put("approvalBypassAllowed", false);
+        summary.put("message", "Review the persisted validated dry-run intent eligibility before any future claimable non-mutating dry-run.");
+        return summary;
+    }
+
     private Map<String, Object> approvedExecutionFlowCompletedHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
         Map<String, Object> summary = new java.util.LinkedHashMap<>();
         summary.put("schema", "learnbot.code-agent.approved-execution-flow-completed-handoff.v1");
@@ -399,12 +430,19 @@ public class CodeAgentLoopPreviewService {
         summary.put("ordered", event.details().get("ordered"));
         summary.put("identityConsistent", event.details().get("identityConsistent"));
         summary.put("releaseAttemptLinked", event.details().get("releaseAttemptLinked"));
+        summary.put("approvalRequestLinked", event.details().get("approvalRequestLinked"));
         summary.put("allTerminal", event.details().get("allTerminal"));
         summary.put("allSucceeded", event.details().get("allSucceeded"));
         summary.put("approvedFlowInspection", event.details().get("approvedFlowInspection"));
+        summary.put("postRetryVerification", event.details().getOrDefault("postRetryVerification", Map.of()));
+        summary.put("postRetryVerificationPassed", event.details().get("postRetryVerificationPassed"));
+        summary.put("postRetryVerificationPartialReindexMarkerRequired", event.details().get("postRetryVerificationPartialReindexMarkerRequired"));
         summary.put("finalResultHandoff", event.details().getOrDefault("finalResultHandoff", Map.of()));
         summary.put("finalMutationReportSummaryStatus", stringDetail(event, "finalMutationReportSummaryStatus", "UNKNOWN_SUMMARY_AUDIT_ONLY"));
         summary.put("ragFreshnessMarkerStatus", stringDetail(event, "ragFreshnessMarkerStatus", "UNKNOWN_RAG_FRESHNESS_MARKER"));
+        summary.put("partialReindexPlanStatus", stringDetail(event, "partialReindexPlanStatus", "UNKNOWN_PARTIAL_REINDEX_PLAN"));
+        summary.put("partialReindexEnqueueBoundaryStatus", stringDetail(event, "partialReindexEnqueueBoundaryStatus", "UNKNOWN_PARTIAL_REINDEX_ENQUEUE_BOUNDARY"));
+        summary.put("partialReindexEnqueueReady", event.details().get("partialReindexEnqueueReady"));
         summary.put("finalAnswerPublicationHandoffStatus", stringDetail(event, "finalAnswerPublicationHandoffStatus", "UNKNOWN_PUBLICATION_HANDOFF"));
         summary.put("acknowledgementSaveHandoffStatus", stringDetail(event, "acknowledgementSaveHandoffStatus", "UNKNOWN_ACKNOWLEDGEMENT_HANDOFF"));
         summary.put("finalResultEnabled", false);
