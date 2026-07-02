@@ -65,9 +65,31 @@ function eventText(event = {}) {
   if (event.details?.outcome) {
     text += ` / outcome ${event.details.outcome}`;
   }
+  const recommendedAction = event.details?.recommendedAction;
+  if (recommendedAction) {
+    text += recommendedActionText(recommendedAction);
+  }
   const action = event.details?.action;
   if (action) {
     text += ` / action: ${action}`;
   }
   return text;
+}
+
+function recommendedActionText(action = {}) {
+  const parts = [
+    ['recommended action', action.actionKey],
+    ['label', action.label],
+    ['enabled', action.enabled],
+    ['method', action.method],
+    ['endpoint', action.endpoint],
+    ['request creation', action.requestCreationEnabled],
+    ['push', action.pushEnabled],
+    ['claim', action.claimEnabled],
+    ['mutation', action.mutationEnabled],
+    ['reason', action.reason],
+  ]
+    .map(([label, value]) => value === undefined || value === null || value === '' ? null : `${label} ${String(value)}`)
+    .filter(Boolean);
+  return parts.length ? ` / ${parts.join(' / ')}` : '';
 }

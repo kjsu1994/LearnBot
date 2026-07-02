@@ -3456,6 +3456,57 @@ const finalAnswerPublicationBoundary = {
   message: 'Final answer publication is refused while publication and final-answer generation remain disabled.',
 };
 
+const finalAnswerPublicationHandoff = {
+  schema: 'learnbot.local-agent.final-answer-publication-handoff.v1',
+  status: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
+  handoffAvailable: true,
+  executionTarget: 'USER_LOCAL_AGENT',
+  sourceFinalMutationReportSummaryStatus: 'READY_SUMMARY_AUDIT_ONLY',
+  sourceRagFreshnessMarkerStatus: 'STALE_INDEX_WARNING_REQUIRED',
+  finalMutationReportSummaryAvailable: true,
+  staleIndexDisclosureRequired: true,
+  staleIndexDisclosureModeled: true,
+  staleIndexDisclosureText: 'Local files changed and code RAG may be stale until partial reindex completes.',
+  targetFiles: ['src/App.java'],
+  staleIndexPolicy: 'REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH',
+  freshnessAction: 'REQUIRE_PARTIAL_REINDEX_OR_STALE_WARNING',
+  finalAnswerSections: ['changedFiles', 'verification', 'rollback', 'ragFreshness', 'residualRisk'],
+  publicationEnabled: false,
+  finalAnswerGenerationEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  acknowledgementSaveEnabled: false,
+  ragFreshnessUpdateEnabled: false,
+  partialReindexEnabled: false,
+  mutationAllowed: false,
+  blockingKeys: ['publicationEnabled', 'finalAnswerGenerationEnabled', 'acknowledgementSaveEnabled'],
+  message: 'Final-answer publication handoff can carry the stale-index disclosure, but publication, final answer delivery, acknowledgement save, and RAG freshness update remain disabled.',
+};
+
+const acknowledgementSaveHandoff = {
+  schema: 'learnbot.local-agent.acknowledgement-save-handoff.v1',
+  status: 'READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED',
+  handoffAvailable: true,
+  executionTarget: 'USER_LOCAL_AGENT',
+  sourceFinalAnswerPublicationHandoffStatus: 'READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED',
+  finalAnswerPublicationHandoffAvailable: true,
+  staleIndexDisclosureModeled: true,
+  staleIndexDisclosureText: 'Local files changed and code RAG may be stale until partial reindex completes.',
+  targetFiles: ['src/App.java'],
+  finalAnswerSections: ['changedFiles', 'verification', 'rollback', 'ragFreshness', 'residualRisk'],
+  acknowledgementReceiptRequired: true,
+  acknowledgementReceiptModeled: true,
+  publicationEnabled: false,
+  finalAnswerGenerationEnabled: false,
+  finalAnswerDeliveryEnabled: false,
+  conversationSaveEnabled: false,
+  acknowledgementSaveEnabled: false,
+  ragFreshnessUpdateEnabled: false,
+  partialReindexEnabled: false,
+  mutationAllowed: false,
+  blockingKeys: ['acknowledgementSaveEnabled', 'conversationSaveEnabled', 'finalAnswerDeliveryEnabled'],
+  message: 'Acknowledgement save handoff has the final-answer disclosure context, but acknowledgement save, conversation save, delivery, publication, and RAG freshness update remain disabled.',
+};
+
 const releaseEnablementChecklist = {
   schema: 'learnbot.local-agent.release-enablement-checklist.v1',
   status: 'BLOCKED_ENABLEMENT_DISABLED',
@@ -3617,6 +3668,8 @@ const latestAttempt = {
   finalMutationReportDraft,
   finalMutationReportFinalizationBoundary,
   finalAnswerPublicationBoundary,
+  finalAnswerPublicationHandoff,
+  acknowledgementSaveHandoff,
   releaseEnablementChecklist,
   freshObservationRequestPlan,
   freshObservationEvidenceStatus,
@@ -3867,7 +3920,7 @@ try {
   assert.match(markup, /13 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop TOOL_FAILED \/ outcome REPORT_TOOL_FAILURE/);
   assert.match(markup, /14 STOP_OUTCOME_POLICY_REGISTERED \/ approval false \/ may mutate false \/ enabled false \/ status REGISTERED \/ stop APPROVAL_DENIED \/ outcome REPORT_APPROVAL_DENIED/);
   assert.match(markup, /15 LOCAL_AGENT_OBSERVATION_RESULT \/ OBSERVE \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true \/ status SUCCEEDED \/ fresh observation true \/ dry-run true \/ mutation applied false/);
-  assert.match(markup, /16 LOCAL_AGENT_APPROVAL_DECISION \/ REQUEST_APPROVAL \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true \/ status APPROVED_HELD \/ approval state APPROVED/);
+  assert.match(markup, /16 LOCAL_AGENT_APPROVAL_DECISION \/ REQUEST_APPROVAL \/ USER_LOCAL_AGENT \/ patch\.apply \/ approval true \/ may mutate false \/ enabled true \/ status APPROVED_HELD \/ approval state APPROVED \/ recommended action CHECK_ENQUEUE_REFUSAL \/ label Check enqueue refusal \/ enabled true \/ method POST \/ endpoint \/api\/code-agent\/loop\/runner\/enqueue-read-only \/ request creation false \/ push false \/ claim false \/ mutation false \/ reason Confirm the runner will not enqueue mutation work from this handoff state\./);
   assert.match(markup, /17 STOP_OUTCOME_RECORDED \/ COMPLETE_OR_PAUSE \/ approval false \/ may mutate false \/ enabled true \/ status RECORDED \/ final result false \/ stop TOOL_FAILED \/ outcome REPORT_TOOL_FAILURE/);
   assert.match(markup, /18 STOP_OUTCOME_RECORDED \/ COMPLETE_OR_PAUSE \/ approval false \/ may mutate false \/ enabled true \/ status RECORDED \/ final result false \/ stop APPROVAL_DENIED \/ outcome REPORT_APPROVAL_DENIED/);
   assert.match(markup, /19 STOP_OUTCOME_RECORDED \/ COMPLETE_OR_PAUSE \/ approval false \/ may mutate false \/ enabled true \/ status RECORDED \/ final result false \/ stop AGENT_UNAVAILABLE \/ outcome WAIT_FOR_LOCAL_AGENT/);
@@ -3885,6 +3938,7 @@ try {
   assert.match(markup, /release attempt model: READY_RELEASE_ATTEMPT_DISABLED/);
   assert.match(markup, /fresh observation request plan: audit-only \/ no enqueue \/ no claim/);
   assert.match(markup, /<button\b(?=[^>]*disabled="")[^>]*>(?:(?!<\/button>)[\s\S])*Queue release fresh observations(?:(?!<\/button>)[\s\S])*<\/button>/);
+  assert.match(markup, /<button\b(?=[^>]*disabled="")[^>]*>(?:(?!<\/button>)[\s\S])*Release Local Agent patch disabled(?:(?!<\/button>)[\s\S])*<\/button>/);
   assert.match(markup, /freshRepositoryVerification: PLANNED_DISABLED \/ git\.status \/ approval NOT_REQUIRED \/ enqueue false \/ claimable false \/ mutation false/);
   assert.match(markup, /freshPatchDryRun: PLANNED_DISABLED \/ patch\.apply \/ approval APPROVED \/ enqueue false \/ claimable false \/ mutation false \/ dry-run true/);
   assert.match(markup, /fresh observation evidence status: audit-only \/ no request creation \/ no push/);
@@ -3928,6 +3982,22 @@ try {
   assert.match(markup, /finalReportDraftModeled: READY_DRAFT_DISABLED \/ passed true \/ blocking false \/ release gate false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ The disabled final report draft maps aggregation outcomes into report sections/);
   assert.match(markup, /publicationSwitch: DISABLED \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ result aggregation false \/ publication false \/ final answer false \/ Publication remains disabled/);
   assert.match(markup, /final answer publication blocking keys: publicationSwitch, publicationEnabled, finalAnswerGenerationEnabled, mutationAllowed/);
+  assert.match(markup, /final answer publication handoff: READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED \/ learnbot\.local-agent\.final-answer-publication-handoff\.v1 \/ handoff true \/ USER_LOCAL_AGENT \/ summary READY_SUMMARY_AUDIT_ONLY \/ freshness STALE_INDEX_WARNING_REQUIRED/);
+  assert.match(markup, /final answer handoff disclosure: required true \/ modeled true \/ policy REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH \/ action REQUIRE_PARTIAL_REINDEX_OR_STALE_WARNING/);
+  assert.match(markup, /final answer handoff target files: src\/App\.java/);
+  assert.match(markup, /final answer handoff sections: changedFiles, verification, rollback, ragFreshness, residualRisk/);
+  assert.match(markup, /final answer stale-index disclosure: Local files changed and code RAG may be stale until partial reindex completes/);
+  assert.match(markup, /final answer handoff disabled: publication false \/ final answer false \/ delivery false \/ acknowledgement save false \/ rag freshness false \/ partial reindex false \/ mutation false/);
+  assert.match(markup, /final answer handoff blocking keys: publicationEnabled, finalAnswerGenerationEnabled, acknowledgementSaveEnabled/);
+  assert.match(markup, /Final-answer publication handoff can carry the stale-index disclosure, but publication, final answer delivery, acknowledgement save, and RAG freshness update remain disabled/);
+  assert.match(markup, /acknowledgement save handoff: READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED \/ learnbot\.local-agent\.acknowledgement-save-handoff\.v1 \/ handoff true \/ USER_LOCAL_AGENT \/ final answer handoff READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED/);
+  assert.match(markup, /acknowledgement receipt: required true \/ modeled true \/ stale disclosure true/);
+  assert.match(markup, /acknowledgement handoff target files: src\/App\.java/);
+  assert.match(markup, /acknowledgement handoff sections: changedFiles, verification, rollback, ragFreshness, residualRisk/);
+  assert.match(markup, /acknowledgement stale-index disclosure: Local files changed and code RAG may be stale until partial reindex completes/);
+  assert.match(markup, /acknowledgement handoff disabled: publication false \/ final answer false \/ delivery false \/ conversation save false \/ acknowledgement save false \/ rag freshness false \/ partial reindex false \/ mutation false/);
+  assert.match(markup, /acknowledgement handoff blocking keys: acknowledgementSaveEnabled, conversationSaveEnabled, finalAnswerDeliveryEnabled/);
+  assert.match(markup, /Acknowledgement save handoff has the final-answer disclosure context, but acknowledgement save, conversation save, delivery, publication, and RAG freshness update remain disabled/);
   assert.match(markup, /release enablement checklist: BLOCKED_ENABLEMENT_DISABLED \/ learnbot\.local-agent\.release-enablement-checklist\.v1 \/ prerequisites false \/ USER_LOCAL_AGENT \/ release gate false \/ claim false \/ write helper false \/ request creation false \/ push false \/ claimable false \/ mutation false/);
   assert.match(markup, /release execution disabled: apply false \/ test false \/ rollback restore false \/ rag freshness false/);
   assert.match(markup, /finalReadiness: BLOCKED_RELEASE_DISABLED \/ passed false \/ blocking true \/ release gate false \/ claimable false \/ mutation false \/ Final readiness must be fresh, complete, and based on passing patch preconditions/);

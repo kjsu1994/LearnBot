@@ -1660,6 +1660,8 @@ public class LearnBotProperties {
 
     public static class LocalAgent {
         private boolean websocketEnabled = false;
+        private boolean patchExecutionReleaseEnabled = false;
+        private boolean approvedExecutionSequenceCreationEnabled = false;
 
         public boolean isWebsocketEnabled() {
             return websocketEnabled;
@@ -1667,6 +1669,22 @@ public class LearnBotProperties {
 
         public void setWebsocketEnabled(boolean websocketEnabled) {
             this.websocketEnabled = websocketEnabled;
+        }
+
+        public boolean isPatchExecutionReleaseEnabled() {
+            return patchExecutionReleaseEnabled;
+        }
+
+        public void setPatchExecutionReleaseEnabled(boolean patchExecutionReleaseEnabled) {
+            this.patchExecutionReleaseEnabled = patchExecutionReleaseEnabled;
+        }
+
+        public boolean isApprovedExecutionSequenceCreationEnabled() {
+            return approvedExecutionSequenceCreationEnabled;
+        }
+
+        public void setApprovedExecutionSequenceCreationEnabled(boolean approvedExecutionSequenceCreationEnabled) {
+            this.approvedExecutionSequenceCreationEnabled = approvedExecutionSequenceCreationEnabled;
         }
     }
 

@@ -9,6 +9,7 @@ import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
+import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
@@ -95,6 +96,53 @@ class LocalAgentControllerTest {
 
         assertThat(actual).isSameAs(expected);
         verify(toolGatewayService).inspectPatchReleaseBoundary(userId, requestId);
+    }
+
+    @Test
+    void releasePatchExecutionForClaimDelegatesToFlagGuardedReleasePath() {
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentAuthService authService = mock(LocalAgentAuthService.class);
+        LocalAgentToolGatewayService toolGatewayService = mock(LocalAgentToolGatewayService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        LocalAgentController controller = new LocalAgentController(
+                gatewayService,
+                authService,
+                toolGatewayService,
+                currentUserProvider
+        );
+        UUID userId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        LocalAgentToolExecutionResponse expected = new LocalAgentToolExecutionResponse(
+                requestId,
+                sessionId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED,
+                Map.of("mutationAllowed", true),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(toolGatewayService.releaseHeldPatchForExecution(userId, requestId)).thenReturn(expected);
+
+        var actual = controller.releasePatchExecutionForClaim(requestId);
+
+        assertThat(actual).isSameAs(expected);
+        verify(toolGatewayService).releaseHeldPatchForExecution(userId, requestId);
     }
 
     @Test

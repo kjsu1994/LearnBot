@@ -7,6 +7,8 @@ import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopStopCondition;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentApprovalState;
+import com.learnbot.dto.LocalAgentPatchExecutionReadinessCheck;
+import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseAttemptModel;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
@@ -251,6 +253,10 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains("\"approvalState\":\"APPROVED\"")
                 .contains("\"status\":\"APPROVED_HELD\"")
                 .contains("\"decisionKey\":\"APPROVAL_APPROVED_HELD\"")
+                .contains("\"recommendedAction\":{")
+                .contains("\"schema\":\"learnbot.code-agent.runner-recommended-action.v1\"")
+                .contains("\"actionKey\":\"CHECK_ENQUEUE_REFUSAL\"")
+                .contains("\"endpoint\":\"/api/code-agent/loop/runner/enqueue-read-only\"")
                 .contains("\"approvalRequestHeld\":true")
                 .contains("\"releaseRequired\":true")
                 .contains("\"releaseGateEnabled\":false")
@@ -382,6 +388,8 @@ class CodeAgentLoopTimelineRepositoryTest {
         assertThat(details)
                 .contains("\"status\":\"FRESH_OBSERVATIONS_ENQUEUED\"")
                 .contains("\"decisionKey\":\"WAIT_FOR_FRESH_OBSERVATION_RESULTS\"")
+                .contains("\"actionKey\":\"CHECK_ENQUEUE_REFUSAL\"")
+                .contains("\"requestCreationEnabled\":false")
                 .contains(sourceRequestId.toString())
                 .contains(releaseAttemptId.toString())
                 .contains(gitStatusRequestId.toString())
@@ -396,6 +404,174 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains("\"ragFreshnessUpdateEnabled\":false")
                 .contains("\"finalAnswerGenerationEnabled\":false")
                 .contains("\"deliveryEnabled\":false");
+    }
+
+    @Test
+    void appendFreshObservationEvidenceCompletePersistsReleaseGatedCompletionEvent() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+
+        repository.appendFreshObservationEvidenceComplete(
+                userId,
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                releaseAttemptId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "complete", true,
+                        "requiredCount", 2,
+                        "linkedCount", 2,
+                        "missingCount", 0,
+                        "sourceOnlyFallbackCount", 0,
+                        "blockingCount", 0,
+                        "linkedKeys", List.of("repositoryVerification", "patchDryRun"),
+                        "blockingKeys", List.of()
+                ),
+                List.of(
+                        Map.of("key", "repositoryVerification", "status", "RELEASE_ATTEMPT_LINKED"),
+                        Map.of("key", "patchDryRun", "status", "RELEASE_ATTEMPT_LINKED")
+                )
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("USER_LOCAL_AGENT");
+        assertThat(params.getValue().getValue("toolName")).isEqualTo("patch.apply");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"status\":\"FRESH_OBSERVATION_EVIDENCE_COMPLETE_RELEASE_GATED\"")
+                .contains("\"decisionKey\":\"FRESH_EVIDENCE_COMPLETE_RELEASE_GATED\"")
+                .contains("\"actionKey\":\"CHECK_ENQUEUE_REFUSAL\"")
+                .contains("\"mutationEnabled\":false")
+                .contains(sourceRequestId.toString())
+                .contains(releaseAttemptId.toString())
+                .contains("\"evidenceComplete\":true")
+                .contains("\"requiredCount\":2")
+                .contains("\"linkedCount\":2")
+                .contains("\"missingCount\":0")
+                .contains("\"sourceOnlyFallbackCount\":0")
+                .contains("\"releaseGateEnabled\":false")
+                .contains("\"sourcePatchClaimEnabled\":false")
+                .contains("\"mutationEnabled\":false")
+                .contains("\"verificationCommandExecutionEnabled\":false")
+                .contains("\"rollbackRestoreEnabled\":false")
+                .contains("\"ragFreshnessUpdateEnabled\":false")
+                .contains("\"finalAnswerGenerationEnabled\":false")
+                .contains("\"deliveryEnabled\":false");
+    }
+
+    @Test
+    void appendReleaseReadinessRefreshedPersistsAuditOnlyReleaseGatedEvent() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+
+        repository.appendReleaseReadinessRefreshed(
+                userId,
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                releaseAttemptId,
+                sessionId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                new LocalAgentPatchExecutionReadinessResponse(
+                        sourceRequestId,
+                        false,
+                        List.of(
+                                new LocalAgentPatchExecutionReadinessCheck("snapshotManifestPreview", true, "Snapshot is present."),
+                                new LocalAgentPatchExecutionReadinessCheck("releaseGateEnabled", false, "Release remains disabled.")
+                        ),
+                        List.of("Release remains disabled."),
+                        "Held patch request is not ready for Local Agent execution.",
+                        Map.of("status", "BLOCKED_RELEASE_DISABLED", "preconditionsPassed", false),
+                        Map.of("status", "BLOCKED_RELEASE_DISABLED", "preconditionsPassed", false),
+                        new LocalAgentPatchReleaseAttemptModel(
+                                "learnbot.local-agent.patch-release-attempt.v1",
+                                "DISABLED_RELEASE_GATE",
+                                true,
+                                false,
+                                120,
+                                List.of(),
+                                Map.of(
+                                        "id", releaseAttemptId.toString(),
+                                        "releaseAttemptFinalReadiness", Map.of(
+                                                "releaseAttemptReady", false,
+                                                "freshObservationEvidenceComplete", true
+                                        )
+                                ),
+                                "Release attempt remains non-claimable."
+                        ),
+                        Map.of(),
+                        Map.of(),
+                        Map.of("status", "MATCH"),
+                        Map.of("status", "MATCH")
+                )
+        );
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
+        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
+        assertThat(params.getValue().getValue("eventType")).isEqualTo("LOCAL_AGENT_RELEASE_READINESS_REFRESHED");
+        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(params.getValue().getValue("executionTarget")).isEqualTo("USER_LOCAL_AGENT");
+        assertThat(params.getValue().getValue("toolName")).isEqualTo("patch.apply");
+        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(true);
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"status\":\"RELEASE_READINESS_REFRESHED_RELEASE_GATED\"")
+                .contains("\"decisionKey\":\"RELEASE_READINESS_REFRESHED_RELEASE_GATED\"")
+                .contains("\"actionKey\":\"REVIEW_RELEASE_REFUSAL\"")
+                .contains("\"endpoint\":\"/api/code-agent/loop/runner/release-review\"")
+                .contains(sourceRequestId.toString())
+                .contains(releaseAttemptId.toString())
+                .contains("\"readyToRelease\":false")
+                .contains("\"warningCount\":1")
+                .contains("\"failedCheckKeys\":[\"releaseGateEnabled\"]")
+                .contains("\"patchReleaseStatus\":\"BLOCKED_RELEASE_DISABLED\"")
+                .contains("\"patchReleasePreconditionsPassed\":false")
+                .contains("\"releaseAttemptReady\":false")
+                .contains("\"freshObservationEvidenceComplete\":true")
+                .contains("\"releaseGateEnabled\":false")
+                .contains("\"sourcePatchClaimEnabled\":false")
+                .contains("\"claimable\":false")
+                .contains("\"mutationAllowed\":false")
+                .contains("\"verificationCommandExecutionEnabled\":false")
+                .contains("\"rollbackRestoreEnabled\":false")
+                .contains("\"ragFreshnessUpdateEnabled\":false")
+                .contains("\"finalAnswerGenerationEnabled\":false")
+                .contains("\"deliveryEnabled\":false")
+                .contains("\"acknowledgementEnabled\":false");
     }
 
     @Test
@@ -484,6 +660,8 @@ class CodeAgentLoopTimelineRepositoryTest {
         String details = (String) params.getValue().getValue("details");
         assertThat(details)
                 .contains("\"decisionKey\":\"OBSERVATION_ACCEPTED\"")
+                .contains("\"actionKey\":\"PREVIEW_RUNNER_STEP\"")
+                .contains("\"endpoint\":\"/api/code-agent/loop/runner/preview\"")
                 .contains("\"followUpToolSelectionEnabled\":true")
                 .contains("\"approvalRequiredBeforeSideEffects\":true")
                 .contains("\"requestCreationEnabled\":false")
@@ -566,6 +744,9 @@ class CodeAgentLoopTimelineRepositoryTest {
         String details = (String) params.getValue().getValue("details");
         assertThat(details)
                 .contains("\"decisionKey\":\"RELEASE_BOUNDARY_REFUSED\"")
+                .contains("\"nextAction\":\"Report that release was refused and mutation remains disabled.\"")
+                .contains("\"actionKey\":\"STOP_AND_REPORT\"")
+                .contains("\"enabled\":false")
                 .contains("\"boundaryStatus\":\"RELEASE_REFUSED_GATE_DISABLED\"")
                 .contains("\"releaseGateEnabled\":false")
                 .contains("\"requestCreationEnabled\":false")

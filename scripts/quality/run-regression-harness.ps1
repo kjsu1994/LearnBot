@@ -145,6 +145,9 @@ $backendFocusedTests = @(
     "OllamaClientTest",
     "WebCrawlerTest",
     "WebPageExtractorTest",
+    "CodeAgentLoopPreviewServiceTest",
+    "CodeAgentLoopRunnerServiceTest",
+    "CodeAgentLoopRunnerEndpointSmokeTest",
     "LocalAgentToolGatewayServiceTest",
     "LocalAgentControllerTest",
     "LocalAgentMutationResultClassifierTest",
@@ -160,10 +163,20 @@ $frontendQualityTests = @(
     "src/components/code/codeWorkspaceReadinessPanelSmoke.test.mjs",
     "src/components/code/approvedExecutionFlowInspectionSummary.test.mjs",
     "src/features/code/approvedExecutionFlowInspectionClient.test.mjs",
+    "src/components/code/agentLoopRunnerHandoffSummary.test.mjs",
+    "src/components/code/agentLoopRunnerPreviewRouteFlow.test.mjs",
+    "src/components/code/agentLoopRunnerSelectedReadOnlyRouteFlow.test.mjs",
+    "src/features/code/agentLoopRunnerPreviewClient.test.mjs",
+    "src/features/code/agentLoopRunnerReadOnlyEnqueueClient.test.mjs",
+    "src/features/code/agentLoopRunnerReleaseReviewClient.test.mjs",
+    "src/features/code/runner/agentLoopRunnerQueuedObservationClient.test.mjs",
+    "src/features/code/runner/agentLoopRunnerSelectedReadOnlyClient.test.mjs",
     "src/components/code/mutationFinalReportDraft.test.mjs",
     "src/components/code/mutationRagFreshnessGate.test.mjs",
     "src/components/code/mutationResultAggregationGate.test.mjs",
-    "src/components/code/mutationPublicationGate.test.mjs"
+    "src/components/code/mutationPublicationGate.test.mjs",
+    "src/components/documents/documentWorkspaceCrawlAuditSmoke.test.mjs",
+    "src/components/documents/documentWorkspaceRetryContextSmoke.test.mjs"
 )
 
 try {
@@ -273,6 +286,7 @@ try {
             "streaming-fallback",
             "crawler-extraction",
             "local-agent-backend-safety",
+            "local-agent-runner-loop",
             "approved-execution-flow",
             "rollbackability"
         )
@@ -285,10 +299,13 @@ try {
             "*mutationDisabledFlagGuard*" { $frontendCoverage += @("mutation-disabled-regression", "local-agent-safety") }
             "*codeWorkspaceReadiness*" { $frontendCoverage += @("workspace-readiness", "local-agent-safety") }
             "*approvedExecutionFlowInspection*" { $frontendCoverage += @("approved-execution-flow", "local-agent-safety") }
+            "*agentLoopRunner*" { $frontendCoverage += @("local-agent-runner-loop", "local-agent-safety", "workspace-readiness") }
             "*mutationFinalReportDraft*" { $frontendCoverage += @("final-report-quality", "rollbackability") }
             "*mutationRagFreshnessGate*" { $frontendCoverage += @("rag-freshness", "rollbackability") }
             "*mutationResultAggregationGate*" { $frontendCoverage += @("result-aggregation", "evidence-fallback") }
             "*mutationPublicationGate*" { $frontendCoverage += @("publication-readiness", "final-answer-readiness") }
+            "*documentWorkspaceCrawlAuditSmoke*" { $frontendCoverage += @("document-rag", "crawler-extraction", "indexing-diagnostics", "evidence-fallback") }
+            "*documentWorkspaceRetryContextSmoke*" { $frontendCoverage += @("document-rag", "indexing-diagnostics", "evidence-fallback", "workspace-readiness") }
         }
 
         Invoke-HarnessStep `
@@ -340,6 +357,36 @@ try {
         -Command ".\scripts\quality\local-agent-smoke\assert-local-agent-smoke-contract.ps1" `
         -Coverage @("local-agent-live-smoke", "local-agent-smoke-contract", "transport-fallback", "local-agent-safety")
 
+    Invoke-HarnessStep `
+        -Name "local-agent-approved-server-queue-flow-smoke-contract" `
+        -WorkingDirectory $root `
+        -Command ".\scripts\quality\local-agent-flow\assert-approved-server-queue-flow-smoke-contract.ps1" `
+        -Coverage @("local-agent-runtime", "approved-execution-flow", "local-agent-smoke-contract", "local-agent-safety")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-live-server-approved-flow-bridge-contract" `
+        -WorkingDirectory $root `
+        -Command ".\scripts\quality\local-agent-flow\assert-live-server-approved-flow-bridge-contract.ps1" `
+        -Coverage @("local-agent-live-smoke", "approved-execution-flow", "local-agent-smoke-contract", "local-agent-safety")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-live-server-approved-durable-flow-contract" `
+        -WorkingDirectory $root `
+        -Command ".\scripts\quality\local-agent-flow\assert-live-server-approved-durable-flow-contract.ps1" `
+        -Coverage @("local-agent-live-smoke", "approved-execution-flow", "local-agent-smoke-contract", "local-agent-safety")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-live-server-release-created-flow-contract" `
+        -WorkingDirectory $root `
+        -Command ".\scripts\quality\local-agent-flow\assert-live-server-release-created-flow-contract.ps1" `
+        -Coverage @("local-agent-live-smoke", "approved-execution-flow", "local-agent-smoke-contract", "local-agent-safety")
+
+    Invoke-HarnessStep `
+        -Name "local-agent-live-server-release-ui-flow-contract" `
+        -WorkingDirectory $root `
+        -Command ".\scripts\quality\local-agent-flow\assert-live-server-release-ui-flow-contract.ps1" `
+        -Coverage @("local-agent-live-smoke", "approved-execution-flow", "local-agent-smoke-contract", "local-agent-safety", "code-workspace-release-ui")
+
     if ($IncludeFrontendBuild) {
         Invoke-HarnessStep `
             -Name "frontend-build" `
@@ -385,6 +432,7 @@ try {
         New-QualitySignal -Name "code-rag-and-patch-safety" -RequiredCoverage @("code-rag", "workspace-readiness", "mutation-disabled-regression", "rag-quality-scoring", "patch-validity", "approval-safety", "test-command-allowlist") -CoverageSummary $coverageSummary
         New-QualitySignal -Name "streaming-and-crawler-fallbacks" -RequiredCoverage @("streaming-fallback", "first-token-latency", "crawler-extraction") -CoverageSummary $coverageSummary
         New-QualitySignal -Name "approved-local-agent-flow" -RequiredCoverage @("approved-execution-flow", "local-agent-runtime", "local-agent-safety", "local-agent-smoke-contract") -CoverageSummary $coverageSummary
+        New-QualitySignal -Name "agent-loop-runner-safety" -RequiredCoverage @("local-agent-runner-loop", "local-agent-backend-safety", "local-agent-safety", "workspace-readiness") -CoverageSummary $coverageSummary
         New-QualitySignal -Name "rollbackability" -RequiredCoverage @("rollbackability") -CoverageSummary $coverageSummary
         New-QualitySignal -Name "final-answer-readiness" -RequiredCoverage @("final-report-quality", "publication-readiness", "final-answer-readiness") -CoverageSummary $coverageSummary
         New-QualitySignal -Name "latency-and-hallucination-risk" -RequiredCoverage @("latency-budget", "hallucination-risk") -CoverageSummary $coverageSummary

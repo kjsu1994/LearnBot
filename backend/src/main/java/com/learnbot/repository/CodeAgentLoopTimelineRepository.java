@@ -8,11 +8,14 @@ import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.CodeAgentLoopStep;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
+import com.learnbot.dto.LocalAgentPatchExecutionReadinessCheck;
+import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRecommendedActionFactory;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -113,6 +116,9 @@ public class CodeAgentLoopTimelineRepository {
         details.put("nextAction", "APPROVED".equals(approvalState) && "APPROVED_HELD".equals(status)
                 ? "Inspect release readiness and queue fresh release-attempt observations before any claimable mutation transition."
                 : "Wait for approval completion or stop if approval was denied.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("APPROVED".equals(approvalState) && "APPROVED_HELD".equals(status)
+                ? "CHECK_ENQUEUE_REFUSAL"
+                : "REJECTED".equals(status) ? "STOP_AND_REPORT" : "ASK_USER"));
         details.put("approvalRequestHeld", "APPROVED_HELD".equals(status));
         details.put("releaseRequired", "APPROVED".equals(approvalState));
         details.put("releaseGateEnabled", false);
@@ -237,6 +243,127 @@ public class CodeAgentLoopTimelineRepository {
         );
     }
 
+    public int appendFreshObservationEvidenceComplete(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            AgentExecutionTarget executionTarget,
+            LocalAgentToolName sourceToolName,
+            Map<String, Object> evidenceCompleteness,
+            List<Map<String, Object>> evidenceStatus
+    ) {
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE",
+                "COMPLETE_OR_PAUSE",
+                executionTarget,
+                sourceToolName,
+                true,
+                freshObservationEvidenceCompleteDetails(
+                        sourceRequestId,
+                        releaseAttemptId,
+                        sessionId,
+                        agentId,
+                        workspaceId,
+                        evidenceCompleteness,
+                        evidenceStatus
+                )
+        );
+    }
+
+    public int appendReleaseReadinessRefreshed(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            AgentExecutionTarget executionTarget,
+            LocalAgentToolName sourceToolName,
+            LocalAgentPatchExecutionReadinessResponse readiness
+    ) {
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_RELEASE_READINESS_REFRESHED",
+                "COMPLETE_OR_PAUSE",
+                executionTarget,
+                sourceToolName,
+                true,
+                releaseReadinessRefreshDetails(
+                        sourceRequestId,
+                        releaseAttemptId,
+                        sessionId,
+                        agentId,
+                        workspaceId,
+                        readiness
+                )
+        );
+    }
+
+    public int appendApprovedExecutionFlowCompleted(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            Map<String, Object> approvedFlowInspection,
+            Map<String, Object> finalResultHandoff
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED");
+        details.put("sourceRequestId", sourceRequestId == null ? null : sourceRequestId.toString());
+        details.put("releaseAttemptId", releaseAttemptId == null ? null : releaseAttemptId.toString());
+        details.put("sessionId", sessionId == null ? null : sessionId.toString());
+        details.put("userId", userId == null ? null : userId.toString());
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("approvedFlowInspection", approvedFlowInspection == null ? Map.of() : approvedFlowInspection);
+        details.put("requestIdSource", approvedFlowInspection == null ? null : approvedFlowInspection.get("requestIdSource"));
+        details.put("stepCount", approvedFlowInspection == null ? null : approvedFlowInspection.get("stepCount"));
+        details.put("ordered", approvedFlowInspection == null ? null : approvedFlowInspection.get("ordered"));
+        details.put("identityConsistent", approvedFlowInspection == null ? null : approvedFlowInspection.get("identityConsistent"));
+        details.put("releaseAttemptLinked", approvedFlowInspection == null ? null : approvedFlowInspection.get("releaseAttemptLinked"));
+        details.put("allTerminal", approvedFlowInspection == null ? null : approvedFlowInspection.get("allTerminal"));
+        details.put("allSucceeded", allSucceeded(approvedFlowInspection));
+        details.put("finalResultHandoff", finalResultHandoff == null ? Map.of() : finalResultHandoff);
+        details.put("finalMutationReportSummaryStatus", finalResultHandoff == null ? null : finalResultHandoff.get("finalMutationReportSummaryStatus"));
+        details.put("ragFreshnessMarkerStatus", finalResultHandoff == null ? null : finalResultHandoff.get("ragFreshnessMarkerStatus"));
+        details.put("finalAnswerPublicationHandoffStatus", finalResultHandoff == null ? null : finalResultHandoff.get("finalAnswerPublicationHandoffStatus"));
+        details.put("acknowledgementSaveHandoffStatus", finalResultHandoff == null ? null : finalResultHandoff.get("acknowledgementSaveHandoffStatus"));
+        details.put("nextAction", "Report the completed approved Local Agent execution flow while final result publication and acknowledgement save remain disabled.");
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("ragFreshnessUpdateEnabled", false);
+        details.put("followUpMutationEnabled", false);
+        details.put("mutationEnabled", false);
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_APPROVED_EXECUTION_FLOW_COMPLETED",
+                "COMPLETE_OR_PAUSE",
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                true,
+                details
+        );
+    }
+
     public int appendStopOutcome(
             UUID userId,
             UUID repositoryId,
@@ -283,6 +410,7 @@ public class CodeAgentLoopTimelineRepository {
         details.put("nextAction", succeeded
                 ? "Evaluate the Local Agent observation before selecting another typed tool or asking for approval."
                 : "Stop the loop after the failed Local Agent observation and report the blocking state.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create(succeeded ? "PREVIEW_RUNNER_STEP" : "STOP_AND_REPORT"));
         details.put("observationStatus", response.status() == null ? null : response.status().name());
         details.put("requestId", response.requestId() == null ? null : response.requestId().toString());
         details.put("sourceRequestId", stringValue(requestInput.get("sourceRequestId"), response.output().get("sourceRequestId")));
@@ -470,6 +598,16 @@ public class CodeAgentLoopTimelineRepository {
                 .addValue("toolName", toolName == null ? null : toolName.wireName())
                 .addValue("requiresApproval", requiresApproval)
                 .addValue("details", toJson(details == null ? Map.of() : details)));
+    }
+
+    private boolean allSucceeded(Map<String, Object> approvedFlowInspection) {
+        if (approvedFlowInspection == null || !(approvedFlowInspection.get("steps") instanceof List<?> steps)) {
+            return false;
+        }
+        return !steps.isEmpty() && steps.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .allMatch(step -> "SUCCEEDED".equals(String.valueOf(step.get("status"))));
     }
 
     private CodeAgentLoopTimelineSummary mapTimeline(UUID userId, ResultSet rs) throws SQLException {
@@ -751,7 +889,8 @@ public class CodeAgentLoopTimelineRepository {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("status", "RECORDED");
         details.put("decisionKey", "RELEASE_BOUNDARY_REFUSED");
-        details.put("nextAction", "Wait for release gate enablement or report that mutation remains disabled.");
+        details.put("nextAction", "Report that release was refused and mutation remains disabled.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("STOP_AND_REPORT"));
         details.put("requestId", boundary.requestId() == null ? null : boundary.requestId().toString());
         details.put("sessionId", sessionId == null ? null : sessionId.toString());
         details.put("agentId", agentId == null ? null : agentId.toString());
@@ -796,6 +935,7 @@ public class CodeAgentLoopTimelineRepository {
         details.put("status", "FRESH_OBSERVATIONS_ENQUEUED");
         details.put("decisionKey", "WAIT_FOR_FRESH_OBSERVATION_RESULTS");
         details.put("nextAction", "Wait for fresh release-attempt Local Agent observations before any release or claimable mutation transition.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("CHECK_ENQUEUE_REFUSAL"));
         details.put("sourceRequestId", sourceRequestId == null ? stringValue(requestInput.get("sourceRequestId"), null) : sourceRequestId.toString());
         details.put("releaseAttemptId", releaseAttemptId == null ? stringValue(requestInput.get("releaseAttemptId"), null) : releaseAttemptId.toString());
         details.put("sessionId", sessionId == null ? null : sessionId.toString());
@@ -820,6 +960,134 @@ public class CodeAgentLoopTimelineRepository {
         details.put("deliveryEnabled", false);
         details.put("acknowledgementEnabled", false);
         details.put("source", requestInput == null ? Map.of() : requestInput);
+        return details;
+    }
+
+    private Map<String, Object> freshObservationEvidenceCompleteDetails(
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            Map<String, Object> evidenceCompleteness,
+            List<Map<String, Object>> evidenceStatus
+    ) {
+        Map<String, Object> completeness = evidenceCompleteness == null ? Map.of() : evidenceCompleteness;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "FRESH_OBSERVATION_EVIDENCE_COMPLETE_RELEASE_GATED");
+        details.put("decisionKey", "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED");
+        details.put("nextAction", "Fresh release-attempt evidence is complete; inspect release readiness while release, claim, and mutation remain disabled.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("CHECK_ENQUEUE_REFUSAL"));
+        details.put("sourceRequestId", sourceRequestId == null ? null : sourceRequestId.toString());
+        details.put("releaseAttemptId", releaseAttemptId == null ? null : releaseAttemptId.toString());
+        details.put("sessionId", sessionId == null ? null : sessionId.toString());
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("evidenceComplete", completeness.get("complete"));
+        details.put("requiredCount", completeness.get("requiredCount"));
+        details.put("linkedCount", completeness.get("linkedCount"));
+        details.put("missingCount", completeness.get("missingCount"));
+        details.put("sourceOnlyFallbackCount", completeness.get("sourceOnlyFallbackCount"));
+        details.put("blockingCount", completeness.get("blockingCount"));
+        details.put("linkedKeys", completeness.get("linkedKeys"));
+        details.put("blockingKeys", completeness.get("blockingKeys"));
+        details.put("freshObservationEvidenceCompleteness", completeness);
+        details.put("freshObservationEvidenceStatus", evidenceStatus == null ? List.of() : evidenceStatus);
+        details.put("releaseGateEnabled", false);
+        details.put("sourcePatchClaimEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("verificationCommandExecutionEnabled", false);
+        details.put("rollbackRestoreEnabled", false);
+        details.put("ragFreshnessUpdateEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("finalAnswerGenerationEnabled", false);
+        details.put("deliveryEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        return details;
+    }
+
+    private Map<String, Object> releaseReadinessRefreshDetails(
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            UUID sessionId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentPatchExecutionReadinessResponse readiness
+    ) {
+        Map<String, Object> patchReleaseReadiness = readiness == null || readiness.patchReleaseReadiness() == null
+                ? Map.of()
+                : readiness.patchReleaseReadiness();
+        Map<String, Object> patchExecutionGate = readiness == null || readiness.patchExecutionGate() == null
+                ? Map.of()
+                : readiness.patchExecutionGate();
+        Map<String, Object> latestAttempt = readiness == null || readiness.releaseAttemptModel() == null
+                ? Map.of()
+                : readiness.releaseAttemptModel().latestAttempt();
+        Map<String, Object> finalReadiness = latestAttempt.get("releaseAttemptFinalReadiness") instanceof Map<?, ?> value
+                ? value.entrySet().stream().collect(
+                LinkedHashMap::new,
+                (map, entry) -> map.put(String.valueOf(entry.getKey()), entry.getValue()),
+                LinkedHashMap::putAll
+        )
+                : Map.of();
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "RELEASE_READINESS_REFRESHED_RELEASE_GATED");
+        details.put("decisionKey", "RELEASE_READINESS_REFRESHED_RELEASE_GATED");
+        details.put("nextAction", "Release readiness was refreshed from fresh evidence; release, claim, and mutation remain disabled.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("REVIEW_RELEASE_REFUSAL"));
+        details.put("sourceRequestId", sourceRequestId == null ? null : sourceRequestId.toString());
+        details.put("releaseAttemptId", releaseAttemptId == null ? null : releaseAttemptId.toString());
+        details.put("sessionId", sessionId == null ? null : sessionId.toString());
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("readyToRelease", readiness != null && readiness.readyToRelease());
+        details.put("readinessMessage", readiness == null ? null : readiness.message());
+        details.put("warningCount", readiness == null || readiness.warnings() == null ? 0 : readiness.warnings().size());
+        details.put("warnings", readiness == null || readiness.warnings() == null ? List.of() : readiness.warnings());
+        details.put("checkCount", readiness == null || readiness.checks() == null ? 0 : readiness.checks().size());
+        details.put("failedCheckKeys", readiness == null || readiness.checks() == null
+                ? List.of()
+                : readiness.checks().stream()
+                .filter(check -> !check.passed())
+                .map(LocalAgentPatchExecutionReadinessCheck::key)
+                .toList());
+        details.put("checks", readiness == null || readiness.checks() == null
+                ? List.of()
+                : readiness.checks().stream().map(this::readinessCheckDetails).toList());
+        details.put("patchReleaseStatus", patchReleaseReadiness.get("status"));
+        details.put("patchReleasePreconditionsPassed", patchReleaseReadiness.get("preconditionsPassed"));
+        details.put("patchExecutionGateStatus", patchExecutionGate.get("status"));
+        details.put("patchExecutionPreconditionsPassed", patchExecutionGate.get("preconditionsPassed"));
+        details.put("releaseAttemptFinalReadiness", finalReadiness);
+        details.put("releaseAttemptReady", finalReadiness.get("releaseAttemptReady"));
+        details.put("freshObservationEvidenceComplete", finalReadiness.get("freshObservationEvidenceComplete"));
+        details.put("releaseGateEnabled", false);
+        details.put("sourcePatchClaimEnabled", false);
+        details.put("claimEnabled", false);
+        details.put("claimable", false);
+        details.put("mutationEnabled", false);
+        details.put("mutationAllowed", false);
+        details.put("verificationCommandExecutionEnabled", false);
+        details.put("rollbackRestoreEnabled", false);
+        details.put("ragFreshnessUpdateEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("finalAnswerGenerationEnabled", false);
+        details.put("deliveryEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        details.put("patchReleaseReadiness", patchReleaseReadiness);
+        details.put("patchExecutionGate", patchExecutionGate);
+        details.put("releaseAttemptModel", readiness == null ? null : readiness.releaseAttemptModel());
+        return details;
+    }
+
+    private Map<String, Object> readinessCheckDetails(LocalAgentPatchExecutionReadinessCheck check) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("key", check.key());
+        details.put("passed", check.passed());
+        details.put("message", check.message());
         return details;
     }
 

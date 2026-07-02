@@ -25,6 +25,7 @@ const baselineReport = {
     activeIndexPreservedCases: 1,
     crawlPolicyPassedCases: 1,
     citationSourcePassedCases: 1,
+    crawlInsightPassedCases: 1,
   },
   results: [
     {
@@ -35,6 +36,7 @@ const baselineReport = {
       activeIndex: { passed: true },
       crawlPolicy: { passed: true },
       citationSource: { passed: true },
+      crawlInsight: { passed: true },
     },
   ],
   passed: true,
@@ -51,6 +53,7 @@ const regressedReport = {
     activeIndexPreservedCases: 0,
     crawlPolicyPassedCases: 0,
     citationSourcePassedCases: 0,
+    crawlInsightPassedCases: 0,
   },
   results: [
     {
@@ -61,6 +64,7 @@ const regressedReport = {
       activeIndex: { passed: false },
       crawlPolicy: { passed: false },
       citationSource: { passed: false },
+      crawlInsight: { passed: false },
     },
   ],
   passed: false,
@@ -98,6 +102,7 @@ try {
   assert.match(failingResult.stderr, /summary-increased:failedCases/);
   assert.match(failingResult.stderr, /case-no-longer-passing:crawler-allowlist-budget-stores-source-pages/);
   assert.match(failingResult.stderr, /case-check-regressed:crawler-allowlist-budget-stores-source-pages:crawlPolicy\.passed/);
+  assert.match(failingResult.stderr, /case-check-regressed:crawler-allowlist-budget-stores-source-pages:crawlInsight\.passed/);
   const failingComparison = JSON.parse(fs.readFileSync(regressedComparisonPath, "utf8"));
   assert.equal(failingComparison.passed, false);
   assert.ok(failingComparison.regressionCount >= 10);

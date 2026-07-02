@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("setup", "start", "background-start", "background-stop", "status", "token", "logs", "doctor", "open")]
+    [ValidateSet("setup-plan", "setup", "start", "background-start", "background-stop", "status", "token", "logs", "doctor", "open")]
     [string]$Action = "status",
     [string]$Server = "http://localhost:8083",
     [string]$LoginId = $env:LEARNBOT_AGENT_LOGIN_ID,
@@ -19,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $localAgentProject = Join-Path $repoRoot "local-agent"
 $defaultAgentExe = Join-Path $env:USERPROFILE ".learnbot\bin\learnbot.exe"
+. (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentSetupPlan.ps1")
 
 function Resolve-AgentExecutable {
     if (-not [string]::IsNullOrWhiteSpace($AgentExe)) {
@@ -204,6 +205,15 @@ function Setup-Agent {
 }
 
 switch ($Action) {
+    "setup-plan" {
+        Get-LearnBotLocalAgentSetupPlan `
+            -Server $Server `
+            -WorkspacePath $WorkspacePath `
+            -LoginId $LoginId `
+            -Transport $Transport `
+            -AgentExe $AgentExe `
+            -ConfigPath $ConfigPath | ConvertTo-Json -Depth 10
+    }
     "setup" {
         Setup-Agent
     }

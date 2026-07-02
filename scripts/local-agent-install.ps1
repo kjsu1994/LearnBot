@@ -13,19 +13,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-agent\LearnBot.LocalAgent.csproj"
 $exe = Join-Path $InstallDir "learnbot.exe"
+. (Join-Path $PSScriptRoot "local-agent\install\LocalAgentInstallStatus.ps1")
 
 function Test-OnUserPath {
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ([string]::IsNullOrWhiteSpace($userPath)) {
-        return $false
-    }
-    $comparison = [StringComparison]::OrdinalIgnoreCase
-    foreach ($entry in $userPath.Split(';', [StringSplitOptions]::RemoveEmptyEntries)) {
-        if ([string]::Equals([System.IO.Path]::GetFullPath($entry.Trim()), [System.IO.Path]::GetFullPath($InstallDir), $comparison)) {
-            return $true
-        }
-    }
-    return $false
+    Test-LearnBotInstallOnUserPath -InstallDir $InstallDir
 }
 
 function Add-ToUserPath {
@@ -39,12 +30,8 @@ function Add-ToUserPath {
 }
 
 function Show-Status {
-    [pscustomobject]@{
-        installDir = [System.IO.Path]::GetFullPath($InstallDir)
-        executable = $exe
-        installed = Test-Path -LiteralPath $exe -PathType Leaf
-        onUserPath = Test-OnUserPath
-    } | ConvertTo-Json -Depth 5
+    param([switch]$IncludeExecutableStatus)
+    Get-LearnBotInstallStatus -InstallDir $InstallDir -Executable $exe -IncludeExecutableStatus:$IncludeExecutableStatus | ConvertTo-Json -Depth 10
 }
 
 switch ($Action) {
@@ -75,15 +62,15 @@ switch ($Action) {
             Write-Host "User PATH updated. Open a new PowerShell window if 'learnbot' is not immediately available."
         } else {
             Write-Host "Run directly:"
-            Write-Host "  & `"$exe`" agent status"
+            Write-Host "  & `"$exe`" status"
             Write-Host "Or reinstall with -AddToUserPath to run 'learnbot' from a new PowerShell window."
         }
         Write-Host ""
         Write-Host "This is a lightweight internal pilot install, not a Windows Service, MSI, updater, or background process manager."
-        Show-Status
+        Show-Status -IncludeExecutableStatus
     }
     "status" {
-        Show-Status
+        Show-Status -IncludeExecutableStatus
     }
     "uninstall" {
         if (Test-Path -LiteralPath $InstallDir) {

@@ -98,7 +98,14 @@ const server = http.createServer((request, response) => {
         { url: "https://example.com/docs/setup", depth: 1, documentId: "doc-2", sourceUri: "https://example.com/docs/setup" },
       ],
       skipped: [
-        { url: "https://evil.example.net/docs", reasonCode: "DISALLOWED_DOMAIN" },
+        {
+          url: "https://evil.example.net/docs",
+          reasonCode: "DOMAIN_NOT_ALLOWED",
+          category: "POLICY_BLOCK",
+          severity: "WARNING",
+          indexingBlocked: true,
+          userAction: "Add the domain to the crawler allowlist or choose an allowed URL.",
+        },
       ],
     }));
     return;
@@ -143,6 +150,9 @@ try {
   assert.equal(capture.cases[1].observed.activeIndexVersionAfterFailure, "index-v1");
   assert.equal(capture.cases[2].observed.effectiveMaxDepth, 2);
   assert.equal(capture.cases[2].observed.fetchedPages[1].sourceUri, "https://example.com/docs/setup");
+  assert.equal(capture.cases[2].observed.skippedPages[0].category, "POLICY_BLOCK");
+  assert.equal(capture.cases[2].observed.skippedPages[0].indexingBlocked, true);
+  assert.match(capture.cases[2].observed.skippedPages[0].userAction, /allowlist/);
 
   const authCaptureResult = await runNode([
     captureScriptPath,
@@ -196,6 +206,7 @@ try {
   const score = JSON.parse(fs.readFileSync(scorePath, "utf8"));
   assert.equal(score.passed, true);
   assert.equal(score.summary.passedCases, 3);
+  assert.equal(score.summary.crawlInsightPassedCases, 3);
 } finally {
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(tempDir, { recursive: true, force: true });

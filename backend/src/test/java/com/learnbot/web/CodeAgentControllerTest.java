@@ -6,11 +6,17 @@ import com.learnbot.dto.CodeAgentLocalPatchRequest;
 import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopPreviewRequest;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
+import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopM8EntryReadinessResponse;
+import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationRequest;
+import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalPayloadRequest;
+import com.learnbot.dto.loop.CodeAgentLoopReleaseReviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
@@ -255,6 +261,143 @@ class CodeAgentControllerTest {
     }
 
     @Test
+    void loopRunnerFinalResultPublicationPreviewResolvesRepositorySpaceAndDelegatesWithoutPublishing() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopRunnerService loopRunnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                mock(CodeAgentLoopPreviewService.class),
+                loopRunnerService,
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        CodeAgentLoopFinalResultPublicationPreviewResponse expected = new CodeAgentLoopFinalResultPublicationPreviewResponse(
+                loopId,
+                repositoryId,
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "READY_FINAL_RESULT_PUBLICATION_DISABLED",
+                "Final-result handoff is audit-only.",
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                java.util.Map.of("schema", "learnbot.code-agent.approved-execution-flow-completed-handoff.v1"),
+                java.util.Map.of("schema", "learnbot.code-agent.approved-execution-flow-final-result-handoff.v1"),
+                null
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopRunnerService.previewFinalResultPublication(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(expected);
+
+        var result = controller.loopRunnerFinalResultPublicationPreview(new CodeAgentLoopRunnerPreviewRequest(
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result.finalResultReady()).isTrue();
+        assertThat(result.publicationEnabled()).isFalse();
+        assertThat(result.acknowledgementSaveEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopRunnerService).previewFinalResultPublication(userId, repositoryId, loopId, agentId, workspaceId);
+    }
+
+    @Test
+    void loopRunnerM8EntryReadinessResolvesRepositorySpaceAndDelegatesWithoutEnablingM8Work() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopRunnerService loopRunnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                mock(CodeAgentLoopPreviewService.class),
+                loopRunnerService,
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        CodeAgentLoopM8EntryReadinessResponse expected = new CodeAgentLoopM8EntryReadinessResponse(
+                loopId,
+                repositoryId,
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "M7_CLOSURE_READY",
+                "M8_ENTRY_READY",
+                "M8 can start, but controls remain disabled.",
+                true,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of(),
+                null,
+                null,
+                null
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopRunnerService.previewM8EntryReadiness(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(expected);
+
+        var result = controller.loopRunnerM8EntryReadiness(new CodeAgentLoopRunnerPreviewRequest(
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId
+        ));
+
+        assertThat(result.m8EntryDecision()).isEqualTo("M8_ENTRY_READY");
+        assertThat(result.m8WorkEnabled()).isFalse();
+        assertThat(result.publicationEnabled()).isFalse();
+        assertThat(result.acknowledgementSaveEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopRunnerService).previewM8EntryReadiness(userId, repositoryId, loopId, agentId, workspaceId);
+    }
+
+    @Test
     void loopRunnerEnqueueReadOnlyResolvesRepositorySpaceAndDelegatesToRunner() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -313,6 +456,112 @@ class CodeAgentControllerTest {
         assertThat(result.mutationEnabled()).isFalse();
         verify(authService).requireSpace(user, repositorySpaceId);
         verify(loopRunnerService).enqueueReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+    }
+
+    @Test
+    void loopRunnerReleaseReviewResolvesRepositorySpaceAndDelegatesWithoutEnablingMutation() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopRunnerService loopRunnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                mock(CodeAgentLoopPreviewService.class),
+                loopRunnerService,
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        CodeAgentLoopRunnerPreviewResponse preview = new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RELEASE_READINESS_REFRESHED_RELEASE_GATED",
+                "RELEASE_READINESS_REFRESHED_RELEASE_GATED",
+                "WAIT_RELEASE_GATE_READINESS_REFRESHED",
+                "Readiness refreshed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                java.util.Map.of("sourceRequestId", sourceRequestId.toString()),
+                null,
+                null,
+                java.util.Map.of("mutationAllowed", false)
+        );
+        LocalAgentPatchReleaseBoundaryResponse boundary = new LocalAgentPatchReleaseBoundaryResponse(
+                sourceRequestId,
+                "RELEASE_REFUSED_GATE_DISABLED",
+                "REFUSAL_ONLY",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of("release gate is disabled"),
+                "Release gate is disabled.",
+                java.util.Map.of("status", "BLOCKED_RELEASE_DISABLED"),
+                java.util.Map.of("releaseGateEnabled", false),
+                null
+        );
+        CodeAgentLoopReleaseReviewResponse expected = new CodeAgentLoopReleaseReviewResponse(
+                loopId,
+                repositoryId,
+                "RELEASE_READINESS_REFRESHED_RELEASE_GATED",
+                "RELEASE_READINESS_REFRESHED_RELEASE_GATED",
+                "RELEASE_REVIEW_REFUSED_GATE_DISABLED",
+                "Release review recorded the disabled release boundary.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                java.util.Map.of("sourceRequestId", sourceRequestId.toString()),
+                preview,
+                boundary
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopRunnerService.reviewReleaseGate(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(expected);
+
+        var result = controller.loopRunnerReleaseReview(new CodeAgentLoopRunnerPreviewRequest(
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result.runnerDecision()).isEqualTo("RELEASE_REVIEW_REFUSED_GATE_DISABLED");
+        assertThat(result.boundary().releaseGateEnabled()).isFalse();
+        assertThat(result.claimEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopRunnerService).reviewReleaseGate(userId, repositoryId, loopId, agentId, workspaceId);
     }
 
     @Test
@@ -441,6 +690,77 @@ class CodeAgentControllerTest {
         assertThat(result.mutationEnabled()).isFalse();
         verify(authService).requireSpace(user, repositorySpaceId);
         verify(toolSelectionService).enqueueSelectedReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+    }
+
+    @Test
+    void loopRunnerContinueAfterObservationResolvesRepositorySpaceAndDelegatesWithoutEnablingMutation() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                toolSelectionService,
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        CodeAgentLoopObservationContinuationResponse expected = new CodeAgentLoopObservationContinuationResponse(
+                loopId,
+                repositoryId,
+                requestId,
+                "SUCCEEDED",
+                "NEXT_MODEL_TOOL_PREVIEW_READY",
+                "Continued.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                1,
+                6,
+                5,
+                false,
+                null,
+                null,
+                null
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(toolSelectionService.continueAfterReadOnlyObservation(userId, repositoryId, loopId, agentId, workspaceId, requestId))
+                .thenReturn(expected);
+
+        var result = controller.loopRunnerContinueAfterObservation(new CodeAgentLoopObservationContinuationRequest(
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId,
+                requestId
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result.continuationDecision()).isEqualTo("NEXT_MODEL_TOOL_PREVIEW_READY");
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.enqueueEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(toolSelectionService).continueAfterReadOnlyObservation(userId, repositoryId, loopId, agentId, workspaceId, requestId);
     }
 
     @Test

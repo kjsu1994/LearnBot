@@ -39,6 +39,7 @@ const report = {
     activeIndexPreservedCases: results.filter((result) => result.activeIndex.passed).length,
     crawlPolicyPassedCases: results.filter((result) => result.crawlPolicy.passed).length,
     citationSourcePassedCases: results.filter((result) => result.citationSource.passed).length,
+    crawlInsightPassedCases: results.filter((result) => result.crawlInsight.passed).length,
   },
   results,
   passed: failed.length === 0,
@@ -61,6 +62,7 @@ function scoreCase(testCase) {
     activeIndex: scoreActiveIndex(testCase.kind, observed),
     crawlPolicy: scoreCrawlPolicy(testCase.kind, observed),
     citationSource: scoreCitationSource(testCase.kind, observed),
+    crawlInsight: scoreCrawlInsight(testCase.kind, observed),
   };
   const passed = Object.values(checks).every((check) => check.passed);
   return {
@@ -160,6 +162,22 @@ function scoreCitationSource(kind, observed) {
     passed: pages.length > 0 && missingSourceUriPages.length === 0,
     checkedPages: pages.length,
     missingSourceUriPages,
+  };
+}
+
+function scoreCrawlInsight(kind, observed) {
+  if (kind !== "crawler") {
+    return { passed: true };
+  }
+  const skippedPages = Array.isArray(observed.skippedPages) ? observed.skippedPages : [];
+  const missingInsightPages = skippedPages
+    .filter((page) => !page.category || !page.severity || typeof page.indexingBlocked !== "boolean" || !page.userAction)
+    .map((page) => page.url ?? "(unknown)");
+  return {
+    passed: missingInsightPages.length === 0,
+    checkedSkippedPages: skippedPages.length,
+    categories: uniqueStrings(skippedPages.map((page) => page.category)),
+    missingInsightPages,
   };
 }
 

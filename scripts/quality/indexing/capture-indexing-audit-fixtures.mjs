@@ -232,6 +232,8 @@ function normalizeCode(payload, context = {}) {
 function normalizeCrawler(payload) {
   const pages = arrayOf(payload.fetchedPages ?? payload.pages ?? payload.documents ?? payload.chunks);
   const audits = arrayOf(payload.crawlAudits ?? payload.auditEvents ?? payload.audits);
+  const skipped = arrayOf(payload.skippedPages ?? payload.skipped);
+  const skippedSources = skipped.length > 0 ? skipped : audits.filter((audit) => audit.success === false);
   const fetchedPages = pages.map((page) => ({
     url: page.url ?? page.sourceUri ?? page.location ?? page.metadata?.sourceUrl ?? payload.summary?.sourceUri ?? "",
     depth: Number(page.depth ?? page.crawlDepth ?? audits[0]?.depth ?? 0),
@@ -248,9 +250,13 @@ function normalizeCrawler(payload) {
     requestedMaxPages: numberOrNull(payload.requestedMaxPages ?? payload.request?.maxPages ?? audits[0]?.metadata?.maxPages),
     effectiveMaxPages: numberOrNull(payload.effectiveMaxPages ?? payload.maxPages ?? fetchedPages.length),
     fetchedPages,
-    skippedPages: arrayOf(payload.skippedPages ?? payload.skipped).map((page) => ({
-      url: page.url ?? "",
+    skippedPages: skippedSources.map((page) => ({
+      url: page.url ?? page.sourceUri ?? "",
       reason: page.reason ?? page.reasonCode ?? "",
+      category: page.category ?? null,
+      severity: page.severity ?? null,
+      indexingBlocked: typeof page.indexingBlocked === "boolean" ? page.indexingBlocked : null,
+      userAction: page.userAction ?? "",
     })),
   };
 }

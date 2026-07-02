@@ -1,6 +1,7 @@
 package com.learnbot.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.dto.LocalAgentApprovalState;
@@ -620,6 +621,258 @@ class LocalAgentToolExecutionRepositoryLivePostgresTest {
             assertThat(heldSource.status()).isEqualTo(LocalAgentToolStatus.APPROVED_HELD);
             assertThat(toolRepository.countMutationEnabledExecutionRowsForReleaseAttempt(userId, releaseAttemptId))
                     .isZero();
+            assertThat(toolRepository.claimNext(userId, agentId)).isEmpty();
+        } finally {
+            cleanupReleaseAttempt(jdbc, releaseAttemptId);
+            cleanup(jdbc, List.of(), userId);
+        }
+    }
+
+    @Test
+    void durableLinkedEvidenceCanReleaseHeldPatchThenClaimCompleteAndPersistMutationObservation() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        NamedParameterJdbcTemplate jdbc = jdbc();
+        LocalAgentToolExecutionRepository toolRepository = new LocalAgentToolExecutionRepository(jdbc, objectMapper);
+        LocalAgentMutationObservationIntakeRepository mutationObservationRepository =
+                new LocalAgentMutationObservationIntakeRepository(jdbc, objectMapper);
+        LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = new LocalAgentPatchReleaseAttemptRepository(jdbc, objectMapper);
+        LocalAgentGatewayService gatewayService = new LocalAgentGatewayService();
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getLocalAgent().setPatchExecutionReleaseEnabled(true);
+        LocalAgentToolGatewayService gateway = new LocalAgentToolGatewayService(
+                toolRepository,
+                mutationObservationRepository,
+                releaseAttemptRepository,
+                mock(CodeAgentLoopTimelineRepository.class),
+                gatewayService,
+                mock(LocalAgentToolPusher.class),
+                properties
+        );
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        try {
+            insertUser(jdbc, userId);
+            gatewayService.registerHeartbeat(
+                    userId,
+                    agentId,
+                    "0.1.0",
+                    List.of(LocalAgentToolName.PATCH_APPLY.wireName(), LocalAgentToolName.ROLLBACK_RESTORE.wireName()),
+                    List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true))
+            );
+            LocalAgentToolRequest sourceRequest = new LocalAgentToolRequest(
+                    sessionId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    validatedPatchInput(),
+                    LocalAgentApprovalState.REQUIRED,
+                    OffsetDateTime.now().minusSeconds(5),
+                    List.of("validated approved-held source")
+            );
+            LocalAgentToolExecution source = toolRepository.create(sourceRequestId, sourceRequest);
+            source = toolRepository.updateApprovalDecision(
+                    sourceRequestId,
+                    userId,
+                    LocalAgentApprovalState.APPROVED,
+                    LocalAgentToolStatus.APPROVED_HELD,
+                    "approved-held source for durable release-to-claim smoke"
+            ).orElseThrow();
+            releaseAttemptRepository.createDisabled(
+                    releaseAttemptId,
+                    source,
+                    120,
+                    Map.of("sourceRequestId", sourceRequestId.toString(), "claimable", false),
+                    List.of("release gate disabled")
+            );
+            List<UUID> freshRequestIds = gateway.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId)
+                    .stream()
+                    .map(item -> item.requestId())
+                    .toList();
+            completeClaimed(gateway, freshRequestIds.get(0), sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                    Map.of(
+                            "clean", true,
+                            "repositoryIdentity", Map.of(
+                                    "branch", "main",
+                                    "headCommit", "abc123",
+                                    "remoteUrl", "https://example.com/acme/learnbot.git"
+                            )
+                    ));
+            completeClaimed(gateway, freshRequestIds.get(1), sessionId, userId, agentId, workspaceId, LocalAgentToolName.PATCH_APPLY,
+                    patchDryRunOutput("src/App.java"));
+
+            var released = gateway.releaseHeldPatchForExecution(userId, sourceRequestId);
+            var claimed = gateway.claimNext(userId, agentId).orElseThrow();
+            gateway.complete(new LocalAgentToolResponse(
+                    sessionId,
+                    sourceRequestId,
+                    userId,
+                    agentId,
+                    workspaceId,
+                    AgentExecutionTarget.USER_LOCAL_AGENT,
+                    LocalAgentToolName.PATCH_APPLY,
+                    LocalAgentToolStatus.SUCCEEDED,
+                    Map.of(
+                            "dryRun", false,
+                            "mutationApplied", true,
+                            "snapshotManifestId", "snap-1234",
+                            "rollbackAvailable", true
+                    ),
+                    null,
+                    null,
+                    OffsetDateTime.now().minusSeconds(1),
+                    OffsetDateTime.now(),
+                    List.of("durable released patch completed")
+            ));
+
+            var completed = toolRepository.find(sourceRequestId).orElseThrow();
+            var observation = mutationObservationRepository.findLatestAcceptedMutationObservationForReleaseAttempt(
+                    userId,
+                    sourceRequestId,
+                    releaseAttemptId
+            ).orElseThrow();
+            var readiness = gateway.inspectPatchExecutionReadiness(userId, sourceRequestId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> finalMutationReportSummary = (Map<String, Object>) readiness.releaseAttemptModel()
+                    .latestAttempt()
+                    .get("finalMutationReportSummary");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> ragFreshnessMarker = (Map<String, Object>) readiness.releaseAttemptModel()
+                    .latestAttempt()
+                    .get("ragFreshnessMarker");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> finalAnswerPublicationHandoff = (Map<String, Object>) readiness.releaseAttemptModel()
+                    .latestAttempt()
+                    .get("finalAnswerPublicationHandoff");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> acknowledgementSaveHandoff = (Map<String, Object>) readiness.releaseAttemptModel()
+                    .latestAttempt()
+                    .get("acknowledgementSaveHandoff");
+
+            assertThat(released.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
+            assertThat(released.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+            assertThat(released.input())
+                    .containsEntry("sourceRequestId", sourceRequestId.toString())
+                    .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                    .containsEntry("mutationAllowed", true)
+                    .containsEntry("dryRunOnly", false);
+            assertThat(claimed.requestId()).isEqualTo(sourceRequestId);
+            assertThat(claimed.request().toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+            assertThat(claimed.request().input())
+                    .containsEntry("mutationAllowed", true)
+                    .containsEntry("dryRunOnly", false);
+            assertThat(completed.status()).isEqualTo(LocalAgentToolStatus.SUCCEEDED);
+            assertThat(completed.output()).containsKeys("mutationResultIntakeCandidate", "acceptedMutationObservation");
+            assertThat(observation)
+                    .containsEntry("schema", "learnbot.local-agent.accepted-mutation-observation.v1")
+                    .containsEntry("status", "ACCEPTED")
+                    .containsEntry("accepted", true)
+                    .containsEntry("toolName", LocalAgentToolName.PATCH_APPLY.wireName())
+                    .containsEntry("sourceRequestId", sourceRequestId.toString())
+                    .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                    .containsEntry("verificationStatus", "APPLIED")
+                    .containsEntry("mutationApplied", true)
+                    .containsEntry("snapshotManifestId", "snap-1234")
+                    .containsEntry("rollbackAvailable", true)
+                    .containsEntry("resultAggregationEnabled", false)
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("ragFreshnessUpdateEnabled", false);
+            assertThat(finalMutationReportSummary)
+                    .containsEntry("schema", "learnbot.local-agent.final-mutation-report-summary.v1")
+                    .containsEntry("status", "READY_SUMMARY_AUDIT_ONLY")
+                    .containsEntry("summaryAvailable", true)
+                    .containsEntry("acceptedMutationObserved", true)
+                    .containsEntry("acceptedMutationObservationCount", 1)
+                    .containsEntry("acceptedMutationObservationAcceptedCount", 1)
+                    .containsEntry("finalMutationReportSummaryAvailable", true)
+                    .containsEntry("finalReportGenerationEnabled", false)
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("finalAnswerGenerationEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("ragFreshnessUpdateEnabled", false);
+            assertThat(finalMutationReportSummary.get("sections")).isInstanceOf(List.class);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> reportSections = (List<Map<String, Object>>) finalMutationReportSummary.get("sections");
+            assertThat(reportSections)
+                    .extracting(section -> section.get("key"))
+                    .containsExactly("changedFiles", "verification", "rollback", "ragFreshness", "residualRisk");
+            assertThat(reportSections)
+                    .filteredOn(section -> "changedFiles".equals(section.get("key")))
+                    .singleElement()
+                    .satisfies(section -> assertThat(section)
+                            .containsEntry("status", "OBSERVED")
+                            .containsEntry("mutationApplied", true)
+                            .containsEntry("snapshotManifestId", "snap-1234"));
+            assertThat(reportSections)
+                    .filteredOn(section -> "ragFreshness".equals(section.get("key")))
+                    .singleElement()
+                    .satisfies(section -> assertThat(section)
+                            .containsEntry("status", "STALE_INDEX_WARNING_REQUIRED")
+                            .containsEntry("staleIndexRiskVisible", true)
+                            .containsEntry("ragFreshnessUpdateEnabled", false));
+            assertThat(ragFreshnessMarker)
+                    .containsEntry("schema", "learnbot.local-agent.rag-freshness-marker.v1")
+                    .containsEntry("status", "STALE_INDEX_WARNING_REQUIRED")
+                    .containsEntry("markerAvailable", true)
+                    .containsEntry("acceptedMutationObserved", true)
+                    .containsEntry("staleIndexRiskVisible", true)
+                    .containsEntry("targetFilesKnown", true)
+                    .containsEntry("staleIndexPolicy", "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH")
+                    .containsEntry("freshnessAction", "REQUIRE_PARTIAL_REINDEX_OR_STALE_WARNING")
+                    .containsEntry("ragFreshnessUpdateEnabled", false)
+                    .containsEntry("partialReindexEnabled", false)
+                    .containsEntry("finalAnswerMustDiscloseStaleIndex", true)
+                    .containsEntry("finalAnswerGenerationEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false);
+            assertThat(ragFreshnessMarker.get("targetFiles")).asList().containsExactly("src/App.java");
+            assertThat(finalAnswerPublicationHandoff)
+                    .containsEntry("schema", "learnbot.local-agent.final-answer-publication-handoff.v1")
+                    .containsEntry("status", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED")
+                    .containsEntry("handoffAvailable", true)
+                    .containsEntry("finalMutationReportSummaryAvailable", true)
+                    .containsEntry("staleIndexDisclosureRequired", true)
+                    .containsEntry("staleIndexDisclosureModeled", true)
+                    .containsEntry("staleIndexPolicy", "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH")
+                    .containsEntry("freshnessAction", "REQUIRE_PARTIAL_REINDEX_OR_STALE_WARNING")
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("finalAnswerGenerationEnabled", false)
+                    .containsEntry("finalAnswerDeliveryEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("ragFreshnessUpdateEnabled", false)
+                    .containsEntry("partialReindexEnabled", false);
+            assertThat(finalAnswerPublicationHandoff.get("targetFiles")).asList().containsExactly("src/App.java");
+            assertThat(finalAnswerPublicationHandoff.get("finalAnswerSections")).asList()
+                    .containsExactly("changedFiles", "verification", "rollback", "ragFreshness", "residualRisk");
+            assertThat((String) finalAnswerPublicationHandoff.get("staleIndexDisclosureText"))
+                    .contains("RAG may be stale")
+                    .contains("partial reindex");
+            assertThat(acknowledgementSaveHandoff)
+                    .containsEntry("schema", "learnbot.local-agent.acknowledgement-save-handoff.v1")
+                    .containsEntry("status", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED")
+                    .containsEntry("handoffAvailable", true)
+                    .containsEntry("finalAnswerPublicationHandoffAvailable", true)
+                    .containsEntry("staleIndexDisclosureModeled", true)
+                    .containsEntry("acknowledgementReceiptRequired", true)
+                    .containsEntry("acknowledgementReceiptModeled", true)
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("finalAnswerGenerationEnabled", false)
+                    .containsEntry("finalAnswerDeliveryEnabled", false)
+                    .containsEntry("conversationSaveEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("ragFreshnessUpdateEnabled", false)
+                    .containsEntry("partialReindexEnabled", false);
+            assertThat(acknowledgementSaveHandoff.get("targetFiles")).asList().containsExactly("src/App.java");
+            assertThat(acknowledgementSaveHandoff.get("finalAnswerSections")).asList()
+                    .containsExactly("changedFiles", "verification", "rollback", "ragFreshness", "residualRisk");
+            assertThat((String) acknowledgementSaveHandoff.get("staleIndexDisclosureText"))
+                    .contains("RAG may be stale")
+                    .contains("partial reindex");
             assertThat(toolRepository.claimNext(userId, agentId)).isEmpty();
         } finally {
             cleanupReleaseAttempt(jdbc, releaseAttemptId);

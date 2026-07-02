@@ -189,6 +189,12 @@ public class LocalAgentController {
         return toolGatewayService.inspectPatchReleaseBoundary(user.id(), requestId);
     }
 
+    @PostMapping("/tools/{requestId}/release-for-execution")
+    LocalAgentToolExecutionResponse releasePatchExecutionForClaim(@PathVariable UUID requestId) {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.releaseHeldPatchForExecution(user.id(), requestId);
+    }
+
     @PostMapping("/tools/{requestId}/response")
     ResponseEntity<Void> completeTool(
             @RequestHeader(name = "X-Local-Agent-Token") String agentToken,

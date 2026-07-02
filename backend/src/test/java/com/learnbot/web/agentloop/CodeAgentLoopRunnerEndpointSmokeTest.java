@@ -63,6 +63,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -330,6 +331,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
         CodeAgentLoopRunnerService runnerService = new CodeAgentLoopRunnerService(previewService, realGateway);
         CodeAgentLoopToolSelectionService selectionService = new CodeAgentLoopToolSelectionService(
                 runnerService,
+                previewService,
                 realGateway,
                 mock(CodeAgentLocalPatchRequestService.class),
                 ollamaClient,
@@ -369,7 +371,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 "LOOP_NEXT_DECISION_RECORDED",
                 Map.of("decisionKey", "OBSERVATION_ACCEPTED")
         ));
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(400))).thenReturn(new OllamaClient.ChatResult(
+        OllamaClient.ChatResult gitStatusSelection = new OllamaClient.ChatResult(
                 """
                         {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.status","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Check current workspace state."}
                         """,
@@ -381,11 +383,50 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 "test",
                 "PRIMARY",
                 false
-        ));
+        );
+        OllamaClient.ChatResult gitDiffSelection = new OllamaClient.ChatResult(
+                """
+                        {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.diff","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Inspect bounded workspace diff after status."}
+                        """,
+                "stop",
+                true,
+                0,
+                0,
+                "http://localhost:11434",
+                "test",
+                "PRIMARY",
+                false
+        );
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(400)))
+                .thenReturn(gitStatusSelection, gitStatusSelection, gitDiffSelection);
         when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
         when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
         when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation ->
                 execution(invocation.getArgument(0), invocation.getArgument(1), LocalAgentToolStatus.PENDING));
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/select-tool-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repositoryId": "%s",
+                                  "loopId": "%s",
+                                  "agentId": "%s",
+                                  "workspaceId": "%s"
+                                }
+                                """.formatted(repositoryId, loopId, agentId, workspaceId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.selectionDecision").value("MODEL_SELECTED_READ_ONLY_CANDIDATE"))
+                .andExpect(jsonPath("$.modelToolSelectionAttempted").value(true))
+                .andExpect(jsonPath("$.modelToolSelectionAccepted").value(true))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.candidate.toolName").value("git.status"));
+
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(toolPusher, never()).sendToolRequest(any());
 
         mockMvc.perform(post("/api/code-agent/loop/runner/enqueue-selected-read-only")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -407,7 +448,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 .andExpect(jsonPath("$.queuedRequest.request.toolName").value("git.status"));
 
         ArgumentCaptor<LocalAgentQueuedToolRequest> queuedCaptor = ArgumentCaptor.forClass(LocalAgentQueuedToolRequest.class);
-        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(authService, times(2)).requireSpace(user, repositorySpaceId);
         verify(toolPusher).sendToolRequest(queuedCaptor.capture());
 
         LocalAgentQueuedToolRequest queued = queuedCaptor.getValue();
@@ -436,10 +477,137 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
         );
 
         realGateway.complete(response);
+        when(repository.find(queued.requestId())).thenReturn(Optional.of(execution(
+                queued.requestId(),
+                request,
+                LocalAgentToolStatus.SUCCEEDED
+        )));
+        when(previewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(new CodeAgentLoopTimelineSummary(
+                loopId,
+                repositoryId,
+                repositorySpaceId,
+                "Observe repository state.",
+                "PREVIEW_ONLY",
+                6,
+                120,
+                false,
+                true,
+                false,
+                OffsetDateTime.now(),
+                List.of(new CodeAgentLoopTimelineEventSummary(
+                        UUID.randomUUID(),
+                        1,
+                        "LOCAL_AGENT_OBSERVATION_RESULT",
+                        "OBSERVE",
+                        AgentExecutionTarget.USER_LOCAL_AGENT,
+                        LocalAgentToolName.GIT_STATUS,
+                        false,
+                        false,
+                        true,
+                        Map.of("status", "SUCCEEDED"),
+                        OffsetDateTime.now()
+                ))
+        )));
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/continue-after-observation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repositoryId": "%s",
+                                  "loopId": "%s",
+                                  "agentId": "%s",
+                                  "workspaceId": "%s",
+                                  "requestId": "%s"
+                                }
+                                """.formatted(repositoryId, loopId, agentId, workspaceId, queued.requestId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.continuationDecision").value("NEXT_MODEL_TOOL_PREVIEW_READY"))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.iterationCount").value(1))
+                .andExpect(jsonPath("$.maxIterations").value(6))
+                .andExpect(jsonPath("$.remainingIterations").value(5))
+                .andExpect(jsonPath("$.iterationLimitReached").value(false))
+                .andExpect(jsonPath("$.observation.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.runnerPreview.runnerDecision").value("PREPARED_READ_ONLY_CANDIDATE"))
+                .andExpect(jsonPath("$.runnerPreview.candidate.toolName").value("git.diff"))
+                .andExpect(jsonPath("$.toolSelectionPreview.selectionDecision").value("MODEL_SELECTED_READ_ONLY_CANDIDATE"))
+                .andExpect(jsonPath("$.toolSelectionPreview.candidate.toolName").value("git.diff"));
+
+        when(previewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(new CodeAgentLoopTimelineSummary(
+                loopId,
+                repositoryId,
+                repositorySpaceId,
+                "Observe repository state.",
+                "PREVIEW_ONLY",
+                2,
+                120,
+                false,
+                true,
+                false,
+                OffsetDateTime.now(),
+                List.of(
+                        new CodeAgentLoopTimelineEventSummary(
+                                UUID.randomUUID(),
+                                1,
+                                "LOCAL_AGENT_OBSERVATION_RESULT",
+                                "OBSERVE",
+                                AgentExecutionTarget.USER_LOCAL_AGENT,
+                                LocalAgentToolName.GIT_STATUS,
+                                false,
+                                false,
+                                true,
+                                Map.of("status", "SUCCEEDED"),
+                                OffsetDateTime.now()
+                        ),
+                        new CodeAgentLoopTimelineEventSummary(
+                                UUID.randomUUID(),
+                                2,
+                                "LOCAL_AGENT_OBSERVATION_RESULT",
+                                "OBSERVE",
+                                AgentExecutionTarget.USER_LOCAL_AGENT,
+                                LocalAgentToolName.GIT_STATUS,
+                                false,
+                                false,
+                                true,
+                                Map.of("status", "SUCCEEDED"),
+                                OffsetDateTime.now()
+                        )
+                )
+        )));
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/continue-after-observation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repositoryId": "%s",
+                                  "loopId": "%s",
+                                  "agentId": "%s",
+                                  "workspaceId": "%s",
+                                  "requestId": "%s"
+                                }
+                                """.formatted(repositoryId, loopId, agentId, workspaceId, queued.requestId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.continuationDecision").value("ITERATION_LIMIT_REACHED"))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.iterationCount").value(2))
+                .andExpect(jsonPath("$.maxIterations").value(2))
+                .andExpect(jsonPath("$.remainingIterations").value(0))
+                .andExpect(jsonPath("$.iterationLimitReached").value(true))
+                .andExpect(jsonPath("$.observation.status").value("SUCCEEDED"));
 
         assertThat(claimed.requestId()).isEqualTo(queued.requestId());
         assertThat(claimed.request().toolName()).isEqualTo(LocalAgentToolName.GIT_STATUS);
         assertThat(request.input()).containsEntry("mutationAllowed", false);
+        verify(authService, times(4)).requireSpace(user, repositorySpaceId);
+        verify(ollamaClient, times(3)).chatResult(anyString(), anyString(), eq(400));
         verify(repository).claimNext(userId, agentId);
         verify(repository).complete(response);
         verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, request.input());
@@ -594,6 +762,211 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
     }
 
     @Test
+    void runnerEndpointsReloadGenericReleaseRefusalAsTerminalStopWithoutQueueing() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID releaseBoundaryEventId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+
+        LocalAgentToolExecutionRepository repository = mock(LocalAgentToolExecutionRepository.class);
+        LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository = mock(LocalAgentMutationObservationIntakeRepository.class);
+        LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository = mock(LocalAgentPatchReleaseAttemptRepository.class);
+        CodeAgentLoopTimelineRepository loopTimelineRepository = mock(CodeAgentLoopTimelineRepository.class);
+        LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
+        LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+
+        CodeAgentLoopPreviewService previewService = new CodeAgentLoopPreviewService(loopTimelineRepository);
+        LocalAgentToolGatewayService realGateway = new LocalAgentToolGatewayService(
+                repository,
+                mutationObservationIntakeRepository,
+                releaseAttemptRepository,
+                loopTimelineRepository,
+                gatewayService,
+                toolPusher
+        );
+        CodeAgentLoopRunnerService runnerService = new CodeAgentLoopRunnerService(previewService, realGateway);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                previewService,
+                runnerService,
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        var mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        Map<String, Object> refusalDetails = Map.ofEntries(
+                Map.entry("status", "RECORDED"),
+                Map.entry("decisionKey", "RELEASE_BOUNDARY_REFUSED"),
+                Map.entry("nextAction", "Report that release was refused and mutation remains disabled."),
+                Map.entry("message", "Release review refused the boundary; report the disabled release state without creating claimable mutation work."),
+                Map.entry("requestId", sourceRequestId.toString()),
+                Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                Map.entry("boundaryStatus", "RELEASE_REFUSED_GATE_DISABLED"),
+                Map.entry("actionMode", "REFUSAL_ONLY"),
+                Map.entry("blockingReasons", List.of("release gate is disabled", "held patch request remains non-claimable")),
+                Map.entry("releaseGateEnabled", false),
+                Map.entry("requestCreationEnabled", false),
+                Map.entry("pushEnabled", false),
+                Map.entry("claimEnabled", false),
+                Map.entry("claimable", false),
+                Map.entry("mutationEnabled", false),
+                Map.entry("rollbackRestoreEnabled", false),
+                Map.entry("ragFreshnessUpdateEnabled", false),
+                Map.entry("finalResultEnabled", false),
+                Map.entry("publicationEnabled", false),
+                Map.entry("acknowledgementEnabled", false)
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopTimelineRepository.findRecent(userId, repositoryId, 20)).thenReturn(List.of(new CodeAgentLoopTimelineSummary(
+                loopId,
+                repositoryId,
+                repositorySpaceId,
+                "fix",
+                "PREVIEW_ONLY",
+                6,
+                120,
+                false,
+                true,
+                false,
+                OffsetDateTime.now(),
+                List.of(new CodeAgentLoopTimelineEventSummary(
+                        releaseBoundaryEventId,
+                        24,
+                        "LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED",
+                        "COMPLETE_OR_PAUSE",
+                        AgentExecutionTarget.USER_LOCAL_AGENT,
+                        LocalAgentToolName.PATCH_APPLY,
+                        true,
+                        false,
+                        true,
+                        refusalDetails,
+                        OffsetDateTime.now()
+                ))
+        )));
+
+        String body = """
+                {
+                  "repositoryId": "%s",
+                  "loopId": "%s",
+                  "agentId": "%s",
+                  "workspaceId": "%s"
+                }
+                """.formatted(repositoryId, loopId, agentId, workspaceId);
+
+        mockMvc.perform(get("/api/code-agent/loop/next-action")
+                        .param("repositoryId", repositoryId.toString())
+                        .param("loopId", loopId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RECORDED"))
+                .andExpect(jsonPath("$.actionKey").value("STOP_WITH_REASON"))
+                .andExpect(jsonPath("$.reason").value("Report that release was refused and mutation remains disabled."))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.finalResultEnabled").value(false))
+                .andExpect(jsonPath("$.publicationEnabled").value(false))
+                .andExpect(jsonPath("$.acknowledgementEnabled").value(false))
+                .andExpect(jsonPath("$.sourceEventId").value(releaseBoundaryEventId.toString()))
+                .andExpect(jsonPath("$.sourceEventType").value("LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED"))
+                .andExpect(jsonPath("$.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"))
+                .andExpect(jsonPath("$.handoffSummary.status").value("RELEASE_REVIEW_REFUSED_GATE_DISABLED"))
+                .andExpect(jsonPath("$.handoffSummary.sourceRequestId").value(sourceRequestId.toString()))
+                .andExpect(jsonPath("$.handoffSummary.releaseAttemptId").value(releaseAttemptId.toString()))
+                .andExpect(jsonPath("$.handoffSummary.boundaryStatus").value("RELEASE_REFUSED_GATE_DISABLED"))
+                .andExpect(jsonPath("$.handoffSummary.actionMode").value("REFUSAL_ONLY"))
+                .andExpect(jsonPath("$.handoffSummary.releaseGateEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.pushEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.claimEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.claimable").value(false))
+                .andExpect(jsonPath("$.handoffSummary.verificationCommandExecutionEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.rollbackRestoreEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.ragFreshnessUpdateEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.finalResultEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.publicationEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.finalAnswerGenerationEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.deliveryEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.acknowledgementEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.runnerDecision").value("NO_REQUEST_PREPARED"));
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RECORDED"))
+                .andExpect(jsonPath("$.actionKey").value("STOP_WITH_REASON"))
+                .andExpect(jsonPath("$.runnerDecision").value("NO_REQUEST_PREPARED"))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.finalResultEnabled").value(false))
+                .andExpect(jsonPath("$.publicationEnabled").value(false))
+                .andExpect(jsonPath("$.acknowledgementEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"))
+                .andExpect(jsonPath("$.handoffSummary.status").value("RELEASE_REVIEW_REFUSED_GATE_DISABLED"))
+                .andExpect(jsonPath("$.handoffSummary.runnerDecision").value("NO_REQUEST_PREPARED"))
+                .andExpect(jsonPath("$.candidate").doesNotExist())
+                .andExpect(jsonPath("$.nextAction.actionKey").value("STOP_WITH_REASON"))
+                .andExpect(jsonPath("$.nextAction.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"));
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/enqueue-read-only")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RECORDED"))
+                .andExpect(jsonPath("$.actionKey").value("STOP_WITH_REASON"))
+                .andExpect(jsonPath("$.runnerDecision").value("NOT_ENQUEUED"))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"))
+                .andExpect(jsonPath("$.preview.runnerDecision").value("NO_REQUEST_PREPARED"))
+                .andExpect(jsonPath("$.preview.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"))
+                .andExpect(jsonPath("$.queuedRequest").doesNotExist());
+
+        mockMvc.perform(post("/api/code-agent/loop/runner/release-review")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runnerDecision").value("NOT_REVIEWED"))
+                .andExpect(jsonPath("$.requestCreationEnabled").value(false))
+                .andExpect(jsonPath("$.enqueueEnabled").value(false))
+                .andExpect(jsonPath("$.pushEnabled").value(false))
+                .andExpect(jsonPath("$.claimEnabled").value(false))
+                .andExpect(jsonPath("$.mutationEnabled").value(false))
+                .andExpect(jsonPath("$.preview.runnerDecision").value("NO_REQUEST_PREPARED"))
+                .andExpect(jsonPath("$.preview.handoffSummary.schema").value("learnbot.code-agent.release-boundary-refusal-summary.v1"));
+
+        verify(authService, org.mockito.Mockito.times(4)).requireSpace(user, repositorySpaceId);
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+        verify(repository, never()).claimNext(any(), any());
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
+        verify(repository, never()).releaseApprovedHeldPatchWithMutationInput(any(), any(), any(), any());
+    }
+
+    @Test
     void patchApprovalRequestEndpointCanBeApprovedHeldWithoutPushClaimOrMutation() throws Exception {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -626,6 +999,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
         CodeAgentLoopRunnerService runnerService = new CodeAgentLoopRunnerService(previewService, realGateway);
         CodeAgentLoopToolSelectionService selectionService = new CodeAgentLoopToolSelectionService(
                 runnerService,
+                previewService,
                 realGateway,
                 mock(CodeAgentLocalPatchRequestService.class),
                 ollamaClient,
@@ -887,6 +1261,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
         CodeAgentLoopRunnerService runnerService = new CodeAgentLoopRunnerService(previewService, realGateway);
         CodeAgentLoopToolSelectionService selectionService = new CodeAgentLoopToolSelectionService(
                 runnerService,
+                previewService,
                 realGateway,
                 localPatchRequestService,
                 ollamaClient,
@@ -1188,6 +1563,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
         CodeAgentLoopRunnerService runnerService = new CodeAgentLoopRunnerService(previewService, realGateway);
         CodeAgentLoopToolSelectionService selectionService = new CodeAgentLoopToolSelectionService(
                 runnerService,
+                previewService,
                 realGateway,
                 localPatchRequestService,
                 ollamaClient,

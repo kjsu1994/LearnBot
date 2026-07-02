@@ -2,19 +2,23 @@ package com.learnbot.service.agentloop;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.AgentExecutionTarget;
+import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSideEffectBoundaryResponse;
 import com.learnbot.dto.loop.CodeAgentLoopToolCandidate;
 import com.learnbot.dto.loop.CodeAgentLoopToolSelectionResponse;
+import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.LocalAgentToolGatewayService;
 import com.learnbot.service.OllamaClient;
@@ -30,6 +34,7 @@ public class CodeAgentLoopToolSelectionService {
     private static final int MAX_TOOL_SELECTION_TOKENS = 400;
 
     private final CodeAgentLoopRunnerService runnerService;
+    private final CodeAgentLoopPreviewService loopPreviewService;
     private final LocalAgentToolGatewayService toolGatewayService;
     private final CodeAgentLocalPatchRequestService localPatchRequestService;
     private final OllamaClient ollamaClient;
@@ -37,12 +42,14 @@ public class CodeAgentLoopToolSelectionService {
 
     public CodeAgentLoopToolSelectionService(
             CodeAgentLoopRunnerService runnerService,
+            CodeAgentLoopPreviewService loopPreviewService,
             LocalAgentToolGatewayService toolGatewayService,
             CodeAgentLocalPatchRequestService localPatchRequestService,
             OllamaClient ollamaClient,
             ObjectMapper objectMapper
     ) {
         this.runnerService = runnerService;
+        this.loopPreviewService = loopPreviewService;
         this.toolGatewayService = toolGatewayService;
         this.localPatchRequestService = localPatchRequestService;
         this.ollamaClient = ollamaClient;
@@ -83,11 +90,11 @@ public class CodeAgentLoopToolSelectionService {
                     userPrompt(preview, candidate),
                     MAX_TOOL_SELECTION_TOKENS
             ).content()));
-            if (acceptsReadOnlyGitStatus(modelDecision, candidate)) {
+            if (acceptsReadOnlyCandidate(modelDecision, candidate)) {
                 return response(
                         preview,
                         "MODEL_SELECTED_READ_ONLY_CANDIDATE",
-                        "Model selected the allowed read-only git.status candidate. Execution and mutation remain disabled in this preview.",
+                        "Model selected the allowed read-only " + candidate.toolName().wireName() + " candidate. Execution and mutation remain disabled in this preview.",
                         true,
                         true,
                         true,
@@ -98,7 +105,7 @@ public class CodeAgentLoopToolSelectionService {
             return response(
                     preview,
                     "MODEL_SELECTION_REJECTED_FALLBACK_READ_ONLY",
-                    "Model output did not match the allowed read-only git.status contract; deterministic read-only fallback was retained.",
+                    "Model output did not match the allowed read-only " + candidate.toolName().wireName() + " contract; deterministic read-only fallback was retained.",
                     true,
                     false,
                     false,
@@ -107,12 +114,12 @@ public class CodeAgentLoopToolSelectionService {
             );
         } catch (Exception ex) {
             return response(
-                    preview,
-                    "MODEL_SELECTION_FAILED_FALLBACK_READ_ONLY",
-                    "Model tool selection failed; deterministic read-only git.status fallback was retained.",
-                    true,
-                    false,
-                    false,
+                preview,
+                "MODEL_SELECTION_FAILED_FALLBACK_READ_ONLY",
+                "Model tool selection failed; deterministic read-only " + candidate.toolName().wireName() + " fallback was retained.",
+                true,
+                false,
+                false,
                     candidate,
                     Map.of("error", ex.getClass().getSimpleName())
             );
@@ -169,9 +176,83 @@ public class CodeAgentLoopToolSelectionService {
                         ? "ENQUEUED_MODEL_SELECTED_READ_ONLY_OBSERVATION"
                         : "ENQUEUED_FALLBACK_READ_ONLY_OBSERVATION",
                 selection.selectedByModel()
-                        ? "Queued the model-selected read-only Local Agent git.status observation. Mutation remains disabled."
-                        : "Queued the deterministic read-only Local Agent git.status fallback after model selection was unavailable or rejected. Mutation remains disabled.",
+                        ? "Queued the model-selected read-only Local Agent " + candidate.toolName().wireName() + " observation. Mutation remains disabled."
+                        : "Queued the deterministic read-only Local Agent " + candidate.toolName().wireName() + " fallback after model selection was unavailable or rejected. Mutation remains disabled.",
                 queued
+        );
+    }
+
+    public CodeAgentLoopObservationContinuationResponse continueAfterReadOnlyObservation(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID agentId,
+            UUID workspaceId,
+            UUID requestId
+    ) {
+        ContinuationBudget budget = continuationBudget(userId, repositoryId, loopId);
+        LocalAgentToolExecutionResponse observation = toolGatewayService.findForUser(userId, requestId).orElse(null);
+        if (observation == null) {
+            return continuationResponse(
+                    loopId,
+                    repositoryId,
+                    requestId,
+                    "NOT_FOUND",
+                    "OBSERVATION_NOT_FOUND",
+                    "The queued Local Agent observation was not found for this user; no next model decision was previewed.",
+                    budget,
+                    null,
+                    null,
+                    null
+            );
+        }
+        if (observation.status() != LocalAgentToolStatus.SUCCEEDED) {
+            return continuationResponse(
+                    loopId,
+                    repositoryId,
+                    requestId,
+                    observation.status().name(),
+                    "WAIT_FOR_OBSERVATION_COMPLETION",
+                    "The Local Agent observation has not succeeded yet; no next model decision was previewed.",
+                    budget,
+                    observation,
+                    null,
+                    null
+            );
+        }
+        if (budget.limitReached()) {
+            return continuationResponse(
+                    loopId,
+                    repositoryId,
+                    requestId,
+                    observation.status().name(),
+                    "ITERATION_LIMIT_REACHED",
+                    "The read-only continuation budget has been reached; no next model decision was previewed.",
+                    budget,
+                    observation,
+                    null,
+                    null
+            );
+        }
+
+        CodeAgentLoopToolSelectionResponse selection = selectNextToolPreview(
+                userId,
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId
+        );
+        return continuationResponse(
+                loopId,
+                repositoryId,
+                requestId,
+                observation.status().name(),
+                "NEXT_MODEL_TOOL_PREVIEW_READY",
+                "The read-only Local Agent observation succeeded; the next model tool-selection preview is ready without enqueueing or mutation.",
+                budget,
+                observation,
+                selection.preview(),
+                selection
         );
     }
 
@@ -413,18 +494,15 @@ public class CodeAgentLoopToolSelectionService {
         );
     }
 
-    private boolean acceptsReadOnlyGitStatus(JsonNode root, CodeAgentLoopToolCandidate candidate) {
+    private boolean acceptsReadOnlyCandidate(JsonNode root, CodeAgentLoopToolCandidate candidate) {
         String toolName = text(root, "toolName");
         String actionKey = text(root, "actionKey");
         boolean readOnly = root.path("readOnly").asBoolean(false);
         boolean mutationAllowed = root.path("mutationAllowed").asBoolean(true);
         boolean requiresApproval = root.path("requiresApproval").asBoolean(true);
-        return LocalAgentToolName.GIT_STATUS.equals(candidate.toolName())
+        return safeReadOnlyCandidate(candidate)
                 && LocalAgentApprovalState.NOT_REQUIRED.equals(candidate.approvalState())
-                && !candidate.sideEffectful()
-                && !candidate.requiresApproval()
-                && !candidate.mutationAllowed()
-                && LocalAgentToolName.GIT_STATUS.wireName().equals(toolName)
+                && candidate.toolName().wireName().equals(toolName)
                 && "QUEUE_READ_ONLY_OBSERVATION".equals(actionKey)
                 && readOnly
                 && !mutationAllowed
@@ -432,7 +510,7 @@ public class CodeAgentLoopToolSelectionService {
     }
 
     private boolean safeReadOnlyCandidate(CodeAgentLoopToolCandidate candidate) {
-        return candidate.toolName() == LocalAgentToolName.GIT_STATUS
+        return (candidate.toolName() == LocalAgentToolName.GIT_STATUS || candidate.toolName() == LocalAgentToolName.GIT_DIFF)
                 && candidate.approvalState() == LocalAgentApprovalState.NOT_REQUIRED
                 && !candidate.sideEffectful()
                 && !candidate.requiresApproval()
@@ -516,6 +594,76 @@ public class CodeAgentLoopToolSelectionService {
                 selection,
                 queued
         );
+    }
+
+    private CodeAgentLoopObservationContinuationResponse continuationResponse(
+            UUID loopId,
+            UUID repositoryId,
+            UUID requestId,
+            String status,
+            String continuationDecision,
+            String reason,
+            ContinuationBudget budget,
+            LocalAgentToolExecutionResponse observation,
+            CodeAgentLoopRunnerPreviewResponse runnerPreview,
+            CodeAgentLoopToolSelectionResponse toolSelectionPreview
+    ) {
+        ContinuationBudget safeBudget = budget == null ? new ContinuationBudget(0, 0) : budget;
+        return new CodeAgentLoopObservationContinuationResponse(
+                runnerPreview == null ? loopId : runnerPreview.loopId(),
+                repositoryId,
+                requestId,
+                status,
+                continuationDecision,
+                reason,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                safeBudget.iterationCount(),
+                safeBudget.maxIterations(),
+                safeBudget.remainingIterations(),
+                safeBudget.limitReached(),
+                observation,
+                runnerPreview,
+                toolSelectionPreview
+        );
+    }
+
+    private ContinuationBudget continuationBudget(UUID userId, UUID repositoryId, UUID loopId) {
+        if (loopId == null) {
+            return new ContinuationBudget(0, 0);
+        }
+        return loopPreviewService.recentTimelines(userId, repositoryId, 10).stream()
+                .filter(timeline -> loopId.equals(timeline.id()))
+                .findFirst()
+                .map(timeline -> {
+                    long completedReadOnlyObservations = timeline.events().stream()
+                            .filter(event -> "LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType()))
+                            .filter(event -> event.toolName() == LocalAgentToolName.GIT_STATUS || event.toolName() == LocalAgentToolName.GIT_DIFF)
+                            .filter(event -> !event.mayMutate())
+                            .filter(event -> "SUCCEEDED".equals(String.valueOf(event.details().get("status"))))
+                            .count();
+                    return new ContinuationBudget((int) completedReadOnlyObservations, Math.max(0, timeline.maxSteps()));
+                })
+                .orElseGet(() -> new ContinuationBudget(0, 0));
+    }
+
+    private record ContinuationBudget(int iterationCount, int maxIterations) {
+        int remainingIterations() {
+            if (maxIterations <= 0) {
+                return 0;
+            }
+            return Math.max(0, maxIterations - iterationCount);
+        }
+
+        boolean limitReached() {
+            return maxIterations > 0 && iterationCount >= maxIterations;
+        }
     }
 
     private CodeAgentLoopSideEffectBoundaryResponse sideEffectResponse(
@@ -621,7 +769,7 @@ public class CodeAgentLoopToolSelectionService {
     private Map<String, Object> guardrails() {
         Map<String, Object> guardrails = new LinkedHashMap<>();
         guardrails.put("modelToolSelectionEnabled", true);
-        guardrails.put("allowedTools", java.util.List.of(LocalAgentToolName.GIT_STATUS.wireName()));
+        guardrails.put("allowedTools", java.util.List.of(LocalAgentToolName.GIT_STATUS.wireName(), LocalAgentToolName.GIT_DIFF.wireName()));
         guardrails.put("requestCreationEnabled", false);
         guardrails.put("enqueueEnabled", false);
         guardrails.put("sideEffectfulToolsBlocked", true);
@@ -689,7 +837,7 @@ public class CodeAgentLoopToolSelectionService {
         return """
                 You select one safe LearnBot Local Agent tool candidate.
                 Return JSON only.
-                Allowed tools: git.status.
+                Allowed tools: git.status, git.diff.
                 You must not select side-effectful tools.
                 mutationAllowed must be false.
                 requiresApproval must be false.
@@ -706,14 +854,15 @@ public class CodeAgentLoopToolSelectionService {
                 Candidate mutationAllowed: %s
 
                 Return this JSON shape:
-                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.status","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"%s","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
                 """.formatted(
                 preview.actionKey(),
                 preview.runnerDecision(),
                 candidate.toolName().wireName(),
                 !candidate.sideEffectful(),
                 candidate.requiresApproval(),
-                candidate.mutationAllowed()
+                candidate.mutationAllowed(),
+                candidate.toolName().wireName()
         );
     }
 
@@ -734,11 +883,12 @@ public class CodeAgentLoopToolSelectionService {
                 Current safe candidate tool: %s
 
                 Return one of these JSON shapes:
-                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.status","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"%s","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
                 {"actionKey":"REQUIRES_APPROVAL_RELEASE","toolName":"patch.apply","readOnly":false,"requiresApproval":true,"mutationAllowed":false,"reason":"..."}
                 """.formatted(
                 preview.actionKey(),
                 preview.runnerDecision(),
+                candidate.toolName().wireName(),
                 candidate.toolName().wireName()
         );
     }

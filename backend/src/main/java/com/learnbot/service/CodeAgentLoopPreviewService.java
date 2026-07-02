@@ -8,6 +8,7 @@ import com.learnbot.dto.CodeAgentLoopStopCondition;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentToolName;
+import com.learnbot.dto.loop.CodeAgentLoopRecommendedActionFactory;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import org.springframework.stereotype.Service;
 
@@ -79,7 +80,10 @@ public class CodeAgentLoopPreviewService {
         CodeAgentLoopTimelineSummary selected = timeline.get();
         Optional<CodeAgentLoopTimelineEventSummary> latestStop = latestEvent(selected, "STOP_OUTCOME_RECORDED");
         Optional<CodeAgentLoopTimelineEventSummary> latestReleaseBoundary = latestEvent(selected, "LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED");
+        Optional<CodeAgentLoopTimelineEventSummary> latestReleaseReadinessRefresh = latestEvent(selected, "LOCAL_AGENT_RELEASE_READINESS_REFRESHED");
+        Optional<CodeAgentLoopTimelineEventSummary> latestApprovedExecutionFlowCompleted = latestEvent(selected, "LOCAL_AGENT_APPROVED_EXECUTION_FLOW_COMPLETED");
         Optional<CodeAgentLoopTimelineEventSummary> latestFreshObservationEnqueue = latestEvent(selected, "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_ENQUEUED");
+        Optional<CodeAgentLoopTimelineEventSummary> latestFreshObservationComplete = latestEvent(selected, "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE");
         Optional<CodeAgentLoopTimelineEventSummary> latestDecision = latestEvent(selected, "LOOP_NEXT_DECISION_RECORDED");
         Optional<CodeAgentLoopTimelineEventSummary> latestApprovalRequest = latestEvent(selected, "LOCAL_AGENT_APPROVAL_REQUEST_CREATED");
         Optional<CodeAgentLoopTimelineEventSummary> latestApproval = latestEvent(selected, "LOCAL_AGENT_APPROVAL_DECISION");
@@ -87,16 +91,62 @@ public class CodeAgentLoopPreviewService {
 
         if (latestStop.isPresent()
                 && isSameOrAfter(latestStop.get(), latestDecision.orElse(null))
-                && isSameOrAfter(latestStop.get(), latestReleaseBoundary.orElse(null))) {
+                && isSameOrAfter(latestStop.get(), latestReleaseBoundary.orElse(null))
+                && isSameOrAfter(latestStop.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestStop.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestStop.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestStop.get(), latestFreshObservationComplete.orElse(null))) {
             return fromStopOutcome(selected, latestStop.get());
+        }
+        if (latestApprovedExecutionFlowCompleted.isPresent()
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestReleaseBoundary.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestFreshObservationComplete.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestApproval.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestApprovalRequest.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestObservation.orElse(null))
+                && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestStop.orElse(null))) {
+            return fromApprovedExecutionFlowCompleted(selected, latestApprovedExecutionFlowCompleted.get());
         }
         if (latestReleaseBoundary.isPresent()
                 && isSameOrAfter(latestReleaseBoundary.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestReleaseBoundary.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestReleaseBoundary.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestReleaseBoundary.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestReleaseBoundary.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestReleaseBoundary.get(), latestStop.orElse(null))) {
             return fromReleaseBoundary(selected, latestReleaseBoundary.get());
         }
+        if (latestReleaseReadinessRefresh.isPresent()
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestReleaseBoundary.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestFreshObservationComplete.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestApproval.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestApprovalRequest.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestObservation.orElse(null))
+                && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestStop.orElse(null))) {
+            return fromReleaseReadinessRefresh(selected, latestReleaseReadinessRefresh.get());
+        }
+        if (latestFreshObservationComplete.isPresent()
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestApproval.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestApprovalRequest.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestObservation.orElse(null))
+                && isSameOrAfter(latestFreshObservationComplete.get(), latestStop.orElse(null))) {
+            return fromFreshObservationComplete(selected, latestFreshObservationComplete.get());
+        }
         if (latestFreshObservationEnqueue.isPresent()
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestFreshObservationEnqueue.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestFreshObservationEnqueue.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestFreshObservationEnqueue.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestApproval.orElse(null))
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestObservation.orElse(null))
@@ -106,6 +156,10 @@ public class CodeAgentLoopPreviewService {
         if (latestApprovalRequest.isPresent()
                 && isSameOrAfter(latestApprovalRequest.get(), latestDecision.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestApproval.orElse(null))
+                && isSameOrAfter(latestApprovalRequest.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestApprovalRequest.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestApprovalRequest.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestApprovalRequest.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestStop.orElse(null))) {
             return nextAction(
@@ -119,6 +173,10 @@ public class CodeAgentLoopPreviewService {
         }
         if (latestApproval.isPresent()
                 && isSameOrAfter(latestApproval.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestApproval.get(), latestReleaseReadinessRefresh.orElse(null))
+                && isSameOrAfter(latestApproval.get(), latestApprovedExecutionFlowCompleted.orElse(null))
+                && isSameOrAfter(latestApproval.get(), latestFreshObservationEnqueue.orElse(null))
+                && isSameOrAfter(latestApproval.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestApproval.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestApproval.get(), latestStop.orElse(null))) {
             return fromApprovalDecision(selected, latestApproval.get());
@@ -198,6 +256,42 @@ public class CodeAgentLoopPreviewService {
         );
     }
 
+    private CodeAgentLoopNextActionResponse fromFreshObservationComplete(CodeAgentLoopTimelineSummary timeline, CodeAgentLoopTimelineEventSummary event) {
+        return nextAction(
+                timeline.id(),
+                timeline.repositoryId(),
+                stringDetail(event, "status", "FRESH_OBSERVATION_EVIDENCE_COMPLETE_RELEASE_GATED"),
+                "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED",
+                stringDetail(event, "nextAction", "Fresh release-attempt evidence is complete; inspect release readiness while release, claim, and mutation remain disabled."),
+                event,
+                freshObservationCompleteHandoffSummary(event)
+        );
+    }
+
+    private CodeAgentLoopNextActionResponse fromReleaseReadinessRefresh(CodeAgentLoopTimelineSummary timeline, CodeAgentLoopTimelineEventSummary event) {
+        return nextAction(
+                timeline.id(),
+                timeline.repositoryId(),
+                stringDetail(event, "status", "RELEASE_READINESS_REFRESHED_RELEASE_GATED"),
+                "RELEASE_READINESS_REFRESHED_RELEASE_GATED",
+                stringDetail(event, "nextAction", "Release readiness was refreshed from fresh evidence; release, claim, and mutation remain disabled."),
+                event,
+                releaseReadinessRefreshHandoffSummary(event)
+        );
+    }
+
+    private CodeAgentLoopNextActionResponse fromApprovedExecutionFlowCompleted(CodeAgentLoopTimelineSummary timeline, CodeAgentLoopTimelineEventSummary event) {
+        return nextAction(
+                timeline.id(),
+                timeline.repositoryId(),
+                stringDetail(event, "status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED"),
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                stringDetail(event, "nextAction", "Report the completed approved Local Agent execution flow while final result publication and acknowledgement save remain disabled."),
+                event,
+                approvedExecutionFlowCompletedHandoffSummary(event)
+        );
+    }
+
     private CodeAgentLoopNextActionResponse fromApprovalDecision(CodeAgentLoopTimelineSummary timeline, CodeAgentLoopTimelineEventSummary event) {
         String approvalState = stringDetail(event, "approvalState", "");
         String status = stringDetail(event, "status", "RECORDED");
@@ -247,10 +341,80 @@ public class CodeAgentLoopPreviewService {
                 timeline.id(),
                 timeline.repositoryId(),
                 stringDetail(event, "status", "RECORDED"),
-                "WAIT_FOR_RELEASE_GATE",
-                stringDetail(event, "nextAction", "Wait for release gate enablement or report that mutation remains disabled."),
-                event
+                "STOP_WITH_REASON",
+                stringDetail(event, "nextAction", "Report that release was refused and mutation remains disabled."),
+                event,
+                releaseBoundaryRefusalHandoffSummary(event)
         );
+    }
+
+    private Map<String, Object> releaseBoundaryRefusalHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("schema", "learnbot.code-agent.release-boundary-refusal-summary.v1");
+        summary.put("status", "RELEASE_REVIEW_REFUSED_GATE_DISABLED");
+        summary.put("sourceEventType", event.eventType());
+        summary.put("sourceSequenceNumber", event.sequenceNumber());
+        summary.put("sourceRequestId", event.details().get("requestId"));
+        summary.put("releaseAttemptId", event.details().get("releaseAttemptId"));
+        summary.put("boundaryStatus", event.details().get("boundaryStatus"));
+        summary.put("actionMode", event.details().get("actionMode"));
+        summary.put("blockingReasons", event.details().get("blockingReasons"));
+        summary.put("releaseGateEnabled", event.details().get("releaseGateEnabled"));
+        summary.put("requestCreationEnabled", event.details().get("requestCreationEnabled"));
+        summary.put("pushEnabled", event.details().get("pushEnabled"));
+        summary.put("claimEnabled", event.details().get("claimEnabled"));
+        summary.put("claimable", event.details().get("claimable"));
+        summary.put("mutationEnabled", event.details().get("mutationEnabled"));
+        summary.put("verificationCommandExecutionEnabled", false);
+        summary.put("rollbackRestoreEnabled", event.details().get("rollbackRestoreEnabled"));
+        summary.put("ragFreshnessUpdateEnabled", event.details().get("ragFreshnessUpdateEnabled"));
+        summary.put("finalResultEnabled", event.details().get("finalResultEnabled"));
+        summary.put("publicationEnabled", event.details().get("publicationEnabled"));
+        summary.put("finalAnswerGenerationEnabled", false);
+        summary.put("deliveryEnabled", false);
+        summary.put("acknowledgementEnabled", event.details().get("acknowledgementEnabled"));
+        summary.put("runnerDecision", "NO_REQUEST_PREPARED");
+        summary.put("message", event.details().getOrDefault(
+                "message",
+                "Release review refused the boundary; report the disabled release state without creating claimable mutation work."
+        ));
+        return summary;
+    }
+
+    private Map<String, Object> approvedExecutionFlowCompletedHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("schema", "learnbot.code-agent.approved-execution-flow-completed-handoff.v1");
+        summary.put("status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED");
+        summary.put("runnerDecision", "READY_FINAL_RESULT_DISABLED");
+        summary.put("sourceEventType", event.eventType());
+        summary.put("sourceSequenceNumber", event.sequenceNumber());
+        summary.put("sourceRequestId", event.details().get("sourceRequestId"));
+        summary.put("releaseAttemptId", event.details().get("releaseAttemptId"));
+        summary.put("sessionId", event.details().get("sessionId"));
+        summary.put("userId", event.details().get("userId"));
+        summary.put("agentId", event.details().get("agentId"));
+        summary.put("workspaceId", event.details().get("workspaceId"));
+        summary.put("requestIdSource", event.details().get("requestIdSource"));
+        summary.put("stepCount", event.details().get("stepCount"));
+        summary.put("ordered", event.details().get("ordered"));
+        summary.put("identityConsistent", event.details().get("identityConsistent"));
+        summary.put("releaseAttemptLinked", event.details().get("releaseAttemptLinked"));
+        summary.put("allTerminal", event.details().get("allTerminal"));
+        summary.put("allSucceeded", event.details().get("allSucceeded"));
+        summary.put("approvedFlowInspection", event.details().get("approvedFlowInspection"));
+        summary.put("finalResultHandoff", event.details().getOrDefault("finalResultHandoff", Map.of()));
+        summary.put("finalMutationReportSummaryStatus", stringDetail(event, "finalMutationReportSummaryStatus", "UNKNOWN_SUMMARY_AUDIT_ONLY"));
+        summary.put("ragFreshnessMarkerStatus", stringDetail(event, "ragFreshnessMarkerStatus", "UNKNOWN_RAG_FRESHNESS_MARKER"));
+        summary.put("finalAnswerPublicationHandoffStatus", stringDetail(event, "finalAnswerPublicationHandoffStatus", "UNKNOWN_PUBLICATION_HANDOFF"));
+        summary.put("acknowledgementSaveHandoffStatus", stringDetail(event, "acknowledgementSaveHandoffStatus", "UNKNOWN_ACKNOWLEDGEMENT_HANDOFF"));
+        summary.put("finalResultEnabled", false);
+        summary.put("publicationEnabled", false);
+        summary.put("acknowledgementEnabled", false);
+        summary.put("ragFreshnessUpdateEnabled", false);
+        summary.put("followUpMutationEnabled", false);
+        summary.put("mutationEnabled", false);
+        summary.put("message", "Approved Local Agent execution flow is complete and visible for final-result handoff, but final publication, acknowledgement save, RAG freshness update, and follow-up mutation remain disabled.");
+        return summary;
     }
 
     private boolean handoffCreationDisabled(CodeAgentLoopTimelineEventSummary event) {
@@ -324,6 +488,77 @@ public class CodeAgentLoopPreviewService {
         summary.put("deliveryEnabled", event.details().get("deliveryEnabled"));
         summary.put("acknowledgementEnabled", event.details().get("acknowledgementEnabled"));
         summary.put("message", "Fresh release-attempt observations are queued; wait for their Local Agent results before release remains disabled.");
+        return summary;
+    }
+
+    private Map<String, Object> freshObservationCompleteHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("schema", "learnbot.code-agent.release-gate-fresh-observation-complete-state.v1");
+        summary.put("status", "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED");
+        summary.put("sourceEventType", event.eventType());
+        summary.put("sourceSequenceNumber", event.sequenceNumber());
+        summary.put("sourceRequestId", event.details().get("sourceRequestId"));
+        summary.put("releaseAttemptId", event.details().get("releaseAttemptId"));
+        summary.put("evidenceComplete", event.details().get("evidenceComplete"));
+        summary.put("requiredCount", event.details().get("requiredCount"));
+        summary.put("linkedCount", event.details().get("linkedCount"));
+        summary.put("missingCount", event.details().get("missingCount"));
+        summary.put("sourceOnlyFallbackCount", event.details().get("sourceOnlyFallbackCount"));
+        summary.put("blockingCount", event.details().get("blockingCount"));
+        summary.put("linkedKeys", event.details().get("linkedKeys"));
+        summary.put("blockingKeys", event.details().get("blockingKeys"));
+        summary.put("freshObservationEvidenceCompleteness", event.details().get("freshObservationEvidenceCompleteness"));
+        summary.put("freshObservationEvidenceStatus", event.details().get("freshObservationEvidenceStatus"));
+        summary.put("releaseGateEnabled", event.details().get("releaseGateEnabled"));
+        summary.put("sourcePatchClaimEnabled", event.details().get("sourcePatchClaimEnabled"));
+        summary.put("claimEnabled", event.details().get("claimEnabled"));
+        summary.put("mutationEnabled", event.details().get("mutationEnabled"));
+        summary.put("verificationCommandExecutionEnabled", event.details().get("verificationCommandExecutionEnabled"));
+        summary.put("rollbackRestoreEnabled", event.details().get("rollbackRestoreEnabled"));
+        summary.put("ragFreshnessUpdateEnabled", event.details().get("ragFreshnessUpdateEnabled"));
+        summary.put("finalResultEnabled", event.details().get("finalResultEnabled"));
+        summary.put("publicationEnabled", event.details().get("publicationEnabled"));
+        summary.put("finalAnswerGenerationEnabled", event.details().get("finalAnswerGenerationEnabled"));
+        summary.put("deliveryEnabled", event.details().get("deliveryEnabled"));
+        summary.put("acknowledgementEnabled", event.details().get("acknowledgementEnabled"));
+        summary.put("message", "Fresh release-attempt evidence is complete, but release and mutation remain disabled.");
+        return summary;
+    }
+
+    private Map<String, Object> releaseReadinessRefreshHandoffSummary(CodeAgentLoopTimelineEventSummary event) {
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("schema", "learnbot.code-agent.release-readiness-refresh-state.v1");
+        summary.put("status", "RELEASE_READINESS_REFRESHED_RELEASE_GATED");
+        summary.put("sourceEventType", event.eventType());
+        summary.put("sourceSequenceNumber", event.sequenceNumber());
+        summary.put("sourceRequestId", event.details().get("sourceRequestId"));
+        summary.put("releaseAttemptId", event.details().get("releaseAttemptId"));
+        summary.put("readyToRelease", event.details().get("readyToRelease"));
+        summary.put("readinessMessage", event.details().get("readinessMessage"));
+        summary.put("warningCount", event.details().get("warningCount"));
+        summary.put("checkCount", event.details().get("checkCount"));
+        summary.put("failedCheckKeys", event.details().get("failedCheckKeys"));
+        summary.put("patchReleaseStatus", event.details().get("patchReleaseStatus"));
+        summary.put("patchReleasePreconditionsPassed", event.details().get("patchReleasePreconditionsPassed"));
+        summary.put("patchExecutionGateStatus", event.details().get("patchExecutionGateStatus"));
+        summary.put("patchExecutionPreconditionsPassed", event.details().get("patchExecutionPreconditionsPassed"));
+        summary.put("releaseAttemptReady", event.details().get("releaseAttemptReady"));
+        summary.put("freshObservationEvidenceComplete", event.details().get("freshObservationEvidenceComplete"));
+        summary.put("releaseAttemptFinalReadiness", event.details().get("releaseAttemptFinalReadiness"));
+        summary.put("releaseGateEnabled", event.details().get("releaseGateEnabled"));
+        summary.put("sourcePatchClaimEnabled", event.details().get("sourcePatchClaimEnabled"));
+        summary.put("claimEnabled", event.details().get("claimEnabled"));
+        summary.put("claimable", event.details().get("claimable"));
+        summary.put("mutationEnabled", event.details().get("mutationEnabled"));
+        summary.put("verificationCommandExecutionEnabled", event.details().get("verificationCommandExecutionEnabled"));
+        summary.put("rollbackRestoreEnabled", event.details().get("rollbackRestoreEnabled"));
+        summary.put("ragFreshnessUpdateEnabled", event.details().get("ragFreshnessUpdateEnabled"));
+        summary.put("finalResultEnabled", event.details().get("finalResultEnabled"));
+        summary.put("publicationEnabled", event.details().get("publicationEnabled"));
+        summary.put("finalAnswerGenerationEnabled", event.details().get("finalAnswerGenerationEnabled"));
+        summary.put("deliveryEnabled", event.details().get("deliveryEnabled"));
+        summary.put("acknowledgementEnabled", event.details().get("acknowledgementEnabled"));
+        summary.put("message", "Release readiness was refreshed from fresh evidence, but release and mutation remain disabled.");
         return summary;
     }
 
@@ -403,8 +638,21 @@ public class CodeAgentLoopPreviewService {
                 sourceEvent == null ? null : sourceEvent.sequenceNumber(),
                 sourceEvent == null ? null : sourceEvent.eventType(),
                 handoffSummary,
-                sourceEvent == null ? Map.of() : sourceEvent.details()
+                sourceEvent == null ? Map.of() : sourceEvent.details(),
+                CodeAgentLoopRecommendedActionFactory.create(recommendedActionKey(actionKey))
         );
+    }
+
+    private String recommendedActionKey(String actionKey) {
+        return switch (actionKey) {
+            case "QUEUE_READ_ONLY_OBSERVATION" -> "PREVIEW_RUNNER_STEP";
+            case "READY_HANDOFF_CREATION_DISABLED", "WAIT_FOR_RELEASE_GATE", "WAIT_FOR_FRESH_OBSERVATION_RESULTS",
+                    "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED" -> "CHECK_ENQUEUE_REFUSAL";
+            case "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED" -> "STOP_AND_REPORT";
+            case "RELEASE_READINESS_REFRESHED_RELEASE_GATED" -> "REVIEW_RELEASE_REFUSAL";
+            case "STOP_WITH_REASON" -> "STOP_AND_REPORT";
+            default -> "ASK_USER";
+        };
     }
 
     private List<CodeAgentLoopStep> steps() {

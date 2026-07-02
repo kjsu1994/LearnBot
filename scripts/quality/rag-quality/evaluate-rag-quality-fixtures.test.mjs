@@ -19,6 +19,8 @@ const failedFixturesPath = path.join(tempDir, "rag-quality-failed-fixtures.json"
 const seededFollowUpFixturesPath = path.join(tempDir, "rag-quality-seeded-follow-up-fixtures.json");
 const seededFollowUpReportPath = path.join(tempDir, "rag-quality-seeded-follow-up.json");
 const seededFollowUpLiveFixturesPath = path.join(tempDir, "rag-quality-seeded-follow-up-live.json");
+const evidenceBackedFollowUpFixturesPath = path.join(tempDir, "rag-quality-evidence-backed-follow-up-fixtures.json");
+const evidenceBackedFollowUpReportPath = path.join(tempDir, "rag-quality-evidence-backed-follow-up.json");
 let seededFollowUpConversationIdSeen = false;
 
 const server = http.createServer(async (request, response) => {
@@ -184,6 +186,41 @@ try {
   assert.equal(seededFollowUpConversationIdSeen, true);
   const seededFollowUpLiveFixtures = JSON.parse(fs.readFileSync(seededFollowUpLiveFixturesPath, "utf8"));
   assert.equal(seededFollowUpLiveFixtures.cases[0].liveCapture.prior.conversationId, "conv-seeded");
+
+  fs.writeFileSync(evidenceBackedFollowUpFixturesPath, JSON.stringify({
+    cases: [
+      {
+        id: "evidence-backed-follow-up",
+        domain: "document",
+        question: "What should it avoid?",
+        observed: {
+          answer: "It should not be used for production work.",
+          citationIds: ["example-domain#chunk-1"],
+          evidence: [
+            {
+              id: "example-domain#chunk-1",
+              text: "Example Domain is for documentation examples. Avoid use in operations.",
+            },
+          ],
+          latencyMs: 10,
+        },
+        expectedCitationIds: ["example-domain#chunk-1"],
+        expectedFollowUpTerms: ["avoid", "operations"],
+        expectedEvidenceSnippets: ["Avoid use in operations"],
+        maxLatencyMs: 1500,
+      },
+    ],
+  }, null, 2));
+  const evidenceBackedFollowUpResult = await runNode([
+    scriptPath,
+    "--fixtures", evidenceBackedFollowUpFixturesPath,
+    "--report", evidenceBackedFollowUpReportPath,
+  ]);
+  assert.equal(evidenceBackedFollowUpResult.status, 0, evidenceBackedFollowUpResult.stderr || evidenceBackedFollowUpResult.stdout);
+  const evidenceBackedFollowUpReport = JSON.parse(fs.readFileSync(evidenceBackedFollowUpReportPath, "utf8"));
+  assert.equal(evidenceBackedFollowUpReport.results[0].followUp.quality, 1);
+  assert.equal(evidenceBackedFollowUpReport.results[0].followUp.matchedAnswerTerms, 0);
+  assert.equal(evidenceBackedFollowUpReport.results[0].followUp.matchedEvidenceTerms, 2);
 } finally {
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(tempDir, { recursive: true, force: true });

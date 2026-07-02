@@ -29,10 +29,10 @@ try {
       rollbackRestore: true,
     },
     steps: [
-      { toolName: "patch.apply", status: "SUCCEEDED", checks: { mutationApplied: true } },
-      { toolName: "command.runAllowed", status: "SUCCEEDED", checks: { arbitraryShellAllowed: false } },
-      { toolName: "git.status", status: "SUCCEEDED", checks: { clean: false } },
-      { toolName: "rollback.restore", status: "SUCCEEDED", checks: { restored: true } },
+      { toolName: "patch.apply", status: "SUCCEEDED", requestId: "request-1", checks: { mutationApplied: true } },
+      { toolName: "command.runAllowed", status: "SUCCEEDED", requestId: "request-2", checks: { arbitraryShellAllowed: false } },
+      { toolName: "git.status", status: "SUCCEEDED", requestId: "request-3", checks: { clean: false } },
+      { toolName: "rollback.restore", status: "SUCCEEDED", requestId: "request-4", checks: { restored: true } },
     ],
     guardrails: {
       executionTarget: "USER_LOCAL_AGENT",

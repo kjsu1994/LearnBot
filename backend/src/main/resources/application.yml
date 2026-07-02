@@ -184,6 +184,8 @@ learnbot:
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
   local-agent:
     websocket-enabled: ${LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED:false}
+    patch-execution-release-enabled: ${LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED:false}
+    approved-execution-sequence-creation-enabled: ${LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED:false}
   transfer:
     export-dir: ${LEARNBOT_EXPORT_DIR:export}
   retention:

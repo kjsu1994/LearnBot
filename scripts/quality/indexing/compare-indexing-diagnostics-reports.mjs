@@ -37,6 +37,7 @@ compareSummaryDecrease("retryReadyCases");
 compareSummaryDecrease("activeIndexPreservedCases");
 compareSummaryDecrease("crawlPolicyPassedCases");
 compareSummaryDecrease("citationSourcePassedCases");
+compareSummaryDecrease("crawlInsightPassedCases");
 
 const baselineCases = indexResultsById(baseline.results);
 const currentCases = indexResultsById(current.results);
@@ -55,6 +56,7 @@ for (const [caseId, baselineCase] of baselineCases.entries()) {
   compareCaseBoolean(caseId, "activeIndex.passed", baselineCase.activeIndex?.passed, currentCase.activeIndex?.passed);
   compareCaseBoolean(caseId, "crawlPolicy.passed", baselineCase.crawlPolicy?.passed, currentCase.crawlPolicy?.passed);
   compareCaseBoolean(caseId, "citationSource.passed", baselineCase.citationSource?.passed, currentCase.citationSource?.passed);
+  compareCaseBoolean(caseId, "crawlInsight.passed", baselineCase.crawlInsight?.passed, currentCase.crawlInsight?.passed);
 }
 
 const comparison = {

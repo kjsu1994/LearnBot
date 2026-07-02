@@ -17,13 +17,19 @@ import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
+import com.learnbot.service.localagent.LocalAgentAcknowledgementSaveHandoffBuilder;
 import com.learnbot.service.localagent.LocalAgentApprovedExecutionFlowContract;
+import com.learnbot.service.localagent.LocalAgentFinalAnswerPublicationHandoffBuilder;
 import com.learnbot.service.localagent.LocalAgentFinalMutationReportDraftBuilder;
+import com.learnbot.service.localagent.LocalAgentFinalMutationReportSummaryBuilder;
 import com.learnbot.service.localagent.LocalAgentMutationResultClassifier;
+import com.learnbot.service.localagent.LocalAgentRagFreshnessMarkerBuilder;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +51,7 @@ public class LocalAgentToolGatewayService {
     private final CodeAgentLoopTimelineRepository loopTimelineRepository;
     private final LocalAgentGatewayService gatewayService;
     private final LocalAgentToolPusher toolPusher;
+    private final LearnBotProperties properties;
     private final LocalAgentPostExecutionObservationGateBuilder postExecutionObservationGateBuilder =
             new LocalAgentPostExecutionObservationGateBuilder();
     private final LocalAgentObservationAcceptanceGateBuilder observationAcceptanceGateBuilder =
@@ -92,12 +99,34 @@ public class LocalAgentToolGatewayService {
             LocalAgentGatewayService gatewayService,
             LocalAgentToolPusher toolPusher
     ) {
+        this(
+                repository,
+                mutationObservationIntakeRepository,
+                releaseAttemptRepository,
+                loopTimelineRepository,
+                gatewayService,
+                toolPusher,
+                new LearnBotProperties()
+        );
+    }
+
+    @Autowired
+    public LocalAgentToolGatewayService(
+            LocalAgentToolExecutionRepository repository,
+            LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository,
+            LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository,
+            CodeAgentLoopTimelineRepository loopTimelineRepository,
+            LocalAgentGatewayService gatewayService,
+            LocalAgentToolPusher toolPusher,
+            LearnBotProperties properties
+    ) {
         this.repository = repository;
         this.mutationObservationIntakeRepository = mutationObservationIntakeRepository;
         this.releaseAttemptRepository = releaseAttemptRepository;
         this.loopTimelineRepository = loopTimelineRepository;
         this.gatewayService = gatewayService;
         this.toolPusher = toolPusher;
+        this.properties = properties;
     }
 
     @Transactional
@@ -300,10 +329,13 @@ public class LocalAgentToolGatewayService {
                 workspaceRepositoryVerified(workspaceVerification),
                 "The selected Local Agent workspace must be verified against the indexed repository identity before release."
         ));
+        boolean releaseEnabled = patchExecutionReleaseEnabled();
         checks.add(check(
                 "releaseGateEnabled",
-                false,
-                "Patch execution release remains disabled until Local Agent patch.apply and rollback safety tests are implemented."
+                releaseEnabled,
+                releaseEnabled
+                        ? "Patch execution release is enabled for the guarded Local Agent release path."
+                        : "Patch execution release remains disabled until the guarded Local Agent release path is explicitly enabled."
         ));
 
         boolean ready = checks.stream().allMatch(LocalAgentPatchExecutionReadinessCheck::passed);
@@ -322,6 +354,7 @@ public class LocalAgentToolGatewayService {
         );
         LocalAgentPatchReleaseAttemptModel releaseAttemptModel = releaseAttemptModel(
                 latestReleaseAttempt,
+                input,
                 repositoryVerification,
                 latestPatchDryRunOutput,
                 patchReleaseReadiness,
@@ -526,14 +559,119 @@ public class LocalAgentToolGatewayService {
                 requestId,
                 releaseAttemptId
         );
-        return repository.releaseApprovedHeldPatchWithMutationInput(
+        LocalAgentToolExecution released = repository.releaseApprovedHeldPatchWithMutationInput(
                         requestId,
                         userId,
                         mutationInput,
                         "Patch execution release gate passed. Request is now claimable by the selected Local Agent."
                 )
-                .map(this::toResponse)
                 .orElseThrow(() -> new IllegalArgumentException("Held patch request is no longer releasable."));
+        createApprovedExecutionSequenceRowsIfEnabled(released, mutationInput, releaseAttemptId);
+        return toResponse(released);
+    }
+
+    private void createApprovedExecutionSequenceRowsIfEnabled(
+            LocalAgentToolExecution releasedPatch,
+            Map<String, Object> mutationInput,
+            UUID releaseAttemptId
+    ) {
+        if (!approvedExecutionSequenceCreationEnabled()) {
+            return;
+        }
+        String manifestId = stringValue(mutationInput.get("manifestId"));
+        if (manifestId == null || manifestId.isBlank()) {
+            throw new IllegalStateException("Approved execution sequence requires a managed snapshot manifest id.");
+        }
+        UUID sourceRequestId = releasedPatch.id();
+        OffsetDateTime baseCreatedAt = OffsetDateTime.now();
+        List<LocalAgentToolRequest> followUpRequests = List.of(
+                approvedSequenceRequest(
+                        releasedPatch,
+                        LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        approvedCommandInput(releasedPatch, sourceRequestId, releaseAttemptId),
+                        baseCreatedAt.plusNanos(1_000_000),
+                        "Approved release follow-up command.runAllowed verification row. Local Agent polling must claim it after patch.apply."
+                ),
+                approvedSequenceRequest(
+                        releasedPatch,
+                        LocalAgentToolName.GIT_STATUS,
+                        approvedSequenceCommonInput(releasedPatch, sourceRequestId, releaseAttemptId),
+                        baseCreatedAt.plusNanos(2_000_000),
+                        "Approved release follow-up git.status observation row. Local Agent polling must claim it after command.runAllowed."
+                ),
+                approvedSequenceRequest(
+                        releasedPatch,
+                        LocalAgentToolName.ROLLBACK_RESTORE,
+                        approvedRollbackInput(releasedPatch, sourceRequestId, releaseAttemptId, manifestId),
+                        baseCreatedAt.plusNanos(3_000_000),
+                        "Approved release follow-up rollback.restore safety row. Local Agent polling must claim it after git.status."
+                )
+        );
+        followUpRequests.forEach(request -> repository.create(UUID.randomUUID(), request));
+    }
+
+    private LocalAgentToolRequest approvedSequenceRequest(
+            LocalAgentToolExecution releasedPatch,
+            LocalAgentToolName toolName,
+            Map<String, Object> input,
+            OffsetDateTime createdAt,
+            String warning
+    ) {
+        return new LocalAgentToolRequest(
+                releasedPatch.sessionId(),
+                releasedPatch.userId(),
+                releasedPatch.agentId(),
+                releasedPatch.workspaceId(),
+                releasedPatch.executionTarget(),
+                toolName,
+                input,
+                LocalAgentApprovalState.APPROVED,
+                createdAt,
+                List.of(warning, "Created by guarded patch execution release; final publication and acknowledgement save remain disabled.")
+        );
+    }
+
+    private Map<String, Object> approvedCommandInput(
+            LocalAgentToolExecution releasedPatch,
+            UUID sourceRequestId,
+            UUID releaseAttemptId
+    ) {
+        Map<String, Object> input = approvedSequenceCommonInput(releasedPatch, sourceRequestId, releaseAttemptId);
+        input.put("commandId", stringValue(releasedPatch.input().getOrDefault("commandId", "dotnet.version")));
+        input.put("timeoutSeconds", numberOrDefault(releasedPatch.input().get("timeoutSeconds"), 30));
+        input.put("maxOutputBytes", numberOrDefault(releasedPatch.input().get("maxOutputBytes"), 4096));
+        return Map.copyOf(input);
+    }
+
+    private Map<String, Object> approvedRollbackInput(
+            LocalAgentToolExecution releasedPatch,
+            UUID sourceRequestId,
+            UUID releaseAttemptId,
+            String manifestId
+    ) {
+        Map<String, Object> input = approvedSequenceCommonInput(releasedPatch, sourceRequestId, releaseAttemptId);
+        input.put("manifestId", manifestId);
+        input.put("snapshotManifestId", manifestId);
+        return Map.copyOf(input);
+    }
+
+    private Map<String, Object> approvedSequenceCommonInput(
+            LocalAgentToolExecution releasedPatch,
+            UUID sourceRequestId,
+            UUID releaseAttemptId
+    ) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("sessionId", releasedPatch.sessionId().toString());
+        input.put("userId", releasedPatch.userId().toString());
+        input.put("agentId", releasedPatch.agentId().toString());
+        input.put("workspaceId", releasedPatch.workspaceId().toString());
+        input.put("sourceRequestId", sourceRequestId.toString());
+        input.put("releaseAttemptId", releaseAttemptId.toString());
+        input.put("releaseExecutionSequenceSchema", "learnbot.local-agent.approved-execution-sequence.v1");
+        input.put("publicationEnabled", false);
+        input.put("acknowledgementSaveEnabled", false);
+        input.put("followUpMutationEnabled", false);
+        return input;
     }
 
     private Optional<UUID> releaseAttemptId(Map<String, Object> latestAttempt) {
@@ -843,6 +981,8 @@ public class LocalAgentToolGatewayService {
         repository.complete(enriched);
         persistAcceptedMutationObservation(enriched);
         appendLoopObservationEvent(enriched);
+        appendLoopFreshObservationEvidenceCompleteEvent(enriched);
+        appendLoopApprovedExecutionFlowCompletedEvent(enriched);
     }
 
     public Optional<LocalAgentToolExecutionResponse> findForUser(UUID userId, UUID requestId) {
@@ -1034,6 +1174,7 @@ public class LocalAgentToolGatewayService {
 
     private LocalAgentPatchReleaseAttemptModel releaseAttemptModel(
             Optional<LocalAgentPatchReleaseAttempt> latestAttempt,
+            Map<String, Object> sourceInput,
             Map<String, Object> repositoryVerification,
             Map<String, Object> latestPatchDryRunOutput,
             Map<String, Object> patchReleaseReadiness,
@@ -1044,6 +1185,7 @@ public class LocalAgentToolGatewayService {
         Map<String, Object> latestAttemptMap = latestAttempt
                 .map(attempt -> releaseAttemptSummary(
                         attempt,
+                        sourceInput,
                         repositoryVerification,
                         latestPatchDryRunOutput,
                         patchReleaseReadiness,
@@ -1076,6 +1218,7 @@ public class LocalAgentToolGatewayService {
 
     private Map<String, Object> releaseAttemptSummary(
             LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> sourceInput,
             Map<String, Object> repositoryVerification,
             Map<String, Object> latestPatchDryRunOutput,
             Map<String, Object> patchReleaseReadiness,
@@ -1149,6 +1292,29 @@ public class LocalAgentToolGatewayService {
                 acceptedMutationObservationSummary
         );
         result.put("mutationResultAggregationPlan", mutationResultAggregationPlan);
+        Map<String, Object> finalMutationReportSummary = LocalAgentFinalMutationReportSummaryBuilder.build(
+                attempt,
+                acceptedMutationObservationSummary,
+                acceptedMutationObservationReadiness
+        );
+        result.put("finalMutationReportSummary", finalMutationReportSummary);
+        Map<String, Object> ragFreshnessMarker = LocalAgentRagFreshnessMarkerBuilder.build(
+                attempt,
+                sourceInput == null ? Map.of() : sourceInput,
+                finalMutationReportSummary
+        );
+        result.put("ragFreshnessMarker", ragFreshnessMarker);
+        Map<String, Object> finalAnswerPublicationHandoff = LocalAgentFinalAnswerPublicationHandoffBuilder.build(
+                attempt,
+                finalMutationReportSummary,
+                ragFreshnessMarker
+        );
+        result.put("finalAnswerPublicationHandoff", finalAnswerPublicationHandoff);
+        Map<String, Object> acknowledgementSaveHandoff = LocalAgentAcknowledgementSaveHandoffBuilder.build(
+                attempt,
+                finalAnswerPublicationHandoff
+        );
+        result.put("acknowledgementSaveHandoff", acknowledgementSaveHandoff);
         Map<String, Object> finalMutationReportDraft = LocalAgentFinalMutationReportDraftBuilder.build(
                 attempt,
                 mutationResultAggregationPlan,
@@ -4296,7 +4462,25 @@ public class LocalAgentToolGatewayService {
     }
 
     private boolean patchExecutionReleaseEnabled() {
-        return false;
+        return properties.getLocalAgent().isPatchExecutionReleaseEnabled();
+    }
+
+    private boolean approvedExecutionSequenceCreationEnabled() {
+        return properties.getLocalAgent().isApprovedExecutionSequenceCreationEnabled();
+    }
+
+    private int numberOrDefault(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     private Map<String, Object> releasePrerequisite(String key, boolean passed, String message) {
@@ -4776,6 +4960,224 @@ public class LocalAgentToolGatewayService {
         );
     }
 
+    private void appendLoopFreshObservationEvidenceCompleteEvent(LocalAgentToolResponse response) {
+        LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
+        if (execution == null || !Boolean.TRUE.equals(execution.input().get("freshObservationOnly"))) {
+            return;
+        }
+        UUID sourceRequestId = sourceRequestId(execution.input());
+        UUID releaseAttemptId = releaseAttemptIdFromInput(execution.input());
+        if (sourceRequestId == null || releaseAttemptId == null) {
+            return;
+        }
+        LocalAgentToolExecution source = repository.find(sourceRequestId).orElse(null);
+        UUID repositoryId = repositoryId(execution.input());
+        UUID loopId = loopId(execution.input());
+        if (repositoryId == null && source != null) {
+            repositoryId = repositoryId(source.input());
+        }
+        if (loopId == null && source != null) {
+            loopId = loopId(source.input());
+        }
+        if (repositoryId == null) {
+            return;
+        }
+        Optional<LocalAgentPatchReleaseAttempt> attempt = Optional
+                .ofNullable(releaseAttemptRepository.findLatestForSourceRequest(response.userId(), sourceRequestId))
+                .flatMap(item -> item)
+                .filter(candidate -> releaseAttemptId.equals(candidate.id()));
+        if (attempt.isEmpty()) {
+            return;
+        }
+        Map<String, Object> repositoryVerification = latestRepositoryVerification(
+                response.userId(),
+                sourceRequestId,
+                attempt
+        ).orElse(null);
+        Map<String, Object> patchDryRunOutput = latestPatchDryRunOutput(
+                response.userId(),
+                sourceRequestId,
+                attempt
+        ).orElse(null);
+        List<Map<String, Object>> evidenceStatus = releaseAttemptFreshObservationEvidenceStatus(
+                attempt.get(),
+                repositoryVerification,
+                patchDryRunOutput
+        );
+        Map<String, Object> evidenceCompleteness = releaseAttemptFreshObservationEvidenceCompleteness(
+                attempt.get(),
+                evidenceStatus
+        );
+        if (!Boolean.TRUE.equals(evidenceCompleteness.get("complete"))) {
+            return;
+        }
+        loopTimelineRepository.appendFreshObservationEvidenceComplete(
+                response.userId(),
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                releaseAttemptId,
+                attempt.get().sessionId(),
+                attempt.get().agentId(),
+                attempt.get().workspaceId(),
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                evidenceCompleteness,
+                evidenceStatus
+        );
+        appendLoopReleaseReadinessRefreshedEvent(response.userId(), sourceRequestId, repositoryId, loopId, attempt.get());
+    }
+
+    private void appendLoopReleaseReadinessRefreshedEvent(
+            UUID userId,
+            UUID sourceRequestId,
+            UUID repositoryId,
+            UUID loopId,
+            LocalAgentPatchReleaseAttempt attempt
+    ) {
+        LocalAgentPatchExecutionReadinessResponse readiness;
+        try {
+            readiness = inspectPatchExecutionReadiness(userId, sourceRequestId);
+        } catch (IllegalArgumentException ex) {
+            return;
+        }
+        loopTimelineRepository.appendReleaseReadinessRefreshed(
+                userId,
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                attempt.id(),
+                attempt.sessionId(),
+                attempt.agentId(),
+                attempt.workspaceId(),
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                readiness
+        );
+    }
+
+    private void appendLoopApprovedExecutionFlowCompletedEvent(LocalAgentToolResponse response) {
+        LocalAgentToolExecution execution = repository.find(response.requestId()).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        UUID releaseAttemptId = releaseAttemptIdFromInput(execution.input());
+        if (releaseAttemptId == null) {
+            return;
+        }
+        List<LocalAgentToolExecution> executions = repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(
+                response.userId(),
+                releaseAttemptId
+        );
+        if (executions.size() != 4) {
+            return;
+        }
+        Map<String, Object> inspection = approvedExecutionFlowSummary(
+                executions,
+                executions.stream().map(LocalAgentToolExecution::id).toList(),
+                releaseAttemptId,
+                "durableCompletedRows"
+        );
+        if (!Boolean.TRUE.equals(inspection.get("ordered"))
+                || !Boolean.TRUE.equals(inspection.get("identityConsistent"))
+                || !Boolean.TRUE.equals(inspection.get("releaseAttemptLinked"))
+                || !Boolean.TRUE.equals(inspection.get("allTerminal"))) {
+            return;
+        }
+        LocalAgentToolExecution first = executions.get(0);
+        UUID sourceRequestId = sourceRequestId(first.input());
+        LocalAgentToolExecution source = sourceRequestId == null ? first : repository.find(sourceRequestId).orElse(first);
+        UUID repositoryId = repositoryId(source.input());
+        if (repositoryId == null) {
+            repositoryId = repositoryId(first.input());
+        }
+        if (repositoryId == null) {
+            return;
+        }
+        UUID loopId = loopId(source.input());
+        if (loopId == null) {
+            loopId = loopId(first.input());
+        }
+        Map<String, Object> finalResultHandoff = releaseAttemptRepository.find(releaseAttemptId)
+                .filter(attempt -> attempt.userId().equals(response.userId()))
+                .map(attempt -> approvedExecutionFlowFinalResultHandoff(attempt, source.input()))
+                .orElse(Map.of());
+        loopTimelineRepository.appendApprovedExecutionFlowCompleted(
+                response.userId(),
+                repositoryId,
+                loopId,
+                sourceRequestId,
+                releaseAttemptId,
+                first.sessionId(),
+                first.agentId(),
+                first.workspaceId(),
+                inspection,
+                finalResultHandoff
+        );
+    }
+
+    private Map<String, Object> approvedExecutionFlowFinalResultHandoff(
+            LocalAgentPatchReleaseAttempt attempt,
+            Map<String, Object> sourceInput
+    ) {
+        Map<String, Object> acceptedSummary = releaseAttemptAcceptedMutationObservationSummary(attempt);
+        Map<String, Object> acceptedReadiness = releaseAttemptAcceptedMutationObservationReadiness(attempt);
+        Map<String, Object> finalMutationReportSummary = LocalAgentFinalMutationReportSummaryBuilder.build(
+                attempt,
+                acceptedSummary,
+                acceptedReadiness
+        );
+        Map<String, Object> ragFreshnessMarker = LocalAgentRagFreshnessMarkerBuilder.build(
+                attempt,
+                sourceInput == null ? Map.of() : sourceInput,
+                finalMutationReportSummary
+        );
+        Map<String, Object> publicationHandoff = LocalAgentFinalAnswerPublicationHandoffBuilder.build(
+                attempt,
+                finalMutationReportSummary,
+                ragFreshnessMarker
+        );
+        Map<String, Object> acknowledgementHandoff = LocalAgentAcknowledgementSaveHandoffBuilder.build(
+                attempt,
+                publicationHandoff
+        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.code-agent.approved-execution-flow-final-result-handoff.v1");
+        result.put("status", "READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED");
+        result.put("releaseAttemptId", attempt.id().toString());
+        result.put("sourceRequestId", attempt.sourceRequestId().toString());
+        result.put("sessionId", attempt.sessionId().toString());
+        result.put("userId", attempt.userId().toString());
+        result.put("agentId", attempt.agentId().toString());
+        result.put("workspaceId", attempt.workspaceId().toString());
+        result.put("finalMutationReportSummaryStatus", finalMutationReportSummary.get("status"));
+        result.put("finalMutationReportSummaryAvailable", finalMutationReportSummary.get("summaryAvailable"));
+        result.put("acceptedMutationObserved", finalMutationReportSummary.get("acceptedMutationObserved"));
+        result.put("acceptedMutationObservationCount", finalMutationReportSummary.get("acceptedMutationObservationCount"));
+        result.put("acceptedMutationObservationAcceptedCount", finalMutationReportSummary.get("acceptedMutationObservationAcceptedCount"));
+        result.put("ragFreshnessMarkerStatus", ragFreshnessMarker.get("status"));
+        result.put("staleIndexRiskVisible", ragFreshnessMarker.get("staleIndexRiskVisible"));
+        result.put("finalAnswerMustDiscloseStaleIndex", ragFreshnessMarker.get("finalAnswerMustDiscloseStaleIndex"));
+        result.put("targetFiles", ragFreshnessMarker.get("targetFiles"));
+        result.put("finalAnswerPublicationHandoffStatus", publicationHandoff.get("status"));
+        result.put("finalAnswerPublicationHandoffAvailable", publicationHandoff.get("handoffAvailable"));
+        result.put("staleIndexDisclosureModeled", publicationHandoff.get("staleIndexDisclosureModeled"));
+        result.put("finalAnswerSections", publicationHandoff.get("finalAnswerSections"));
+        result.put("acknowledgementSaveHandoffStatus", acknowledgementHandoff.get("status"));
+        result.put("acknowledgementSaveHandoffAvailable", acknowledgementHandoff.get("handoffAvailable"));
+        result.put("finalResultEnabled", false);
+        result.put("publicationEnabled", false);
+        result.put("finalAnswerGenerationEnabled", false);
+        result.put("finalAnswerDeliveryEnabled", false);
+        result.put("acknowledgementSaveEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("partialReindexEnabled", false);
+        result.put("followUpMutationEnabled", false);
+        result.put("mutationEnabled", false);
+        result.put("message", "Approved execution completed and audit-only final-result handoff context is modeled, but publication, final answer delivery, acknowledgement save, RAG freshness update, and follow-up mutation remain disabled.");
+        return Map.copyOf(result);
+    }
+
     private void appendAgentUnavailableStopOutcome(LocalAgentToolRequest request) {
         UUID repositoryId = repositoryId(request.input());
         if (repositoryId == null) {
@@ -4874,6 +5276,22 @@ public class LocalAgentToolGatewayService {
 
     private UUID loopId(Map<String, Object> input) {
         Object direct = input.get("loopId");
+        if (direct instanceof String text && hasText(text)) {
+            return UUID.fromString(text);
+        }
+        return null;
+    }
+
+    private UUID sourceRequestId(Map<String, Object> input) {
+        Object direct = input.get("sourceRequestId");
+        if (direct instanceof String text && hasText(text)) {
+            return UUID.fromString(text);
+        }
+        return null;
+    }
+
+    private UUID releaseAttemptIdFromInput(Map<String, Object> input) {
+        Object direct = input.get("releaseAttemptId");
         if (direct instanceof String text && hasText(text)) {
             return UUID.fromString(text);
         }

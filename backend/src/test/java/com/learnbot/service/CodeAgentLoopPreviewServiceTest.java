@@ -109,6 +109,16 @@ class CodeAgentLoopPreviewServiceTest {
         assertThat(result.finalResultEnabled()).isFalse();
         assertThat(result.publicationEnabled()).isFalse();
         assertThat(result.acknowledgementEnabled()).isFalse();
+        assertThat(result.recommendedAction())
+                .containsEntry("schema", "learnbot.code-agent.runner-recommended-action.v1")
+                .containsEntry("actionKey", "PREVIEW_RUNNER_STEP")
+                .containsEntry("label", "Preview runner step")
+                .containsEntry("endpoint", "/api/code-agent/loop/runner/preview")
+                .containsEntry("enabled", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("mutationEnabled", false);
         assertThat(result.sourceEventId()).isEqualTo(eventId);
         assertThat(result.sourceEventType()).isEqualTo("LOOP_NEXT_DECISION_RECORDED");
     }
@@ -216,6 +226,12 @@ class CodeAgentLoopPreviewServiceTest {
         assertThat(result.finalResultEnabled()).isFalse();
         assertThat(result.publicationEnabled()).isFalse();
         assertThat(result.acknowledgementEnabled()).isFalse();
+        assertThat(result.recommendedAction())
+                .containsEntry("actionKey", "CHECK_ENQUEUE_REFUSAL")
+                .containsEntry("label", "Check enqueue refusal")
+                .containsEntry("endpoint", "/api/code-agent/loop/runner/enqueue-read-only")
+                .containsEntry("enabled", true)
+                .containsEntry("mutationEnabled", false);
         assertThat(result.sourceEventId()).isEqualTo(approvalEventId);
         assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_APPROVAL_DECISION");
         assertThat(result.sourceDetails())
@@ -304,6 +320,178 @@ class CodeAgentLoopPreviewServiceTest {
     }
 
     @Test
+    void nextActionReportsFreshEvidenceCompleteButReleaseStillGated() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID completeEventId = UUID.randomUUID();
+        CodeAgentLoopTimelineEventSummary genericDecision = event(
+                UUID.randomUUID(),
+                18,
+                "LOOP_NEXT_DECISION_RECORDED",
+                Map.of(
+                        "status", "RECORDED",
+                        "decisionKey", "OBSERVATION_ACCEPTED",
+                        "mutationEnabled", false
+                )
+        );
+        CodeAgentLoopTimelineEventSummary complete = event(
+                completeEventId,
+                19,
+                "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE",
+                Map.ofEntries(
+                        Map.entry("status", "FRESH_OBSERVATION_EVIDENCE_COMPLETE_RELEASE_GATED"),
+                        Map.entry("decisionKey", "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED"),
+                        Map.entry("nextAction", "Fresh release-attempt evidence is complete; inspect release readiness while release, claim, and mutation remain disabled."),
+                        Map.entry("sourceRequestId", sourceRequestId.toString()),
+                        Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                        Map.entry("evidenceComplete", true),
+                        Map.entry("requiredCount", 2),
+                        Map.entry("linkedCount", 2),
+                        Map.entry("missingCount", 0),
+                        Map.entry("sourceOnlyFallbackCount", 0),
+                        Map.entry("blockingCount", 0),
+                        Map.entry("linkedKeys", List.of("repositoryVerification", "patchDryRun")),
+                        Map.entry("blockingKeys", List.of()),
+                        Map.entry("releaseGateEnabled", false),
+                        Map.entry("sourcePatchClaimEnabled", false),
+                        Map.entry("claimEnabled", false),
+                        Map.entry("mutationEnabled", false),
+                        Map.entry("verificationCommandExecutionEnabled", false),
+                        Map.entry("rollbackRestoreEnabled", false),
+                        Map.entry("ragFreshnessUpdateEnabled", false),
+                        Map.entry("finalResultEnabled", false),
+                        Map.entry("publicationEnabled", false),
+                        Map.entry("finalAnswerGenerationEnabled", false),
+                        Map.entry("deliveryEnabled", false),
+                        Map.entry("acknowledgementEnabled", false)
+                )
+        );
+        when(timelineRepository.findRecent(userId, repositoryId, 20))
+                .thenReturn(List.of(timeline(loopId, repositoryId, List.of(genericDecision, complete))));
+
+        var result = service.nextAction(userId, repositoryId, loopId);
+
+        assertThat(result.actionKey()).isEqualTo("FRESH_EVIDENCE_COMPLETE_RELEASE_GATED");
+        assertThat(result.reason()).contains("Fresh release-attempt evidence is complete");
+        assertThat(result.sourceEventId()).isEqualTo(completeEventId);
+        assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE");
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.pushEnabled()).isFalse();
+        assertThat(result.claimEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        assertThat(result.finalResultEnabled()).isFalse();
+        assertThat(result.publicationEnabled()).isFalse();
+        assertThat(result.acknowledgementEnabled()).isFalse();
+        assertThat(result.handoffSummary())
+                .containsEntry("schema", "learnbot.code-agent.release-gate-fresh-observation-complete-state.v1")
+                .containsEntry("status", "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED")
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                .containsEntry("evidenceComplete", true)
+                .containsEntry("requiredCount", 2)
+                .containsEntry("linkedCount", 2)
+                .containsEntry("sourcePatchClaimEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("deliveryEnabled", false);
+    }
+
+    @Test
+    void nextActionReportsReleaseReadinessRefreshAfterFreshEvidenceComplete() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID readinessEventId = UUID.randomUUID();
+        CodeAgentLoopTimelineEventSummary complete = event(
+                UUID.randomUUID(),
+                19,
+                "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE",
+                Map.of(
+                        "status", "FRESH_OBSERVATION_EVIDENCE_COMPLETE_RELEASE_GATED",
+                        "decisionKey", "FRESH_EVIDENCE_COMPLETE_RELEASE_GATED",
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "releaseAttemptId", releaseAttemptId.toString(),
+                        "mutationEnabled", false
+                )
+        );
+        CodeAgentLoopTimelineEventSummary readiness = event(
+                readinessEventId,
+                20,
+                "LOCAL_AGENT_RELEASE_READINESS_REFRESHED",
+                Map.ofEntries(
+                        Map.entry("status", "RELEASE_READINESS_REFRESHED_RELEASE_GATED"),
+                        Map.entry("decisionKey", "RELEASE_READINESS_REFRESHED_RELEASE_GATED"),
+                        Map.entry("nextAction", "Release readiness was refreshed from fresh evidence; release, claim, and mutation remain disabled."),
+                        Map.entry("sourceRequestId", sourceRequestId.toString()),
+                        Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                        Map.entry("readyToRelease", false),
+                        Map.entry("readinessMessage", "Held patch request is not ready for Local Agent execution."),
+                        Map.entry("warningCount", 1),
+                        Map.entry("checkCount", 2),
+                        Map.entry("failedCheckKeys", List.of("releaseGateEnabled")),
+                        Map.entry("patchReleaseStatus", "BLOCKED_RELEASE_DISABLED"),
+                        Map.entry("patchReleasePreconditionsPassed", false),
+                        Map.entry("patchExecutionGateStatus", "BLOCKED_RELEASE_DISABLED"),
+                        Map.entry("patchExecutionPreconditionsPassed", false),
+                        Map.entry("releaseAttemptReady", false),
+                        Map.entry("freshObservationEvidenceComplete", true),
+                        Map.entry("releaseAttemptFinalReadiness", Map.of(
+                                "releaseAttemptReady", false,
+                                "freshObservationEvidenceComplete", true
+                        )),
+                        Map.entry("releaseGateEnabled", false),
+                        Map.entry("sourcePatchClaimEnabled", false),
+                        Map.entry("claimEnabled", false),
+                        Map.entry("claimable", false),
+                        Map.entry("mutationEnabled", false),
+                        Map.entry("verificationCommandExecutionEnabled", false),
+                        Map.entry("rollbackRestoreEnabled", false),
+                        Map.entry("ragFreshnessUpdateEnabled", false),
+                        Map.entry("finalResultEnabled", false),
+                        Map.entry("publicationEnabled", false),
+                        Map.entry("finalAnswerGenerationEnabled", false),
+                        Map.entry("deliveryEnabled", false),
+                        Map.entry("acknowledgementEnabled", false)
+                )
+        );
+        when(timelineRepository.findRecent(userId, repositoryId, 20))
+                .thenReturn(List.of(timeline(loopId, repositoryId, List.of(complete, readiness))));
+
+        var result = service.nextAction(userId, repositoryId, loopId);
+
+        assertThat(result.actionKey()).isEqualTo("RELEASE_READINESS_REFRESHED_RELEASE_GATED");
+        assertThat(result.reason()).contains("Release readiness was refreshed");
+        assertThat(result.sourceEventId()).isEqualTo(readinessEventId);
+        assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_RELEASE_READINESS_REFRESHED");
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.pushEnabled()).isFalse();
+        assertThat(result.claimEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        assertThat(result.finalResultEnabled()).isFalse();
+        assertThat(result.publicationEnabled()).isFalse();
+        assertThat(result.acknowledgementEnabled()).isFalse();
+        assertThat(result.handoffSummary())
+                .containsEntry("schema", "learnbot.code-agent.release-readiness-refresh-state.v1")
+                .containsEntry("status", "RELEASE_READINESS_REFRESHED_RELEASE_GATED")
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                .containsEntry("readyToRelease", false)
+                .containsEntry("patchReleaseStatus", "BLOCKED_RELEASE_DISABLED")
+                .containsEntry("releaseAttemptReady", false)
+                .containsEntry("freshObservationEvidenceComplete", true)
+                .containsEntry("sourcePatchClaimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("finalAnswerGenerationEnabled", false)
+                .containsEntry("deliveryEnabled", false);
+    }
+
+    @Test
     void nextActionPrefersLaterStopOutcomeAfterFailedObservation() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -332,7 +520,7 @@ class CodeAgentLoopPreviewServiceTest {
     }
 
     @Test
-    void nextActionWaitsForReleaseGateAfterReleaseBoundaryRefusal() {
+    void nextActionStopsWithReleaseBoundaryRefusalSummary() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
         UUID loopId = UUID.randomUUID();
@@ -341,15 +529,26 @@ class CodeAgentLoopPreviewServiceTest {
                 eventId,
                 14,
                 "LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED",
-                Map.of(
-                        "status", "RECORDED",
-                        "decisionKey", "RELEASE_BOUNDARY_REFUSED",
-                        "nextAction", "Wait for release gate enablement or report that mutation remains disabled.",
-                        "releaseGateEnabled", false,
-                        "requestCreationEnabled", false,
-                        "pushEnabled", false,
-                        "claimEnabled", false,
-                        "mutationEnabled", false
+                Map.ofEntries(
+                        Map.entry("status", "RECORDED"),
+                        Map.entry("decisionKey", "RELEASE_BOUNDARY_REFUSED"),
+                        Map.entry("nextAction", "Report that release was refused and mutation remains disabled."),
+                        Map.entry("requestId", "source-request-1"),
+                        Map.entry("releaseAttemptId", "release-attempt-1"),
+                        Map.entry("boundaryStatus", "RELEASE_REFUSED_GATE_DISABLED"),
+                        Map.entry("actionMode", "REFUSAL_ONLY"),
+                        Map.entry("blockingReasons", List.of("release gate is disabled", "held patch request remains non-claimable")),
+                        Map.entry("releaseGateEnabled", false),
+                        Map.entry("requestCreationEnabled", false),
+                        Map.entry("pushEnabled", false),
+                        Map.entry("claimEnabled", false),
+                        Map.entry("claimable", false),
+                        Map.entry("mutationEnabled", false),
+                        Map.entry("rollbackRestoreEnabled", false),
+                        Map.entry("ragFreshnessUpdateEnabled", false),
+                        Map.entry("finalResultEnabled", false),
+                        Map.entry("publicationEnabled", false),
+                        Map.entry("acknowledgementEnabled", false)
                 )
         );
         when(timelineRepository.findRecent(userId, repositoryId, 20))
@@ -358,8 +557,8 @@ class CodeAgentLoopPreviewServiceTest {
         var result = service.nextAction(userId, repositoryId, loopId);
 
         assertThat(result.loopId()).isEqualTo(loopId);
-        assertThat(result.actionKey()).isEqualTo("WAIT_FOR_RELEASE_GATE");
-        assertThat(result.reason()).isEqualTo("Wait for release gate enablement or report that mutation remains disabled.");
+        assertThat(result.actionKey()).isEqualTo("STOP_WITH_REASON");
+        assertThat(result.reason()).isEqualTo("Report that release was refused and mutation remains disabled.");
         assertThat(result.requestCreationEnabled()).isFalse();
         assertThat(result.pushEnabled()).isFalse();
         assertThat(result.claimEnabled()).isFalse();
@@ -369,6 +568,20 @@ class CodeAgentLoopPreviewServiceTest {
         assertThat(result.acknowledgementEnabled()).isFalse();
         assertThat(result.sourceEventId()).isEqualTo(eventId);
         assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED");
+        assertThat(result.handoffSummary())
+                .containsEntry("schema", "learnbot.code-agent.release-boundary-refusal-summary.v1")
+                .containsEntry("status", "RELEASE_REVIEW_REFUSED_GATE_DISABLED")
+                .containsEntry("sourceRequestId", "source-request-1")
+                .containsEntry("releaseAttemptId", "release-attempt-1")
+                .containsEntry("boundaryStatus", "RELEASE_REFUSED_GATE_DISABLED")
+                .containsEntry("actionMode", "REFUSAL_ONLY")
+                .containsEntry("releaseGateEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("runnerDecision", "NO_REQUEST_PREPARED");
     }
 
     @Test
@@ -452,6 +665,123 @@ class CodeAgentLoopPreviewServiceTest {
                 .containsEntry("runnerDecision", "WAIT_CREATION_GATE_DISABLED");
         assertThat(result.sourceEventId()).isEqualTo(eventId);
         assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED");
+    }
+
+    @Test
+    void nextActionReportsCompletedApprovedExecutionFlowAsFinalResultDisabledHandoff() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> inspection = Map.of(
+                "schema", "learnbot.local-agent.approved-execution-flow-contract.v1",
+                "requestIdSource", "durableCompletedRows",
+                "stepCount", 4,
+                "ordered", true,
+                "identityConsistent", true,
+                "releaseAttemptLinked", true,
+                "allTerminal", true,
+                "steps", List.of(
+                        Map.of("toolName", "patch.apply", "status", "SUCCEEDED"),
+                        Map.of("toolName", "command.runAllowed", "status", "SUCCEEDED"),
+                        Map.of("toolName", "git.status", "status", "SUCCEEDED"),
+                        Map.of("toolName", "rollback.restore", "status", "SUCCEEDED")
+                )
+        );
+        Map<String, Object> finalResultHandoff = Map.ofEntries(
+                Map.entry("schema", "learnbot.code-agent.approved-execution-flow-final-result-handoff.v1"),
+                Map.entry("status", "READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED"),
+                Map.entry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY"),
+                Map.entry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED"),
+                Map.entry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED"),
+                Map.entry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED"),
+                Map.entry("finalResultEnabled", false),
+                Map.entry("publicationEnabled", false),
+                Map.entry("acknowledgementSaveEnabled", false),
+                Map.entry("ragFreshnessUpdateEnabled", false),
+                Map.entry("mutationEnabled", false)
+        );
+        CodeAgentLoopTimelineEventSummary completed = event(
+                eventId,
+                31,
+                "LOCAL_AGENT_APPROVED_EXECUTION_FLOW_COMPLETED",
+                Map.ofEntries(
+                        Map.entry("status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED"),
+                        Map.entry("sourceRequestId", sourceRequestId.toString()),
+                        Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                        Map.entry("sessionId", sessionId.toString()),
+                        Map.entry("userId", userId.toString()),
+                        Map.entry("agentId", agentId.toString()),
+                        Map.entry("workspaceId", workspaceId.toString()),
+                        Map.entry("approvedFlowInspection", inspection),
+                        Map.entry("requestIdSource", "durableCompletedRows"),
+                        Map.entry("stepCount", 4),
+                        Map.entry("ordered", true),
+                        Map.entry("identityConsistent", true),
+                        Map.entry("releaseAttemptLinked", true),
+                        Map.entry("allTerminal", true),
+                        Map.entry("allSucceeded", true),
+                        Map.entry("finalResultHandoff", finalResultHandoff),
+                        Map.entry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY"),
+                        Map.entry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED"),
+                        Map.entry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED"),
+                        Map.entry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED"),
+                        Map.entry("nextAction", "Report the completed approved Local Agent execution flow while final result publication and acknowledgement save remain disabled."),
+                        Map.entry("finalResultEnabled", false),
+                        Map.entry("publicationEnabled", false),
+                        Map.entry("acknowledgementEnabled", false),
+                        Map.entry("ragFreshnessUpdateEnabled", false),
+                        Map.entry("followUpMutationEnabled", false),
+                        Map.entry("mutationEnabled", false)
+                )
+        );
+        when(timelineRepository.findRecent(userId, repositoryId, 20))
+                .thenReturn(List.of(timeline(loopId, repositoryId, List.of(completed))));
+
+        var result = service.nextAction(userId, repositoryId, loopId);
+
+        assertThat(result.actionKey()).isEqualTo("APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED");
+        assertThat(result.status()).isEqualTo("APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED");
+        assertThat(result.sourceEventId()).isEqualTo(eventId);
+        assertThat(result.sourceEventType()).isEqualTo("LOCAL_AGENT_APPROVED_EXECUTION_FLOW_COMPLETED");
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.pushEnabled()).isFalse();
+        assertThat(result.claimEnabled()).isFalse();
+        assertThat(result.finalResultEnabled()).isFalse();
+        assertThat(result.publicationEnabled()).isFalse();
+        assertThat(result.acknowledgementEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        assertThat(result.handoffSummary())
+                .containsEntry("schema", "learnbot.code-agent.approved-execution-flow-completed-handoff.v1")
+                .containsEntry("status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED")
+                .containsEntry("runnerDecision", "READY_FINAL_RESULT_DISABLED")
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("releaseAttemptId", releaseAttemptId.toString())
+                .containsEntry("requestIdSource", "durableCompletedRows")
+                .containsEntry("stepCount", 4)
+                .containsEntry("ordered", true)
+                .containsEntry("identityConsistent", true)
+                .containsEntry("releaseAttemptLinked", true)
+                .containsEntry("allTerminal", true)
+                .containsEntry("allSucceeded", true)
+                .containsEntry("finalMutationReportSummaryStatus", "READY_SUMMARY_AUDIT_ONLY")
+                .containsEntry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED")
+                .containsEntry("finalAnswerPublicationHandoffStatus", "READY_HANDOFF_AUDIT_ONLY_PUBLICATION_DISABLED")
+                .containsEntry("acknowledgementSaveHandoffStatus", "READY_ACKNOWLEDGEMENT_AUDIT_ONLY_SAVE_DISABLED")
+                .containsEntry("finalResultEnabled", false)
+                .containsEntry("publicationEnabled", false)
+                .containsEntry("acknowledgementEnabled", false)
+                .containsEntry("ragFreshnessUpdateEnabled", false)
+                .containsEntry("followUpMutationEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        assertThat(result.handoffSummary().get("approvedFlowInspection")).isEqualTo(inspection);
+        assertThat(result.handoffSummary().get("finalResultHandoff")).isEqualTo(finalResultHandoff);
+        assertThat(result.recommendedAction()).containsEntry("actionKey", "STOP_AND_REPORT");
     }
 
     @Test

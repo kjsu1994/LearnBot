@@ -87,8 +87,13 @@ function CodeWorkspace(props) {
     codeAgentLoopPreview,
     codeAgentLoopTimelines = [],
     codeAgentLoopRunnerPreview,
+    codeAgentLoopRunnerToolSelectionPreview,
     codeAgentLoopRunnerEnqueueResult,
+    codeAgentLoopRunnerReleaseReviewResult,
+    codeAgentLoopRunnerFinalResultPublicationPreview,
+    codeAgentLoopRunnerM8EntryReadiness,
     codeAgentLoopRunnerQueuedObservationResult,
+    codeAgentLoopRunnerObservationContinuation,
     codeAgentLocalPatchRequest,
     codeAgentLocalPatchReadiness,
     codeAgentLocalPatchDryRunRequest,
@@ -114,7 +119,11 @@ function CodeWorkspace(props) {
     generateCodeAgentPlan = (event) => event.preventDefault(),
     previewCodeAgentLoop = () => {},
     previewCodeAgentLoopRunner = () => {},
+    previewCodeAgentLoopRunnerToolSelection = () => {},
     enqueueCodeAgentLoopRunnerReadOnly = () => {},
+    reviewCodeAgentLoopRunnerReleaseGate = () => {},
+    previewCodeAgentLoopRunnerFinalResultPublication = () => {},
+    previewCodeAgentLoopRunnerM8EntryReadiness = () => {},
     enqueueCodeAgentLoopRunnerSelectedReadOnly = () => {},
     refreshCodeAgentLoopRunnerQueuedObservation = () => {},
     refreshCodeAgentLoopTimelines = () => {},
@@ -124,6 +133,7 @@ function CodeWorkspace(props) {
     refreshCodeAgentLocalPatchReadiness = () => {},
     queueCodeAgentLocalPatchDryRun = () => {},
     queueCodeAgentReleaseFreshObservations = () => {},
+    releaseCodeAgentLocalPatchForExecution = () => {},
     refreshCodeAgentLocalPatchDryRunResult = () => {},
     queueCodeAgentLocalRepositoryObservation = () => {},
     refreshCodeAgentLocalRepositoryObservationResult = () => {},
@@ -221,8 +231,13 @@ function CodeWorkspace(props) {
           loopPreview={codeAgentLoopPreview}
           loopTimelines={codeAgentLoopTimelines}
           loopRunnerPreview={codeAgentLoopRunnerPreview}
+          loopRunnerToolSelectionPreview={codeAgentLoopRunnerToolSelectionPreview}
           loopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
+          loopRunnerReleaseReviewResult={codeAgentLoopRunnerReleaseReviewResult}
+          loopRunnerFinalResultPublicationPreview={codeAgentLoopRunnerFinalResultPublicationPreview}
+          loopRunnerM8EntryReadiness={codeAgentLoopRunnerM8EntryReadiness}
           loopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
+          loopRunnerObservationContinuation={codeAgentLoopRunnerObservationContinuation}
           localPatchRequest={codeAgentLocalPatchRequest}
           localPatchReadiness={codeAgentLocalPatchReadiness}
           localPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
@@ -237,7 +252,11 @@ function CodeWorkspace(props) {
           onPlan={generateCodeAgentPlan}
           onLoopPreview={previewCodeAgentLoop}
           onLoopRunnerPreview={previewCodeAgentLoopRunner}
+          onLoopRunnerToolSelectionPreview={previewCodeAgentLoopRunnerToolSelection}
           onLoopRunnerEnqueueReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
+          onLoopRunnerReleaseReview={reviewCodeAgentLoopRunnerReleaseGate}
+          onLoopRunnerFinalResultPublicationPreview={previewCodeAgentLoopRunnerFinalResultPublication}
+          onLoopRunnerM8EntryReadiness={previewCodeAgentLoopRunnerM8EntryReadiness}
           onLoopRunnerEnqueueSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
           onRefreshLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
           onRefreshLoopTimelines={refreshCodeAgentLoopTimelines}
@@ -247,6 +266,7 @@ function CodeWorkspace(props) {
           onRefreshLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
           onQueueLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
           onQueueReleaseFreshObservations={queueCodeAgentReleaseFreshObservations}
+          onReleaseLocalPatchForExecution={releaseCodeAgentLocalPatchForExecution}
           onRefreshLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
           onQueueLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
           onRefreshLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
@@ -371,6 +391,40 @@ function normalizeRepositoryUrl(value = '') {
     .toLowerCase();
 }
 
+function buildAgentLoopRunnerToolSelectionPreviewView(preview) {
+  if (!preview) {
+    return null;
+  }
+  const candidate = preview.candidate || preview.selection?.candidate || {};
+  const modelDecision = preview.modelDecision || {};
+  const toolName = candidate.toolName || modelDecision.toolName || 'unknown';
+  const accepted = Boolean(preview.modelToolSelectionAccepted);
+  const selectedByModel = Boolean(preview.selectedByModel);
+  const label = selectedByModel ? 'model selected' : 'deterministic fallback';
+  return {
+    headerText: `agent loop runner model tool preview: ${preview.actionKey || 'unknown'} / ${preview.selectionDecision || preview.runnerDecision || 'unknown'} / ${label}`,
+    decisionText: `agent loop runner model decision: attempted ${Boolean(preview.modelToolSelectionAttempted)} / accepted ${accepted} / tool ${toolName} / read-only ${Boolean(candidate.readOnly ?? modelDecision.readOnly)} / approval ${candidate.approvalState || (modelDecision.requiresApproval ? 'REQUIRED' : 'NOT_REQUIRED')} / mutation ${Boolean(candidate.mutationAllowed ?? modelDecision.mutationAllowed)}`,
+    controlsText: `agent loop runner model tool controls: request creation ${Boolean(preview.requestCreationEnabled)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / final result ${Boolean(preview.finalResultEnabled)} / publication ${Boolean(preview.publicationEnabled)} / acknowledgement ${Boolean(preview.acknowledgementEnabled)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    reasonText: preview.reason || modelDecision.reason || '',
+  };
+}
+
+function buildAgentLoopRunnerObservationContinuationView(continuation) {
+  if (!continuation) {
+    return null;
+  }
+  const selection = continuation.toolSelectionPreview || {};
+  return {
+    headerText: `agent loop runner observation continuation: ${continuation.status || 'UNKNOWN'} / ${continuation.continuationDecision || 'unknown'}`,
+    budgetText: `agent loop runner observation continuation budget: iteration ${continuation.iterationCount ?? 0} / max ${continuation.maxIterations ?? 0} / remaining ${continuation.remainingIterations ?? 0} / limit reached ${Boolean(continuation.iterationLimitReached)}`,
+    controlsText: `agent loop runner observation continuation controls: request creation ${Boolean(continuation.requestCreationEnabled)} / enqueue ${Boolean(continuation.enqueueEnabled)} / push ${Boolean(continuation.pushEnabled)} / claim ${Boolean(continuation.claimEnabled)} / final result ${Boolean(continuation.finalResultEnabled)} / publication ${Boolean(continuation.publicationEnabled)} / acknowledgement ${Boolean(continuation.acknowledgementEnabled)} / mutation ${Boolean(continuation.mutationEnabled)}`,
+    nextPreviewText: selection.selectionDecision
+      ? `agent loop runner observation continuation next model preview: ${selection.actionKey || 'unknown'} / ${selection.selectionDecision} / tool ${selection.candidate?.toolName || selection.modelDecision?.toolName || 'unknown'} / mutation ${Boolean(selection.candidate?.mutationAllowed ?? selection.modelDecision?.mutationAllowed)}`
+      : '',
+    reasonText: continuation.reason || '',
+  };
+}
+
 function CodeAgentPanel({
   instruction = '',
   setInstruction = () => {},
@@ -382,8 +436,13 @@ function CodeAgentPanel({
   loopPreview,
   loopTimelines = [],
   loopRunnerPreview,
+  loopRunnerToolSelectionPreview,
   loopRunnerEnqueueResult,
+  loopRunnerReleaseReviewResult,
+  loopRunnerFinalResultPublicationPreview,
+  loopRunnerM8EntryReadiness,
   loopRunnerQueuedObservationResult,
+  loopRunnerObservationContinuation,
   localPatchRequest,
   localPatchReadiness,
   localPatchDryRunRequest,
@@ -398,7 +457,11 @@ function CodeAgentPanel({
   onPlan = (event) => event.preventDefault(),
   onLoopPreview = () => {},
   onLoopRunnerPreview = () => {},
+  onLoopRunnerToolSelectionPreview = () => {},
   onLoopRunnerEnqueueReadOnly = () => {},
+  onLoopRunnerReleaseReview = () => {},
+  onLoopRunnerFinalResultPublicationPreview = () => {},
+  onLoopRunnerM8EntryReadiness = () => {},
   onLoopRunnerEnqueueSelectedReadOnly = () => {},
   onRefreshLoopRunnerQueuedObservation = () => {},
   onRefreshLoopTimelines = () => {},
@@ -408,6 +471,7 @@ function CodeAgentPanel({
   onRefreshLocalPatchReadiness = () => {},
   onQueueLocalPatchDryRun = () => {},
   onQueueReleaseFreshObservations = () => {},
+  onReleaseLocalPatchForExecution = () => {},
   onRefreshLocalPatchDryRunResult = () => {},
   onQueueLocalRepositoryObservation = () => {},
   onRefreshLocalRepositoryObservationResult = () => {},
@@ -427,19 +491,64 @@ function CodeAgentPanel({
     selectedRepositoryId
     && loopPreview?.loopId
     && (
-      loopRunnerPreview?.actionKey === 'READY_HANDOFF_CREATION_DISABLED'
+      loopRunnerPreview?.recommendedAction?.actionKey === 'CHECK_ENQUEUE_REFUSAL'
+      || loopRunnerPreview?.actionKey === 'READY_HANDOFF_CREATION_DISABLED'
       || loopRunnerPreview?.actionKey === 'WAIT_FOR_RELEASE_GATE'
+      || loopRunnerPreview?.actionKey === 'WAIT_FOR_FRESH_OBSERVATION_RESULTS'
+      || loopRunnerPreview?.actionKey === 'FRESH_EVIDENCE_COMPLETE_RELEASE_GATED'
       || loopRunnerPreview?.runnerDecision === 'WAIT_RELEASE_GATE_FRESH_OBSERVATIONS'
+      || loopRunnerPreview?.runnerDecision === 'WAIT_RELEASE_GATE_FRESH_OBSERVATION_RESULTS'
+      || loopRunnerPreview?.runnerDecision === 'WAIT_RELEASE_GATE_FRESH_EVIDENCE_COMPLETE'
     )
   ) && !loading('code-agent-loop-runner-enqueue-read-only');
+  const canReviewRunnerReleaseRefusal = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && (
+      loopRunnerPreview?.recommendedAction?.actionKey === 'REVIEW_RELEASE_REFUSAL'
+      || loopRunnerPreview?.actionKey === 'RELEASE_READINESS_REFRESHED_RELEASE_GATED'
+      || loopRunnerPreview?.runnerDecision === 'WAIT_RELEASE_GATE_READINESS_REFRESHED'
+    )
+  ) && !loading('code-agent-loop-runner-release-review');
   const canEnqueueSelectedReadOnlyRunner = Boolean(
     selectedRepositoryId
     && loopPreview?.loopId
-    && loopRunnerPreview?.runnerDecision === 'PREPARED_READ_ONLY_CANDIDATE'
-    && loopRunnerPreview?.candidate?.toolName === 'git.status'
+    && loopRunnerObservationContinuation?.iterationLimitReached !== true
+    && (
+      loopRunnerPreview?.recommendedAction?.actionKey === 'QUEUE_SELECTED_READ_ONLY'
+      || loopRunnerPreview?.runnerDecision === 'PREPARED_READ_ONLY_CANDIDATE'
+    )
+    && ['git.status', 'git.diff'].includes(loopRunnerPreview?.candidate?.toolName)
     && loopRunnerPreview?.candidate?.approvalState === 'NOT_REQUIRED'
     && loopRunnerPreview?.candidate?.mutationAllowed === false
   ) && !loading('code-agent-loop-runner-enqueue-selected-read-only');
+  const canPreviewFinalResultPublication = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && (
+      loopRunnerPreview?.recommendedAction?.actionKey === 'STOP_AND_REPORT'
+      || loopRunnerPreview?.actionKey === 'APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED'
+      || loopRunnerPreview?.runnerDecision === 'READY_FINAL_RESULT_DISABLED'
+    )
+  ) && !loading('code-agent-loop-runner-final-result-publication-preview');
+  const canPreviewM8EntryReadiness = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && (
+      loopRunnerFinalResultPublicationPreview?.finalResultReady === true
+      || loopRunnerPreview?.recommendedAction?.actionKey === 'STOP_AND_REPORT'
+      || loopRunnerPreview?.actionKey === 'APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED'
+      || loopRunnerPreview?.runnerDecision === 'READY_FINAL_RESULT_DISABLED'
+    )
+  ) && !loading('code-agent-loop-runner-m8-entry-readiness');
+  const canPreviewRunnerToolSelection = Boolean(
+    selectedRepositoryId
+    && loopPreview?.loopId
+    && (
+      loopRunnerPreview?.recommendedAction?.actionKey === 'QUEUE_SELECTED_READ_ONLY'
+      || loopRunnerPreview?.runnerDecision === 'PREPARED_READ_ONLY_CANDIDATE'
+    )
+  ) && !loading('code-agent-loop-runner-tool-selection-preview');
   const runnerQueuedRequestId = loopRunnerEnqueueResult?.queuedRequest?.requestId;
   const canRefreshRunnerQueuedObservation = Boolean(runnerQueuedRequestId)
     && !loading(`code-agent-loop-runner-queued-observation-${runnerQueuedRequestId}`);
@@ -456,9 +565,11 @@ function CodeAgentPanel({
   const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
   const agentLoopTimelineHistoryView = buildAgentLoopTimelineHistoryView(loopTimelines);
   const agentLoopRunnerHandoffSummaryView = buildAgentLoopRunnerHandoffSummaryView(
-    loopRunnerEnqueueResult || loopRunnerPreview,
+    loopRunnerM8EntryReadiness || loopRunnerFinalResultPublicationPreview || loopRunnerReleaseReviewResult || loopRunnerEnqueueResult || loopRunnerPreview,
     loopRunnerQueuedObservationResult
   );
+  const runnerToolSelectionPreviewView = buildAgentLoopRunnerToolSelectionPreviewView(loopRunnerToolSelectionPreview);
+  const runnerObservationContinuationView = buildAgentLoopRunnerObservationContinuationView(loopRunnerObservationContinuation);
   const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
   const canPrepareLocalPatchRequest = Boolean(
     patch?.valid
@@ -525,6 +636,17 @@ function CodeAgentPanel({
   });
   const readinessReleaseAttemptFinalReadiness = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptFinalReadiness || null;
   const readinessReleaseAttemptDisplaySummary = readinessReleaseAttemptModel?.latestAttempt?.releaseAttemptDisplaySummary || null;
+  const releaseGateEnabledCheck = Array.isArray(visibleReadiness?.checks)
+    ? visibleReadiness.checks.find((check) => check.key === 'releaseGateEnabled')
+    : null;
+  const releaseForExecutionEnabled = Boolean(releaseGateEnabledCheck?.passed);
+  const canReleaseLocalPatchForExecution = Boolean(
+    localPatchRequest?.status === 'APPROVED_HELD'
+    && visibleReadiness
+    && releaseForExecutionEnabled
+    && readinessReleaseAttemptFinalReadiness?.ready === true
+    && !loading(`code-agent-local-release-for-execution-${localPatchRequest.requestId}`)
+  );
   const readinessReleaseAttemptDisplaySummaryView = buildReleaseAttemptDisplaySummaryView({
     displaySummary: readinessReleaseAttemptDisplaySummary,
     evidenceCompleteness: readinessFreshObservationEvidenceCompleteness,
@@ -588,6 +710,10 @@ function CodeAgentPanel({
   )
     ? readinessFinalAnswerPublicationBoundary.answerQualityGuardrails
     : [];
+  const readinessFinalAnswerPublicationHandoff =
+    readinessReleaseAttemptModel?.latestAttempt?.finalAnswerPublicationHandoff || null;
+  const readinessAcknowledgementSaveHandoff =
+    readinessReleaseAttemptModel?.latestAttempt?.acknowledgementSaveHandoff || null;
   const readinessReleaseEnablementChecklist = readinessReleaseAttemptModel?.latestAttempt?.releaseEnablementChecklist || null;
   const readinessReleaseEnablementChecklistItems = Array.isArray(readinessReleaseEnablementChecklist?.items)
     ? readinessReleaseEnablementChecklist.items
@@ -900,12 +1026,52 @@ function CodeAgentPanel({
           <button
             type="button"
             className="ghost-button"
+            disabled={!canReviewRunnerReleaseRefusal}
+            onClick={() => onLoopRunnerReleaseReview(loopPreview)}
+            title="Reviews the refreshed release gate and records the disabled release boundary. It does not release, claim, mutate, publish, deliver, or acknowledge results."
+          >
+            {loading('code-agent-loop-runner-release-review') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+            Review release refusal
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canPreviewFinalResultPublication}
+            onClick={() => onLoopRunnerFinalResultPublicationPreview(loopPreview)}
+            title="Previews the completed-flow final-result report and final-answer publication handoff. It does not publish, deliver, save acknowledgement, update RAG freshness, or mutate."
+          >
+            {loading('code-agent-loop-runner-final-result-publication-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
+            Preview final result handoff
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canPreviewM8EntryReadiness}
+            onClick={() => onLoopRunnerM8EntryReadiness(loopPreview)}
+            title="Checks whether the current completed-flow handoff is sufficient to move from M7 into M8 planning. It does not enable CLI packaging, publication, acknowledgement save, RAG updates, or mutation."
+          >
+            {loading('code-agent-loop-runner-m8-entry-readiness') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+            Check M8 entry
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
             disabled={!canEnqueueSelectedReadOnlyRunner}
             onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
-            title="Queues only the prepared read-only Local Agent git.status observation. It does not claim, mutate, publish, or acknowledge final results."
+            title="Queues only the prepared read-only Local Agent git.status or git.diff observation. It does not claim, mutate, publish, or acknowledge final results."
           >
             {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
             Queue read-only step
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canPreviewRunnerToolSelection}
+            onClick={() => onLoopRunnerToolSelectionPreview(loopPreview)}
+            title="Asks the model to select the next allowed read-only Local Agent tool. This is preview-only and does not create, enqueue, push, claim, mutate, publish, deliver, or acknowledge results."
+          >
+            {loading('code-agent-loop-runner-tool-selection-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
+            Preview model tool
           </button>
           <button type="button" className="ghost-button" disabled={!selectedRepositoryId || loading('code-agent-loop-timelines')} onClick={() => onRefreshLoopTimelines(selectedRepositoryId)}>
             {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
@@ -971,6 +1137,36 @@ function CodeAgentPanel({
           {agentLoopRunnerHandoffSummaryView.countsText && (
             <small>{agentLoopRunnerHandoffSummaryView.countsText}</small>
           )}
+          {loopRunnerFinalResultPublicationPreview && (
+            <small>
+              agent loop runner final-result publication preview: {loopRunnerFinalResultPublicationPreview.publicationDecision || 'UNKNOWN'}
+              {' / final result ready '}
+              {String(loopRunnerFinalResultPublicationPreview.finalResultReady)}
+              {' / publication '}
+              {String(loopRunnerFinalResultPublicationPreview.publicationEnabled)}
+              {' / acknowledgement save '}
+              {String(loopRunnerFinalResultPublicationPreview.acknowledgementSaveEnabled)}
+              {' / mutation '}
+              {String(loopRunnerFinalResultPublicationPreview.mutationEnabled)}
+            </small>
+          )}
+          {loopRunnerM8EntryReadiness && (
+            <small>
+              agent loop runner M8 entry readiness: {loopRunnerM8EntryReadiness.m8EntryDecision || 'UNKNOWN'}
+              {' / M7 closure '}
+              {loopRunnerM8EntryReadiness.m7ClosureDecision || 'UNKNOWN'}
+              {' / M8 entry ready '}
+              {String(loopRunnerM8EntryReadiness.m8EntryReady)}
+              {' / M8 work '}
+              {String(loopRunnerM8EntryReadiness.m8WorkEnabled)}
+              {' / publication '}
+              {String(loopRunnerM8EntryReadiness.publicationEnabled)}
+              {' / acknowledgement save '}
+              {String(loopRunnerM8EntryReadiness.acknowledgementSaveEnabled)}
+              {' / mutation '}
+              {String(loopRunnerM8EntryReadiness.mutationEnabled)}
+            </small>
+          )}
           <small>{agentLoopRunnerHandoffSummaryView.disabledText}</small>
           {agentLoopRunnerHandoffSummaryView.nestedPreviewText && (
             <small>{agentLoopRunnerHandoffSummaryView.nestedPreviewText}</small>
@@ -981,8 +1177,23 @@ function CodeAgentPanel({
           {agentLoopRunnerHandoffSummaryView.routeText && (
             <small>{agentLoopRunnerHandoffSummaryView.routeText}</small>
           )}
+          {agentLoopRunnerHandoffSummaryView.freshObservationText && (
+            <small>{agentLoopRunnerHandoffSummaryView.freshObservationText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.readinessText && (
+            <small>{agentLoopRunnerHandoffSummaryView.readinessText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.boundaryText && (
+            <small>{agentLoopRunnerHandoffSummaryView.boundaryText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.finalResultText && (
+            <small>{agentLoopRunnerHandoffSummaryView.finalResultText}</small>
+          )}
           {agentLoopRunnerHandoffSummaryView.observationText && (
             <small>{agentLoopRunnerHandoffSummaryView.observationText}</small>
+          )}
+          {agentLoopRunnerHandoffSummaryView.recommendedActionText && (
+            <small>{agentLoopRunnerHandoffSummaryView.recommendedActionText}</small>
           )}
           {agentLoopRunnerHandoffSummaryView.message && (
             <small>{agentLoopRunnerHandoffSummaryView.message}</small>
@@ -999,6 +1210,45 @@ function CodeAgentPanel({
               Refresh read-only observation
             </button>
           )}
+        </div>
+      )}
+      {runnerToolSelectionPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{runnerToolSelectionPreviewView.headerText}</strong>
+            <Badge variant="outline">model preview</Badge>
+          </div>
+          <small>{runnerToolSelectionPreviewView.decisionText}</small>
+          <small>{runnerToolSelectionPreviewView.controlsText}</small>
+          {runnerToolSelectionPreviewView.reasonText && (
+            <small>{runnerToolSelectionPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {runnerObservationContinuationView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{runnerObservationContinuationView.headerText}</strong>
+            <Badge variant="outline">loop continuation</Badge>
+          </div>
+          <small>{runnerObservationContinuationView.budgetText}</small>
+          <small>{runnerObservationContinuationView.controlsText}</small>
+          {runnerObservationContinuationView.nextPreviewText && (
+            <small>{runnerObservationContinuationView.nextPreviewText}</small>
+          )}
+          {runnerObservationContinuationView.reasonText && (
+            <small>{runnerObservationContinuationView.reasonText}</small>
+          )}
+          <button
+            type="button"
+            className="ghost-button compact-action"
+            disabled={!canEnqueueSelectedReadOnlyRunner}
+            onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
+            title="Queues the next model-previewed read-only Local Agent git.status observation. It does not claim, mutate, publish, deliver, or acknowledge final results."
+          >
+            {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={14} /> : <Play size={14} />}
+            Continue read-only step
+          </button>
         </div>
       )}
       {plan && (
@@ -1226,11 +1476,14 @@ function CodeAgentPanel({
                     <button
                       type="button"
                       className="ghost-button"
-                      disabled
-                      title="Release is currently a refusal-only audit boundary. It does not create or push a Local Agent mutation request."
+                      disabled={!canReleaseLocalPatchForExecution}
+                      onClick={() => onReleaseLocalPatchForExecution(localPatchRequest.requestId)}
+                      title={canReleaseLocalPatchForExecution
+                        ? 'Releases the approved-held patch through the guarded backend path so the Local Agent can claim the approved execution sequence.'
+                        : 'Release remains disabled until the backend release flag is enabled and fresh release evidence is ready.'}
                     >
-                      <Play size={16} />
-                      Release Local Agent patch disabled
+                      {loading(`code-agent-local-release-for-execution-${localPatchRequest.requestId}`) ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      {canReleaseLocalPatchForExecution ? 'Release Local Agent patch' : 'Release Local Agent patch disabled'}
                     </button>
                   )}
                   <button
@@ -1714,6 +1967,93 @@ function CodeAgentPanel({
                           )}
                           {readinessFinalAnswerPublicationBoundary.message && (
                             <span>{readinessFinalAnswerPublicationBoundary.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessFinalAnswerPublicationHandoff && (
+                        <>
+                          <span>
+                            final answer publication handoff: {readinessFinalAnswerPublicationHandoff.status || 'BLOCKED_STALE_INDEX_DISCLOSURE_MISSING'}
+                            {readinessFinalAnswerPublicationHandoff.schema ? ` / ${readinessFinalAnswerPublicationHandoff.schema}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.handoffAvailable !== undefined ? ` / handoff ${String(readinessFinalAnswerPublicationHandoff.handoffAvailable)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.executionTarget ? ` / ${readinessFinalAnswerPublicationHandoff.executionTarget}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.sourceFinalMutationReportSummaryStatus ? ` / summary ${readinessFinalAnswerPublicationHandoff.sourceFinalMutationReportSummaryStatus}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.sourceRagFreshnessMarkerStatus ? ` / freshness ${readinessFinalAnswerPublicationHandoff.sourceRagFreshnessMarkerStatus}` : ''}
+                          </span>
+                          <span>
+                            final answer handoff disclosure:
+                            {readinessFinalAnswerPublicationHandoff.staleIndexDisclosureRequired !== undefined ? ` required ${String(readinessFinalAnswerPublicationHandoff.staleIndexDisclosureRequired)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.staleIndexDisclosureModeled !== undefined ? ` / modeled ${String(readinessFinalAnswerPublicationHandoff.staleIndexDisclosureModeled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.staleIndexPolicy ? ` / policy ${readinessFinalAnswerPublicationHandoff.staleIndexPolicy}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.freshnessAction ? ` / action ${readinessFinalAnswerPublicationHandoff.freshnessAction}` : ''}
+                          </span>
+                          {!!readinessFinalAnswerPublicationHandoff.targetFiles?.length && (
+                            <span>final answer handoff target files: {readinessFinalAnswerPublicationHandoff.targetFiles.join(', ')}</span>
+                          )}
+                          {!!readinessFinalAnswerPublicationHandoff.finalAnswerSections?.length && (
+                            <span>final answer handoff sections: {readinessFinalAnswerPublicationHandoff.finalAnswerSections.join(', ')}</span>
+                          )}
+                          {readinessFinalAnswerPublicationHandoff.staleIndexDisclosureText && (
+                            <span>final answer stale-index disclosure: {readinessFinalAnswerPublicationHandoff.staleIndexDisclosureText}</span>
+                          )}
+                          <span>
+                            final answer handoff disabled:
+                            {readinessFinalAnswerPublicationHandoff.publicationEnabled !== undefined ? ` publication ${String(readinessFinalAnswerPublicationHandoff.publicationEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessFinalAnswerPublicationHandoff.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessFinalAnswerPublicationHandoff.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.acknowledgementSaveEnabled !== undefined ? ` / acknowledgement save ${String(readinessFinalAnswerPublicationHandoff.acknowledgementSaveEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessFinalAnswerPublicationHandoff.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.partialReindexEnabled !== undefined ? ` / partial reindex ${String(readinessFinalAnswerPublicationHandoff.partialReindexEnabled)}` : ''}
+                            {readinessFinalAnswerPublicationHandoff.mutationAllowed !== undefined ? ` / mutation ${String(readinessFinalAnswerPublicationHandoff.mutationAllowed)}` : ''}
+                          </span>
+                          {!!readinessFinalAnswerPublicationHandoff.blockingKeys?.length && (
+                            <span>final answer handoff blocking keys: {readinessFinalAnswerPublicationHandoff.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessFinalAnswerPublicationHandoff.message && (
+                            <span>{readinessFinalAnswerPublicationHandoff.message}</span>
+                          )}
+                        </>
+                      )}
+                      {readinessAcknowledgementSaveHandoff && (
+                        <>
+                          <span>
+                            acknowledgement save handoff: {readinessAcknowledgementSaveHandoff.status || 'BLOCKED_FINAL_ANSWER_HANDOFF_INCOMPLETE'}
+                            {readinessAcknowledgementSaveHandoff.schema ? ` / ${readinessAcknowledgementSaveHandoff.schema}` : ''}
+                            {readinessAcknowledgementSaveHandoff.handoffAvailable !== undefined ? ` / handoff ${String(readinessAcknowledgementSaveHandoff.handoffAvailable)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.executionTarget ? ` / ${readinessAcknowledgementSaveHandoff.executionTarget}` : ''}
+                            {readinessAcknowledgementSaveHandoff.sourceFinalAnswerPublicationHandoffStatus ? ` / final answer handoff ${readinessAcknowledgementSaveHandoff.sourceFinalAnswerPublicationHandoffStatus}` : ''}
+                          </span>
+                          <span>
+                            acknowledgement receipt:
+                            {readinessAcknowledgementSaveHandoff.acknowledgementReceiptRequired !== undefined ? ` required ${String(readinessAcknowledgementSaveHandoff.acknowledgementReceiptRequired)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.acknowledgementReceiptModeled !== undefined ? ` / modeled ${String(readinessAcknowledgementSaveHandoff.acknowledgementReceiptModeled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.staleIndexDisclosureModeled !== undefined ? ` / stale disclosure ${String(readinessAcknowledgementSaveHandoff.staleIndexDisclosureModeled)}` : ''}
+                          </span>
+                          {!!readinessAcknowledgementSaveHandoff.targetFiles?.length && (
+                            <span>acknowledgement handoff target files: {readinessAcknowledgementSaveHandoff.targetFiles.join(', ')}</span>
+                          )}
+                          {!!readinessAcknowledgementSaveHandoff.finalAnswerSections?.length && (
+                            <span>acknowledgement handoff sections: {readinessAcknowledgementSaveHandoff.finalAnswerSections.join(', ')}</span>
+                          )}
+                          {readinessAcknowledgementSaveHandoff.staleIndexDisclosureText && (
+                            <span>acknowledgement stale-index disclosure: {readinessAcknowledgementSaveHandoff.staleIndexDisclosureText}</span>
+                          )}
+                          <span>
+                            acknowledgement handoff disabled:
+                            {readinessAcknowledgementSaveHandoff.publicationEnabled !== undefined ? ` publication ${String(readinessAcknowledgementSaveHandoff.publicationEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.finalAnswerGenerationEnabled !== undefined ? ` / final answer ${String(readinessAcknowledgementSaveHandoff.finalAnswerGenerationEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.finalAnswerDeliveryEnabled !== undefined ? ` / delivery ${String(readinessAcknowledgementSaveHandoff.finalAnswerDeliveryEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.conversationSaveEnabled !== undefined ? ` / conversation save ${String(readinessAcknowledgementSaveHandoff.conversationSaveEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.acknowledgementSaveEnabled !== undefined ? ` / acknowledgement save ${String(readinessAcknowledgementSaveHandoff.acknowledgementSaveEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.ragFreshnessUpdateEnabled !== undefined ? ` / rag freshness ${String(readinessAcknowledgementSaveHandoff.ragFreshnessUpdateEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.partialReindexEnabled !== undefined ? ` / partial reindex ${String(readinessAcknowledgementSaveHandoff.partialReindexEnabled)}` : ''}
+                            {readinessAcknowledgementSaveHandoff.mutationAllowed !== undefined ? ` / mutation ${String(readinessAcknowledgementSaveHandoff.mutationAllowed)}` : ''}
+                          </span>
+                          {!!readinessAcknowledgementSaveHandoff.blockingKeys?.length && (
+                            <span>acknowledgement handoff blocking keys: {readinessAcknowledgementSaveHandoff.blockingKeys.join(', ')}</span>
+                          )}
+                          {readinessAcknowledgementSaveHandoff.message && (
+                            <span>{readinessAcknowledgementSaveHandoff.message}</span>
                           )}
                         </>
                       )}

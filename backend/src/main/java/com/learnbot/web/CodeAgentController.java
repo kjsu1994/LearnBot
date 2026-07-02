@@ -22,7 +22,12 @@ import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
+import com.learnbot.dto.loop.CodeAgentLoopReleaseReviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopM8EntryReadinessResponse;
+import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationRequest;
+import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalPayloadRequest;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
@@ -226,6 +231,52 @@ public class CodeAgentController {
         );
     }
 
+    @PostMapping("/loop/runner/release-review")
+    CodeAgentLoopReleaseReviewResponse loopRunnerReleaseReview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.reviewReleaseGate(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/final-result-publication-preview")
+    CodeAgentLoopFinalResultPublicationPreviewResponse loopRunnerFinalResultPublicationPreview(
+            @Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.previewFinalResultPublication(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/m8-entry-readiness")
+    CodeAgentLoopM8EntryReadinessResponse loopRunnerM8EntryReadiness(
+            @Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.previewM8EntryReadiness(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
     @PostMapping("/loop/runner/select-tool-preview")
     CodeAgentLoopToolSelectionResponse loopRunnerSelectToolPreview(@Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request) {
         var user = currentUserProvider.currentUser();
@@ -251,6 +302,23 @@ public class CodeAgentController {
                 request.loopId(),
                 request.agentId(),
                 request.workspaceId()
+        );
+    }
+
+    @PostMapping("/loop/runner/continue-after-observation")
+    CodeAgentLoopObservationContinuationResponse loopRunnerContinueAfterObservation(
+            @Valid @RequestBody CodeAgentLoopObservationContinuationRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopToolSelectionService.continueAfterReadOnlyObservation(
+                user.id(),
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId(),
+                request.requestId()
         );
     }
 

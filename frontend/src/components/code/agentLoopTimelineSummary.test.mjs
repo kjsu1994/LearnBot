@@ -143,6 +143,19 @@ const view = buildAgentLoopTimelineHistoryView([
         details: {
           status: 'APPROVED_HELD',
           approvalState: 'APPROVED',
+          recommendedAction: {
+            schema: 'learnbot.code-agent.runner-recommended-action.v1',
+            actionKey: 'CHECK_ENQUEUE_REFUSAL',
+            label: 'Check enqueue refusal',
+            enabled: true,
+            method: 'POST',
+            endpoint: '/api/code-agent/loop/runner/enqueue-read-only',
+            requestCreationEnabled: false,
+            pushEnabled: false,
+            claimEnabled: false,
+            mutationEnabled: false,
+            reason: 'Confirm the runner will not enqueue mutation work from this handoff state.',
+          },
         },
       },
       {
@@ -234,7 +247,7 @@ assert.deepEqual(view.timelines[0].eventLines, [
   '13 STOP_OUTCOME_POLICY_REGISTERED / approval false / may mutate false / enabled false / status REGISTERED / stop TOOL_FAILED / outcome REPORT_TOOL_FAILURE',
   '14 STOP_OUTCOME_POLICY_REGISTERED / approval false / may mutate false / enabled false / status REGISTERED / stop APPROVAL_DENIED / outcome REPORT_APPROVAL_DENIED',
   '15 LOCAL_AGENT_OBSERVATION_RESULT / OBSERVE / USER_LOCAL_AGENT / patch.apply / approval true / may mutate false / enabled true / status SUCCEEDED / fresh observation true / dry-run true / mutation applied false',
-  '16 LOCAL_AGENT_APPROVAL_DECISION / REQUEST_APPROVAL / USER_LOCAL_AGENT / patch.apply / approval true / may mutate false / enabled true / status APPROVED_HELD / approval state APPROVED',
+  '16 LOCAL_AGENT_APPROVAL_DECISION / REQUEST_APPROVAL / USER_LOCAL_AGENT / patch.apply / approval true / may mutate false / enabled true / status APPROVED_HELD / approval state APPROVED / recommended action CHECK_ENQUEUE_REFUSAL / label Check enqueue refusal / enabled true / method POST / endpoint /api/code-agent/loop/runner/enqueue-read-only / request creation false / push false / claim false / mutation false / reason Confirm the runner will not enqueue mutation work from this handoff state.',
   '17 STOP_OUTCOME_RECORDED / COMPLETE_OR_PAUSE / approval false / may mutate false / enabled true / status RECORDED / final result false / stop TOOL_FAILED / outcome REPORT_TOOL_FAILURE',
   '18 STOP_OUTCOME_RECORDED / COMPLETE_OR_PAUSE / approval false / may mutate false / enabled true / status RECORDED / final result false / stop APPROVAL_DENIED / outcome REPORT_APPROVAL_DENIED',
   '19 STOP_OUTCOME_RECORDED / COMPLETE_OR_PAUSE / approval false / may mutate false / enabled true / status RECORDED / final result false / stop AGENT_UNAVAILABLE / outcome WAIT_FOR_LOCAL_AGENT',

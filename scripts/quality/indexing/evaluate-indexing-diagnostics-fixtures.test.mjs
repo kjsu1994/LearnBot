@@ -31,6 +31,7 @@ try {
   assert.equal(report.summary.activeIndexPreservedCases, 3);
   assert.equal(report.summary.crawlPolicyPassedCases, 3);
   assert.equal(report.summary.citationSourcePassedCases, 3);
+  assert.equal(report.summary.crawlInsightPassedCases, 3);
 
   const succeededFixtures = {
     schema: "learnbot.quality.indexing-fixtures.v1",
@@ -76,6 +77,9 @@ try {
           fetchedPages: [
             { url: "https://example.com/docs", depth: 0, storedAsSeparateDocument: true, sourceUri: "https://example.com/docs" },
             { url: "https://evil.example.net/docs", depth: 3, storedAsSeparateDocument: false }
+          ],
+          skippedPages: [
+            { url: "https://evil.example.net/docs", reason: "DOMAIN_NOT_ALLOWED" }
           ]
         }
       }
@@ -93,8 +97,10 @@ try {
   const failingReport = JSON.parse(fs.readFileSync(failingReportPath, "utf8"));
   assert.equal(failingReport.passed, false);
   assert.equal(failingReport.results[0].crawlPolicy.passed, false);
+  assert.equal(failingReport.results[0].crawlInsight.passed, false);
   assert.deepEqual(failingReport.results[0].crawlPolicy.overDepthPages, ["https://evil.example.net/docs"]);
   assert.deepEqual(failingReport.results[0].citationSource.missingSourceUriPages, ["https://evil.example.net/docs"]);
+  assert.deepEqual(failingReport.results[0].crawlInsight.missingInsightPages, ["https://evil.example.net/docs"]);
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }

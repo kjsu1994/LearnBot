@@ -648,6 +648,23 @@ A live polling smoke can be run against the local stack after `.\scripts\up.ps1 
 
 The script logs in, issues a pairing token, stores a temporary Local Agent config, registers the workspace, queues a read-only server request, runs the agent once, and verifies that the server persisted a `SUCCEEDED` tool response.
 
+To verify the guarded backend-created approved execution sequence, restart the backend with the local-agent release override and then run the release-created smoke:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.local-agent-release.yml up -d --build backend nginx
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\quality\local-agent-flow\run-live-server-release-created-flow-smoke.ps1
+```
+
+The override enables `LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED=true` and `LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED=true` only for this local verification path. The smoke creates held source/evidence rows, calls the backend release endpoint, and expects the server-created durable sequence to be completed by Local Agent polling while final-answer publication and acknowledgement save remain disabled.
+
+To verify the Code workspace release surface and that same live release path in one repeatable command, use the UI-flow wrapper:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\quality\local-agent-flow\run-live-server-release-ui-flow-smoke.ps1 -StartFlaggedStack -RestoreDefaultStack
+```
+
+This wrapper runs the route-level Code workspace release smoke, then runs the live release-created Local Agent polling smoke against the flagged stack and restores the default release-disabled backend afterward. It is still route-level UI coverage rather than a true interactive browser click.
+
 When the backend is started with `LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED=true`, the same helper can require the WebSocket path. With the normal Docker helper, set the environment variable before starting or recreating the stack so the backend enables `/api/local-agents/ws` and Nginx forwards the WebSocket upgrade:
 
 ```powershell

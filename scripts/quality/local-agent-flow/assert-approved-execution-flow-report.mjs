@@ -31,6 +31,7 @@ assert.equal(report.capabilities?.commandRunAllowed, true);
 assert.equal(report.capabilities?.rollbackRestore, true);
 
 const steps = new Map((report.steps ?? []).map((step) => [step.toolName, step]));
+assert.equal((report.steps ?? []).length, 4);
 assert.equal(steps.get("patch.apply")?.status, "SUCCEEDED");
 assert.equal(steps.get("patch.apply")?.checks?.mutationApplied, true);
 assert.equal(steps.get("command.runAllowed")?.status, "SUCCEEDED");
@@ -39,6 +40,9 @@ assert.equal(steps.get("git.status")?.status, "SUCCEEDED");
 assert.equal(steps.get("git.status")?.checks?.clean, false);
 assert.equal(steps.get("rollback.restore")?.status, "SUCCEEDED");
 assert.equal(steps.get("rollback.restore")?.checks?.restored, true);
+const requestIds = (report.steps ?? []).map((step) => step.requestId).filter(Boolean);
+assert.equal(requestIds.length, 4);
+assert.equal(new Set(requestIds).size, 4);
 
 assert.equal(report.guardrails?.executionTarget, "USER_LOCAL_AGENT");
 assert.equal(report.guardrails?.identitiesPreserved, true);

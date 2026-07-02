@@ -192,6 +192,19 @@ export function buildCodeWorkspaceReadinessSmokeProps({
             details: {
               status: 'APPROVED_HELD',
               approvalState: 'APPROVED',
+              recommendedAction: {
+                schema: 'learnbot.code-agent.runner-recommended-action.v1',
+                actionKey: 'CHECK_ENQUEUE_REFUSAL',
+                label: 'Check enqueue refusal',
+                enabled: true,
+                method: 'POST',
+                endpoint: '/api/code-agent/loop/runner/enqueue-read-only',
+                requestCreationEnabled: false,
+                pushEnabled: false,
+                claimEnabled: false,
+                mutationEnabled: false,
+                reason: 'Confirm the runner will not enqueue mutation work from this handoff state.',
+              },
             },
           },
           {
@@ -334,6 +347,13 @@ export function buildCodeWorkspaceReadinessSmokeProps({
       requestId,
       readyToRelease: false,
       message: 'Held patch request is not ready for Local Agent execution.',
+      checks: [
+        {
+          key: 'releaseGateEnabled',
+          passed: false,
+          message: 'Patch execution release remains disabled until the guarded Local Agent release path is explicitly enabled.',
+        },
+      ],
       patchExecutionGate: {
         status: 'BLOCKED_RELEASE_DISABLED',
         claimEnabled: false,

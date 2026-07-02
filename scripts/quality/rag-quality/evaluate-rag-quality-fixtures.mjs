@@ -77,7 +77,7 @@ function scoreCase(testCase) {
   const forbiddenAnswerTerms = uniqueStrings(testCase.forbiddenAnswerTerms);
   const forbiddenTermsFound = forbiddenAnswerTerms.filter((term) => includesNormalized(answer, term));
   const latencyPassed = Number.isFinite(latencyMs) && latencyMs <= Number(testCase.maxLatencyMs);
-  const followUp = scoreFollowUpQuality(testCase, answer, observedCitationIds, evidenceIds);
+  const followUp = scoreFollowUpQuality(testCase, answer, evidenceText, observedCitationIds, evidenceIds);
 
   const passed =
     citationRecall === 1 &&
@@ -347,19 +347,26 @@ function normalizeLiveObserved(response, latencyMs, domain) {
   };
 }
 
-function scoreFollowUpQuality(testCase, answer, observedCitationIds, evidenceIds) {
+function scoreFollowUpQuality(testCase, answer, evidenceText, observedCitationIds, evidenceIds) {
   const expectedFollowUpTerms = uniqueStrings(testCase.expectedFollowUpTerms);
   const expectedPriorCitationIds = uniqueStrings(testCase.expectedPriorCitationIds);
   const forbiddenFollowUpTerms = uniqueStrings(testCase.forbiddenFollowUpTerms);
   const effectiveQuestion = testCase.observed?.effectiveQuestion ?? "";
-  const searchableText = `${effectiveQuestion}\n${answer}`;
+  const answerSearchableText = `${effectiveQuestion}\n${answer}`;
+  const evidenceSearchableText = `${evidenceText}`;
 
-  const matchedTerms = expectedFollowUpTerms.filter((term) => includesNormalized(searchableText, term));
+  const matchedAnswerTerms = expectedFollowUpTerms.filter((term) => includesNormalized(answerSearchableText, term));
+  const matchedEvidenceTerms = expectedFollowUpTerms.filter((term) => includesNormalized(evidenceSearchableText, term));
+  const matchedTerms = uniqueStrings([...matchedAnswerTerms, ...matchedEvidenceTerms]);
   const matchedPriorCitationIds = expectedPriorCitationIds.filter(
     (id) => observedCitationIds.includes(id) || evidenceIds.includes(id),
   );
-  const forbiddenTermsFound = forbiddenFollowUpTerms.filter((term) => includesNormalized(searchableText, term));
+  const forbiddenTermsFound = forbiddenFollowUpTerms.filter((term) => includesNormalized(answerSearchableText, term));
   const termCoverage = expectedFollowUpTerms.length === 0 ? 1 : matchedTerms.length / expectedFollowUpTerms.length;
+  const answerTermCoverage =
+    expectedFollowUpTerms.length === 0 ? 1 : matchedAnswerTerms.length / expectedFollowUpTerms.length;
+  const evidenceTermCoverage =
+    expectedFollowUpTerms.length === 0 ? 1 : matchedEvidenceTerms.length / expectedFollowUpTerms.length;
   const priorCitationCoverage =
     expectedPriorCitationIds.length === 0 ? 1 : matchedPriorCitationIds.length / expectedPriorCitationIds.length;
   const quality = Math.min(termCoverage, priorCitationCoverage);
@@ -367,6 +374,10 @@ function scoreFollowUpQuality(testCase, answer, observedCitationIds, evidenceIds
   return {
     expectedTerms: expectedFollowUpTerms.length,
     matchedTerms: matchedTerms.length,
+    matchedAnswerTerms: matchedAnswerTerms.length,
+    matchedEvidenceTerms: matchedEvidenceTerms.length,
+    answerTermCoverage: round(answerTermCoverage),
+    evidenceTermCoverage: round(evidenceTermCoverage),
     expectedPriorCitationIds: expectedPriorCitationIds.length,
     matchedPriorCitationIds: matchedPriorCitationIds.length,
     forbiddenTermsFound,

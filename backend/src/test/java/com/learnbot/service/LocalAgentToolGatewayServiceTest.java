@@ -11,6 +11,7 @@ import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.LocalAgentWorkspaceSummary;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
@@ -29,10 +30,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
@@ -768,7 +771,7 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(readiness.warnings()).contains(
                 "The connected Local Agent must advertise patch.apply capability.",
                 "The connected Local Agent must advertise rollback.restore capability before patch execution can be released.",
-                "Patch execution release remains disabled until Local Agent patch.apply and rollback safety tests are implemented."
+                "Patch execution release remains disabled until the guarded Local Agent release path is explicitly enabled."
         );
     }
 
@@ -845,7 +848,7 @@ class LocalAgentToolGatewayServiceTest {
         assertThat(readiness.warnings()).contains(
                 "The selected Local Agent workspace must be verified against the indexed repository identity before release.",
                 "Latest Local Agent dry-run must provide a managed snapshot manifest with schema, id, path, target files, and a matching snapshotCreated state.",
-                "Patch execution release remains disabled until Local Agent patch.apply and rollback safety tests are implemented."
+                "Patch execution release remains disabled until the guarded Local Agent release path is explicitly enabled."
         );
     }
 
@@ -2256,6 +2259,402 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void releaseHeldPatchForExecutionCanReleaseWhenFlagAndFreshLinkedEvidenceAreReady() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest request = patchRequest(userId, agentId, workspaceId);
+        LocalAgentToolGatewayService enabledService = new LocalAgentToolGatewayService(
+                repository,
+                mutationObservationIntakeRepository,
+                releaseAttemptRepository,
+                loopTimelineRepository,
+                gatewayService,
+                toolPusher,
+                releaseEnabledProperties()
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        )));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+        when(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Fresh linked repository observation matched.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        when(repository.releaseApprovedHeldPatchWithMutationInput(
+                eq(requestId),
+                eq(userId),
+                argThat(input -> Boolean.TRUE.equals(input.get("mutationAllowed"))
+                        && Boolean.FALSE.equals(input.get("dryRunOnly"))
+                        && requestId.toString().equals(input.get("sourceRequestId"))
+                        && attemptId.toString().equals(input.get("releaseAttemptId"))),
+                eq("Patch execution release gate passed. Request is now claimable by the selected Local Agent.")
+        )).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                new LocalAgentToolRequest(
+                        request.sessionId(),
+                        userId,
+                        agentId,
+                        workspaceId,
+                        request.executionTarget(),
+                        request.toolName(),
+                        Map.of(
+                                "sourceRequestId", requestId.toString(),
+                                "releaseAttemptId", attemptId.toString(),
+                                "mutationAllowed", true,
+                                "dryRunOnly", false
+                        ),
+                        LocalAgentApprovalState.APPROVED,
+                        null,
+                        request.warnings()
+                ),
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED
+        )));
+
+        var released = enabledService.releaseHeldPatchForExecution(userId, requestId);
+
+        assertThat(released.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
+        assertThat(released.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+        assertThat(released.input())
+                .containsEntry("sourceRequestId", requestId.toString())
+                .containsEntry("releaseAttemptId", attemptId.toString())
+                .containsEntry("mutationAllowed", true)
+                .containsEntry("dryRunOnly", false);
+        verify(releaseAttemptRepository, never()).createDisabled(any(), any(), anyInt(), any(), any());
+        verify(repository).releaseApprovedHeldPatchWithMutationInput(
+                eq(requestId),
+                eq(userId),
+                any(),
+                eq("Patch execution release gate passed. Request is now claimable by the selected Local Agent.")
+        );
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void releaseHeldPatchForExecutionCreatesApprovedExecutionSequenceRowsWhenFlagEnabled() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest request = patchRequest(userId, agentId, workspaceId);
+        LocalAgentToolGatewayService enabledService = new LocalAgentToolGatewayService(
+                repository,
+                mutationObservationIntakeRepository,
+                releaseAttemptRepository,
+                loopTimelineRepository,
+                gatewayService,
+                toolPusher,
+                releaseAndSequenceEnabledProperties()
+        );
+        when(repository.find(requestId)).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                request,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        )));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                requestId,
+                request.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+        when(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Fresh linked repository observation matched.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        when(repository.releaseApprovedHeldPatchWithMutationInput(
+                eq(requestId),
+                eq(userId),
+                argThat(input -> "snap-1234".equals(input.get("manifestId"))
+                        && Boolean.TRUE.equals(input.get("mutationAllowed"))
+                        && Boolean.FALSE.equals(input.get("dryRunOnly"))
+                        && requestId.toString().equals(input.get("sourceRequestId"))
+                        && attemptId.toString().equals(input.get("releaseAttemptId"))),
+                eq("Patch execution release gate passed. Request is now claimable by the selected Local Agent.")
+        )).thenReturn(java.util.Optional.of(execution(
+                requestId,
+                new LocalAgentToolRequest(
+                        request.sessionId(),
+                        userId,
+                        agentId,
+                        workspaceId,
+                        request.executionTarget(),
+                        request.toolName(),
+                        Map.of(
+                                "sourceRequestId", requestId.toString(),
+                                "releaseAttemptId", attemptId.toString(),
+                                "manifestId", "snap-1234",
+                                "mutationAllowed", true,
+                                "dryRunOnly", false
+                        ),
+                        LocalAgentApprovalState.APPROVED,
+                        request.createdAt(),
+                        request.warnings()
+                ),
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED
+        )));
+        when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation ->
+                execution(invocation.getArgument(0), invocation.getArgument(1), LocalAgentApprovalState.APPROVED, LocalAgentToolStatus.APPROVED));
+
+        var released = enabledService.releaseHeldPatchForExecution(userId, requestId);
+
+        var requestCaptor = forClass(LocalAgentToolRequest.class);
+        verify(repository, times(3)).create(any(UUID.class), requestCaptor.capture());
+        assertThat(released.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
+        assertThat(requestCaptor.getAllValues()).extracting(LocalAgentToolRequest::toolName)
+                .containsExactly(
+                        LocalAgentToolName.COMMAND_RUN_ALLOWED,
+                        LocalAgentToolName.GIT_STATUS,
+                        LocalAgentToolName.ROLLBACK_RESTORE
+                );
+        assertThat(requestCaptor.getAllValues()).allSatisfy(created -> {
+            assertThat(created.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
+            assertThat(created.executionTarget()).isEqualTo(AgentExecutionTarget.USER_LOCAL_AGENT);
+            assertThat(created.input())
+                    .containsEntry("sourceRequestId", requestId.toString())
+                    .containsEntry("releaseAttemptId", attemptId.toString())
+                    .containsEntry("releaseExecutionSequenceSchema", "learnbot.local-agent.approved-execution-sequence.v1")
+                    .containsEntry("publicationEnabled", false)
+                    .containsEntry("acknowledgementSaveEnabled", false)
+                    .containsEntry("followUpMutationEnabled", false);
+        });
+        assertThat(requestCaptor.getAllValues().get(0).input())
+                .containsEntry("commandId", "dotnet.version")
+                .containsEntry("timeoutSeconds", 30)
+                .containsEntry("maxOutputBytes", 4096);
+        assertThat(requestCaptor.getAllValues().get(2).input())
+                .containsEntry("manifestId", "snap-1234")
+                .containsEntry("snapshotManifestId", "snap-1234");
+        assertThat(requestCaptor.getAllValues().get(0).createdAt())
+                .isBefore(requestCaptor.getAllValues().get(1).createdAt());
+        assertThat(requestCaptor.getAllValues().get(1).createdAt())
+                .isBefore(requestCaptor.getAllValues().get(2).createdAt());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void releasedHeldPatchCanBeClaimedCompletedAndRecordedAsMutationObservation() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(5);
+        LocalAgentToolRequest heldRequest = patchRequest(userId, agentId, workspaceId, repositoryId, loopId);
+        LocalAgentToolGatewayService enabledService = new LocalAgentToolGatewayService(
+                repository,
+                mutationObservationIntakeRepository,
+                releaseAttemptRepository,
+                loopTimelineRepository,
+                gatewayService,
+                toolPusher,
+                releaseEnabledProperties()
+        );
+        LocalAgentToolExecution heldExecution = execution(
+                requestId,
+                heldRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        );
+        Map<String, Object> mutationInput = new LinkedHashMap<>(heldRequest.input());
+        mutationInput.put("sourceRequestId", requestId.toString());
+        mutationInput.put("releaseAttemptId", attemptId.toString());
+        mutationInput.put("mutationAllowed", true);
+        mutationInput.put("dryRunOnly", false);
+        LocalAgentToolRequest releasedRequest = new LocalAgentToolRequest(
+                heldRequest.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                heldRequest.executionTarget(),
+                heldRequest.toolName(),
+                mutationInput,
+                LocalAgentApprovalState.APPROVED,
+                heldRequest.createdAt(),
+                heldRequest.warnings()
+        );
+        LocalAgentToolExecution releasedExecution = execution(
+                requestId,
+                releasedRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED
+        );
+        LocalAgentToolExecution runningExecution = execution(
+                requestId,
+                releasedRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.RUNNING
+        );
+        when(repository.find(requestId)).thenReturn(
+                java.util.Optional.of(heldExecution),
+                java.util.Optional.of(heldExecution),
+                java.util.Optional.of(runningExecution),
+                java.util.Optional.of(runningExecution)
+        );
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("file.read", "git.status", "git.diff", "patch.apply", "command.runAllowed", "rollback.restore"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, requestId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                attemptId,
+                requestId,
+                heldRequest.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        )));
+        when(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Fresh linked repository observation matched.",
+                "checks", List.of(Map.of("key", "branch", "status", "MATCH", "expected", "main", "actual", "main"))
+        )));
+        when(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, requestId, attemptId)).thenReturn(java.util.Optional.of(patchDryRunOutput(true)));
+        when(repository.releaseApprovedHeldPatchWithMutationInput(
+                eq(requestId),
+                eq(userId),
+                argThat(input -> Boolean.TRUE.equals(input.get("mutationAllowed"))
+                        && Boolean.FALSE.equals(input.get("dryRunOnly"))
+                        && requestId.toString().equals(input.get("sourceRequestId"))
+                        && attemptId.toString().equals(input.get("releaseAttemptId"))),
+                eq("Patch execution release gate passed. Request is now claimable by the selected Local Agent.")
+        )).thenReturn(java.util.Optional.of(releasedExecution));
+        when(repository.expireTimedOutLeases()).thenReturn(List.of());
+        when(repository.claimNext(userId, agentId)).thenReturn(java.util.Optional.of(runningExecution));
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                heldRequest.sessionId(),
+                requestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                patchDryRunOutputWithMutationApplied(),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of()
+        );
+
+        var released = enabledService.releaseHeldPatchForExecution(userId, requestId);
+        var claimed = enabledService.claimNext(userId, agentId).orElseThrow();
+        enabledService.complete(response);
+
+        assertThat(released.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
+        assertThat(claimed.requestId()).isEqualTo(requestId);
+        assertThat(claimed.request().toolName()).isEqualTo(LocalAgentToolName.PATCH_APPLY);
+        assertThat(claimed.request().input())
+                .containsEntry("sourceRequestId", requestId.toString())
+                .containsEntry("releaseAttemptId", attemptId.toString())
+                .containsEntry("mutationAllowed", true)
+                .containsEntry("dryRunOnly", false);
+        verify(repository).claimNext(userId, agentId);
+        var completedResponseCaptor = forClass(LocalAgentToolResponse.class);
+        verify(repository).complete(completedResponseCaptor.capture());
+        assertThat(completedResponseCaptor.getValue().output())
+                .containsKeys("mutationResultIntakeCandidate", "acceptedMutationObservation");
+        verify(mutationObservationIntakeRepository).saveAcceptedObservation(completedResponseCaptor.getValue(), releasedRequest.input());
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, completedResponseCaptor.getValue(), releasedRequest.input());
+        verify(loopTimelineRepository).appendNextDecision(userId, repositoryId, loopId, completedResponseCaptor.getValue(), releasedRequest.input());
+        verify(releaseAttemptRepository, never()).createDisabled(any(), any(), anyInt(), any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
     void releaseBoundaryCreatesDisabledAttemptAndReturnsRefusalDiagnosticsWithoutClaiming() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
@@ -3068,6 +3467,162 @@ class LocalAgentToolGatewayServiceTest {
         verify(loopTimelineRepository).appendNextDecision(userId, repositoryId, loopId, response, request.input());
         verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(repository, never()).claimNext(any(), any());
+        verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void completeAppendsFreshObservationEvidenceCompleteWhenLinkedReleaseEvidenceIsComplete() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID patchDryRunRequestId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        OffsetDateTime attemptCreatedAt = OffsetDateTime.now().minusSeconds(20);
+        LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId, repositoryId, loopId);
+        LocalAgentToolRequest patchDryRunRequest = new LocalAgentToolRequest(
+                sourceRequest.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "repositoryId", repositoryId.toString(),
+                        "loopId", loopId.toString(),
+                        "sourceRequestId", sourceRequestId.toString(),
+                        "releaseAttemptId", releaseAttemptId.toString(),
+                        "freshObservationOnly", true,
+                        "dryRunOnly", true,
+                        "mutationAllowed", false
+                ),
+                LocalAgentApprovalState.APPROVED,
+                null,
+                List.of("fresh dry-run observation only")
+        );
+        LocalAgentToolExecution source = execution(
+                sourceRequestId,
+                sourceRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.APPROVED_HELD
+        );
+        LocalAgentToolExecution patchDryRunExecution = execution(
+                patchDryRunRequestId,
+                patchDryRunRequest,
+                LocalAgentApprovalState.APPROVED,
+                LocalAgentToolStatus.SUCCEEDED
+        );
+        LocalAgentPatchReleaseAttempt attempt = new LocalAgentPatchReleaseAttempt(
+                releaseAttemptId,
+                sourceRequestId,
+                sourceRequest.sessionId(),
+                userId,
+                agentId,
+                workspaceId,
+                LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS,
+                false,
+                120,
+                Map.of(),
+                List.of("release gate disabled"),
+                attemptCreatedAt,
+                attemptCreatedAt.plusSeconds(1),
+                null
+        );
+        when(repository.find(patchDryRunRequestId)).thenReturn(java.util.Optional.of(patchDryRunExecution));
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(source));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, sourceRequestId)).thenReturn(java.util.Optional.of(attempt));
+        when(repository.findLatestRepositoryVerificationForReleaseAttempt(userId, sourceRequestId, releaseAttemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "status", "MATCH",
+                "blocking", true,
+                "message", "Observed local repository identity matches available indexed metadata."
+        )));
+        when(repository.findLatestPatchDryRunOutputForReleaseAttempt(userId, sourceRequestId, releaseAttemptId)).thenReturn(java.util.Optional.of(Map.of(
+                "dryRun", true,
+                "mutationApplied", false,
+                "snapshotCreated", true
+        )));
+        when(gatewayService.status(userId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED,
+                agentId,
+                "0.1.0",
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("patch.apply", "rollback.restore", "git.status"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "polling",
+                "polling",
+                0,
+                null,
+                "Local Agent is connected."
+        ));
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                patchDryRunRequest.sessionId(),
+                patchDryRunRequestId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "dryRun", true,
+                        "mutationApplied", false,
+                        "snapshotCreated", true
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of("fresh dry-run completed without mutation")
+        );
+
+        service.complete(response);
+
+        verify(repository).complete(response);
+        verify(loopTimelineRepository).appendObservationResult(userId, repositoryId, loopId, response, patchDryRunRequest.input());
+        verify(loopTimelineRepository).appendNextDecision(userId, repositoryId, loopId, response, patchDryRunRequest.input());
+        verify(loopTimelineRepository).appendFreshObservationEvidenceComplete(
+                eq(userId),
+                eq(repositoryId),
+                eq(loopId),
+                eq(sourceRequestId),
+                eq(releaseAttemptId),
+                eq(sourceRequest.sessionId()),
+                eq(agentId),
+                eq(workspaceId),
+                eq(AgentExecutionTarget.USER_LOCAL_AGENT),
+                eq(LocalAgentToolName.PATCH_APPLY),
+                argThat(completeness -> Boolean.TRUE.equals(completeness.get("complete"))
+                        && Integer.valueOf(2).equals(completeness.get("requiredCount"))
+                        && Integer.valueOf(2).equals(completeness.get("linkedCount"))
+                        && Integer.valueOf(0).equals(completeness.get("missingCount"))
+                        && Integer.valueOf(0).equals(completeness.get("sourceOnlyFallbackCount"))),
+                argThat(status -> status.size() == 2
+                        && status.stream().allMatch(item -> "RELEASE_ATTEMPT_LINKED".equals(item.get("status"))))
+        );
+        verify(loopTimelineRepository).appendReleaseReadinessRefreshed(
+                eq(userId),
+                eq(repositoryId),
+                eq(loopId),
+                eq(sourceRequestId),
+                eq(releaseAttemptId),
+                eq(sourceRequest.sessionId()),
+                eq(agentId),
+                eq(workspaceId),
+                eq(AgentExecutionTarget.USER_LOCAL_AGENT),
+                eq(LocalAgentToolName.PATCH_APPLY),
+                argThat(readiness -> !readiness.readyToRelease()
+                        && readiness.requestId().equals(sourceRequestId)
+                        && "MATCH".equals(readiness.repositoryVerification().get("status"))
+                        && Boolean.FALSE.equals(readiness.patchReleaseReadiness().get("preconditionsPassed"))
+                        && Boolean.FALSE.equals(readiness.patchExecutionGate().get("preconditionsPassed"))
+                        && readiness.checks().stream().anyMatch(check -> "releaseGateEnabled".equals(check.key()) && !check.passed()))
+        );
+        verify(repository, never()).releaseApprovedHeldPatch(any(), any(), any());
         verify(repository, never()).claimNext(any(), any());
         verify(toolPusher, never()).sendToolRequest(any());
     }
@@ -8306,6 +8861,18 @@ class LocalAgentToolGatewayServiceTest {
         Map<String, Object> output = new java.util.LinkedHashMap<>(patchDryRunOutput(true));
         output.put("mutationApplied", true);
         return output;
+    }
+
+    private LearnBotProperties releaseEnabledProperties() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getLocalAgent().setPatchExecutionReleaseEnabled(true);
+        return properties;
+    }
+
+    private LearnBotProperties releaseAndSequenceEnabledProperties() {
+        LearnBotProperties properties = releaseEnabledProperties();
+        properties.getLocalAgent().setApprovedExecutionSequenceCreationEnabled(true);
+        return properties;
     }
 
     private LocalAgentToolExecution execution(UUID requestId, LocalAgentToolRequest request) {

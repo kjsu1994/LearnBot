@@ -754,12 +754,13 @@ function DocumentDetailPanel({ detail, loading }) {
             <article className={audit.success ? 'result audit-result' : 'result audit-result audit-result-warning'} key={audit.id}>
               <div className="result-heading">
                 <strong>{crawlReasonLabel(audit.reasonCode || (audit.success ? 'FETCHED' : 'SKIPPED'))}</strong>
-                <span>{audit.statusCode || '-'}</span>
+                <span>{audit.category || audit.statusCode || '-'}</span>
               </div>
               <small title={audit.url}>
                 {audit.host || '-'}{audit.depth != null ? ` · depth ${audit.depth}` : ''}{audit.referrerUrl ? ` · from ${audit.referrerUrl}` : ''}
               </small>
               <p>{audit.message || audit.url}</p>
+              {audit.userAction && <small>{audit.userAction}</small>}
               <small>{crawlAuditMetadataLine(audit)}</small>
             </article>
           ))}

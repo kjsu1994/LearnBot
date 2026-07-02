@@ -43,6 +43,8 @@ try {
   assert.match(report.sql, /"mutationAllowed":true/);
   assert.match(report.sql, /"dryRunOnly":false/);
   assert.match(report.sql, /"manifestId":"snap-reviewed-flow"/);
+  assert.match(fs.readFileSync(scriptPath, "utf8"), /--diff-file/);
+  assert.match(report.sql, /INTERVAL '1 millisecond'/);
   assert.match(report.cleanupSql, /DELETE FROM local_agent_tool_executions/);
 
   const invalid = spawnSync(process.execPath, [

@@ -26,6 +26,8 @@ Example:
 ```powershell
 dotnet run --project local-agent -- pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> --transport polling
 dotnet run --project local-agent -- workspace add .
+dotnet run --project local-agent -- status
+dotnet run --project local-agent -- doctor
 dotnet run --project local-agent -- agent status
 dotnet run --project local-agent -- agent token
 dotnet run --project local-agent -- agent logs --tail 80
@@ -41,6 +43,7 @@ Internal foreground helper from the repository root:
 
 ```powershell
 .\scripts\local-agent.ps1 -Action setup -Server http://localhost:8083 -WorkspacePath . -Transport polling
+.\scripts\local-agent.ps1 -Action setup-plan -Server http://localhost:8083 -WorkspacePath . -Transport polling
 .\scripts\local-agent.ps1 -Action status
 .\scripts\local-agent.ps1 -Action token
 .\scripts\local-agent.ps1 -Action logs -Tail 80
@@ -65,7 +68,10 @@ Internal executable publish helper:
 ```powershell
 .\scripts\local-agent-install.ps1 -Action install
 .\scripts\local-agent-install.ps1 -Action install -AddToUserPath
+.\scripts\local-agent-install.ps1 -Action status
+learnbot status
+learnbot doctor
 learnbot agent status
 ```
 
-After publishing to the default install directory, `scripts/local-agent.ps1` uses the installed executable automatically.
+After publishing to the default install directory, `scripts/local-agent.ps1` uses the installed executable automatically. The install helper returns `learnbot.local-agent.install-status.v1`, including the install directory, executable path, PATH visibility, recommended `status`/`doctor`/`start` commands, internal-pilot limitations, and the installed executable's `learnbot status` output when available.

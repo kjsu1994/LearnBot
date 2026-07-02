@@ -49,7 +49,14 @@
           { "url": "https://example.com/docs/setup", "depth": 1, "storedAsSeparateDocument": true, "sourceUri": "https://example.com/docs/setup" }
         ],
         "skippedPages": [
-          { "url": "https://evil.example.net/docs", "reason": "DISALLOWED_DOMAIN" }
+          {
+            "url": "https://evil.example.net/docs",
+            "reason": "DOMAIN_NOT_ALLOWED",
+            "category": "POLICY_BLOCK",
+            "severity": "WARNING",
+            "indexingBlocked": true,
+            "userAction": "Add the domain to the crawler allowlist or choose an allowed URL."
+          }
         ]
       }
     }

@@ -39,7 +39,10 @@ try {
   const sessionId = readUuid("--session-id", crypto.randomUUID());
   const targetFile = normalizeRelativePath(readArg("--target-file", "src/App.cs"));
   const commandId = readArg("--command-id", "dotnet.version");
-  const diff = readArg("--diff", defaultDiff(targetFile));
+  const diffFile = readArg("--diff-file", "");
+  const diff = diffFile
+    ? fs.readFileSync(path.resolve(diffFile), "utf8")
+    : readArg("--diff", defaultDiff(targetFile));
   const requestIds = {
     patchApply: readUuid("--patch-request-id", crypto.randomUUID()),
     commandRunAllowed: readUuid("--command-request-id", crypto.randomUUID()),
@@ -173,7 +176,7 @@ function buildRows({
 }
 
 function buildSql(rows) {
-  const values = rows.map((row) => `(
+  const values = rows.map((row, index) => `(
     '${row.id}'::uuid,
     '${row.input.sessionId}'::uuid,
     '${row.input.userId}'::uuid,
@@ -185,7 +188,7 @@ function buildSql(rows) {
     'APPROVED',
     ${sqlJson(row.input)},
     '["quality seed: approved local-agent flow; review before execution"]'::jsonb,
-    now()
+    now() + (${index} * INTERVAL '1 millisecond')
   )`).join(",\n");
   return `
 BEGIN;

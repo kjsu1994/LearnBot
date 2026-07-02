@@ -33,6 +33,7 @@ internal sealed partial class LearnBotLocalAgent
             "workspace" => await Workspace(args[1..]),
             "file" => FileCommand(args[1..]),
             "git" => await GitCommand(args[1..]),
+            "status" => AgentStatus(),
             "doctor" => Doctor(),
             "open" => Open(),
             "self-test" => SelfTest(args[1..]),
@@ -185,21 +186,7 @@ internal sealed partial class LearnBotLocalAgent
 
     private int AgentStatus()
     {
-        var config = LoadConfigOrDefault();
-        var state = LoadRunState();
-        Console.WriteLine(JsonSerializer.Serialize(new
-        {
-            configured = !string.IsNullOrWhiteSpace(config.Token) && config.AgentId != Guid.Empty,
-            config.ServerUrl,
-            config.AgentId,
-            config.Version,
-            transport = NormalizeTransport(config.Transport),
-            workspaces = config.Workspaces.Count,
-            logPath = LogPath(),
-            statePath = StatePath(),
-            running = state is not null && state.Status == "running" && IsProcessRunning(state.ProcessId),
-            state
-        }, JsonOptions));
+        Console.WriteLine(JsonSerializer.Serialize(BuildCliStatusReport(), JsonOptions));
         return 0;
     }
 
@@ -291,19 +278,7 @@ internal sealed partial class LearnBotLocalAgent
 
     private int Doctor()
     {
-        var config = LoadConfigOrDefault();
-        Console.WriteLine(JsonSerializer.Serialize(new
-        {
-            version = Version,
-            configPath = ConfigPath(),
-            logPath = LogPath(),
-            statePath = StatePath(),
-            paired = !string.IsNullOrWhiteSpace(config.Token) && config.AgentId != Guid.Empty,
-            serverUrl = config.ServerUrl,
-            transport = NormalizeTransport(config.Transport),
-            workspaceCount = config.Workspaces.Count,
-            safeMode = "Only read-only tools are handled. File mutation tools are rejected."
-        }, JsonOptions));
+        Console.WriteLine(JsonSerializer.Serialize(BuildCliDoctorReport(), JsonOptions));
         return 0;
     }
 
@@ -2247,6 +2222,10 @@ internal sealed partial class LearnBotLocalAgent
         {
             return SelfTestApprovedServerQueueFlowContract(GetOption(args, "--report"));
         }
+        if (string.Equals(args[0], "cli-status-doctor-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCliStatusDoctorContract();
+        }
         if (!string.Equals(args[0], "snapshot-guards", StringComparison.OrdinalIgnoreCase))
         {
             return Unknown("self-test " + string.Join(' ', args));
@@ -2270,6 +2249,72 @@ internal sealed partial class LearnBotLocalAgent
         }
         Console.WriteLine("snapshot-guards-ok");
         return 0;
+    }
+
+    private static int SelfTestCliStatusDoctorContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-cli-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var config = new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            };
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(config);
+
+            var status = app.BuildCliStatusReport();
+            var doctor = app.BuildCliDoctorReport();
+            var statusJson = JsonSerializer.Serialize(status, JsonOptions);
+            var doctorJson = JsonSerializer.Serialize(doctor, JsonOptions);
+            var ok = status.CommandName == "learnbot"
+                && status.Configured
+                && status.Transport == "auto"
+                && status.WorkspaceCount == 1
+                && status.ApprovedWorkspaceCount == 1
+                && status.ConfigExists
+                && !statusJson.Contains("secret-token", StringComparison.Ordinal)
+                && doctor.CommandName == "learnbot"
+                && doctor.Ready
+                && doctor.Checks.Any(check => check.Name == "tokenSecretHidden" && check.Ok)
+                && doctor.Checks.Any(check => check.Name == "safeToolBoundary" && check.Ok)
+                && !doctorJson.Contains("secret-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("cli status/doctor contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("cli-status-doctor-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
     }
 
     private static int SelfTestSnapshotCreate()
@@ -2708,6 +2753,8 @@ internal sealed partial class LearnBotLocalAgent
     {
         Console.WriteLine("""
         learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]
+        learnbot status
+        learnbot doctor
         learnbot agent start [--once] [--interval-seconds 15] [--transport polling|websocket|auto]
         learnbot agent status
         learnbot agent token
@@ -2718,7 +2765,6 @@ internal sealed partial class LearnBotLocalAgent
         learnbot file read --workspace-id <workspace-id> --path <relative-path>
         learnbot git status --workspace-id <workspace-id>
         learnbot git diff --workspace-id <workspace-id> [--path <relative-path>] [--max-bytes <bytes>]
-        learnbot doctor
         learnbot open
         """);
         return 0;
