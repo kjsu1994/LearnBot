@@ -13,25 +13,26 @@ const plan = buildLocalAgentDeviceApprovalRoutePlan('/settings/local-agent/devic
 const summary = buildLocalAgentDeviceApprovalRouteSummary(plan);
 
 assert.equal(plan.schema, 'learnbot.web.local-agent.device-approval-route-plan.v1');
-assert.equal(plan.status, 'DISABLED_PREVIEW');
+assert.equal(plan.status, 'READY_FOR_BROWSER_APPROVAL');
 assert.equal(plan.routeMatched, true);
-assert.equal(plan.browserApprovalEnabled, false);
-assert.equal(plan.deviceCodeValidationEnabled, false);
-assert.equal(plan.pendingSessionLookupEnabled, false);
-assert.equal(plan.sessionClaimEnabled, false);
+assert.equal(plan.browserApprovalEnabled, true);
+assert.equal(plan.deviceCodeValidationEnabled, true);
+assert.equal(plan.pendingSessionLookupEnabled, true);
+assert.equal(plan.sessionClaimEnabled, true);
 assert.equal(plan.accessTokenIssued, false);
 assert.equal(plan.refreshTokenIssued, false);
 assert.equal(plan.cookiePersistenceEnabled, false);
 assert.equal(plan.localAgentTokenAccepted, false);
 assert.equal(plan.tokenSecretPrinted, false);
 assert.equal(plan.deviceCodeSecretPrinted, false);
-assert.ok(plan.cliFollowUpCommands.includes('learnbot session create-plan'));
-assert.ok(plan.cliFollowUpCommands.includes('learnbot session claim-plan --device-code <device-code>'));
-assert.ok(plan.serverEndpoints.includes('POST /api/auth/cli-device-session/create/plan'));
-assert.ok(plan.serverEndpoints.includes('POST /api/auth/cli-device-session/claim/plan'));
-assert.match(summary, /local agent device approval route: DISABLED_PREVIEW/);
-assert.match(summary, /browser approval false/);
-assert.match(summary, /session claim false/);
+assert.ok(plan.cliFollowUpCommands.includes('learnbot login'));
+assert.ok(plan.cliFollowUpCommands.includes('learnbot pair --workspace <path> --transport auto'));
+assert.ok(plan.serverEndpoints.includes('POST /api/auth/cli-device-session/create'));
+assert.ok(plan.serverEndpoints.includes('POST /api/auth/cli-device-session/claim'));
+assert.ok(plan.serverEndpoints.includes('POST /api/auth/cli-device-session/claim-result'));
+assert.match(summary, /local agent device approval route: READY_FOR_BROWSER_APPROVAL/);
+assert.match(summary, /browser approval true/);
+assert.match(summary, /session claim true/);
 assert.match(summary, /token secret printed false/);
 assert.doesNotMatch(JSON.stringify(plan), /secret-device-code|secret-token|local-agent-token/);
 

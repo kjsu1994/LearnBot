@@ -2,13 +2,13 @@ function buildLocalAgentDeviceApprovalRoutePlan(routePath = '') {
   const routeMatched = routePath === '/settings/local-agent/device';
   return {
     schema: 'learnbot.web.local-agent.device-approval-route-plan.v1',
-    status: routeMatched ? 'DISABLED_PREVIEW' : 'NOT_SELECTED',
+    status: routeMatched ? 'READY_FOR_BROWSER_APPROVAL' : 'NOT_SELECTED',
     routePath: '/settings/local-agent/device',
     routeMatched,
-    browserApprovalEnabled: false,
-    deviceCodeValidationEnabled: false,
-    pendingSessionLookupEnabled: false,
-    sessionClaimEnabled: false,
+    browserApprovalEnabled: routeMatched,
+    deviceCodeValidationEnabled: routeMatched,
+    pendingSessionLookupEnabled: routeMatched,
+    sessionClaimEnabled: routeMatched,
     accessTokenIssued: false,
     refreshTokenIssued: false,
     cookiePersistenceEnabled: false,
@@ -16,18 +16,17 @@ function buildLocalAgentDeviceApprovalRoutePlan(routePath = '') {
     tokenSecretPrinted: false,
     deviceCodeSecretPrinted: false,
     cliFollowUpCommands: [
-      'learnbot session create-plan',
-      'learnbot session claim-plan --device-code <device-code>',
+      'learnbot login',
       'learnbot session status',
+      'learnbot pair --workspace <path> --transport auto',
     ],
     serverEndpoints: [
-      'POST /api/auth/cli-device-session/create/plan',
-      'POST /api/auth/cli-device-session/claim/plan',
+      'POST /api/auth/cli-device-session/create',
+      'POST /api/auth/cli-device-session/claim',
+      'POST /api/auth/cli-device-session/claim-result',
     ],
-    blockers: [
-      'Browser approval is disabled until pending device sessions, user-code validation, and encrypted CLI session storage are implemented.',
-    ],
-    reason: 'This route is a disabled preview for the future browser approval screen. It does not approve devices, issue tokens, persist cookies, accept Local Agent credentials, or print secrets.',
+    blockers: [],
+    reason: 'This route approves a pending CLI device session for the current logged-in browser user. It never accepts Local Agent pairing credentials or prints token secrets.',
   };
 }
 

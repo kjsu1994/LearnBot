@@ -3,6 +3,7 @@ package com.learnbot.service.agentloop;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
+import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentApprovalState;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
@@ -20,8 +21,11 @@ import com.learnbot.service.LocalAgentToolGatewayService;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -124,9 +128,38 @@ public class CodeAgentLoopRunnerService {
         input.put("freshObservationOnly", true);
         input.put("mutationAllowed", false);
 
+        CodeAgentLoopTimelineEventSummary latestTreeOrSearch = latestDiscoveryObservation(userId, repositoryId, nextAction.loopId());
         LocalAgentToolName selectedTool = selectReadOnlyTool(userId, repositoryId, nextAction.loopId());
+        if (selectedTool == LocalAgentToolName.WORKSPACE_TREE) {
+            input.put("path", ".");
+            input.put("maxEntries", 240);
+            input.put("maxDepth", 4);
+        }
+        if (selectedTool == LocalAgentToolName.WORKSPACE_SEARCH) {
+            input.put("path", ".");
+            input.put("query", searchQuery(nextAction));
+            input.put("maxMatches", 30);
+            input.put("maxFiles", 20);
+            input.put("maxBytesPerFile", 200_000);
+        }
         if (selectedTool == LocalAgentToolName.GIT_DIFF) {
             input.put("maxBytes", 6000);
+        }
+        if (selectedTool == LocalAgentToolName.FILE_READ) {
+            String path = selectFileReadPath(userId, repositoryId, nextAction.loopId());
+            if (path == null) {
+                return response(
+                        nextAction,
+                        "WAIT_FOR_NARROWER_GOAL",
+                        "Workspace discovery completed, but no safe bounded file.read candidate was found. Ask the user for a narrower file or symbol target.",
+                        null,
+                        fileSelectionHandoff(latestTreeOrSearch, List.of())
+                );
+            }
+            input.put("path", path);
+            input.put("maxBytes", 80_000);
+            input.put("selectionSchema", "learnbot.server.code-agent.file-read-selection.v1");
+            input.put("selectionReason", "Selected from completed workspace.search/workspace.tree observations.");
         }
 
         CodeAgentLoopToolCandidate candidate = new CodeAgentLoopToolCandidate(
@@ -141,7 +174,7 @@ public class CodeAgentLoopRunnerService {
                 false,
                 false,
                 false,
-                Map.copyOf(input),
+                safeRequestInput(input),
                 List.of("Runner preview prepared a read-only " + selectedTool.wireName() + " candidate. Enqueue and mutation remain disabled.")
         );
         return response(
@@ -367,7 +400,13 @@ public class CodeAgentLoopRunnerService {
         guardrails.put("requestCreationEnabled", false);
         guardrails.put("enqueueEnabled", false);
         guardrails.put("sideEffectfulToolsBlocked", true);
-        guardrails.put("allowedCandidateTools", List.of(LocalAgentToolName.GIT_STATUS.wireName(), LocalAgentToolName.GIT_DIFF.wireName()));
+        guardrails.put("allowedCandidateTools", List.of(
+                LocalAgentToolName.WORKSPACE_TREE.wireName(),
+                LocalAgentToolName.WORKSPACE_SEARCH.wireName(),
+                LocalAgentToolName.FILE_READ.wireName(),
+                LocalAgentToolName.GIT_STATUS.wireName(),
+                LocalAgentToolName.GIT_DIFF.wireName()
+        ));
         guardrails.put("approvalRequiredBeforeSideEffects", true);
         guardrails.put("mutationAllowed", false);
         return Map.copyOf(guardrails);
@@ -385,8 +424,20 @@ public class CodeAgentLoopRunnerService {
                 .filter(timeline -> loopId.equals(timeline.id()))
                 .findFirst()
                 .map(timeline -> {
+                    long succeededTree = succeededReadOnlyObservations(timeline.events(), LocalAgentToolName.WORKSPACE_TREE);
+                    long succeededSearch = succeededReadOnlyObservations(timeline.events(), LocalAgentToolName.WORKSPACE_SEARCH);
+                    long succeededFileReads = succeededReadOnlyObservations(timeline.events(), LocalAgentToolName.FILE_READ);
                     long succeededStatus = succeededReadOnlyObservations(timeline.events(), LocalAgentToolName.GIT_STATUS);
                     long succeededDiff = succeededReadOnlyObservations(timeline.events(), LocalAgentToolName.GIT_DIFF);
+                    if (succeededTree == 0) {
+                        return LocalAgentToolName.WORKSPACE_TREE;
+                    }
+                    if (succeededSearch == 0) {
+                        return LocalAgentToolName.WORKSPACE_SEARCH;
+                    }
+                    if (succeededFileReads < Math.min(3, fileReadCandidates(timeline).size())) {
+                        return LocalAgentToolName.FILE_READ;
+                    }
                     return succeededStatus > succeededDiff ? LocalAgentToolName.GIT_DIFF : LocalAgentToolName.GIT_STATUS;
                 })
                 .orElse(LocalAgentToolName.GIT_STATUS);
@@ -402,11 +453,178 @@ public class CodeAgentLoopRunnerService {
     }
 
     private boolean safeReadOnlyCandidate(CodeAgentLoopToolCandidate candidate) {
-        return (candidate.toolName() == LocalAgentToolName.GIT_STATUS || candidate.toolName() == LocalAgentToolName.GIT_DIFF)
+        return (candidate.toolName() == LocalAgentToolName.WORKSPACE_TREE
+                    || candidate.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
+                    || candidate.toolName() == LocalAgentToolName.FILE_READ
+                    || candidate.toolName() == LocalAgentToolName.GIT_STATUS
+                    || candidate.toolName() == LocalAgentToolName.GIT_DIFF)
                 && candidate.approvalState() == LocalAgentApprovalState.NOT_REQUIRED
                 && !candidate.sideEffectful()
                 && !candidate.requiresApproval()
                 && !candidate.mutationAllowed();
+    }
+
+    private String selectFileReadPath(UUID userId, UUID repositoryId, UUID loopId) {
+        CodeAgentLoopTimelineSummary timeline = timeline(userId, repositoryId, loopId);
+        if (timeline == null) {
+            return null;
+        }
+        Set<String> alreadyRead = new LinkedHashSet<>();
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
+            if ("LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    && event.toolName() == LocalAgentToolName.FILE_READ
+                    && "SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                String path = summaryPath(event);
+                if (path != null) {
+                    alreadyRead.add(path);
+                }
+            }
+        }
+        return fileReadCandidates(timeline).stream()
+                .filter(path -> !alreadyRead.contains(path))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<String> fileReadCandidates(CodeAgentLoopTimelineSummary timeline) {
+        if (timeline == null || timeline.events() == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> ranked = new LinkedHashSet<>();
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
+            if ("LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    && event.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
+                    && "SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                ranked.addAll(pathsFromOutputSummary(event, "matches"));
+            }
+        }
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
+            if ("LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    && event.toolName() == LocalAgentToolName.WORKSPACE_TREE
+                    && "SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                pathsFromOutputSummary(event, "entries").stream()
+                        .filter(this::likelyReadableSourcePath)
+                        .forEach(ranked::add);
+            }
+        }
+        return ranked.stream()
+                .filter(this::safeRelativePath)
+                .limit(5)
+                .toList();
+    }
+
+    private List<String> pathsFromOutputSummary(CodeAgentLoopTimelineEventSummary event, String key) {
+        Map<String, Object> outputSummary = objectMap(event.details().get("outputSummary"));
+        Object items = outputSummary.get(key);
+        if (!(items instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> paths = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                if ("entries".equals(key) && map.containsKey("type") && !"file".equals(String.valueOf(map.get("type")))) {
+                    continue;
+                }
+                Object path = map.get("path");
+                if (path != null && safeRelativePath(String.valueOf(path))) {
+                    paths.add(String.valueOf(path));
+                }
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    private String summaryPath(CodeAgentLoopTimelineEventSummary event) {
+        Object path = objectMap(event.details().get("outputSummary")).get("relativePath");
+        return path == null || String.valueOf(path).isBlank() ? null : String.valueOf(path);
+    }
+
+    private boolean safeRelativePath(String path) {
+        if (path == null || path.isBlank() || ".".equals(path)) {
+            return false;
+        }
+        String normalized = path.replace('\\', '/');
+        return !normalized.startsWith("/")
+                && !normalized.matches("^[A-Za-z]:.*")
+                && !normalized.contains("../")
+                && !normalized.equals("..")
+                && !normalized.contains("\u0000");
+    }
+
+    private boolean likelyReadableSourcePath(String path) {
+        String lower = path == null ? "" : path.toLowerCase(java.util.Locale.ROOT);
+        if (lower.isBlank()) {
+            return false;
+        }
+        if (lower.contains("/node_modules/") || lower.contains("/.git/") || lower.contains("/build/")
+                || lower.contains("/dist/") || lower.contains("/target/") || lower.contains("/bin/")
+                || lower.contains("/obj/")) {
+            return false;
+        }
+        return lower.endsWith(".java")
+                || lower.endsWith(".cs")
+                || lower.endsWith(".js")
+                || lower.endsWith(".jsx")
+                || lower.endsWith(".ts")
+                || lower.endsWith(".tsx")
+                || lower.endsWith(".py")
+                || lower.endsWith(".go")
+                || lower.endsWith(".rs")
+                || lower.endsWith(".kt")
+                || lower.endsWith(".md")
+                || lower.endsWith(".json")
+                || lower.endsWith(".yml")
+                || lower.endsWith(".yaml")
+                || lower.endsWith(".css")
+                || lower.endsWith(".html");
+    }
+
+    private CodeAgentLoopTimelineSummary timeline(UUID userId, UUID repositoryId, UUID loopId) {
+        if (loopId == null) {
+            return null;
+        }
+        return loopPreviewService.recentTimelines(userId, repositoryId, 20).stream()
+                .filter(candidate -> loopId.equals(candidate.id()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private CodeAgentLoopTimelineEventSummary latestDiscoveryObservation(UUID userId, UUID repositoryId, UUID loopId) {
+        CodeAgentLoopTimelineSummary timeline = timeline(userId, repositoryId, loopId);
+        if (timeline == null || timeline.events() == null) {
+            return null;
+        }
+        return timeline.events().stream()
+                .filter(event -> event.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
+                        || event.toolName() == LocalAgentToolName.WORKSPACE_TREE)
+                .reduce((first, second) -> second)
+                .orElse(null);
+    }
+
+    private Map<String, Object> fileSelectionHandoff(CodeAgentLoopTimelineEventSummary source, List<String> selectedPaths) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.server.code-agent.file-read-selection.v1");
+        result.put("status", selectedPaths == null || selectedPaths.isEmpty() ? "NO_SAFE_CANDIDATES" : "SELECTED");
+        result.put("sourceEventType", source == null ? null : source.eventType());
+        result.put("sourceSequenceNumber", source == null ? null : source.sequenceNumber());
+        result.put("selectedPaths", selectedPaths == null ? List.of() : selectedPaths);
+        result.put("maxSelectedFiles", 5);
+        result.put("maxBytesPerFile", 80_000);
+        result.put("mutationAllowed", false);
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private String searchQuery(CodeAgentLoopNextActionResponse nextAction) {
+        Object value = nextAction.sourceDetails() == null ? null : nextAction.sourceDetails().get("instruction");
+        String raw = value == null ? "" : String.valueOf(value).trim();
+        if (raw.isBlank()) {
+            return "TODO";
+        }
+        String normalized = raw.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}_.$/-]+", " ").trim();
+        if (normalized.isBlank()) {
+            return "TODO";
+        }
+        return normalized.length() > 80 ? normalized.substring(0, 80).trim() : normalized;
     }
 
     private Map<String, Object> objectMap(Object value) {
@@ -419,7 +637,19 @@ public class CodeAgentLoopRunnerService {
                 result.put(String.valueOf(key), item);
             }
         });
-        return Map.copyOf(result);
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private Map<String, Object> safeRequestInput(Map<String, Object> input) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (input != null) {
+            input.forEach((key, value) -> {
+                if (key != null && value != null) {
+                    result.put(key, value);
+                }
+            });
+        }
+        return java.util.Collections.unmodifiableMap(result);
     }
 
     private String recommendedActionKey(

@@ -372,14 +372,14 @@ internal sealed partial class LearnBotLocalAgent
         var submissionPlan = new CliCodexServerSubmissionPlan(
             Schema: "learnbot.local-agent.codex-server-submission-plan.v1",
             Method: "POST",
-            Endpoint: "/api/code-agent/loop/submission-plan",
-            AbsoluteEndpointPreview: $"{(config.ServerUrl ?? "http://localhost:8083").TrimEnd('/')}/api/code-agent/loop/submission-plan",
+            Endpoint: "/api/code-agent/loop/runs",
+            AbsoluteEndpointPreview: $"{(config.ServerUrl ?? "http://localhost:8083").TrimEnd('/')}/api/code-agent/loop/runs",
             ReadyForDisabledPlan: submissionPlanBlockers.Count == 0,
-            Enabled: false,
-            NetworkCallEnabled: false,
-            RequestCreationEnabled: false,
+            Enabled: submissionPlanBlockers.Count == 0,
+            NetworkCallEnabled: submissionPlanBlockers.Count == 0,
+            RequestCreationEnabled: submissionPlanBlockers.Count == 0,
             ServerConversationCreationEnabled: false,
-            LoopPreviewExecutionEnabled: false,
+            LoopPreviewExecutionEnabled: submissionPlanBlockers.Count == 0,
             RequiresAuthenticatedWebSession: true,
             RequiresRepositoryAuthorization: true,
             RepositoryId: repositoryReady ? repositoryId : null,
@@ -390,6 +390,8 @@ internal sealed partial class LearnBotLocalAgent
             {
                 ["repositoryId"] = repositoryReady ? repositoryId : "<repository-id>",
                 ["spaceId"] = parsedSpaceId,
+                ["agentId"] = paired ? config.AgentId : null,
+                ["workspaceId"] = matchedWorkspace?.WorkspaceId,
                 ["instruction"] = goal,
                 ["maxSteps"] = Math.Clamp(maxSteps, 1, 20)
             },
@@ -399,7 +401,9 @@ internal sealed partial class LearnBotLocalAgent
                 "POST /api/code-agent/loop/runner/enqueue-selected-read-only"
             ],
             Blockers: submissionPlanBlockers,
-            Reason: "CLI goal submission stays disabled until web authentication, repository authorization, and review surfaces are proven.");
+            Reason: submissionPlanBlockers.Count == 0
+                ? "CLI goal submission can create a server loop run and queue the first read-only Local Agent observation."
+                : "CLI goal submission requires pairing, workspace registration, repository id, and web authentication.");
 
         return new CliCodexCommandPreviewReport(
             Schema: "learnbot.local-agent.codex-command-preview.v1",
@@ -978,7 +982,39 @@ internal sealed record CliCodexServerPlanFetchResult(
     IReadOnlyList<string> Blockers,
     int? HttpStatusCode,
     object? ServerResponse,
+    CliCodexServerAutoLoopResult? AutoLoop,
     string? Error);
+
+internal sealed record CliCodexServerAutoLoopResult(
+    string Schema,
+    string Status,
+    bool Enabled,
+    bool Started,
+    Guid? LoopId,
+    Guid? ApprovalRequestId,
+    string? ApprovalUrl,
+    bool ApprovalObserved,
+    string? ApprovalState,
+    bool ReleaseAttempted,
+    bool ReleaseForExecutionAttempted,
+    bool MutationApplied,
+    bool TimedOut,
+    int Iterations,
+    int LocalAgentPolls,
+    IReadOnlyList<CliCodexServerAutoLoopEvent> Events,
+    object? LastStatus,
+    object? ReleaseReadiness,
+    object? ReleaseBoundary,
+    object? ReleaseForExecution,
+    IReadOnlyList<string> Blockers,
+    string? Error,
+    string Reason);
+
+internal sealed record CliCodexServerAutoLoopEvent(
+    string Stage,
+    string Status,
+    string? Detail,
+    DateTimeOffset At);
 
 internal sealed record CliCodexReadOnlyServerBridge(
     string Schema,
@@ -997,6 +1033,9 @@ internal sealed record CliCodexReadOnlyServerBridge(
     string RunnerPreviewEndpoint,
     string SelectToolPreviewEndpoint,
     string EnqueueSelectedReadOnlyEndpoint,
+    string RunStatusEndpoint,
+    string AdvanceEndpoint,
+    bool AutoAdvanceAvailable,
     CliCodexFileDiscoveryReadPlan FileDiscoveryReadPlan,
     bool FileDiscoveryPlanEnabled,
     bool FileReadPlanEnabled,

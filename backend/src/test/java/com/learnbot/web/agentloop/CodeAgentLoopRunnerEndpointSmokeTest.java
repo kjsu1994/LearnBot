@@ -384,9 +384,9 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 "PRIMARY",
                 false
         );
-        OllamaClient.ChatResult gitDiffSelection = new OllamaClient.ChatResult(
+        OllamaClient.ChatResult workspaceTreeSelection = new OllamaClient.ChatResult(
                 """
-                        {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.diff","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Inspect bounded workspace diff after status."}
+                        {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"workspace.tree","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Inspect bounded workspace tree after status."}
                         """,
                 "stop",
                 true,
@@ -398,7 +398,7 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 false
         );
         when(ollamaClient.chatResult(anyString(), anyString(), eq(400)))
-                .thenReturn(gitStatusSelection, gitStatusSelection, gitDiffSelection);
+                .thenReturn(gitStatusSelection, gitStatusSelection, workspaceTreeSelection);
         when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
         when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
         when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation ->
@@ -533,9 +533,9 @@ class CodeAgentLoopRunnerEndpointSmokeTest {
                 .andExpect(jsonPath("$.iterationLimitReached").value(false))
                 .andExpect(jsonPath("$.observation.status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.runnerPreview.runnerDecision").value("PREPARED_READ_ONLY_CANDIDATE"))
-                .andExpect(jsonPath("$.runnerPreview.candidate.toolName").value("git.diff"))
+                .andExpect(jsonPath("$.runnerPreview.candidate.toolName").value("workspace.tree"))
                 .andExpect(jsonPath("$.toolSelectionPreview.selectionDecision").value("MODEL_SELECTED_READ_ONLY_CANDIDATE"))
-                .andExpect(jsonPath("$.toolSelectionPreview.candidate.toolName").value("git.diff"));
+                .andExpect(jsonPath("$.toolSelectionPreview.candidate.toolName").value("workspace.tree"));
 
         when(previewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(new CodeAgentLoopTimelineSummary(
                 loopId,

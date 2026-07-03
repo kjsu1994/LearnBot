@@ -4,14 +4,71 @@ import com.learnbot.dto.CliDeviceSessionPlanRequest;
 import com.learnbot.dto.CliDeviceSessionCreatePlanRequest;
 import com.learnbot.dto.CliDeviceSessionClaimPlanRequest;
 import com.learnbot.dto.CliDeviceSessionClaimResultPlanRequest;
+import com.learnbot.dto.AuthResponse;
 import com.learnbot.security.CurrentUserProvider;
+import com.learnbot.service.AppUser;
 import com.learnbot.service.AuthService;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
+import java.util.Map;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AuthControllerTest {
+    @Test
+    void cliDeviceSessionCreateClaimAndClaimResultIssueTokensOnlyAfterBrowserApproval() {
+        UUID userId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.issueCliSession(userId)).thenReturn(new AuthResponse(
+                "access-token",
+                OffsetDateTime.now().plusHours(1),
+                "refresh-token",
+                OffsetDateTime.now().plusDays(1),
+                null,
+                null,
+                false
+        ));
+        AuthController controller = new AuthController(authService, currentUserProvider);
+
+        var created = controller.cliDeviceSessionCreate(new CliDeviceSessionCreatePlanRequest("learnbot", "0.1.0"));
+
+        assertThat(created).containsEntry("schema", "learnbot.server.auth.cli-device-session-create.v1");
+        assertThat(created).containsEntry("status", "PENDING_BROWSER_APPROVAL");
+        assertThat(created).containsEntry("tokenSecretPrinted", false);
+        assertThat(created).containsKeys("deviceCode", "userCode", "verificationUriCompletePath");
+        assertThat(created).doesNotContainValue("access-token");
+        assertThat(created).doesNotContainValue("refresh-token");
+
+        var pending = controller.cliDeviceSessionClaimResult(Map.of("deviceCode", created.get("deviceCode")));
+        assertThat(pending).containsEntry("status", "PENDING_BROWSER_APPROVAL");
+        assertThat(pending).containsEntry("approved", false);
+        assertThat(pending).doesNotContainKey("accessToken");
+
+        var claimed = controller.cliDeviceSessionClaim(Map.of("userCode", created.get("userCode")));
+        assertThat(claimed).containsEntry("status", "APPROVED");
+        assertThat(claimed).containsEntry("approved", true);
+        assertThat(claimed).containsEntry("tokenSecretPrinted", false);
+        assertThat(claimed).doesNotContainValue("access-token");
+
+        var approved = controller.cliDeviceSessionClaimResult(Map.of("deviceCode", created.get("deviceCode")));
+        assertThat(approved).containsEntry("status", "APPROVED");
+        assertThat(approved).containsEntry("approved", true);
+        assertThat(approved).containsEntry("accessToken", "access-token");
+        assertThat(approved).containsEntry("refreshToken", "refresh-token");
+        assertThat(approved).containsEntry("tokenSecretPrinted", false);
+
+        var consumed = controller.cliDeviceSessionClaimResult(Map.of("deviceCode", created.get("deviceCode")));
+        assertThat(consumed).containsEntry("status", "CONSUMED");
+        assertThat(consumed).doesNotContainKey("accessToken");
+    }
+
     @Test
     void cliDeviceSessionPlanIsDisabledAndDoesNotIssueTokens() {
         AuthController controller = new AuthController(mock(AuthService.class), mock(CurrentUserProvider.class));

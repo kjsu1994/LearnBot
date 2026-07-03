@@ -25,8 +25,10 @@ public class AuthInterceptor implements HandlerInterceptor {
         if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)
                 || "/api/auth/cli-device-session/plan".equals(path)
                 || "/api/auth/cli-device-session/create/plan".equals(path)
+                || "/api/auth/cli-device-session/create".equals(path)
                 || "/api/auth/cli-device-session/claim/plan".equals(path)
-                || "/api/auth/cli-device-session/claim-result/plan".equals(path)) {
+                || "/api/auth/cli-device-session/claim-result/plan".equals(path)
+                || "/api/auth/cli-device-session/claim-result".equals(path)) {
             return true;
         }
         if (isLocalAgentTokenEndpoint(path) && hasLocalAgentToken(request)) {

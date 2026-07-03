@@ -35,6 +35,35 @@ public class CodeAgentLoopPreviewService {
         this.timelineRepository = timelineRepository;
     }
 
+    public CodeAgentLoopPreviewResponse startRun(
+            UUID userId,
+            UUID repositoryId,
+            UUID spaceId,
+            String instruction,
+            Integer requestedMaxSteps,
+            UUID agentId,
+            UUID workspaceId
+    ) {
+        int maxSteps = boundedMaxSteps(requestedMaxSteps);
+        CodeAgentLoopPreviewResponse run = new CodeAgentLoopPreviewResponse(
+                UUID.randomUUID(),
+                repositoryId,
+                spaceId,
+                "RUNNING",
+                maxSteps,
+                TIMEOUT_SECONDS,
+                false,
+                true,
+                false,
+                steps(),
+                stopConditions(),
+                warnings(instruction)
+        );
+        timelineRepository.createPreview(userId, instruction, run);
+        timelineRepository.appendRunStarted(userId, repositoryId, run.loopId(), agentId, workspaceId, instruction);
+        return run;
+    }
+
     public CodeAgentLoopPreviewResponse preview(UUID userId, UUID repositoryId, UUID spaceId, String instruction, Integer requestedMaxSteps) {
         int maxSteps = boundedMaxSteps(requestedMaxSteps);
         CodeAgentLoopPreviewResponse preview = new CodeAgentLoopPreviewResponse(
@@ -2038,6 +2067,7 @@ public class CodeAgentLoopPreviewService {
         Optional<CodeAgentLoopTimelineEventSummary> latestFreshObservationEnqueue = latestEvent(selected, "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_ENQUEUED");
         Optional<CodeAgentLoopTimelineEventSummary> latestFreshObservationComplete = latestEvent(selected, "LOCAL_AGENT_RELEASE_FRESH_OBSERVATIONS_COMPLETE");
         Optional<CodeAgentLoopTimelineEventSummary> latestDecision = latestEvent(selected, "LOOP_NEXT_DECISION_RECORDED");
+        Optional<CodeAgentLoopTimelineEventSummary> latestReadOnlyQueued = latestEvent(selected, "LOCAL_AGENT_READ_ONLY_REQUEST_QUEUED");
         Optional<CodeAgentLoopTimelineEventSummary> latestApprovalRequest = latestEvent(selected, "LOCAL_AGENT_APPROVAL_REQUEST_CREATED");
         Optional<CodeAgentLoopTimelineEventSummary> latestApproval = latestEvent(selected, "LOCAL_AGENT_APPROVAL_DECISION");
         Optional<CodeAgentLoopTimelineEventSummary> latestObservation = latestEvent(selected, "LOCAL_AGENT_OBSERVATION_RESULT");
@@ -2106,6 +2136,21 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestStop.orElse(null))) {
             return fromFreshObservationEnqueue(selected, latestFreshObservationEnqueue.get());
         }
+        if (latestReadOnlyQueued.isPresent()
+                && isSameOrAfter(latestReadOnlyQueued.get(), latestDecision.orElse(null))
+                && isSameOrAfter(latestReadOnlyQueued.get(), latestApproval.orElse(null))
+                && isSameOrAfter(latestReadOnlyQueued.get(), latestApprovalRequest.orElse(null))
+                && isSameOrAfter(latestReadOnlyQueued.get(), latestObservation.orElse(null))
+                && isSameOrAfter(latestReadOnlyQueued.get(), latestStop.orElse(null))) {
+            return nextAction(
+                    selected.id(),
+                    selected.repositoryId(),
+                    stringDetail(latestReadOnlyQueued.get(), "status", "QUEUED"),
+                    "WAIT_FOR_LOCAL_AGENT_OBSERVATION",
+                    stringDetail(latestReadOnlyQueued.get(), "nextAction", "Wait for the Local Agent to complete the queued read-only observation before advancing again."),
+                    latestReadOnlyQueued.get()
+            );
+        }
         if (latestApprovalRequest.isPresent()
                 && isSameOrAfter(latestApprovalRequest.get(), latestDecision.orElse(null))
                 && isSameOrAfter(latestApprovalRequest.get(), latestApproval.orElse(null))
@@ -2159,6 +2204,25 @@ public class CodeAgentLoopPreviewService {
                 "ASK_USER",
                 "Only the read-only loop preview is available. Ask for confirmation before selecting a Local Agent tool.",
                 selected.events().stream().max(Comparator.comparingInt(CodeAgentLoopTimelineEventSummary::sequenceNumber)).orElse(null)
+        );
+    }
+
+    public void appendPatchProposalBlocked(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            String stopKey,
+            String action,
+            Map<String, Object> details
+    ) {
+        timelineRepository.appendStopOutcome(
+                userId,
+                repositoryId,
+                loopId,
+                stopKey == null || stopKey.isBlank() ? "PATCH_PROPOSAL_BLOCKED" : stopKey,
+                "REPORT_PATCH_PROPOSAL_BLOCKED",
+                action == null || action.isBlank() ? "Report that patch proposal could not produce an approval-ready diff." : action,
+                details == null ? Map.of() : details
         );
     }
 

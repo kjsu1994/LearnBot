@@ -49,6 +49,10 @@ import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationRequest;
 import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalPayloadRequest;
+import com.learnbot.dto.loop.CodeAgentLoopAdvanceRequest;
+import com.learnbot.dto.loop.CodeAgentLoopRunRequest;
+import com.learnbot.dto.loop.CodeAgentLoopRunResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRunStatusResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSideEffectBoundaryResponse;
 import com.learnbot.dto.loop.CodeAgentLoopToolSelectionResponse;
@@ -61,8 +65,10 @@ import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
 import com.learnbot.service.agentloop.CodeAgentLoopRunnerService;
+import com.learnbot.service.agentloop.CodeAgentLoopRunService;
 import com.learnbot.service.agentloop.CodeAgentLoopToolSelectionService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -85,12 +91,14 @@ public class CodeAgentController {
     private final CodeAgentLocalPatchRequestService localPatchRequestService;
     private final CodeAgentLoopPreviewService loopPreviewService;
     private final CodeAgentLoopRunnerService loopRunnerService;
+    private final CodeAgentLoopRunService loopRunService;
     private final CodeAgentLoopToolSelectionService loopToolSelectionService;
     private final CodeIndexingService indexingService;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
     private final LearnBotProperties properties;
 
+    @Autowired
     public CodeAgentController(
             CodeAgentService codeAgentService,
             CodeAgentApplyService codeAgentApplyService,
@@ -103,11 +111,40 @@ public class CodeAgentController {
             CurrentUserProvider currentUserProvider,
             LearnBotProperties properties
     ) {
+        this(
+                codeAgentService,
+                codeAgentApplyService,
+                localPatchRequestService,
+                loopPreviewService,
+                loopRunnerService,
+                new CodeAgentLoopRunService(loopPreviewService, loopToolSelectionService, loopRunnerService, codeAgentService, localPatchRequestService),
+                loopToolSelectionService,
+                indexingService,
+                authService,
+                currentUserProvider,
+                properties
+        );
+    }
+
+    public CodeAgentController(
+            CodeAgentService codeAgentService,
+            CodeAgentApplyService codeAgentApplyService,
+            CodeAgentLocalPatchRequestService localPatchRequestService,
+            CodeAgentLoopPreviewService loopPreviewService,
+            CodeAgentLoopRunnerService loopRunnerService,
+            CodeAgentLoopRunService loopRunService,
+            CodeAgentLoopToolSelectionService loopToolSelectionService,
+            CodeIndexingService indexingService,
+            AuthService authService,
+            CurrentUserProvider currentUserProvider,
+            LearnBotProperties properties
+    ) {
         this.codeAgentService = codeAgentService;
         this.codeAgentApplyService = codeAgentApplyService;
         this.localPatchRequestService = localPatchRequestService;
         this.loopPreviewService = loopPreviewService;
         this.loopRunnerService = loopRunnerService;
+        this.loopRunService = loopRunService;
         this.loopToolSelectionService = loopToolSelectionService;
         this.indexingService = indexingService;
         this.authService = authService;
@@ -272,6 +309,51 @@ public class CodeAgentController {
                 request.maxSteps(),
                 request.patchDryRunApprovalHandoffPreview()
         );
+    }
+
+    @PostMapping("/loop/runs")
+    CodeAgentLoopRunResponse startLoopRun(@Valid @RequestBody CodeAgentLoopRunRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopRunService.start(
+                user.id(),
+                request.repositoryId(),
+                selectedSpaceId,
+                request.instruction(),
+                request.maxSteps(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
+    @GetMapping("/loop/runs/{loopId}")
+    CodeAgentLoopRunStatusResponse loopRunStatus(
+            @PathVariable UUID loopId,
+            @RequestParam UUID repositoryId,
+            @RequestParam(required = false) UUID agentId,
+            @RequestParam(required = false) UUID workspaceId
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, repositoryId);
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunService.status(user.id(), repositoryId, loopId, agentId, workspaceId);
+    }
+
+    @PostMapping("/loop/runs/{loopId}/advance")
+    CodeAgentLoopRunStatusResponse advanceLoopRun(
+            @PathVariable UUID loopId,
+            @RequestParam UUID repositoryId,
+            @Valid @RequestBody(required = false) CodeAgentLoopAdvanceRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, repositoryId);
+        authService.requireSpace(user, repositorySpaceId);
+        UUID agentId = request == null ? null : request.agentId();
+        UUID workspaceId = request == null ? null : request.workspaceId();
+        return loopRunService.advance(user.id(), repositoryId, loopId, agentId, workspaceId);
     }
 
     @PostMapping("/loop/runner/patch-dry-run-approval-intent-preview")

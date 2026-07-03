@@ -151,6 +151,7 @@ learnbot:
       max-candidates-per-hop: ${LEARNBOT_CODE_GRAPH_MAX_CANDIDATES_PER_HOP:200}
       max-traversal-rows: ${LEARNBOT_CODE_GRAPH_MAX_TRAVERSAL_ROWS:1000}
       max-llm-files: ${LEARNBOT_CODE_GRAPH_MAX_LLM_FILES:80}
+      llm-timeout-seconds: ${LEARNBOT_CODE_GRAPH_LLM_TIMEOUT_SECONDS:60}
       enrichment-lease-seconds: ${LEARNBOT_CODE_GRAPH_ENRICHMENT_LEASE_SECONDS:300}
       evidence-ranking-enabled: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_ENABLED:true}
       evidence-ranking-debug: ${LEARNBOT_CODE_GRAPH_EVIDENCE_RANKING_DEBUG:false}
@@ -184,8 +185,8 @@ learnbot:
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
   local-agent:
     websocket-enabled: ${LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED:false}
-    patch-execution-release-enabled: ${LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED:false}
-    approved-execution-sequence-creation-enabled: ${LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED:false}
+    patch-execution-release-enabled: ${LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED:true}
+    approved-execution-sequence-creation-enabled: ${LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED:true}
   transfer:
     export-dir: ${LEARNBOT_EXPORT_DIR:export}
   retention:

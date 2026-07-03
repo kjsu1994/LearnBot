@@ -9,6 +9,8 @@ public enum LocalAgentToolName {
     AGENT_STATUS("agent.status", false),
     AGENT_DOCTOR("agent.doctor", false),
     WORKSPACE_LIST("workspace.list", false),
+    WORKSPACE_TREE("workspace.tree", false),
+    WORKSPACE_SEARCH("workspace.search", false),
     WORKSPACE_ADD("workspace.add", true),
     FILE_READ("file.read", false),
     PATCH_APPLY("patch.apply", true),

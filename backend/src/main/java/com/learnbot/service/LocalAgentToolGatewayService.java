@@ -154,11 +154,24 @@ public class LocalAgentToolGatewayService {
     @Transactional
     public LocalAgentQueuedToolRequest enqueueReadOnly(LocalAgentToolRequest request) {
         if (request.toolName() != LocalAgentToolName.FILE_READ
+                && request.toolName() != LocalAgentToolName.WORKSPACE_TREE
+                && request.toolName() != LocalAgentToolName.WORKSPACE_SEARCH
                 && request.toolName() != LocalAgentToolName.GIT_STATUS
                 && request.toolName() != LocalAgentToolName.GIT_DIFF) {
-            throw new IllegalArgumentException("Only file.read, git.status, and git.diff can be queued through this read-only path.");
+            throw new IllegalArgumentException("Only workspace.tree, workspace.search, file.read, git.status, and git.diff can be queued through this read-only path.");
         }
-        return enqueue(request);
+        LocalAgentQueuedToolRequest queued = enqueue(request);
+        UUID repositoryId = repositoryId(request.input());
+        if (repositoryId != null) {
+            loopTimelineRepository.appendReadOnlyRequestQueued(
+                    request.userId(),
+                    repositoryId,
+                    loopId(request.input()),
+                    queued.requestId(),
+                    request
+            );
+        }
+        return queued;
     }
 
     @Transactional
@@ -617,7 +630,7 @@ public class LocalAgentToolGatewayService {
                         LocalAgentToolName.ROLLBACK_RESTORE,
                         approvedRollbackInput(releasedPatch, sourceRequestId, releaseAttemptId, manifestId),
                         baseCreatedAt.plusNanos(3_000_000),
-                        "Approved release follow-up rollback.restore safety row. Local Agent polling must claim it after git.status."
+                        "Approved release follow-up rollback.restore verification row. Local Agent polling must claim it after git.status."
                 )
         );
         followUpRequests.forEach(request -> repository.create(UUID.randomUUID(), request));
@@ -1147,16 +1160,21 @@ public class LocalAgentToolGatewayService {
 
         boolean prerequisitesPassed = prerequisites.stream()
                 .allMatch(item -> Boolean.TRUE.equals(item.get("passed")));
+        boolean releaseEnabled = patchExecutionReleaseEnabled();
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", prerequisitesPassed ? "PRECONDITIONS_READY_RELEASE_DISABLED" : "BLOCKED");
+        result.put("status", prerequisitesPassed
+                ? (releaseEnabled ? "PRECONDITIONS_READY_RELEASE_ENABLED" : "PRECONDITIONS_READY_RELEASE_DISABLED")
+                : "BLOCKED");
         result.put("preconditionsPassed", prerequisitesPassed);
-        result.put("releaseGateEnabled", false);
+        result.put("releaseGateEnabled", releaseEnabled);
         result.put("mutationEnabled", false);
-        result.put("blocking", true);
+        result.put("blocking", !prerequisitesPassed || !releaseEnabled);
         result.put("approvalPersistence", approvalPersistenceSummary(sourceInput));
         result.put("message", prerequisitesPassed
-                ? "All pre-apply safety prerequisites are visible, but patch execution remains disabled by the release gate."
-                : "Patch execution prerequisites are incomplete and the release gate remains disabled.");
+                ? (releaseEnabled
+                ? "All pre-apply safety prerequisites are visible; release still requires fresh release-attempt-linked evidence before claim."
+                : "All pre-apply safety prerequisites are visible, but patch execution remains disabled by the release gate.")
+                : "Patch execution prerequisites are incomplete.");
         result.put("prerequisites", prerequisites);
         return result;
     }
@@ -1167,10 +1185,13 @@ public class LocalAgentToolGatewayService {
             LocalAgentPatchReleaseAttemptModel releaseAttemptModel
     ) {
         boolean preconditionsPassed = Boolean.TRUE.equals(patchReleaseReadiness.get("preconditionsPassed"));
+        boolean releaseEnabled = patchExecutionReleaseEnabled();
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", preconditionsPassed ? "INTERNAL_PRECONDITIONS_READY_GATE_DISABLED" : "BLOCKED");
+        result.put("status", preconditionsPassed
+                ? (releaseEnabled ? "INTERNAL_PRECONDITIONS_READY_GATE_ENABLED" : "INTERNAL_PRECONDITIONS_READY_GATE_DISABLED")
+                : "BLOCKED");
         result.put("preconditionsPassed", preconditionsPassed);
-        result.put("releaseGateEnabled", false);
+        result.put("releaseGateEnabled", releaseEnabled);
         result.put("claimEnabled", false);
         result.put("writeHelperEnabled", false);
         result.put("mutationEnabled", false);
@@ -1180,17 +1201,21 @@ public class LocalAgentToolGatewayService {
                 ? "LINKED_DRY_RUN_OUTPUT_OBSERVED"
                 : "NOT_OBSERVED");
         result.put("message", preconditionsPassed
-                ? "Internal patch write prerequisites are visible, but held requests cannot be claimed and the Local Agent write helper is not enabled."
+                ? (releaseEnabled
+                ? "Internal patch write prerequisites are visible; held requests remain non-claimable until the release endpoint links fresh evidence."
+                : "Internal patch write prerequisites are visible, but held requests cannot be claimed and the Local Agent write helper is not enabled.")
                 : "Internal patch write prerequisites are incomplete; held requests remain non-claimable.");
         result.put("preReleaseRevalidation", preReleaseRevalidation(dryRunOutput));
         result.put("releaseAttemptModel", releaseAttemptModelMap(releaseAttemptModel));
-        result.put("requiredBeforeEnablement", List.of(
-                "Enable explicit backend release gate.",
-                "Make approved-held patch requests claimable only through the release path.",
-                "Connect Local Agent patch.apply to the guarded write helper.",
-                "Keep rollback.restore validation and user approval mandatory.",
-                "Emit post-write hash observations and run allowlisted verification before final answer."
-        ));
+        List<String> requiredBeforeEnablement = new ArrayList<>();
+        if (!releaseEnabled) {
+            requiredBeforeEnablement.add("Enable explicit backend release gate.");
+        }
+        requiredBeforeEnablement.add("Make approved-held patch requests claimable only through the release path.");
+        requiredBeforeEnablement.add("Connect Local Agent patch.apply to the guarded write helper.");
+        requiredBeforeEnablement.add("Keep rollback.restore validation and user approval mandatory.");
+        requiredBeforeEnablement.add("Emit post-write hash observations and run allowlisted verification before final answer.");
+        result.put("requiredBeforeEnablement", requiredBeforeEnablement);
         return result;
     }
 

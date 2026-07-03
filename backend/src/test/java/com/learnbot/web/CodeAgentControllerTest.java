@@ -18,6 +18,8 @@ import com.learnbot.dto.loop.CodeAgentLoopObservationContinuationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalRequestResponse;
 import com.learnbot.dto.loop.CodeAgentLoopPatchApprovalPayloadRequest;
 import com.learnbot.dto.loop.CodeAgentLoopReleaseReviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRunRequest;
+import com.learnbot.dto.loop.CodeAgentLoopRunResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
@@ -50,6 +52,7 @@ import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodeIndexingService;
 import com.learnbot.service.agentloop.CodeAgentLoopRunnerService;
+import com.learnbot.service.agentloop.CodeAgentLoopRunService;
 import com.learnbot.service.agentloop.CodeAgentLoopToolSelectionService;
 import org.junit.jupiter.api.Test;
 
@@ -128,6 +131,73 @@ class CodeAgentControllerTest {
 
         verify(authService).requireSpace(user, repositorySpaceId);
         verify(loopPreviewService).preview(userId, repositoryId, repositorySpaceId, "fix this bug", 7);
+    }
+
+    @Test
+    void startLoopRunResolvesRepositorySpaceAndDelegatesToRunService() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopRunService loopRunService = mock(CodeAgentLoopRunService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                mock(CodeAgentLoopPreviewService.class),
+                mock(CodeAgentLoopRunnerService.class),
+                loopRunService,
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopRunService.start(userId, repositoryId, repositorySpaceId, "fix this bug", 8, agentId, workspaceId))
+                .thenReturn(new CodeAgentLoopRunResponse(
+                        "learnbot.server.code-agent.loop-run.v1",
+                        loopId,
+                        repositoryId,
+                        repositorySpaceId,
+                        agentId,
+                        workspaceId,
+                        "fix this bug",
+                        8,
+                        "READ_ONLY_QUEUED",
+                        true,
+                        true,
+                        true,
+                        false,
+                        true,
+                        "Wait for the Local Agent read-only observation.",
+                        null,
+                        List.of()
+                ));
+
+        CodeAgentLoopRunResponse response = controller.startLoopRun(new CodeAgentLoopRunRequest(
+                repositoryId,
+                requestedSpaceId,
+                "fix this bug",
+                8,
+                agentId,
+                workspaceId
+        ));
+
+        assertThat(response.schema()).isEqualTo("learnbot.server.code-agent.loop-run.v1");
+        assertThat(response.readOnlyQueued()).isTrue();
+        assertThat(response.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopRunService).start(userId, repositoryId, repositorySpaceId, "fix this bug", 8, agentId, workspaceId);
     }
 
     @Test

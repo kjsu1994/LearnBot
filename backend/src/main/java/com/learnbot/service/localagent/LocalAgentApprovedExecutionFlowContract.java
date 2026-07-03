@@ -47,7 +47,7 @@ public final class LocalAgentApprovedExecutionFlowContract {
         result.put("postRetryVerification", postRetryVerification(safeSteps));
         result.put("allTerminal", safeSteps.stream().allMatch(step -> step.response().finishedAt() != null));
         result.put("readyForServerOrchestration", false);
-        result.put("message", "Approved Local Agent execution-flow responses are modeled for server-side contract verification only; request creation, push, claim, result intake, acknowledgement save, and follow-up mutation remain disabled.");
+        result.put("message", "Approved Local Agent execution-flow responses are modeled for server-side contract verification only; request creation, push, claim, result intake, acknowledgement save, rollback restore, and follow-up mutation remain disabled.");
         return result;
     }
 
@@ -78,10 +78,10 @@ public final class LocalAgentApprovedExecutionFlowContract {
     }
 
     private static boolean ordered(List<Step> steps) {
-        if (steps.size() != EXPECTED_ORDER.size()) {
+        if (steps.size() != 3 && steps.size() != EXPECTED_ORDER.size()) {
             return false;
         }
-        for (int index = 0; index < EXPECTED_ORDER.size(); index++) {
+        for (int index = 0; index < steps.size(); index++) {
             if (steps.get(index).response().toolName() != EXPECTED_ORDER.get(index)) {
                 return false;
             }

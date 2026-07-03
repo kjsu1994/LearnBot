@@ -1,7 +1,8 @@
 param(
     [switch]$Build,
     [switch]$NoBuild,
-    [switch]$Cpu
+    [switch]$Cpu,
+    [switch]$Reranker
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +24,10 @@ function Invoke-Compose {
     $args = @()
     foreach ($file in $ComposeFiles) {
         $args += @("-f", $file)
+    }
+    if ($Reranker) {
+        $args += @("--profile", "reranker")
+        $env:LEARNBOT_RERANKER_ENABLED = "true"
     }
     $args += @("up", "-d")
     if ($shouldBuild) {

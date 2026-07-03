@@ -111,6 +111,7 @@ function CodeWorkspace(props) {
     codeAgentValidatedDryRunIntentEligibility,
     codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
+    localAgentDeviceApprovalResult,
     codeConversations = [],
     codeConversationId = '',
     codeConversationTurns = [],
@@ -150,6 +151,7 @@ function CodeWorkspace(props) {
     inspectCodeAgentValidatedDryRunIntentEligibility = () => {},
     previewCodeAgentValidatedDryRunIntentTransition = () => {},
     refreshLocalAgentStatus = () => {},
+    approveLocalAgentDeviceSession = () => {},
     applyCodeAgentPatch = () => {},
     rollbackCodeAgentPatch = () => {},
     runCodeAgentTest = () => {},
@@ -162,6 +164,13 @@ function CodeWorkspace(props) {
   } = props;
   const localAgentDeviceApprovalRoutePlan = buildLocalAgentDeviceApprovalRoutePlan(routePath);
   const localAgentDeviceApprovalRouteSummary = buildLocalAgentDeviceApprovalRouteSummary(localAgentDeviceApprovalRoutePlan);
+  const [localAgentDeviceUserCode, setLocalAgentDeviceUserCode] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('user_code') || '';
+    } catch {
+      return '';
+    }
+  });
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
   const answerStreamAnchorRef = useRef(null);
   const chatTurns = props.pendingCodeTurn
@@ -190,17 +199,38 @@ function CodeWorkspace(props) {
             <ShieldCheck size={18} />
             <div>
               <h2>Local Agent Device Approval</h2>
-              <p>Browser approval is preview-only. No device is approved and no token is issued.</p>
+              <p>Approve this CLI login request for the current browser account.</p>
             </div>
           </div>
           <div className="code-agent-result compact-result">
             <div className="result-heading">
               <strong>{localAgentDeviceApprovalRoutePlan.schema}</strong>
-              <Badge variant="secondary">{localAgentDeviceApprovalRoutePlan.status}</Badge>
+              <Badge variant="outline">{localAgentDeviceApprovalRoutePlan.status}</Badge>
             </div>
             <small>{localAgentDeviceApprovalRouteSummary}</small>
             <small>server endpoints: {localAgentDeviceApprovalRoutePlan.serverEndpoints.join(' / ')}</small>
-            <small>blocker: {localAgentDeviceApprovalRoutePlan.blockers[0]}</small>
+            <label htmlFor="local-agent-device-user-code">User code</label>
+            <input
+              id="local-agent-device-user-code"
+              value={localAgentDeviceUserCode}
+              onChange={(event) => setLocalAgentDeviceUserCode(event.target.value)}
+              placeholder="XXXX-XXXX"
+            />
+            <button
+              type="button"
+              className="ghost-button compact-action"
+              disabled={!localAgentDeviceUserCode.trim() || loading('local-agent-device-approval')}
+              onClick={() => approveLocalAgentDeviceSession(localAgentDeviceUserCode)}
+            >
+              {loading('local-agent-device-approval') ? <Loader2 className="spin" size={14} /> : <ShieldCheck size={14} />}
+              approve CLI session
+            </button>
+            {localAgentDeviceApprovalResult && (
+              <small>
+                approval: {localAgentDeviceApprovalResult.status || 'UNKNOWN'}
+                {localAgentDeviceApprovalResult.error ? `, ${localAgentDeviceApprovalResult.error}` : ''}
+              </small>
+            )}
           </div>
         </div>
       )}
@@ -1514,7 +1544,7 @@ function CodeAgentPanel({
                   <small>{token.agentId}</small>
                   <small>{token.lastSeenAt ? `last seen ${formatDate(token.lastSeenAt)}` : `created ${formatDate(token.createdAt)}`}</small>
                 </span>
-                <Badge variant={token.active ? 'outline' : 'secondary'}>{token.revokedAt ? 'revoked' : token.active ? 'active' : 'expired'}</Badge>
+                <Badge variant={token.revokedAt ? 'secondary' : token.active ? 'success' : 'secondary'}>{token.revokedAt ? 'revoked' : token.active ? 'active' : 'expired'}</Badge>
                 {!token.revokedAt && (
                   <button
                     type="button"

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -36,7 +37,7 @@ internal sealed partial class LearnBotLocalAgent
             "status" => AgentStatus(),
             "doctor" => Doctor(),
             "m8" => M8(args[1..]),
-            "login" => LoginPlan(args[1..]),
+            "login" => await Login(args[1..]),
             "session" => await Session(args[1..]),
             "fix" => await CodexCommandPreview("fix", args[1..]),
             "review" => await CodexCommandPreview("review", args[1..]),
@@ -53,9 +54,42 @@ internal sealed partial class LearnBotLocalAgent
         var token = GetOption(args, "--token");
         var agentId = GetOption(args, "--agent-id");
         var transport = NormalizeTransport(GetOption(args, "--transport") ?? "polling");
+        var workspace = GetOption(args, "--workspace");
+        if (string.IsNullOrWhiteSpace(token) && string.IsNullOrWhiteSpace(agentId))
+        {
+            var webToken = GetOption(args, "--web-token")
+                ?? Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN")
+                ?? TryReadStoredWebAccessToken(server.TrimEnd('/'));
+            if (string.IsNullOrWhiteSpace(webToken))
+            {
+                Console.Error.WriteLine("Web session is required for automatic pairing. Run learnbot login, pass --web-token, or use manual --agent-id/--token pairing.");
+                return 2;
+            }
+            try
+            {
+                using var client = new HttpClient { BaseAddress = new Uri(server.TrimEnd('/')) };
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", webToken);
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
+                using var response = await client.PostAsync("/api/local-agents/pairing-token", Json(new { label = Environment.MachineName }));
+                var body = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.Error.WriteLine("Failed to issue Local Agent pairing token: HTTP " + (int)response.StatusCode);
+                    return 1;
+                }
+                using var json = JsonDocument.Parse(body);
+                token = json.RootElement.GetProperty("token").GetString();
+                agentId = json.RootElement.GetProperty("agentId").GetString();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+            {
+                Console.Error.WriteLine("Failed to issue Local Agent pairing token: " + ex.Message);
+                return 1;
+            }
+        }
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(agentId) || !Guid.TryParse(agentId, out var parsedAgentId))
         {
-            Console.Error.WriteLine("Usage: learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]");
+            Console.Error.WriteLine("Usage: learnbot pair --server http://localhost:8083 [--workspace <path>] [--transport polling|websocket|auto] or learnbot pair --agent-id <agent-id> --token <pairing-token>");
             return 2;
         }
 
@@ -71,6 +105,10 @@ internal sealed partial class LearnBotLocalAgent
         };
         await SendHeartbeat(candidate);
         SaveConfig(candidate);
+        if (!string.IsNullOrWhiteSpace(workspace))
+        {
+            return await WorkspaceAdd(workspace);
+        }
         Console.WriteLine("paired");
         return 0;
     }
@@ -306,6 +344,121 @@ internal sealed partial class LearnBotLocalAgent
         return Unknown("m8 " + args[0]);
     }
 
+    private async Task<int> Login(string[] args)
+    {
+        if (args.Contains("--plan", StringComparer.OrdinalIgnoreCase) || args.Contains("--preview", StringComparer.OrdinalIgnoreCase))
+        {
+            return LoginPlan(args);
+        }
+        var config = LoadConfigOrDefault();
+        var server = (GetOption(args, "--server") ?? config.ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        var timeoutSeconds = Math.Clamp(ParseInt(GetOption(args, "--timeout-seconds"), 600), 60, 900);
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(server) };
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
+            using var create = await client.PostAsync("/api/auth/cli-device-session/create", Json(new
+            {
+                clientName = Environment.MachineName,
+                cliVersion = Version
+            }));
+            var createBody = await create.Content.ReadAsStringAsync();
+            if (!create.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine("Failed to create CLI login session: HTTP " + (int)create.StatusCode);
+                return 1;
+            }
+            using var createJson = JsonDocument.Parse(createBody);
+            var root = createJson.RootElement;
+            var deviceCode = root.GetProperty("deviceCode").GetString();
+            var userCode = root.GetProperty("userCode").GetString();
+            var intervalSeconds = root.TryGetProperty("intervalSeconds", out var intervalElement)
+                ? Math.Clamp(intervalElement.GetInt32(), 2, 30)
+                : 5;
+            var approvalPath = root.TryGetProperty("verificationUriCompletePath", out var pathElement)
+                ? pathElement.GetString()
+                : "/settings/local-agent/device";
+            var approvalUrl = server + approvalPath;
+            Console.Error.WriteLine("Open this URL in your logged-in browser to approve the CLI session:");
+            Console.Error.WriteLine(approvalUrl);
+            Console.Error.WriteLine("User code: " + userCode);
+            if (!args.Contains("--no-open", StringComparer.OrdinalIgnoreCase))
+            {
+                TryOpenUrl(approvalUrl);
+            }
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(intervalSeconds));
+                using var poll = await client.PostAsync("/api/auth/cli-device-session/claim-result", Json(new { deviceCode }));
+                var pollBody = await poll.Content.ReadAsStringAsync();
+                if (!poll.IsSuccessStatusCode)
+                {
+                    Console.Error.WriteLine("Failed to poll CLI login session: HTTP " + (int)poll.StatusCode);
+                    return 1;
+                }
+                using var pollJson = JsonDocument.Parse(pollBody);
+                var pollRoot = pollJson.RootElement;
+                var status = pollRoot.TryGetProperty("status", out var statusElement) ? statusElement.GetString() : "";
+                if (string.Equals(status, "PENDING_BROWSER_APPROVAL", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (!string.Equals(status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        schema = "learnbot.local-agent.web-login-result.v1",
+                        status = status ?? "FAILED",
+                        serverUrl = server,
+                        webSessionStored = false,
+                        tokenSecretPrinted = false,
+                        fallback = "Use LEARNBOT_WEB_TOKEN or run learnbot login again."
+                    }, JsonOptions));
+                    return 1;
+                }
+
+                var accessToken = pollRoot.GetProperty("accessToken").GetString();
+                var refreshToken = pollRoot.GetProperty("refreshToken").GetString();
+                var expiresAt = pollRoot.GetProperty("expiresAt").GetString();
+                var refreshExpiresAt = pollRoot.GetProperty("refreshExpiresAt").GetString();
+                var stored = TryWriteStoredWebSession(server, accessToken, refreshToken, expiresAt, refreshExpiresAt, out var storeError);
+                config.ServerUrl = server;
+                SaveConfig(config);
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    schema = "learnbot.local-agent.web-login-result.v1",
+                    status = stored ? "SUCCEEDED" : "TOKEN_RECEIVED_STORAGE_FAILED",
+                    serverUrl = server,
+                    webSessionStored = stored,
+                    tokenSecretPrinted = false,
+                    error = storeError,
+                    next = stored
+                        ? "learnbot pair --workspace <path> --transport auto"
+                        : "Set LEARNBOT_WEB_TOKEN for this shell or retry on Windows with DPAPI available."
+                }, JsonOptions));
+                return stored ? 0 : 1;
+            }
+
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                schema = "learnbot.local-agent.web-login-result.v1",
+                status = "TIMED_OUT",
+                serverUrl = server,
+                webSessionStored = false,
+                tokenSecretPrinted = false,
+                fallback = "Run learnbot login again or pass --web-token."
+            }, JsonOptions));
+            return 1;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            Console.Error.WriteLine("CLI login failed: " + ex.Message);
+            return 1;
+        }
+    }
+
     private int LoginPlan(string[] args)
     {
         var loginId = GetOption(args, "--login-id");
@@ -417,7 +570,13 @@ internal sealed partial class LearnBotLocalAgent
         }
         if (args.Contains("--server-plan", StringComparer.OrdinalIgnoreCase))
         {
-            var webToken = GetOption(args, "--web-token") ?? Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+            var webToken = GetOption(args, "--web-token")
+                ?? Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN")
+                ?? TryReadStoredWebAccessToken(LoadConfigOrDefault().ServerUrl);
+            var autoLoop = !args.Contains("--no-auto-loop", StringComparer.OrdinalIgnoreCase);
+            var noApply = args.Contains("--no-apply", StringComparer.OrdinalIgnoreCase);
+            var pollTimeoutSeconds = Math.Clamp(ParseInt(GetOption(args, "--poll-timeout"), 300), 5, 3600);
+            var approvalTimeoutSeconds = Math.Clamp(ParseInt(GetOption(args, "--approval-timeout"), 600), 5, 7200);
             CliCodexReadOnlyObservationReport? approvalHandoffPreview = null;
             if (args.Contains("--include-approval-handoff-preview", StringComparer.OrdinalIgnoreCase))
             {
@@ -430,7 +589,14 @@ internal sealed partial class LearnBotLocalAgent
                 var runNonWritingPreflightPreview = args.Contains("--run-nonwriting-preflight-preview", StringComparer.OrdinalIgnoreCase);
                 approvalHandoffPreview = BuildCliCodexReadOnlyObservationReport(preview, readSelected, diffSource, diffFile, diffTextProvided, acceptGeneratedDiffPreview, generatedDiffPreview, runNonWritingPreflightPreview);
             }
-            Console.WriteLine(JsonSerializer.Serialize(await FetchCliCodexServerPlan(preview, webToken, approvalHandoffPreview?.PatchDryRunApprovalHandoffPreview), JsonOptions));
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliCodexServerPlan(
+                preview,
+                webToken,
+                approvalHandoffPreview?.PatchDryRunApprovalHandoffPreview,
+                autoLoop,
+                noApply,
+                TimeSpan.FromSeconds(pollTimeoutSeconds),
+                TimeSpan.FromSeconds(approvalTimeoutSeconds)), JsonOptions));
             return 0;
         }
         Console.WriteLine(JsonSerializer.Serialize(preview, JsonOptions));
@@ -1822,15 +1988,15 @@ internal sealed partial class LearnBotLocalAgent
         return false;
     }
 
-    private async Task PollOnce(AgentConfig config)
+    private async Task<bool> PollOnce(AgentConfig config, bool quiet = false)
     {
         using var client = Client(config);
         using var response = await client.GetAsync("/api/local-agents/tools/next");
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
         {
             Log("poll no tool request");
-            Console.WriteLine("no tool request");
-            return;
+            if (!quiet) Console.WriteLine("no tool request");
+            return false;
         }
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -1841,7 +2007,8 @@ internal sealed partial class LearnBotLocalAgent
         using var complete = await client.PostAsync($"/api/local-agents/tools/{requestId}/response", Json(result));
         complete.EnsureSuccessStatusCode();
         Log($"tool {toolName} {result.Status} requestId={requestId}");
-        Console.WriteLine($"{toolName}: {result.Status}");
+        if (!quiet) Console.WriteLine($"{toolName}: {result.Status}");
+        return true;
     }
 
     private async Task ReceiveWebSocketRequests(AgentConfig config, ClientWebSocket socket, TimeSpan receiveWindow)
@@ -1976,6 +2143,109 @@ internal sealed partial class LearnBotLocalAgent
         } while (!result.EndOfMessage);
         return Encoding.UTF8.GetString(stream.ToArray());
     }
+
+    private static string? CryptProtect(string value, out string? error)
+    {
+        error = null;
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var input = new DataBlob(bytes);
+        var output = new DataBlob();
+        try
+        {
+            if (!CryptProtectData(ref input, "LearnBot CLI web session", IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0, ref output))
+            {
+                error = "Windows DPAPI CryptProtectData failed.";
+                return null;
+            }
+            var protectedBytes = new byte[output.cbData];
+            Marshal.Copy(output.pbData, protectedBytes, 0, protectedBytes.Length);
+            return Convert.ToBase64String(protectedBytes);
+        }
+        finally
+        {
+            input.Free();
+            output.Free();
+        }
+    }
+
+    private static string? CryptUnprotect(string value)
+    {
+        var bytes = Convert.FromBase64String(value);
+        var input = new DataBlob(bytes);
+        var output = new DataBlob();
+        try
+        {
+            if (!CryptUnprotectData(ref input, out _, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0, ref output))
+            {
+                return null;
+            }
+            var plainBytes = new byte[output.cbData];
+            Marshal.Copy(output.pbData, plainBytes, 0, plainBytes.Length);
+            return Encoding.UTF8.GetString(plainBytes);
+        }
+        finally
+        {
+            input.Free();
+            output.Free();
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DataBlob
+    {
+        public int cbData;
+        public IntPtr pbData;
+        private bool allocatedByMarshal;
+
+        public DataBlob(byte[] data)
+        {
+            cbData = data.Length;
+            pbData = Marshal.AllocHGlobal(data.Length);
+            allocatedByMarshal = true;
+            Marshal.Copy(data, 0, pbData, data.Length);
+        }
+
+        public void Free()
+        {
+            if (pbData != IntPtr.Zero)
+            {
+                if (allocatedByMarshal)
+                {
+                    Marshal.FreeHGlobal(pbData);
+                }
+                else
+                {
+                    LocalFree(pbData);
+                }
+                pbData = IntPtr.Zero;
+            }
+            cbData = 0;
+            allocatedByMarshal = false;
+        }
+    }
+
+    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CryptProtectData(
+        ref DataBlob pDataIn,
+        string? szDataDescr,
+        IntPtr pOptionalEntropy,
+        IntPtr pvReserved,
+        IntPtr pPromptStruct,
+        int dwFlags,
+        ref DataBlob pDataOut);
+
+    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CryptUnprotectData(
+        ref DataBlob pDataIn,
+        out string? ppszDataDescr,
+        IntPtr pOptionalEntropy,
+        IntPtr pvReserved,
+        IntPtr pPromptStruct,
+        int dwFlags,
+        ref DataBlob pDataOut);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LocalFree(IntPtr hMem);
 
     private ToolResponse HandleTool(AgentConfig config, Guid requestId, JsonElement request, string toolName)
     {
@@ -3005,6 +3275,125 @@ internal sealed partial class LearnBotLocalAgent
 
     private static string WebSessionPath() => Path.Combine(AgentDataDirectory(), "web-session.json");
 
+    private static string? TryReadStoredWebAccessToken(string? expectedServerUrl = null)
+    {
+        try
+        {
+            var path = WebSessionPath();
+            if (!File.Exists(path)) return null;
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            var schema = root.TryGetProperty("schema", out var schemaElement) ? schemaElement.GetString() : "";
+            if (!string.Equals(schema, "learnbot.local-agent.web-session-artifact.v1", StringComparison.Ordinal))
+            {
+                return null;
+            }
+            var serverUrl = root.TryGetProperty("serverUrl", out var serverElement) ? serverElement.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(expectedServerUrl)
+                && !string.IsNullOrWhiteSpace(serverUrl)
+                && !string.Equals(serverUrl.TrimEnd('/'), expectedServerUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            var encryptedAccessToken = root.TryGetProperty("encryptedAccessToken", out var tokenElement) ? tokenElement.GetString() : null;
+            return string.IsNullOrWhiteSpace(encryptedAccessToken) ? null : TryUnprotectForCurrentUser(encryptedAccessToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException or CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryWriteStoredWebSession(
+        string serverUrl,
+        string? accessToken,
+        string? refreshToken,
+        string? expiresAt,
+        string? refreshExpiresAt,
+        out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(refreshToken))
+        {
+            error = "server did not return both access and refresh tokens";
+            return false;
+        }
+        var protectedAccess = TryProtectForCurrentUser(accessToken, out error);
+        if (protectedAccess is null)
+        {
+            return false;
+        }
+        var protectedRefresh = TryProtectForCurrentUser(refreshToken, out error);
+        if (protectedRefresh is null)
+        {
+            return false;
+        }
+        try
+        {
+            var path = WebSessionPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var tempPath = path + ".tmp";
+            var body = new
+            {
+                schema = "learnbot.local-agent.web-session-artifact.v1",
+                serverUrl = serverUrl.TrimEnd('/'),
+                encryptedAccessToken = protectedAccess,
+                encryptedRefreshToken = protectedRefresh,
+                expiresAt,
+                refreshExpiresAt,
+                createdAt = DateTimeOffset.UtcNow,
+                encryption = new
+                {
+                    provider = "WINDOWS_DPAPI_CURRENT_USER",
+                    plaintextTokenSerializationAllowed = false
+                }
+            };
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(body, JsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(tempPath, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static string? TryProtectForCurrentUser(string value, out string? error)
+    {
+        error = null;
+        if (!OperatingSystem.IsWindows())
+        {
+            error = "DPAPI session storage is only enabled on Windows";
+            return null;
+        }
+        return CryptProtect(value, out error);
+    }
+
+    private static string? TryUnprotectForCurrentUser(string value)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+        return CryptUnprotect(value);
+    }
+
+    private static void TryOpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+        }
+    }
+
     private static void Log(string message)
     {
         var path = LogPath();
@@ -3085,7 +3474,11 @@ internal sealed partial class LearnBotLocalAgent
     private async Task<CliCodexServerPlanFetchResult> FetchCliCodexServerPlan(
         CliCodexCommandPreviewReport preview,
         string? webToken,
-        CliCodexPatchDryRunApprovalHandoffPreview? patchDryRunApprovalHandoffPreview = null)
+        CliCodexPatchDryRunApprovalHandoffPreview? patchDryRunApprovalHandoffPreview = null,
+        bool autoLoop = true,
+        bool noApply = false,
+        TimeSpan? pollTimeout = null,
+        TimeSpan? approvalTimeout = null)
     {
         var readiness = BuildCliWebSessionServerPlanReadinessReport();
         var submissionBody = BuildCliCodexServerSubmissionBody(preview, patchDryRunApprovalHandoffPreview);
@@ -3101,6 +3494,7 @@ internal sealed partial class LearnBotLocalAgent
                 webTokenProvided: false,
                 httpStatusCode: null,
                 serverResponse: null,
+                autoLoop: null,
                 error: "web token is required; pass --web-token or set LEARNBOT_WEB_TOKEN");
         }
         if (!preview.ServerSubmissionPlan.ReadyForDisabledPlan)
@@ -3115,6 +3509,7 @@ internal sealed partial class LearnBotLocalAgent
                 webTokenProvided: true,
                 httpStatusCode: null,
                 serverResponse: null,
+                autoLoop: null,
                 error: "server submission plan is not ready");
         }
 
@@ -3127,16 +3522,57 @@ internal sealed partial class LearnBotLocalAgent
             using var response = await client.PostAsync(preview.ServerSubmissionPlan.Endpoint, Json(submissionBody));
             var body = await response.Content.ReadAsStringAsync();
             var responseBody = string.IsNullOrWhiteSpace(body) ? null : JsonSerializer.Deserialize<object>(body, JsonOptions);
+            CliCodexServerAutoLoopResult? autoLoopResult = null;
+            if (response.IsSuccessStatusCode && autoLoop)
+            {
+                try
+                {
+                    autoLoopResult = await RunCliCodexServerAutoLoop(
+                        preview,
+                        client,
+                        body,
+                        noApply,
+                        pollTimeout ?? TimeSpan.FromMinutes(5),
+                        approvalTimeout ?? TimeSpan.FromMinutes(10));
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+                {
+                    autoLoopResult = BuildCliCodexServerAutoLoopResult(
+                        "FAILED",
+                        enabled: true,
+                        started: true,
+                        loopId: null,
+                        approvalRequestId: null,
+                        approvalUrl: null,
+                        approvalObserved: false,
+                        approvalState: null,
+                        releaseAttempted: false,
+                        releaseForExecutionAttempted: false,
+                        mutationApplied: false,
+                        timedOut: false,
+                        iterations: 0,
+                        localAgentPolls: 0,
+                        events: [],
+                        lastStatus: null,
+                        releaseReadiness: null,
+                        releaseBoundary: null,
+                        releaseForExecution: null,
+                        blockers: ["auto loop failed after run creation; rerun with --no-auto-loop to inspect the raw server response"],
+                        error: ex.Message,
+                        reason: "The server run was created, but CLI auto-advance failed before completion.");
+                }
+            }
             return BuildCliCodexServerPlanFetchResult(
                 preview,
                 submissionBody,
                 readiness,
-                status: response.IsSuccessStatusCode ? "FETCHED_DISABLED_PLAN" : "FAILED",
+                status: response.IsSuccessStatusCode ? "RUN_CREATED" : "FAILED",
                 attempted: true,
                 networkCallEnabled: true,
                 webTokenProvided: true,
                 httpStatusCode: (int)response.StatusCode,
                 serverResponse: responseBody,
+                autoLoop: autoLoopResult,
                 error: response.IsSuccessStatusCode ? null : "server returned a non-success status");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
@@ -3151,8 +3587,400 @@ internal sealed partial class LearnBotLocalAgent
                 webTokenProvided: true,
                 httpStatusCode: null,
                 serverResponse: null,
+                autoLoop: null,
                 error: ex.Message);
         }
+    }
+
+    private async Task<CliCodexServerAutoLoopResult> RunCliCodexServerAutoLoop(
+        CliCodexCommandPreviewReport preview,
+        HttpClient webClient,
+        string startResponseBody,
+        bool noApply,
+        TimeSpan pollTimeout,
+        TimeSpan approvalTimeout)
+    {
+        var events = new List<CliCodexServerAutoLoopEvent>();
+        object? lastStatus = null;
+        object? releaseReadiness = null;
+        object? releaseBoundary = null;
+        object? releaseForExecution = null;
+        Guid? loopId = null;
+        Guid? approvalRequestId = null;
+        var approvalObserved = false;
+        string? approvalState = null;
+        var releaseAttempted = false;
+        var releaseForExecutionAttempted = false;
+        var mutationApplied = false;
+        var localAgentPolls = 0;
+        var iterations = 0;
+        var blockers = new List<string>();
+        var started = false;
+        var timedOut = false;
+        string? error = null;
+
+        try
+        {
+            using var startDocument = JsonDocument.Parse(startResponseBody);
+            loopId = TryGetGuid(startDocument.RootElement, "loopId");
+            started = loopId is not null;
+        }
+        catch (JsonException ex)
+        {
+            error = "failed to parse loop run response: " + ex.Message;
+        }
+
+        if (loopId is null || preview.ServerSubmissionPlan.RepositoryId is null)
+        {
+            blockers.Add(loopId is null ? "server did not return loopId" : "repository id is missing");
+            return BuildCliCodexServerAutoLoopResult(
+                "BLOCKED",
+                enabled: true,
+                started,
+                loopId,
+                approvalRequestId,
+                approvalUrl: null,
+                approvalObserved,
+                approvalState,
+                releaseAttempted,
+                releaseForExecutionAttempted,
+                mutationApplied,
+                timedOut,
+                iterations,
+                localAgentPolls,
+                events,
+                lastStatus,
+                releaseReadiness,
+                releaseBoundary,
+                releaseForExecution,
+                blockers,
+                error,
+                "Server run creation succeeded, but the CLI could not identify the loop to poll.");
+        }
+
+        var config = LoadConfigOrDefault();
+        var serverUrl = (config.ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        var approvalUrl = (string?)null;
+        var deadline = DateTimeOffset.UtcNow.Add(pollTimeout);
+        DateTimeOffset? approvalDeadline = null;
+        var finalStatus = "RUNNING";
+        var reason = "The CLI advanced server loop status and processed Local Agent work inline.";
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            iterations++;
+            var statusElement = await GetJsonElement(
+                webClient,
+                BuildLoopStatusPath(loopId.Value, preview.ServerSubmissionPlan.RepositoryId.Value, preview.ServerSubmissionPlan.AgentId, preview.ServerSubmissionPlan.WorkspaceId));
+            lastStatus = ToJsonObject(statusElement);
+            var actionKey = TryGetString(statusElement, "actionKey");
+            var runnerDecision = TryGetString(statusElement, "runnerDecision");
+            events.Add(AutoLoopEvent("status", actionKey ?? runnerDecision ?? "UNKNOWN", TryGetString(statusElement, "reason")));
+
+            var discoveredApprovalId = TryGetApprovalRequestId(statusElement);
+            if (discoveredApprovalId is not null)
+            {
+                approvalRequestId ??= discoveredApprovalId;
+                approvalUrl ??= serverUrl + "/code";
+            }
+
+            if (approvalRequestId is not null)
+            {
+                var approvalElement = await GetJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}");
+                approvalState = TryGetString(approvalElement, "approvalState") ?? TryGetString(approvalElement, "status");
+                var toolStatus = TryGetString(approvalElement, "status");
+                approvalObserved = string.Equals(approvalState, "APPROVED", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(toolStatus, "APPROVED_HELD", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(toolStatus, "APPROVED", StringComparison.OrdinalIgnoreCase);
+                events.Add(AutoLoopEvent("approval", approvalState ?? toolStatus ?? "UNKNOWN", approvalObserved ? "approval observed" : "waiting for browser approval"));
+
+                if (string.Equals(approvalState, "DENIED", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(toolStatus, "REJECTED", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(toolStatus, "CANCELLED", StringComparison.OrdinalIgnoreCase))
+                {
+                    finalStatus = "APPROVAL_DENIED";
+                    reason = "The user denied or cancelled the approval request; no patch was released.";
+                    break;
+                }
+
+                if (noApply)
+                {
+                    finalStatus = "APPROVAL_REQUIRED";
+                    blockers.Add("no-apply mode requested; approval and release are not automated");
+                    reason = "The CLI stopped after creating the approval request because --no-apply was requested.";
+                    break;
+                }
+
+                approvalDeadline ??= DateTimeOffset.UtcNow.Add(approvalTimeout);
+                if (!approvalObserved)
+                {
+                    if (DateTimeOffset.UtcNow >= approvalDeadline.Value)
+                    {
+                        finalStatus = "APPROVAL_TIMED_OUT";
+                        timedOut = true;
+                        blockers.Add("approval timeout elapsed before browser approval");
+                        reason = "The CLI created the approval request but did not observe approval before the timeout.";
+                        break;
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                    continue;
+                }
+
+                if (!releaseAttempted)
+                {
+                    releaseReadiness = ToJsonObject(await GetJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/readiness"));
+                    await PostJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/fresh-observations", new { });
+                    releaseBoundary = ToJsonObject(await PostJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/release", new { }));
+                    releaseAttempted = true;
+                    events.Add(AutoLoopEvent("release-readiness", "CHECKED", "fresh observations and release boundary were requested"));
+                }
+
+                if (await PollOnce(config, quiet: true))
+                {
+                    localAgentPolls++;
+                    events.Add(AutoLoopEvent("local-agent", "CLAIM_PROCESSED", "processed queued Local Agent work"));
+                    continue;
+                }
+
+                if (!releaseForExecutionAttempted)
+                {
+                    try
+                    {
+                        releaseForExecution = ToJsonObject(await PostJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/release-for-execution", new { }));
+                        releaseForExecutionAttempted = true;
+                        events.Add(AutoLoopEvent("release-for-execution", "ATTEMPTED", "approved patch was released for Local Agent claim"));
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        releaseForExecutionAttempted = true;
+                        error = ex.Message;
+                        blockers.Add("release-for-execution failed; release flags or readiness gates may be disabled");
+                        finalStatus = "RELEASE_BLOCKED";
+                        reason = "Approval was observed, but the server refused to release the patch for execution.";
+                        break;
+                    }
+                    continue;
+                }
+
+                if (await PollOnce(config, quiet: true))
+                {
+                    localAgentPolls++;
+                    events.Add(AutoLoopEvent("local-agent", "CLAIM_PROCESSED", "processed approved execution work"));
+                    continue;
+                }
+            }
+
+            if (string.Equals(actionKey, "QUEUE_READ_ONLY_OBSERVATION", StringComparison.OrdinalIgnoreCase)
+                || TryGetBool(statusElement, "advanceAvailable") == true)
+            {
+                var advance = await PostJsonElement(
+                    webClient,
+                    $"/api/code-agent/loop/runs/{loopId}/advance?repositoryId={preview.ServerSubmissionPlan.RepositoryId}",
+                    new
+                    {
+                        agentId = preview.ServerSubmissionPlan.AgentId,
+                        workspaceId = preview.ServerSubmissionPlan.WorkspaceId
+                    });
+                lastStatus = ToJsonObject(advance);
+                events.Add(AutoLoopEvent("advance", TryGetString(advance, "runnerDecision") ?? "ADVANCED", TryGetString(advance, "reason")));
+            }
+
+            if (await PollOnce(config, quiet: true))
+            {
+                localAgentPolls++;
+                events.Add(AutoLoopEvent("local-agent", "CLAIM_PROCESSED", "processed queued Local Agent work"));
+                continue;
+            }
+
+            if (string.Equals(actionKey, "STOP_WITH_REASON", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(runnerDecision, "STOPPED", StringComparison.OrdinalIgnoreCase))
+            {
+                finalStatus = "STOPPED";
+                reason = "The server loop reached a stopped state.";
+                break;
+            }
+
+            if (approvalRequestId is null && !TryGetBool(statusElement, "waitingForLocalAgent").GetValueOrDefault())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+
+        if (DateTimeOffset.UtcNow >= deadline && finalStatus == "RUNNING")
+        {
+            finalStatus = "TIMED_OUT";
+            timedOut = true;
+            blockers.Add("poll timeout elapsed before the loop reached a terminal state");
+            reason = "The CLI did not reach approval, release, or a terminal server state before the polling timeout.";
+        }
+
+        mutationApplied = releaseForExecutionAttempted && finalStatus != "RELEASE_BLOCKED";
+        return BuildCliCodexServerAutoLoopResult(
+            finalStatus,
+            enabled: true,
+            started,
+            loopId,
+            approvalRequestId,
+            approvalUrl,
+            approvalObserved,
+            approvalState,
+            releaseAttempted,
+            releaseForExecutionAttempted,
+            mutationApplied,
+            timedOut,
+            iterations,
+            localAgentPolls,
+            events,
+            lastStatus,
+            releaseReadiness,
+            releaseBoundary,
+            releaseForExecution,
+            blockers,
+            error,
+            reason);
+    }
+
+    private static CliCodexServerAutoLoopResult BuildCliCodexServerAutoLoopResult(
+        string status,
+        bool enabled,
+        bool started,
+        Guid? loopId,
+        Guid? approvalRequestId,
+        string? approvalUrl,
+        bool approvalObserved,
+        string? approvalState,
+        bool releaseAttempted,
+        bool releaseForExecutionAttempted,
+        bool mutationApplied,
+        bool timedOut,
+        int iterations,
+        int localAgentPolls,
+        IReadOnlyList<CliCodexServerAutoLoopEvent> events,
+        object? lastStatus,
+        object? releaseReadiness,
+        object? releaseBoundary,
+        object? releaseForExecution,
+        IReadOnlyList<string> blockers,
+        string? error,
+        string reason) =>
+        new(
+            Schema: "learnbot.local-agent.codex-server-auto-loop-result.v1",
+            Status: status,
+            Enabled: enabled,
+            Started: started,
+            LoopId: loopId,
+            ApprovalRequestId: approvalRequestId,
+            ApprovalUrl: approvalUrl,
+            ApprovalObserved: approvalObserved,
+            ApprovalState: approvalState,
+            ReleaseAttempted: releaseAttempted,
+            ReleaseForExecutionAttempted: releaseForExecutionAttempted,
+            MutationApplied: mutationApplied,
+            TimedOut: timedOut,
+            Iterations: iterations,
+            LocalAgentPolls: localAgentPolls,
+            Events: events,
+            LastStatus: lastStatus,
+            ReleaseReadiness: releaseReadiness,
+            ReleaseBoundary: releaseBoundary,
+            ReleaseForExecution: releaseForExecution,
+            Blockers: blockers.Distinct(StringComparer.Ordinal).ToList(),
+            Error: error,
+            Reason: reason);
+
+    private static CliCodexServerAutoLoopEvent AutoLoopEvent(string stage, string status, string? detail) =>
+        new(stage, status, detail, DateTimeOffset.UtcNow);
+
+    private static string BuildLoopStatusPath(Guid loopId, Guid repositoryId, Guid? agentId, Guid? workspaceId)
+    {
+        var query = new StringBuilder($"/api/code-agent/loop/runs/{loopId}?repositoryId={Uri.EscapeDataString(repositoryId.ToString())}");
+        if (agentId is not null) query.Append("&agentId=").Append(Uri.EscapeDataString(agentId.Value.ToString()));
+        if (workspaceId is not null) query.Append("&workspaceId=").Append(Uri.EscapeDataString(workspaceId.Value.ToString()));
+        return query.ToString();
+    }
+
+    private static async Task<JsonElement> GetJsonElement(HttpClient client, string path)
+    {
+        using var response = await client.GetAsync(path);
+        var text = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"GET {path} failed with HTTP {(int)response.StatusCode}: {text}");
+        }
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> PostJsonElement(HttpClient client, string path, object body)
+    {
+        using var response = await client.PostAsync(path, Json(body));
+        var text = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"POST {path} failed with HTTP {(int)response.StatusCode}: {text}");
+        }
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
+        return document.RootElement.Clone();
+    }
+
+    private static object? ToJsonObject(JsonElement element) =>
+        JsonSerializer.Deserialize<object>(element.GetRawText(), JsonOptions);
+
+    private static string? TryGetString(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+
+    private static bool? TryGetBool(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value)
+            && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? value.GetBoolean()
+                : null;
+
+    private static Guid? TryGetGuid(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+        if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return null;
+    }
+
+    private static Guid? TryGetApprovalRequestId(JsonElement statusElement)
+    {
+        if (TryGetNestedGuid(statusElement, "finalReport", "approvalRequestId") is Guid fromFinal)
+        {
+            return fromFinal;
+        }
+        if (TryGetNestedGuid(statusElement, "advance", "handoff", "approvalRequestId") is Guid fromAdvance)
+        {
+            return fromAdvance;
+        }
+        return null;
+    }
+
+    private static Guid? TryGetNestedGuid(JsonElement element, params string[] path)
+    {
+        var current = element;
+        foreach (var part in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out current))
+            {
+                return null;
+            }
+        }
+        if (current.ValueKind == JsonValueKind.String && Guid.TryParse(current.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return null;
     }
 
     private static CliCodexServerPlanFetchResult BuildCliCodexServerPlanFetchResult(
@@ -3165,7 +3993,8 @@ internal sealed partial class LearnBotLocalAgent
         bool webTokenProvided,
         int? httpStatusCode,
         object? serverResponse,
-        string? error) =>
+        CliCodexServerAutoLoopResult? autoLoop = null,
+        string? error = null) =>
         new(
             Schema: "learnbot.local-agent.codex-server-plan-fetch-result.v1",
             CommandName: preview.CommandName,
@@ -3180,7 +4009,7 @@ internal sealed partial class LearnBotLocalAgent
             UsedLocalAgentToken: false,
             WebTokenProvided: webTokenProvided,
             TokenSecretPrinted: false,
-            RequestCreated: false,
+            RequestCreated: status == "RUN_CREATED",
             MutationAllowed: false,
             Endpoint: preview.ServerSubmissionPlan.Endpoint,
             Method: preview.ServerSubmissionPlan.Method,
@@ -3190,6 +4019,7 @@ internal sealed partial class LearnBotLocalAgent
                 : preview.ServerSubmissionPlan.Blockers,
             HttpStatusCode: httpStatusCode,
             ServerResponse: serverResponse,
+            AutoLoop: autoLoop,
             Error: error);
 
     private static CliCodexReadOnlyServerBridge BuildCliCodexReadOnlyServerBridge(
@@ -3248,6 +4078,9 @@ internal sealed partial class LearnBotLocalAgent
             RunnerPreviewEndpoint: "/api/code-agent/loop/runner/preview",
             SelectToolPreviewEndpoint: "/api/code-agent/loop/runner/select-tool-preview",
             EnqueueSelectedReadOnlyEndpoint: "/api/code-agent/loop/runner/enqueue-selected-read-only",
+            RunStatusEndpoint: "/api/code-agent/loop/runs/{loopId}",
+            AdvanceEndpoint: "/api/code-agent/loop/runs/{loopId}/advance",
+            AutoAdvanceAvailable: planFetched,
             FileDiscoveryReadPlan: oneCycle.FileDiscoveryReadPlan,
             FileDiscoveryPlanEnabled: oneCycle.FileDiscoveryReadPlan.FileDiscoveryPlanEnabled,
             FileReadPlanEnabled: oneCycle.FileDiscoveryReadPlan.FileReadPlanEnabled,
@@ -5262,17 +6095,17 @@ internal sealed partial class LearnBotLocalAgent
                 && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "rag-freshness-update" && !stage.Ready && !stage.MutationAllowed)
                 && fix.OneCyclePreview.Blockers.Contains("authenticated server handoff is required before request creation")
                 && fix.ServerSubmissionPlan.Schema == "learnbot.local-agent.codex-server-submission-plan.v1"
-                && fix.ServerSubmissionPlan.Endpoint == "/api/code-agent/loop/submission-plan"
+                && fix.ServerSubmissionPlan.Endpoint == "/api/code-agent/loop/runs"
                 && fix.ServerSubmissionPlan.RepositoryId == repositoryId
                 && fix.ServerSubmissionPlan.SpaceId == spaceId
                 && fix.ServerSubmissionPlan.AgentId == config.AgentId
                 && fix.ServerSubmissionPlan.WorkspaceId == workspaceId
                 && fix.ServerSubmissionPlan.ReadyForDisabledPlan
-                && !fix.ServerSubmissionPlan.Enabled
-                && !fix.ServerSubmissionPlan.NetworkCallEnabled
-                && !fix.ServerSubmissionPlan.RequestCreationEnabled
+                && fix.ServerSubmissionPlan.Enabled
+                && fix.ServerSubmissionPlan.NetworkCallEnabled
+                && fix.ServerSubmissionPlan.RequestCreationEnabled
                 && !fix.ServerSubmissionPlan.ServerConversationCreationEnabled
-                && !fix.ServerSubmissionPlan.LoopPreviewExecutionEnabled
+                && fix.ServerSubmissionPlan.LoopPreviewExecutionEnabled
                 && fix.ServerSubmissionPlan.BodyPreview.TryGetValue("repositoryId", out var bodyRepositoryId)
                 && bodyRepositoryId is Guid bodyRepositoryGuid
                 && bodyRepositoryGuid == repositoryId
@@ -6149,6 +6982,9 @@ internal sealed partial class LearnBotLocalAgent
                 && blocked.ReadOnlyServerBridge.RunnerPreviewEndpoint == "/api/code-agent/loop/runner/preview"
                 && blocked.ReadOnlyServerBridge.SelectToolPreviewEndpoint == "/api/code-agent/loop/runner/select-tool-preview"
                 && blocked.ReadOnlyServerBridge.EnqueueSelectedReadOnlyEndpoint == "/api/code-agent/loop/runner/enqueue-selected-read-only"
+                && blocked.ReadOnlyServerBridge.RunStatusEndpoint == "/api/code-agent/loop/runs/{loopId}"
+                && blocked.ReadOnlyServerBridge.AdvanceEndpoint == "/api/code-agent/loop/runs/{loopId}/advance"
+                && !blocked.ReadOnlyServerBridge.AutoAdvanceAvailable
                 && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.Schema == "learnbot.local-agent.codex-file-discovery-read-plan.v1"
                 && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.DryRunOnly
                 && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.PlanPrepared
@@ -6198,7 +7034,7 @@ internal sealed partial class LearnBotLocalAgent
                 && !blocked.TokenSecretPrinted
                 && !blocked.RequestCreated
                 && !blocked.MutationAllowed
-                && blocked.Endpoint == "/api/code-agent/loop/submission-plan"
+                && blocked.Endpoint == "/api/code-agent/loop/runs"
                 && blocked.Method == "POST"
                 && blocked.ServerSubmissionPlan.ReadyForDisabledPlan
                 && blocked.ServerSubmissionPlan.BodyPreview.TryGetValue("patchDryRunApprovalHandoffPreview", out var submittedHandoff)
@@ -8295,12 +9131,14 @@ internal sealed partial class LearnBotLocalAgent
     private static int Help()
     {
         Console.WriteLine("""
+        learnbot pair --server http://localhost:8083 [--workspace <path>] [--transport polling|websocket|auto]
         learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]
         learnbot status
         learnbot doctor
         learnbot m8 status
         learnbot m8 doctor
-        learnbot login [--login-id <login-id>|--email <email>] [--remember]
+        learnbot login [--server <url>] [--no-open]
+        learnbot login --plan [--login-id <login-id>|--email <email>] [--remember]
         learnbot session status
         learnbot session plan [--server <url>] [--offline]
         learnbot session create-plan [--server <url>] [--offline]
@@ -8328,8 +9166,8 @@ internal sealed partial class LearnBotLocalAgent
         learnbot file read --workspace-id <workspace-id> --path <relative-path>
         learnbot git status --workspace-id <workspace-id>
         learnbot git diff --workspace-id <workspace-id> [--path <relative-path>] [--max-bytes <bytes>]
-        learnbot fix --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--include-approval-handoff-preview]] [--web-token <token>]
-        learnbot review --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--include-approval-handoff-preview]] [--web-token <token>]
+        learnbot fix --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--no-auto-loop|--no-apply] [--poll-timeout 300] [--approval-timeout 600]] [--web-token <token>]
+        learnbot review --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--no-auto-loop|--no-apply] [--poll-timeout 300] [--approval-timeout 600]] [--web-token <token>]
         learnbot open
         """);
         return 0;

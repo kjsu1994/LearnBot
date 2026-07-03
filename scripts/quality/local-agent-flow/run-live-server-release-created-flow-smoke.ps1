@@ -113,6 +113,7 @@ $spaceId = [Guid]::NewGuid()
 $repositoryId = [Guid]::NewGuid()
 $loopId = [Guid]::NewGuid()
 $sourceRequestId = [Guid]::NewGuid()
+$approvalRequestId = [Guid]::NewGuid()
 $gitStatusRequestId = [Guid]::NewGuid()
 $dryRunRequestId = [Guid]::NewGuid()
 $cleanupSql = @()
@@ -189,6 +190,7 @@ try {
         gitRoot = $gitRoot.Replace("\", "/")
     }
     $commonPatchInput = [ordered]@{
+        schemaVersion = 1
         workspaceId = $workspaceId
         diff = $diff
         targetFiles = @("src/App.cs")
@@ -196,6 +198,8 @@ try {
             path = "src/App.cs"
             sha256 = $originalHash
         })
+        requiresSnapshot = $true
+        staleIndexPolicy = "REQUIRE_EXPECTED_HASH_OR_CONTEXT_MATCH"
         sourceRepository = $sourceRepository
         snapshotPolicy = @{
             required = $true
@@ -220,6 +224,9 @@ try {
     }
     $sourceInput["repositoryId"] = $repositoryId
     $sourceInput["loopId"] = $loopId
+    $sourceInput["approvalRequestId"] = $approvalRequestId.ToString()
+    $sourceInput["approvalPersistenceRequired"] = $true
+    $sourceInput["approvalPersisted"] = $true
     $gitStatusInput = [ordered]@{
         workspaceId = $workspaceId
         sourceRequestId = $sourceRequestId

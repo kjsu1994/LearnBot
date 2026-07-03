@@ -81,6 +81,44 @@ public class CodeAgentLoopTimelineRepository {
                 .addValue("limit", limit), (rs, rowNum) -> mapTimeline(userId, rs));
     }
 
+    public int appendRunStarted(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID agentId,
+            UUID workspaceId,
+            String instruction
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "RUNNING");
+        details.put("decisionKey", "OBSERVATION_ACCEPTED");
+        details.put("nextAction", "Queue the first read-only Local Agent observation.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("QUEUE_SELECTED_READ_ONLY"));
+        details.put("instruction", instruction == null ? "" : instruction);
+        details.put("agentId", agentId == null ? null : agentId.toString());
+        details.put("workspaceId", workspaceId == null ? null : workspaceId.toString());
+        details.put("followUpToolSelectionEnabled", true);
+        details.put("approvalRequiredBeforeSideEffects", true);
+        details.put("requestCreationEnabled", true);
+        details.put("pushEnabled", true);
+        details.put("claimEnabled", true);
+        details.put("mutationEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOOP_NEXT_DECISION_RECORDED",
+                "OBSERVE",
+                AgentExecutionTarget.SERVER_LOCAL,
+                null,
+                false,
+                details
+        );
+    }
+
     public int appendObservationResult(UUID userId, UUID repositoryId, UUID loopId, LocalAgentToolResponse response, Map<String, Object> requestInput) {
         return appendLatestEvent(
                 userId,
@@ -92,6 +130,40 @@ public class CodeAgentLoopTimelineRepository {
                 response.toolName(),
                 response.toolName().isSideEffectful(),
                 observationDetails(response, requestInput)
+        );
+    }
+
+    public int appendReadOnlyRequestQueued(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID requestId,
+            LocalAgentToolRequest request
+    ) {
+        Map<String, Object> details = requestDetails(request, "QUEUED", null);
+        details.put("requestId", requestId == null ? null : requestId.toString());
+        details.put("decisionKey", "WAIT_FOR_LOCAL_AGENT_OBSERVATION");
+        details.put("nextAction", "Wait for the Local Agent to complete the queued read-only observation before advancing again.");
+        details.put("recommendedAction", CodeAgentLoopRecommendedActionFactory.create("WAIT_FOR_LOCAL_AGENT"));
+        details.put("readOnlyRequestQueued", true);
+        details.put("requestCreationEnabled", true);
+        details.put("enqueueEnabled", true);
+        details.put("pushEnabled", true);
+        details.put("claimEnabled", true);
+        details.put("mutationEnabled", false);
+        details.put("finalResultEnabled", false);
+        details.put("publicationEnabled", false);
+        details.put("acknowledgementEnabled", false);
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "LOCAL_AGENT_READ_ONLY_REQUEST_QUEUED",
+                "OBSERVE",
+                request.executionTarget(),
+                request.toolName(),
+                false,
+                details
         );
     }
 
@@ -870,7 +942,76 @@ public class CodeAgentLoopTimelineRepository {
         if (response.output().containsKey("snapshotCreated")) {
             details.put("snapshotCreated", response.output().get("snapshotCreated"));
         }
+        details.put("outputSummary", outputSummary(response));
         return details;
+    }
+
+    private Map<String, Object> outputSummary(LocalAgentToolResponse response) {
+        Map<String, Object> output = response.output() == null ? Map.of() : response.output();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        if (response.toolName() == LocalAgentToolName.WORKSPACE_SEARCH) {
+            summary.put("query", output.get("query"));
+            summary.put("matchCount", output.get("matchCount"));
+            summary.put("matches", limitedPathMaps(output.get("matches"), 30, true));
+        } else if (response.toolName() == LocalAgentToolName.WORKSPACE_TREE) {
+            summary.put("entryCount", output.get("entryCount"));
+            summary.put("truncated", output.get("truncated"));
+            summary.put("entries", limitedPathMaps(output.get("entries"), 80, false));
+        } else if (response.toolName() == LocalAgentToolName.FILE_READ) {
+            summary.put("relativePath", output.get("relativePath"));
+            summary.put("bytes", output.get("bytes"));
+            summary.put("returnedBytes", output.get("returnedBytes"));
+            summary.put("truncated", output.get("truncated"));
+            summary.put("contentPreview", preview(output.get("content"), 1200));
+        } else if (response.toolName() == LocalAgentToolName.GIT_STATUS || response.toolName() == LocalAgentToolName.GIT_DIFF) {
+            summary.put("clean", output.get("clean"));
+            summary.put("branch", output.get("branch"));
+            summary.put("changedFiles", output.get("changedFiles"));
+            summary.put("diffPreview", preview(output.get("diff"), 1200));
+        }
+        return java.util.Collections.unmodifiableMap(summary);
+    }
+
+    private List<Map<String, Object>> limitedPathMaps(Object value, int limit, boolean includeSnippet) {
+        if (!(value instanceof List<?> items)) {
+            return List.of();
+        }
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (Object item : items) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Object path = map.get("path");
+            if (path == null || String.valueOf(path).isBlank()) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("path", String.valueOf(path));
+            if (map.containsKey("type")) {
+                row.put("type", map.get("type"));
+            }
+            if (map.containsKey("bytes")) {
+                row.put("bytes", map.get("bytes"));
+            }
+            if (includeSnippet) {
+                row.put("line", map.get("line"));
+                row.put("column", map.get("column"));
+                row.put("snippet", preview(map.get("snippet"), 240));
+            }
+            result.add(java.util.Collections.unmodifiableMap(row));
+            if (result.size() >= limit) {
+                break;
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private String preview(Object value, int maxChars) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value);
+        return text.length() <= maxChars ? text : text.substring(0, maxChars);
     }
 
     private Map<String, Object> approvalDetails(
@@ -901,6 +1042,7 @@ public class CodeAgentLoopTimelineRepository {
         details.put("dryRunOnly", booleanValue(requestInput.get("dryRunOnly"), null));
         details.put("mutationAllowed", booleanValue(requestInput.get("mutationAllowed"), null));
         details.put("approvalRequestId", stringValue(requestInput.get("approvalRequestId"), null));
+        details.put("targetFiles", requestInput.getOrDefault("targetFiles", List.of()));
         return details;
     }
 

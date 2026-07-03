@@ -49,7 +49,7 @@ public record LocalAgentToolRequest(
 
     private static boolean requiresWorkspace(LocalAgentToolName toolName) {
         return switch (toolName) {
-            case FILE_READ, PATCH_APPLY, GIT_STATUS, GIT_DIFF, COMMAND_RUN_ALLOWED, ROLLBACK_RESTORE -> true;
+            case WORKSPACE_TREE, WORKSPACE_SEARCH, FILE_READ, PATCH_APPLY, GIT_STATUS, GIT_DIFF, COMMAND_RUN_ALLOWED, ROLLBACK_RESTORE -> true;
             case AGENT_STATUS, AGENT_DOCTOR, WORKSPACE_LIST, WORKSPACE_ADD -> false;
         };
     }

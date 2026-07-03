@@ -510,7 +510,11 @@ public class CodeAgentLoopToolSelectionService {
     }
 
     private boolean safeReadOnlyCandidate(CodeAgentLoopToolCandidate candidate) {
-        return (candidate.toolName() == LocalAgentToolName.GIT_STATUS || candidate.toolName() == LocalAgentToolName.GIT_DIFF)
+        return (candidate.toolName() == LocalAgentToolName.WORKSPACE_TREE
+                    || candidate.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
+                    || candidate.toolName() == LocalAgentToolName.FILE_READ
+                    || candidate.toolName() == LocalAgentToolName.GIT_STATUS
+                    || candidate.toolName() == LocalAgentToolName.GIT_DIFF)
                 && candidate.approvalState() == LocalAgentApprovalState.NOT_REQUIRED
                 && !candidate.sideEffectful()
                 && !candidate.requiresApproval()
@@ -644,7 +648,11 @@ public class CodeAgentLoopToolSelectionService {
                 .map(timeline -> {
                     long completedReadOnlyObservations = timeline.events().stream()
                             .filter(event -> "LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType()))
-                            .filter(event -> event.toolName() == LocalAgentToolName.GIT_STATUS || event.toolName() == LocalAgentToolName.GIT_DIFF)
+                            .filter(event -> event.toolName() == LocalAgentToolName.WORKSPACE_TREE
+                                    || event.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
+                                    || event.toolName() == LocalAgentToolName.FILE_READ
+                                    || event.toolName() == LocalAgentToolName.GIT_STATUS
+                                    || event.toolName() == LocalAgentToolName.GIT_DIFF)
                             .filter(event -> !event.mayMutate())
                             .filter(event -> "SUCCEEDED".equals(String.valueOf(event.details().get("status"))))
                             .count();
@@ -769,7 +777,13 @@ public class CodeAgentLoopToolSelectionService {
     private Map<String, Object> guardrails() {
         Map<String, Object> guardrails = new LinkedHashMap<>();
         guardrails.put("modelToolSelectionEnabled", true);
-        guardrails.put("allowedTools", java.util.List.of(LocalAgentToolName.GIT_STATUS.wireName(), LocalAgentToolName.GIT_DIFF.wireName()));
+        guardrails.put("allowedTools", java.util.List.of(
+                LocalAgentToolName.WORKSPACE_TREE.wireName(),
+                LocalAgentToolName.WORKSPACE_SEARCH.wireName(),
+                LocalAgentToolName.FILE_READ.wireName(),
+                LocalAgentToolName.GIT_STATUS.wireName(),
+                LocalAgentToolName.GIT_DIFF.wireName()
+        ));
         guardrails.put("requestCreationEnabled", false);
         guardrails.put("enqueueEnabled", false);
         guardrails.put("sideEffectfulToolsBlocked", true);
@@ -853,7 +867,7 @@ public class CodeAgentLoopToolSelectionService {
         return """
                 You select one safe LearnBot Local Agent tool candidate.
                 Return JSON only.
-                Allowed tools: git.status, git.diff.
+                Allowed tools: workspace.tree, workspace.search, file.read, git.status, git.diff.
                 You must not select side-effectful tools.
                 mutationAllowed must be false.
                 requiresApproval must be false.

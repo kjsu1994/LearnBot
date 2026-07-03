@@ -104,6 +104,35 @@ public class AuthService {
         return new AuthResponse(null, null, null, null, toSummary(user), securityRepository.listSpacesForUser(user), null);
     }
 
+    public AuthResponse issueCliSession(AppUser user) {
+        if (user == null) {
+            throw new UnauthorizedException("Authentication is required.");
+        }
+        IssuedSession session = issueSessionTokens(user.id(), false);
+        securityRepository.createAuditLog(
+                user.id(),
+                "CLI_DEVICE_SESSION_APPROVED",
+                "USER",
+                user.id().toString(),
+                null,
+                "User approved a CLI device session.",
+                java.util.Map.of()
+        );
+        return new AuthResponse(
+                session.accessToken(),
+                session.accessExpiresAt(),
+                session.refreshToken(),
+                session.refreshExpiresAt(),
+                toSummary(user),
+                securityRepository.listSpacesForUser(user),
+                false
+        );
+    }
+
+    public AuthResponse issueCliSession(UUID userId) {
+        return issueCliSession(activeUser(userId));
+    }
+
     public AuthResponse refreshSession(String refreshToken) {
         String refreshTokenHash = tokenHash(refreshToken);
         if (securityRepository.supportsRefreshSessions()) {

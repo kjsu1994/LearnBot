@@ -47,7 +47,8 @@ class LocalAgentToolGatewayServiceTest {
     private final CodeAgentLoopTimelineRepository loopTimelineRepository = mock(CodeAgentLoopTimelineRepository.class);
     private final LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
     private final LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
-    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher);
+    private final LearnBotProperties properties = releaseDisabledProperties();
+    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher, properties);
 
     @Test
     void enqueuePersistsReadOnlyRequestForConnectedApprovedWorkspace() {
@@ -2606,13 +2607,13 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("commandId", "dotnet.version")
                 .containsEntry("timeoutSeconds", 30)
                 .containsEntry("maxOutputBytes", 4096);
-        assertThat(requestCaptor.getAllValues().get(2).input())
-                .containsEntry("manifestId", "snap-1234")
-                .containsEntry("snapshotManifestId", "snap-1234");
         assertThat(requestCaptor.getAllValues().get(0).createdAt())
                 .isBefore(requestCaptor.getAllValues().get(1).createdAt());
         assertThat(requestCaptor.getAllValues().get(1).createdAt())
                 .isBefore(requestCaptor.getAllValues().get(2).createdAt());
+        assertThat(requestCaptor.getAllValues().get(2).input())
+                .containsEntry("manifestId", "snap-1234")
+                .containsEntry("snapshotManifestId", "snap-1234");
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -9250,6 +9251,14 @@ class LocalAgentToolGatewayServiceTest {
     private LearnBotProperties releaseEnabledProperties() {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getLocalAgent().setPatchExecutionReleaseEnabled(true);
+        properties.getLocalAgent().setApprovedExecutionSequenceCreationEnabled(false);
+        return properties;
+    }
+
+    private LearnBotProperties releaseDisabledProperties() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getLocalAgent().setPatchExecutionReleaseEnabled(false);
+        properties.getLocalAgent().setApprovedExecutionSequenceCreationEnabled(false);
         return properties;
     }
 

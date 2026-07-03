@@ -24,7 +24,7 @@ class CodeGraphLlmEnricherTest {
         OllamaClient ollama = mock(OllamaClient.class);
         UUID chunkId = UUID.randomUUID();
         CodeGraph graph = graph(chunkId);
-        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(512), any(Duration.class)))
+        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(1024), any(Duration.class)))
                 .thenReturn(chat("""
                 {"relations":[
                   {"sourceKey":"method:a","targetKey":"method:b","type":"CALLS"},
@@ -50,7 +50,7 @@ class CodeGraphLlmEnricherTest {
         OllamaClient ollama = mock(OllamaClient.class);
         UUID chunkId = UUID.randomUUID();
         CodeGraph graph = graph(chunkId);
-        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(512), any(Duration.class)))
+        when(ollama.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), eq(1024), any(Duration.class)))
                 .thenThrow(new IllegalStateException("offline"));
         CodeGraphLlmEnricher enricher = new CodeGraphLlmEnricher(properties, ollama, new ObjectMapper());
 

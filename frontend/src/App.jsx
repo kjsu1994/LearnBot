@@ -229,6 +229,7 @@ export default function App() {
     codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
     localAgentTokens,
+    localAgentDeviceApprovalResult,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -287,6 +288,7 @@ export default function App() {
     refreshLocalAgentStatus,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
+    approveLocalAgentDeviceSession,
     applyCodeAgentPatch,
     rollbackCodeAgentPatch,
     runCodeAgentTest,
@@ -1056,6 +1058,7 @@ export default function App() {
             codeAgentValidatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
             localAgentStatus={localAgentStatus}
             localAgentTokens={localAgentTokens}
+            localAgentDeviceApprovalResult={localAgentDeviceApprovalResult}
             codeConversations={codeConversations}
             codeConversationId={codeConversationId}
             codeConversationTurns={codeConversationTurns}
@@ -1115,6 +1118,7 @@ export default function App() {
             refreshLocalAgentStatus={refreshLocalAgentStatus}
             refreshLocalAgentTokens={refreshLocalAgentTokens}
             revokeLocalAgentToken={revokeLocalAgentToken}
+            approveLocalAgentDeviceSession={approveLocalAgentDeviceSession}
             applyCodeAgentPatch={applyCodeAgentPatch}
             rollbackCodeAgentPatch={rollbackCodeAgentPatch}
             runCodeAgentTest={runCodeAgentTest}

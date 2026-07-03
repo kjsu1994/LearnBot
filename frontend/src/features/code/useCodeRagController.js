@@ -78,6 +78,7 @@ export function useCodeRagController({
   const [codeAgentValidatedDryRunIntentTransitionPreview, setCodeAgentValidatedDryRunIntentTransitionPreview] = useState(null);
   const [localAgentStatus, setLocalAgentStatus] = useState(null);
   const [localAgentTokens, setLocalAgentTokens] = useState([]);
+  const [localAgentDeviceApprovalResult, setLocalAgentDeviceApprovalResult] = useState(null);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeConversations, setCodeConversations] = useState([]);
   const [codeConversationId, setCodeConversationId] = useState('');
@@ -1021,6 +1022,25 @@ export function useCodeRagController({
     });
   }
 
+  async function approveLocalAgentDeviceSession(userCode) {
+    const cleanUserCode = String(userCode || '').trim();
+    if (!cleanUserCode) {
+      setLocalAgentDeviceApprovalResult({
+        status: 'BLOCKED',
+        error: 'user code is required',
+      });
+      return null;
+    }
+    return await run('local-agent-device-approval', async () => {
+      const result = await request('/api/auth/cli-device-session/claim', {
+        method: 'POST',
+        json: { userCode: cleanUserCode },
+      });
+      setLocalAgentDeviceApprovalResult(result);
+      return result;
+    });
+  }
+
   async function generateCodeAgentPatch() {
     const instruction = codeAgentInstruction.trim();
     const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
@@ -1421,6 +1441,7 @@ export function useCodeRagController({
     codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
     localAgentTokens,
+    localAgentDeviceApprovalResult,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -1480,6 +1501,7 @@ export function useCodeRagController({
     refreshCodeAgentMutationPolicy,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,
+    approveLocalAgentDeviceSession,
     applyCodeAgentPatch,
     rollbackCodeAgentPatch,
     runCodeAgentTest,

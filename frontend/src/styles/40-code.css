@@ -93,6 +93,86 @@
   overflow-wrap: anywhere;
 }
 
+.code-workspace-product > *,
+.code-workspace-product .right-column,
+.code-workspace-product .rag-chat-panel,
+.code-workspace-product .code-agent-panel {
+  min-width: 0;
+}
+
+.code-workspace-product .code-agent-panel {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.075);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.86);
+  overflow: hidden;
+}
+
+.code-workspace-product .code-agent-panel textarea {
+  background: rgba(10, 10, 11, 0.72);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.code-workspace-product .code-agent-panel textarea::placeholder {
+  color: rgba(226, 232, 240, 0.42);
+}
+
+.code-workspace-product .code-agent-panel .stack label {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.code-workspace-product .code-agent-panel .action-row {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.code-workspace-product .code-agent-panel .action-row button {
+  flex: 1 1 148px;
+  min-width: 0;
+  padding-inline: 10px;
+  white-space: normal;
+}
+
+.code-workspace-product .code-agent-panel .ghost-button {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.code-workspace-product .code-agent-panel .ghost-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(167, 139, 250, 0.32);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.code-workspace-product .local-agent-token-row .bg-emerald-50 {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #a7f3d0;
+}
+
+.code-workspace-product .code-agent-panel .code-agent-result,
+.code-workspace-product .code-agent-panel .detail-box,
+.code-workspace-product .code-agent-panel .compact-box,
+.code-workspace-product .code-agent-panel .local-agent-token-row {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.075);
+  color: rgba(255, 255, 255, 0.68);
+  min-width: 0;
+}
+
+.code-workspace-product .code-agent-panel .result-heading,
+.code-workspace-product .code-agent-panel .local-agent-token-row {
+  min-width: 0;
+}
+
+.code-workspace-product .code-agent-panel pre,
+.code-workspace-product .code-agent-panel code {
+  max-width: 100%;
+}
+
 .file-list {
   display: grid;
   gap: 7px;

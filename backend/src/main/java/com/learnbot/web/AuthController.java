@@ -24,8 +24,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.security.SecureRandom;
+import java.time.OffsetDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -33,9 +38,13 @@ public class AuthController {
     private static final String ACCESS_TOKEN_COOKIE_NAME = "learnbot_access_token";
     private static final String REFRESH_TOKEN_COOKIE_NAME = "learnbot_refresh_token";
     private static final String COOKIE_PATH = "/api";
+    private static final int CLI_DEVICE_SESSION_TTL_SECONDS = 600;
+    private static final int CLI_DEVICE_SESSION_POLL_SECONDS = 5;
 
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
+    private final SecureRandom secureRandom = new SecureRandom();
+    private final Map<String, PendingCliDeviceSession> pendingCliDeviceSessions = new ConcurrentHashMap<>();
 
     public AuthController(AuthService authService, CurrentUserProvider currentUserProvider) {
         this.authService = authService;
@@ -137,6 +146,36 @@ public class AuthController {
         );
     }
 
+    @PostMapping("/cli-device-session/create")
+    Map<String, Object> cliDeviceSessionCreate(@RequestBody(required = false) CliDeviceSessionCreatePlanRequest request) {
+        cleanupExpiredCliDeviceSessions();
+        String deviceCode = randomSecret();
+        String userCode = newUserCode();
+        OffsetDateTime expiresAt = OffsetDateTime.now().plusSeconds(CLI_DEVICE_SESSION_TTL_SECONDS);
+        pendingCliDeviceSessions.put(deviceCode, new PendingCliDeviceSession(
+                deviceCode,
+                userCode,
+                request == null ? null : request.clientName(),
+                request == null ? null : request.cliVersion(),
+                expiresAt,
+                null,
+                null,
+                false
+        ));
+        return Map.of(
+                "schema", "learnbot.server.auth.cli-device-session-create.v1",
+                "status", "PENDING_BROWSER_APPROVAL",
+                "deviceCode", deviceCode,
+                "userCode", userCode,
+                "expiresAt", expiresAt.toString(),
+                "intervalSeconds", CLI_DEVICE_SESSION_POLL_SECONDS,
+                "verificationUriPath", "/settings/local-agent/device",
+                "verificationUriCompletePath", "/settings/local-agent/device?user_code=" + userCode,
+                "browserApprovalRequired", true,
+                "tokenSecretPrinted", false
+        );
+    }
+
     @PostMapping("/cli-device-session/claim/plan")
     CliDeviceSessionClaimPlanResponse cliDeviceSessionClaimPlan(@RequestBody(required = false) CliDeviceSessionClaimPlanRequest request) {
         return new CliDeviceSessionClaimPlanResponse(
@@ -179,6 +218,35 @@ public class AuthController {
                 ),
                 List.of("CLI session claim and local web-session artifact storage are disabled until browser approval, polling, and encrypted storage are implemented."),
                 "This read-only claim plan describes the future CLI polling and local web-session artifact boundary without issuing tokens, accepting Local Agent credentials, writing local files, or persisting cookies."
+        );
+    }
+
+    @PostMapping("/cli-device-session/claim")
+    Map<String, Object> cliDeviceSessionClaim(@RequestBody(required = false) Map<String, Object> request) {
+        cleanupExpiredCliDeviceSessions();
+        String userCode = stringValue(request, "userCode");
+        if (userCode == null || userCode.isBlank()) {
+            throw new IllegalArgumentException("userCode is required.");
+        }
+        PendingCliDeviceSession session = pendingCliDeviceSessions.values().stream()
+                .filter(item -> userCode.equalsIgnoreCase(item.userCode()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Device session was not found or expired."));
+        if (session.consumed()) {
+            throw new IllegalArgumentException("Device session was already used.");
+        }
+        if (session.expiresAt().isBefore(OffsetDateTime.now())) {
+            pendingCliDeviceSessions.remove(session.deviceCode());
+            throw new IllegalArgumentException("Device session expired.");
+        }
+        var user = currentUserProvider.currentUser();
+        pendingCliDeviceSessions.put(session.deviceCode(), session.approvedBy(user.id(), OffsetDateTime.now()));
+        return Map.of(
+                "schema", "learnbot.server.auth.cli-device-session-claim.v1",
+                "status", "APPROVED",
+                "userCode", session.userCode(),
+                "approved", true,
+                "tokenSecretPrinted", false
         );
     }
 
@@ -246,6 +314,56 @@ public class AuthController {
                 ),
                 List.of("Encrypted web-session artifact writing is disabled until browser-approved claim results, OS-backed encryption, atomic write, read/decrypt validation, and refresh handling are implemented."),
                 "This read-only claim-result plan fixes the artifact writer preflight contract without accepting tokens, serializing plaintext secrets, writing local files, persisting cookies, or using Local Agent pairing credentials."
+        );
+    }
+
+    @PostMapping("/cli-device-session/claim-result")
+    Map<String, Object> cliDeviceSessionClaimResult(@RequestBody(required = false) Map<String, Object> request) {
+        cleanupExpiredCliDeviceSessions();
+        String deviceCode = stringValue(request, "deviceCode");
+        if (deviceCode == null || deviceCode.isBlank()) {
+            throw new IllegalArgumentException("deviceCode is required.");
+        }
+        PendingCliDeviceSession session = pendingCliDeviceSessions.get(deviceCode);
+        if (session == null || session.expiresAt().isBefore(OffsetDateTime.now())) {
+            pendingCliDeviceSessions.remove(deviceCode);
+            return Map.of(
+                    "schema", "learnbot.server.auth.cli-device-session-claim-result.v1",
+                    "status", "EXPIRED_OR_NOT_FOUND",
+                    "approved", false,
+                    "tokenSecretPrinted", false
+            );
+        }
+        if (session.consumed()) {
+            return Map.of(
+                    "schema", "learnbot.server.auth.cli-device-session-claim-result.v1",
+                    "status", "CONSUMED",
+                    "approved", false,
+                    "tokenSecretPrinted", false
+            );
+        }
+        if (session.approvedUserId() == null) {
+            return Map.of(
+                    "schema", "learnbot.server.auth.cli-device-session-claim-result.v1",
+                    "status", "PENDING_BROWSER_APPROVAL",
+                    "approved", false,
+                    "intervalSeconds", CLI_DEVICE_SESSION_POLL_SECONDS,
+                    "expiresAt", session.expiresAt().toString(),
+                    "tokenSecretPrinted", false
+            );
+        }
+        AuthResponse issued = authService.issueCliSession(session.approvedUserId());
+        pendingCliDeviceSessions.put(deviceCode, session.markConsumed());
+        return Map.of(
+                "schema", "learnbot.server.auth.cli-device-session-claim-result.v1",
+                "status", "APPROVED",
+                "approved", true,
+                "serverUrl", "",
+                "accessToken", issued.token(),
+                "refreshToken", issued.refreshToken(),
+                "expiresAt", issued.expiresAt().toString(),
+                "refreshExpiresAt", issued.refreshExpiresAt().toString(),
+                "tokenSecretPrinted", false
         );
     }
 
@@ -357,5 +475,54 @@ public class AuthController {
 
     private AuthResponse withoutTokens(AuthResponse authResponse) {
         return new AuthResponse(null, null, null, null, authResponse.user(), authResponse.spaces(), null);
+    }
+
+    private void cleanupExpiredCliDeviceSessions() {
+        OffsetDateTime now = OffsetDateTime.now();
+        pendingCliDeviceSessions.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
+    }
+
+    private String randomSecret() {
+        byte[] bytes = new byte[32];
+        secureRandom.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String newUserCode() {
+        byte[] bytes = new byte[6];
+        secureRandom.nextBytes(bytes);
+        String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+                .replace('O', 'A')
+                .replace('0', 'B')
+                .replace('I', 'C')
+                .replace('l', 'D')
+                .toUpperCase();
+        return raw.substring(0, 4) + "-" + raw.substring(4, 8);
+    }
+
+    private String stringValue(Map<String, Object> request, String key) {
+        if (request == null || request.get(key) == null) {
+            return null;
+        }
+        return String.valueOf(request.get(key)).trim();
+    }
+
+    private record PendingCliDeviceSession(
+            String deviceCode,
+            String userCode,
+            String clientName,
+            String cliVersion,
+            OffsetDateTime expiresAt,
+            UUID approvedUserId,
+            OffsetDateTime approvedAt,
+            boolean consumed
+    ) {
+        PendingCliDeviceSession approvedBy(UUID userId, OffsetDateTime now) {
+            return new PendingCliDeviceSession(deviceCode, userCode, clientName, cliVersion, expiresAt, userId, now, consumed);
+        }
+
+        PendingCliDeviceSession markConsumed() {
+            return new PendingCliDeviceSession(deviceCode, userCode, clientName, cliVersion, expiresAt, approvedUserId, approvedAt, true);
+        }
     }
 }

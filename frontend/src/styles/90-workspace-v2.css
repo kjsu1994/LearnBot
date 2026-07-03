@@ -602,6 +602,7 @@ button:hover:not(:disabled),
 .left-column,
 .right-column {
   align-content: start;
+  min-width: 0;
 }
 
 .right-column {

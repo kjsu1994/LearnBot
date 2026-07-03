@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,6 +19,10 @@ import java.time.Duration;
 public class CodeGraphLlmEnricher {
     private static final Set<String> ALLOWED_TYPES = Set.of("CALLS", "INJECTS", "USES_ENTITY");
     private static final int MAX_CANDIDATES = 160;
+    private static final int MAX_CODE_CHARS_PER_CANDIDATE = 360;
+    private static final int MAX_BATCH_JSON_CHARS = 8_000;
+    private static final int MAX_LLM_BATCHES = 6;
+    private static final int MAX_OUTPUT_TOKENS = 1024;
 
     private final LearnBotProperties properties;
     private final OllamaClient ollamaClient;
@@ -63,51 +68,93 @@ public class CodeGraphLlmEnricher {
                 }
             }
         }
-        List<Map<String, Object>> input = new ArrayList<>();
+        List<List<Map<String, Object>>> batches = new ArrayList<>();
+        List<Map<String, Object>> currentBatch = new ArrayList<>();
+        int inputJsonChars = 2;
         for (CodeGraphEdge edge : candidates) {
             CodeSearchResult evidence = byId.get(edge.evidenceChunkId());
             if (evidence == null || !allowedFiles.contains(evidence.filePath())) {
                 continue;
             }
-            input.add(Map.of(
+            Map<String, Object> item = Map.of(
                     "sourceKey", edge.sourceKey(),
                     "targetKey", edge.targetKey(),
                     "file", evidence.filePath(),
-                    "code", truncate(evidence.content(), 1200)
-            ));
+                    "code", truncate(evidence.content(), MAX_CODE_CHARS_PER_CANDIDATE)
+            );
+            int nextInputJsonChars = inputJsonChars + estimatedJsonChars(item) + 1;
+            if (nextInputJsonChars > MAX_BATCH_JSON_CHARS && !currentBatch.isEmpty()) {
+                batches.add(currentBatch);
+                if (batches.size() >= MAX_LLM_BATCHES) {
+                    break;
+                }
+                currentBatch = new ArrayList<>();
+                inputJsonChars = 2;
+                nextInputJsonChars = inputJsonChars + estimatedJsonChars(item) + 1;
+            }
+            currentBatch.add(item);
+            inputJsonChars = nextInputJsonChars;
         }
-        if (input.isEmpty()) {
+        if (!currentBatch.isEmpty() && batches.size() < MAX_LLM_BATCHES) {
+            batches.add(currentBatch);
+        }
+        if (batches.isEmpty()) {
             return new CodeGraphAnalysisResult(graph, CodeAnalysisDiagnostic.skipped(
                     "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "No eligible evidence files found."
             ));
         }
         try {
-            String response = ollamaClient.chatResult(
-                    "Classify unresolved source-code graph candidates. Return JSON only as {\"relations\":[{\"sourceKey\":\"...\",\"targetKey\":\"...\",\"type\":\"CALLS|INJECTS|USES_ENTITY\"}]}. "
-                            + "Use only supplied keys. Omit uncertain relations.",
-                    objectMapper.writeValueAsString(input),
-                    OllamaClient.ChatRole.AUXILIARY,
-                    512,
-                    Duration.ofSeconds(20)
-            ).content();
-            LlmOutput output = objectMapper.readValue(jsonObject(response), LlmOutput.class);
-            CodeGraph enriched = mergeValidated(graph, candidates, output);
+            List<LlmRelation> relations = new ArrayList<>();
+            int attempted = 0;
+            for (List<Map<String, Object>> batch : batches) {
+                attempted += batch.size();
+                String response = ollamaClient.chatResult(
+                        "Classify unresolved source-code graph candidates. Return JSON only as {\"relations\":[{\"sourceKey\":\"...\",\"targetKey\":\"...\",\"type\":\"CALLS|INJECTS|USES_ENTITY\"}]}. "
+                                + "Use only supplied keys. Omit uncertain relations.",
+                        objectMapper.writeValueAsString(batch),
+                        OllamaClient.ChatRole.AUXILIARY,
+                        MAX_OUTPUT_TOKENS,
+                        Duration.ofSeconds(properties.getCode().getGraph().getLlmTimeoutSeconds())
+                ).content();
+                LlmOutput output = objectMapper.readValue(jsonObject(response), LlmOutput.class);
+                if (output != null && output.relations() != null) {
+                    relations.addAll(output.relations());
+                }
+            }
+            CodeGraph enriched = mergeValidated(graph, candidates, new LlmOutput(relations));
             int added = Math.max(0, enriched.edges().size() - graph.edges().size());
             return new CodeGraphAnalysisResult(enriched, new CodeAnalysisDiagnostic(
                     "LLM_ENRICHMENT", "Ollama auxiliary", "SUCCESS", "ASYNC",
-                    input.size(), input.size(), 0, added, Math.max(0, input.size() - added),
+                    attempted, attempted, 0, added, Math.max(0, attempted - added),
                     enriched.nodes().size(), added,
                     java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
-                    "LLM relationship enrichment completed.", Map.of("candidateCount", input.size())
+                    "LLM relationship enrichment completed.", Map.of("candidateCount", attempted, "batchCount", batches.size())
             ));
         } catch (RuntimeException | java.io.IOException ex) {
+            int attempted = batches.stream().mapToInt(List::size).sum();
             return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
                     "LLM_ENRICHMENT", "Ollama auxiliary", "FAILED", "ASYNC",
-                    input.size(), 0, input.size(), 0, input.size(), graph.nodes().size(), 0,
+                    attempted, 0, attempted, 0, attempted, graph.nodes().size(), 0,
                     java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
-                    "LLM enrichment failed: " + ex.getClass().getSimpleName(), Map.of()
+                    "LLM enrichment failed: " + failureMessage(ex), Map.of()
             ));
         }
+    }
+
+    private String failureMessage(Exception ex) {
+        if (ex instanceof WebClientResponseException responseException) {
+            String body = truncate(responseException.getResponseBodyAsString(), 240);
+            return responseException.getStatusCode() + (body.isBlank() ? "" : ": " + body);
+        }
+        return ex.getClass().getSimpleName();
+    }
+
+    private int estimatedJsonChars(Map<String, Object> item) {
+        int length = 64;
+        for (Object value : item.values()) {
+            length += String.valueOf(value).length();
+        }
+        return length;
     }
 
     private CodeGraph mergeValidated(CodeGraph graph, List<CodeGraphEdge> candidates, LlmOutput output) {

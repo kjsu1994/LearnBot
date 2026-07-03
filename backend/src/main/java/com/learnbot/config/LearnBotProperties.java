@@ -1349,6 +1349,9 @@ public class LearnBotProperties {
             private int maxLlmFiles = 80;
 
             @Min(1)
+            private int llmTimeoutSeconds = 60;
+
+            @Min(1)
             private int enrichmentLeaseSeconds = 300;
 
             private boolean evidenceRankingEnabled = true;
@@ -1425,6 +1428,9 @@ public class LearnBotProperties {
             public void setMaxLlmFiles(int maxLlmFiles) {
                 this.maxLlmFiles = maxLlmFiles;
             }
+
+            public int getLlmTimeoutSeconds() { return llmTimeoutSeconds; }
+            public void setLlmTimeoutSeconds(int llmTimeoutSeconds) { this.llmTimeoutSeconds = llmTimeoutSeconds; }
 
             public int getEnrichmentLeaseSeconds() { return enrichmentLeaseSeconds; }
             public void setEnrichmentLeaseSeconds(int enrichmentLeaseSeconds) { this.enrichmentLeaseSeconds = enrichmentLeaseSeconds; }
@@ -1660,8 +1666,8 @@ public class LearnBotProperties {
 
     public static class LocalAgent {
         private boolean websocketEnabled = false;
-        private boolean patchExecutionReleaseEnabled = false;
-        private boolean approvedExecutionSequenceCreationEnabled = false;
+        private boolean patchExecutionReleaseEnabled = true;
+        private boolean approvedExecutionSequenceCreationEnabled = true;
 
         public boolean isWebsocketEnabled() {
             return websocketEnabled;
