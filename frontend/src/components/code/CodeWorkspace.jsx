@@ -63,6 +63,10 @@ import { buildAgentLoopRunnerHandoffSummaryView } from './agentLoopRunnerHandoff
 import { buildApprovedExecutionFlowInspectionView } from './approvedExecutionFlowInspectionSummary.js';
 import { buildValidatedDryRunIntentEligibilityView } from './validatedDryRunIntentEligibilitySummary.js';
 import { buildValidatedDryRunIntentTransitionPreviewView } from './validatedDryRunIntentTransitionPreviewSummary.js';
+import {
+  buildLocalAgentDeviceApprovalRoutePlan,
+  buildLocalAgentDeviceApprovalRouteSummary,
+} from './localAgentDeviceApprovalRoutePlan.js';
 
 function CodeWorkspace(props) {
   const {
@@ -87,6 +91,7 @@ function CodeWorkspace(props) {
     codeAgentTestResult,
     codeAgentMutationPolicy,
     codeAgentLoopPreview,
+    codeAgentLoopSubmissionPlan,
     codeAgentLoopTimelines = [],
     codeAgentLoopRunnerPreview,
     codeAgentLoopRunnerToolSelectionPreview,
@@ -153,7 +158,10 @@ function CodeWorkspace(props) {
     loading = () => false,
     codeFileLoading = false,
     showSourceManagement = true,
+    routePath = '',
   } = props;
+  const localAgentDeviceApprovalRoutePlan = buildLocalAgentDeviceApprovalRoutePlan(routePath);
+  const localAgentDeviceApprovalRouteSummary = buildLocalAgentDeviceApprovalRouteSummary(localAgentDeviceApprovalRoutePlan);
   const activeCodeModeGuide = getCodeModeGuide(codeMode);
   const answerStreamAnchorRef = useRef(null);
   const chatTurns = props.pendingCodeTurn
@@ -176,6 +184,26 @@ function CodeWorkspace(props) {
           <span><strong>{referenceResult ? (referenceResult.definitions?.length || 0) + (referenceResult.references?.length || 0) : 0}</strong> references</span>
         </div>
       </div>
+      {localAgentDeviceApprovalRoutePlan.routeMatched && (
+        <div className="panel code-agent-panel">
+          <div className="panel-title">
+            <ShieldCheck size={18} />
+            <div>
+              <h2>Local Agent Device Approval</h2>
+              <p>Browser approval is preview-only. No device is approved and no token is issued.</p>
+            </div>
+          </div>
+          <div className="code-agent-result compact-result">
+            <div className="result-heading">
+              <strong>{localAgentDeviceApprovalRoutePlan.schema}</strong>
+              <Badge variant="secondary">{localAgentDeviceApprovalRoutePlan.status}</Badge>
+            </div>
+            <small>{localAgentDeviceApprovalRouteSummary}</small>
+            <small>server endpoints: {localAgentDeviceApprovalRoutePlan.serverEndpoints.join(' / ')}</small>
+            <small>blocker: {localAgentDeviceApprovalRoutePlan.blockers[0]}</small>
+          </div>
+        </div>
+      )}
       {showSourceManagement && <CodeSourceManagementPanel {...props} />}
 
       <div className={showSourceManagement ? 'right-column' : 'right-column full-column'}>
@@ -235,6 +263,7 @@ function CodeWorkspace(props) {
           testResult={codeAgentTestResult}
           mutationPolicy={codeAgentMutationPolicy}
           loopPreview={codeAgentLoopPreview}
+          loopSubmissionPlan={codeAgentLoopSubmissionPlan}
           loopTimelines={codeAgentLoopTimelines}
           loopRunnerPreview={codeAgentLoopRunnerPreview}
           loopRunnerToolSelectionPreview={codeAgentLoopRunnerToolSelectionPreview}
@@ -435,6 +464,455 @@ function buildAgentLoopRunnerObservationContinuationView(continuation) {
   };
 }
 
+function buildAgentLoopOneCycleView({
+  runnerPreview = null,
+  toolSelectionPreview = null,
+  enqueueResult = null,
+  queuedObservationResult = null,
+  observationContinuation = null,
+  plan = null,
+  patch = null,
+  validatedDryRunIntentEligibility = null,
+  validatedDryRunIntentTransitionPreview = null,
+  localPatchDryRunRequest = null,
+  localPatchDryRunResult = null,
+  finalResultPublicationPreview = null,
+} = {}) {
+  if (
+    !runnerPreview
+    && !toolSelectionPreview
+    && !enqueueResult
+    && !queuedObservationResult
+    && !observationContinuation
+    && !plan
+    && !patch
+    && !validatedDryRunIntentEligibility
+    && !validatedDryRunIntentTransitionPreview
+    && !localPatchDryRunRequest
+    && !localPatchDryRunResult
+    && !finalResultPublicationPreview
+  ) {
+    return null;
+  }
+  const queuedRequest = enqueueResult?.queuedRequest || null;
+  const observed = queuedObservationResult || observationContinuation?.observation || null;
+  const nextPreview = observationContinuation?.toolSelectionPreview || toolSelectionPreview || null;
+  const oldRunnerPhase = observed?.status
+    ? 'observation returned'
+    : queuedRequest?.requestId
+      ? 'tool queued'
+      : nextPreview?.selectionDecision
+        ? 'tool selected'
+        : runnerPreview?.runnerDecision
+          ? 'runner previewed'
+          : '';
+  const phase = finalResultPublicationPreview?.status
+    ? 'final report previewed'
+    : localPatchDryRunResult?.status
+      ? 'dry-run observation returned'
+      : localPatchDryRunRequest?.requestId
+        ? 'dry-run queued'
+        : validatedDryRunIntentTransitionPreview?.status
+          ? 'dry-run transition previewed'
+          : validatedDryRunIntentEligibility?.status
+            ? 'dry-run eligibility inspected'
+            : oldRunnerPhase
+              || (patch ? 'patch proposed' : '')
+              || (plan ? 'plan prepared' : '')
+              || 'not started';
+  const toolName = observed?.toolName
+    || queuedRequest?.request?.toolName
+    || nextPreview?.candidate?.toolName
+    || nextPreview?.modelDecision?.toolName
+    || runnerPreview?.candidate?.toolName
+    || localPatchDryRunResult?.toolName
+    || localPatchDryRunRequest?.toolName
+    || validatedDryRunIntentEligibility?.toolName
+    || validatedDryRunIntentTransitionPreview?.wouldBeClaimableDryRunRequest?.toolName
+    || 'none';
+  const nextDecision = observationContinuation?.continuationDecision || runnerPreview?.runnerDecision || 'pending';
+  const targetFiles = Array.isArray(plan?.targetFiles)
+    ? plan.targetFiles
+    : Array.isArray(validatedDryRunIntentEligibility?.targetFiles)
+      ? validatedDryRunIntentEligibility.targetFiles
+      : Array.isArray(validatedDryRunIntentTransitionPreview?.wouldBeClaimableDryRunRequest?.input?.targetFiles)
+        ? validatedDryRunIntentTransitionPreview.wouldBeClaimableDryRunRequest.input.targetFiles
+        : Array.isArray(validatedDryRunIntentTransitionPreview?.targetFiles)
+          ? validatedDryRunIntentTransitionPreview.targetFiles
+          : [];
+  const patchStatus = patch
+    ? patch.valid === true
+      ? 'valid'
+      : patch.valid === false
+        ? 'invalid'
+        : patch.status || 'present'
+    : 'pending';
+  const expectedDryRunRefusal = Boolean(
+    localPatchDryRunResult?.status === 'REJECTED'
+    && localPatchDryRunResult?.failureCode === 'UNSAFE_TOOL'
+    && localPatchDryRunResult?.output?.dryRun === true
+    && localPatchDryRunResult?.output?.mutationApplied === false
+  );
+  const decisionText = buildAgentLoopOneCycleDecisionText({
+    runnerPreview,
+    localPatchDryRunResult,
+    finalResultPublicationPreview,
+    expectedDryRunRefusal,
+    observationContinuation,
+  });
+  return {
+    headerText: `agent loop one-cycle: ${phase}`,
+    phaseText: `agent loop one-cycle phases: runner ${runnerPreview?.runnerDecision || 'pending'} / model tool ${nextPreview?.selectionDecision || 'pending'} / queued ${queuedRequest?.requestId || 'none'} / observation ${observed?.status || 'pending'} / next ${nextDecision}`,
+    toolText: `agent loop one-cycle tool: ${toolName} / request ${queuedRequest?.requestId || observed?.requestId || localPatchDryRunRequest?.requestId || localPatchDryRunResult?.requestId || 'none'} / approval ${observed?.approvalState || queuedRequest?.request?.approvalState || localPatchDryRunRequest?.request?.approvalState || localPatchDryRunResult?.approvalState || nextPreview?.candidate?.approvalState || 'unknown'}`,
+    patchText: (plan || patch || targetFiles.length)
+      ? `agent loop one-cycle patch: plan ${plan?.status || (plan ? 'present' : 'pending')} / patch ${patchStatus} / target files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`
+      : '',
+    dryRunText: (validatedDryRunIntentEligibility || validatedDryRunIntentTransitionPreview || localPatchDryRunRequest || localPatchDryRunResult)
+      ? `agent loop one-cycle dry-run: eligibility ${validatedDryRunIntentEligibility?.status || 'pending'} / transition ${validatedDryRunIntentTransitionPreview?.status || 'pending'} / request ${localPatchDryRunRequest?.requestId || validatedDryRunIntentEligibility?.requestId || validatedDryRunIntentTransitionPreview?.sourceRequestId || 'none'} / result ${localPatchDryRunResult?.status || 'pending'} / claimable ${Boolean(validatedDryRunIntentTransitionPreview?.claimable ?? validatedDryRunIntentEligibility?.claimable)} / mutation ${Boolean(validatedDryRunIntentTransitionPreview?.mutationAllowed ?? validatedDryRunIntentEligibility?.mutationAllowed ?? localPatchDryRunResult?.mutationAllowed)}`
+      : '',
+    dryRunObservationText: localPatchDryRunResult
+      ? `agent loop one-cycle dry-run observation: dry-run ${Boolean(localPatchDryRunResult.output?.dryRun)} / preflight ${String(localPatchDryRunResult.output?.preflightPassed ?? 'unknown')} / snapshot ${String(localPatchDryRunResult.output?.snapshotCreated ?? 'unknown')} / mutation applied ${Boolean(localPatchDryRunResult.output?.mutationApplied)} / expected refusal ${expectedDryRunRefusal}`
+      : '',
+    finalReportText: finalResultPublicationPreview
+      ? `agent loop one-cycle final report: ${finalResultPublicationPreview.status || 'UNKNOWN'} / ready ${Boolean(finalResultPublicationPreview.finalResultReady)} / final result ${Boolean(finalResultPublicationPreview.finalResultEnabled)} / publication ${Boolean(finalResultPublicationPreview.publicationEnabled)} / acknowledgement ${Boolean(finalResultPublicationPreview.acknowledgementSaveEnabled ?? finalResultPublicationPreview.acknowledgementEnabled)} / mutation ${Boolean(finalResultPublicationPreview.mutationEnabled)}`
+      : '',
+    budgetText: observationContinuation
+      ? `agent loop one-cycle budget: iteration ${observationContinuation.iterationCount ?? 0} / max ${observationContinuation.maxIterations ?? 0} / remaining ${observationContinuation.remainingIterations ?? 0} / limit reached ${Boolean(observationContinuation.iterationLimitReached)}`
+      : '',
+    safetyText: `agent loop one-cycle safety: request creation ${Boolean(enqueueResult?.requestCreationEnabled || localPatchDryRunRequest?.requestId)} / enqueue ${Boolean(enqueueResult?.enqueueEnabled || localPatchDryRunRequest?.requestId)} / push ${Boolean(enqueueResult?.pushEnabled || localPatchDryRunRequest?.requestId)} / claim ${Boolean(enqueueResult?.claimEnabled || localPatchDryRunResult?.requestId)} / final result ${Boolean(observationContinuation?.finalResultEnabled ?? enqueueResult?.finalResultEnabled)} / publication ${Boolean(observationContinuation?.publicationEnabled ?? enqueueResult?.publicationEnabled)} / acknowledgement ${Boolean(observationContinuation?.acknowledgementEnabled ?? enqueueResult?.acknowledgementEnabled)} / mutation ${Boolean(observationContinuation?.mutationEnabled ?? enqueueResult?.mutationEnabled ?? runnerPreview?.mutationEnabled ?? localPatchDryRunResult?.mutationAllowed)}`,
+    decisionText,
+    nextText: finalResultPublicationPreview
+      ? 'agent loop one-cycle next: final report preview is ready for review; publication, acknowledgement, and mutation remain disabled'
+      : localPatchDryRunResult
+      ? 'agent loop one-cycle next: dry-run observation recorded; refresh readiness or runner next-action before any release; mutation remains disabled'
+      : observationContinuation?.reason || enqueueResult?.reason || runnerPreview?.reason || '',
+  };
+}
+
+function buildAgentLoopOneCycleDecisionText({
+  runnerPreview = null,
+  localPatchDryRunResult = null,
+  finalResultPublicationPreview = null,
+  expectedDryRunRefusal = false,
+  observationContinuation = null,
+} = {}) {
+  const actionKey = runnerPreview?.recommendedAction?.actionKey || runnerPreview?.actionKey || observationContinuation?.continuationDecision || 'pending';
+  const runnerDecision = runnerPreview?.runnerDecision || 'pending';
+  if (finalResultPublicationPreview?.finalResultReady || actionKey === 'STOP_AND_REPORT' || runnerDecision === 'READY_FINAL_RESULT_DISABLED') {
+    return `agent loop one-cycle decision: stop with report / action ${actionKey} / runner ${runnerDecision} / approval false / replan false / report true`;
+  }
+  if (runnerPreview?.actionKey === 'WAIT_FOR_APPROVAL' || runnerDecision === 'WAIT_FOR_APPROVAL' || expectedDryRunRefusal) {
+    return `agent loop one-cycle decision: ask for approval / action ${actionKey} / runner ${runnerDecision} / approval true / replan false / report false`;
+  }
+  if (localPatchDryRunResult) {
+    const preflightFailed = localPatchDryRunResult.output?.preflightPassed === false;
+    const failed = ['FAILED', 'REJECTED'].includes(localPatchDryRunResult.status) && !expectedDryRunRefusal;
+    if (preflightFailed || failed) {
+      return `agent loop one-cycle decision: replan from failure logs / action ${actionKey} / runner ${runnerDecision} / approval false / replan true / report false`;
+    }
+  }
+  if (actionKey === 'NEXT_MODEL_TOOL_PREVIEW_READY' || observationContinuation?.toolSelectionPreview) {
+    return `agent loop one-cycle decision: continue loop / action ${actionKey} / runner ${runnerDecision} / approval false / replan false / report false`;
+  }
+  return `agent loop one-cycle decision: pending / action ${actionKey} / runner ${runnerDecision} / approval false / replan false / report false`;
+}
+
+function buildAgentLoopSubmissionPlanReviewView(submissionPlan = null) {
+  const review = submissionPlan?.patchDryRunApprovalReviewPreview || null;
+  if (!review) return null;
+  const targetFiles = Array.isArray(review.targetFiles) ? review.targetFiles : [];
+  return {
+    headerText: `agent loop server approval review: ${review.status || 'UNKNOWN'} / ${review.schema || 'unknown'}`,
+    identityText: `agent loop server approval review identity: repository ${review.repositoryId || 'none'} / space ${review.spaceId || 'none'} / agent ${review.agentId || 'none'} / workspace ${review.workspaceId || 'none'}`,
+    evidenceText: `agent loop server approval review evidence: tool ${review.toolName || 'patch.apply'} / target ${review.executionTarget || 'USER_LOCAL_AGENT'} / approval ${review.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${review.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop server approval review readiness: source ${review.sourcePlanStatus || 'UNKNOWN'} / diff ${Boolean(review.diffValidationPassed)} / envelope ${Boolean(review.requestEnvelopePrepared)} / preflight ${Boolean(review.nonWritingPreflightPassed)} / browser review ${Boolean(review.browserReviewReady)} / user approval ${Boolean(review.userApprovalRequired)}`,
+    disabledText: `agent loop server approval review disabled: request creation ${Boolean(review.requestCreationEnabled)} / approval request creation ${Boolean(review.approvalRequestCreationEnabled)} / approval persistence ${Boolean(review.approvalPersistenceEnabled)} / enqueue ${Boolean(review.enqueueEnabled)} / claim ${Boolean(review.claimEnabled)} / snapshot ${Boolean(review.snapshotCreationEnabled)} / patch dry-run ${Boolean(review.patchDryRunExecutionEnabled)} / test ${Boolean(review.testExecutionEnabled)} / publication ${Boolean(review.finalPublicationEnabled)} / partial reindex ${Boolean(review.partialReindexEnabled)} / mutation ${Boolean(review.mutationEnabled)}`,
+    routeText: `agent loop server approval review routes: approval ${review.approvalRequestEndpoint || 'none'} / release ${review.releaseReviewEndpoint || 'none'}`,
+    reasonText: review.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalIntentPreviewView(submissionPlan = null) {
+  const intent = submissionPlan?.patchDryRunApprovalIntentPreview || null;
+  if (!intent) return null;
+  const targetFiles = Array.isArray(intent.targetFiles) ? intent.targetFiles : [];
+  return {
+    headerText: `agent loop approval intent preview: ${intent.status || 'UNKNOWN'} / ${intent.schema || 'unknown'}`,
+    identityText: `agent loop approval intent identity: repository ${intent.repositoryId || 'none'} / space ${intent.spaceId || 'none'} / agent ${intent.agentId || 'none'} / workspace ${intent.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval intent evidence: source ${intent.sourceReviewStatus || 'UNKNOWN'} / surface ${intent.sourceReviewSurface || 'none'} / tool ${intent.toolName || 'patch.apply'} / target ${intent.executionTarget || 'USER_LOCAL_AGENT'} / approval ${intent.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${intent.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval intent readiness: review provided ${Boolean(intent.reviewProvided)} / prepared ${Boolean(intent.approvalIntentPrepared)} / diff ${Boolean(intent.diffValidationPassed)} / envelope ${Boolean(intent.requestEnvelopePrepared)} / preflight ${Boolean(intent.nonWritingPreflightPassed)} / browser review ${Boolean(intent.browserReviewReady)} / user approval ${Boolean(intent.userApprovalRequired)}`,
+    disabledText: `agent loop approval intent disabled: intent creation ${Boolean(intent.approvalIntentCreationEnabled)} / approval persistence ${Boolean(intent.approvalPersistenceEnabled)} / request creation ${Boolean(intent.requestCreationEnabled)} / approval request creation ${Boolean(intent.approvalRequestCreationEnabled)} / enqueue ${Boolean(intent.enqueueEnabled)} / claim ${Boolean(intent.claimEnabled)} / snapshot ${Boolean(intent.snapshotCreationEnabled)} / patch dry-run ${Boolean(intent.patchDryRunExecutionEnabled)} / test ${Boolean(intent.testExecutionEnabled)} / publication ${Boolean(intent.finalPublicationEnabled)} / partial reindex ${Boolean(intent.partialReindexEnabled)} / bypass ${Boolean(intent.approvalBypassAllowed)} / mutation ${Boolean(intent.mutationEnabled)}`,
+    routeText: `agent loop approval intent routes: approval ${intent.approvalRequestEndpoint || 'none'} / release ${intent.releaseReviewEndpoint || 'none'}`,
+    reasonText: intent.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalRequestCreationPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalRequestCreationPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  return {
+    headerText: `agent loop approval request creation preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval request creation identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval request creation evidence: source ${preview.sourceIntentStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval request creation readiness: intent provided ${Boolean(preview.approvalIntentProvided)} / request prepared ${Boolean(preview.approvalRequestCreationPrepared)} / persistence prepared ${Boolean(preview.approvalPersistencePrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    disabledText: `agent loop approval request creation disabled: approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval request creation routes: approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalDecisionPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalDecisionPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const decisionOptions = Array.isArray(preview.decisionOptions)
+    ? preview.decisionOptions.map((option) => `${option.action}:${Boolean(option.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop approval decision preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval decision identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval decision evidence: source ${preview.sourceRequestCreationStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval decision readiness: request creation provided ${Boolean(preview.approvalRequestCreationProvided)} / decision prepared ${Boolean(preview.approvalDecisionPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    optionsText: `agent loop approval decision options: ${decisionOptions}`,
+    disabledText: `agent loop approval decision disabled: decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / held request ${Boolean(preview.heldRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval decision routes: decision ${preview.approvalDecisionEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalDecisionPersistencePreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalDecisionPersistencePreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  return {
+    headerText: `agent loop approval decision persistence preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval decision persistence identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval decision persistence evidence: source ${preview.sourceDecisionStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval decision persistence readiness: decision provided ${Boolean(preview.approvalDecisionProvided)} / persistence prepared ${Boolean(preview.approvalDecisionPersistencePrepared)} / held review ${Boolean(preview.heldRequestReviewPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    disabledText: `agent loop approval decision persistence disabled: decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / held request ${Boolean(preview.heldRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval decision persistence routes: decision ${preview.approvalDecisionEndpoint || 'none'} / persistence ${preview.approvalDecisionPersistenceEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopHeldRequestReviewPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunHeldRequestReviewPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const reviewActions = Array.isArray(preview.reviewActions)
+    ? preview.reviewActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop held request review preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop held request review identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop held request review evidence: source ${preview.sourceDecisionPersistenceStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop held request review readiness: decision persistence provided ${Boolean(preview.approvalDecisionPersistenceProvided)} / action prepared ${Boolean(preview.heldRequestReviewActionPrepared)} / held review ${Boolean(preview.heldRequestReviewPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop held request review actions: ${reviewActions}`,
+    disabledText: `agent loop held request review disabled: held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop held request review routes: persistence ${preview.approvalDecisionPersistenceEndpoint || 'none'} / held review ${preview.heldRequestReviewEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalActionPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalActionPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop approval action preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval action identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval action evidence: source ${preview.sourceHeldRequestReviewStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval action readiness: held review provided ${Boolean(preview.heldRequestReviewProvided)} / action prepared ${Boolean(preview.approvalActionPrepared)} / held review ${Boolean(preview.heldRequestReviewPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop approval action options: ${approvalActions}`,
+    disabledText: `agent loop approval action disabled: action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval action routes: held review ${preview.heldRequestReviewEndpoint || 'none'} / action ${preview.approvalActionEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalActionPersistencePreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalActionPersistencePreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop approval action persistence preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval action persistence identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval action persistence evidence: source ${preview.sourceApprovalActionStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval action persistence readiness: action provided ${Boolean(preview.approvalActionProvided)} / persistence prepared ${Boolean(preview.approvalActionPersistencePrepared)} / held review ${Boolean(preview.heldRequestReviewPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop approval action persistence options: ${approvalActions}`,
+    disabledText: `agent loop approval action persistence disabled: action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval action persistence routes: action ${preview.approvalActionEndpoint || 'none'} / persistence ${preview.approvalActionPersistenceEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopApprovalRecordPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunApprovalRecordPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop approval record preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop approval record identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop approval record evidence: source ${preview.sourceApprovalActionPersistenceStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop approval record readiness: action persistence provided ${Boolean(preview.approvalActionPersistenceProvided)} / record prepared ${Boolean(preview.approvalRecordPrepared)} / request prepared ${Boolean(preview.localAgentRequestCreationPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop approval record options: ${approvalActions}`,
+    disabledText: `agent loop approval record disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop approval record routes: action persistence ${preview.approvalActionPersistenceEndpoint || 'none'} / record ${preview.approvalRecordEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentRequestEnvelopePreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentRequestEnvelopePreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop local agent request envelope preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent request envelope identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent request envelope evidence: source ${preview.sourceApprovalRecordStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop local agent request envelope readiness: approval record provided ${Boolean(preview.approvalRecordProvided)} / envelope prepared ${Boolean(preview.localAgentRequestEnvelopePrepared)} / request prepared ${Boolean(preview.localAgentRequestCreationPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop local agent request envelope options: ${approvalActions}`,
+    disabledText: `agent loop local agent request envelope disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent request envelope routes: approval record ${preview.approvalRecordEndpoint || 'none'} / request envelope ${preview.localAgentRequestEnvelopeEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentRequestCreationPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentRequestCreationPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop local agent request creation preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent request creation identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent request creation evidence: source ${preview.sourceLocalAgentRequestEnvelopeStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop local agent request creation readiness: request envelope provided ${Boolean(preview.localAgentRequestEnvelopeProvided)} / envelope prepared ${Boolean(preview.localAgentRequestEnvelopePrepared)} / request creation prepared ${Boolean(preview.localAgentRequestCreationPrepared)} / queue handoff ${Boolean(preview.queueHandoffPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop local agent request creation options: ${approvalActions}`,
+    disabledText: `agent loop local agent request creation disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent request creation routes: request envelope ${preview.localAgentRequestEnvelopeEndpoint || 'none'} / request creation ${preview.localAgentRequestCreationEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentQueuePreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentQueuePreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop local agent queue preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent queue identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent queue evidence: source ${preview.sourceLocalAgentRequestCreationStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop local agent queue readiness: request creation provided ${Boolean(preview.localAgentRequestCreationProvided)} / request creation prepared ${Boolean(preview.localAgentRequestCreationPrepared)} / queue handoff ${Boolean(preview.queueHandoffPrepared)} / push handoff ${Boolean(preview.pushHandoffPrepared)} / claim handoff ${Boolean(preview.claimHandoffPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop local agent queue options: ${approvalActions}`,
+    disabledText: `agent loop local agent queue disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent queue routes: request creation ${preview.localAgentRequestCreationEndpoint || 'none'} / queue ${preview.localAgentQueueEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentClaimReadinessPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentClaimReadinessPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop local agent claim readiness preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent claim readiness identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent claim readiness evidence: source ${preview.sourceLocalAgentQueueStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop local agent claim readiness: queue provided ${Boolean(preview.localAgentQueueProvided)} / queue handoff ${Boolean(preview.queueHandoffPrepared)} / push handoff ${Boolean(preview.pushHandoffPrepared)} / claim handoff ${Boolean(preview.claimHandoffPrepared)} / snapshot dry-run ${Boolean(preview.snapshotDryRunReadinessPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop local agent claim readiness options: ${approvalActions}`,
+    disabledText: `agent loop local agent claim readiness disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent claim readiness routes: queue ${preview.localAgentQueueEndpoint || 'none'} / claim readiness ${preview.localAgentClaimReadinessEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentSnapshotDryRunPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentSnapshotDryRunPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  const approvalActions = Array.isArray(preview.approvalActions)
+    ? preview.approvalActions.map((action) => `${action.action}:${Boolean(action.enabled)}`).join(', ')
+    : 'none';
+  return {
+    headerText: `agent loop local agent snapshot dry-run preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent snapshot dry-run identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent snapshot dry-run evidence: source ${preview.sourceLocalAgentClaimReadinessStatus || 'UNKNOWN'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / approval ${preview.approvalKind || 'SNAPSHOT_WRITING_DRY_RUN'} / state ${preview.approvalState || 'NOT_PREPARED'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    readinessText: `agent loop local agent snapshot dry-run readiness: claim readiness provided ${Boolean(preview.localAgentClaimReadinessProvided)} / queue handoff ${Boolean(preview.queueHandoffPrepared)} / push handoff ${Boolean(preview.pushHandoffPrepared)} / claim handoff ${Boolean(preview.claimHandoffPrepared)} / snapshot dry-run ${Boolean(preview.snapshotDryRunReadinessPrepared)} / observation ${Boolean(preview.patchDryRunExecutionObservationPrepared)} / diff ${Boolean(preview.diffValidationPassed)} / envelope ${Boolean(preview.requestEnvelopePrepared)} / preflight ${Boolean(preview.nonWritingPreflightPassed)} / browser review ${Boolean(preview.browserReviewReady)} / user approval ${Boolean(preview.userApprovalRequired)}`,
+    actionsText: `agent loop local agent snapshot dry-run options: ${approvalActions}`,
+    disabledText: `agent loop local agent snapshot dry-run disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / dry-run executed ${Boolean(preview.patchDryRunExecuted)} / observation recorded ${Boolean(preview.patchDryRunObservationRecorded)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent snapshot dry-run routes: claim readiness ${preview.localAgentClaimReadinessEndpoint || 'none'} / snapshot dry-run ${preview.localAgentSnapshotDryRunEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentDryRunResultPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentDryRunResultPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  return {
+    headerText: `agent loop local agent dry-run result preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent dry-run result identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent dry-run result evidence: source ${preview.sourceLocalAgentSnapshotDryRunStatus || 'UNKNOWN'} / result ${preview.dryRunResultStatus || 'UNAVAILABLE'} / failure ${preview.dryRunFailureCode || 'NO_RESULT'} / tool ${preview.toolName || 'patch.apply'} / target ${preview.executionTarget || 'USER_LOCAL_AGENT'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    analysisText: `agent loop local agent dry-run result analysis: snapshot provided ${Boolean(preview.localAgentSnapshotDryRunProvided)} / result analysis ${Boolean(preview.dryRunResultAnalysisPrepared)} / failure-log ${Boolean(preview.failureLogAnalysisPrepared)} / retry decision ${Boolean(preview.retryDecisionPrepared)} / succeeded ${Boolean(preview.dryRunSucceeded)} / failed ${Boolean(preview.dryRunFailed)} / context mismatch ${Boolean(preview.contextMismatchDetected)} / unsafe patch ${Boolean(preview.unsafePatchDetected)}`,
+    decisionText: `agent loop local agent dry-run retry decision: recommended ${Boolean(preview.retryRecommended)} / decision ${preview.retryDecision || 'WAIT_FOR_SNAPSHOT_DRY_RUN_PREVIEW'} / replan ${Boolean(preview.replanRequired)} / user review ${Boolean(preview.userReviewRequired)}`,
+    disabledText: `agent loop local agent dry-run result disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / dry-run executed ${Boolean(preview.patchDryRunExecuted)} / observation recorded ${Boolean(preview.patchDryRunObservationRecorded)} / result recorded ${Boolean(preview.dryRunResultRecorded)} / failure-log recorded ${Boolean(preview.failureLogAnalysisRecorded)} / retry recorded ${Boolean(preview.retryDecisionRecorded)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent dry-run result routes: snapshot dry-run ${preview.localAgentSnapshotDryRunEndpoint || 'none'} / dry-run result ${preview.localAgentDryRunResultEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentRetryInputPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentRetryInputPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  return {
+    headerText: `agent loop local agent retry input preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent retry input identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent retry input evidence: source ${preview.sourceLocalAgentDryRunResultStatus || 'UNKNOWN'} / result ${preview.dryRunResultStatus || 'UNAVAILABLE'} / failure ${preview.dryRunFailureCode || 'NO_RESULT'} / retry ${preview.sourceRetryDecision || 'WAIT_FOR_DRY_RUN_RESULT_PREVIEW'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    decisionText: `agent loop local agent retry input decision: dry-run result provided ${Boolean(preview.localAgentDryRunResultProvided)} / retry input ${Boolean(preview.retryInputPrepared)} / bounded patch input ${Boolean(preview.boundedRetryPatchInputPrepared)} / replan decision ${Boolean(preview.replanDecisionPrepared)} / context mismatch ${Boolean(preview.contextMismatchDetected)} / unsafe patch ${Boolean(preview.unsafePatchDetected)} / retry recommended ${Boolean(preview.retryRecommended)} / decision ${preview.retryInputDecision || 'WAIT_FOR_DRY_RUN_RESULT_PREVIEW'} / replan ${Boolean(preview.replanRequired)} / user visible ${preview.userVisibleDecision || 'WAIT_FOR_DRY_RUN_RESULT_PREVIEW'}`,
+    disabledText: `agent loop local agent retry input disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / dry-run executed ${Boolean(preview.patchDryRunExecuted)} / observation recorded ${Boolean(preview.patchDryRunObservationRecorded)} / result recorded ${Boolean(preview.dryRunResultRecorded)} / failure-log recorded ${Boolean(preview.failureLogAnalysisRecorded)} / retry decision recorded ${Boolean(preview.retryDecisionRecorded)} / retry patch ${Boolean(preview.retryPatchGenerated)} / retry request ${Boolean(preview.retryRequestCreationEnabled)} / retry execution ${Boolean(preview.retryExecutionEnabled)} / replan execution ${Boolean(preview.replanExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent retry input routes: dry-run result ${preview.localAgentDryRunResultEndpoint || 'none'} / retry input ${preview.localAgentRetryInputEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
+function buildAgentLoopLocalAgentRetryProposalPreviewView(submissionPlan = null) {
+  const preview = submissionPlan?.patchDryRunLocalAgentRetryProposalPreview || null;
+  if (!preview) return null;
+  const targetFiles = Array.isArray(preview.targetFiles) ? preview.targetFiles : [];
+  return {
+    headerText: `agent loop local agent retry proposal preview: ${preview.status || 'UNKNOWN'} / ${preview.schema || 'unknown'}`,
+    identityText: `agent loop local agent retry proposal identity: repository ${preview.repositoryId || 'none'} / space ${preview.spaceId || 'none'} / agent ${preview.agentId || 'none'} / workspace ${preview.workspaceId || 'none'}`,
+    evidenceText: `agent loop local agent retry proposal evidence: source ${preview.sourceLocalAgentRetryInputStatus || 'UNKNOWN'} / result ${preview.dryRunResultStatus || 'UNAVAILABLE'} / failure ${preview.dryRunFailureCode || 'NO_RESULT'} / retry input ${preview.sourceRetryInputDecision || 'WAIT_FOR_RETRY_INPUT_PREVIEW'} / files ${targetFiles.length ? targetFiles.join(', ') : 'none'}`,
+    decisionText: `agent loop local agent retry proposal decision: retry input provided ${Boolean(preview.localAgentRetryInputProvided)} / proposal ${Boolean(preview.retryProposalPrepared)} / bounded proposal ${Boolean(preview.boundedRetryPatchProposalPrepared)} / final stop ${Boolean(preview.finalStopDecisionPrepared)} / context mismatch ${Boolean(preview.contextMismatchDetected)} / unsafe patch ${Boolean(preview.unsafePatchDetected)} / retry recommended ${Boolean(preview.retryRecommended)} / replan ${Boolean(preview.replanRequired)} / user visible ${preview.userVisibleDecision || 'WAIT_FOR_RETRY_INPUT_PREVIEW'} / stop ${preview.finalStopDecision || 'WAIT_FOR_RETRY_INPUT_PREVIEW'}`,
+    disabledText: `agent loop local agent retry proposal disabled: record creation ${Boolean(preview.approvalRecordCreationEnabled)} / action persistence ${Boolean(preview.approvalActionPersistenceEnabled)} / action ${Boolean(preview.approvalActionEnabled)} / held review ${Boolean(preview.heldRequestReviewEnabled)} / held request ${Boolean(preview.heldRequestCreated)} / decision persistence ${Boolean(preview.approvalDecisionPersistenceEnabled)} / approval persistence ${Boolean(preview.approvalPersistenceEnabled)} / approval request creation ${Boolean(preview.approvalRequestCreationEnabled)} / request creation ${Boolean(preview.requestCreationEnabled)} / approval record ${Boolean(preview.serverApprovalRecordCreated)} / decision recorded ${Boolean(preview.approvalDecisionRecorded)} / decision persisted ${Boolean(preview.approvalDecisionPersisted)} / action recorded ${Boolean(preview.approvalActionRecorded)} / action persisted ${Boolean(preview.approvalActionPersisted)} / tool request ${Boolean(preview.localAgentToolRequestCreated)} / durable request ${Boolean(preview.durableLocalAgentRequestCreated)} / enqueue ${Boolean(preview.enqueueEnabled)} / push ${Boolean(preview.pushEnabled)} / claim ${Boolean(preview.claimEnabled)} / claimable ${Boolean(preview.claimable)} / snapshot ${Boolean(preview.snapshotCreationEnabled)} / patch dry-run ${Boolean(preview.patchDryRunExecutionEnabled)} / dry-run executed ${Boolean(preview.patchDryRunExecuted)} / observation recorded ${Boolean(preview.patchDryRunObservationRecorded)} / result recorded ${Boolean(preview.dryRunResultRecorded)} / failure-log recorded ${Boolean(preview.failureLogAnalysisRecorded)} / retry decision recorded ${Boolean(preview.retryDecisionRecorded)} / retry patch ${Boolean(preview.retryPatchGenerated)} / retry proposal ${Boolean(preview.retryPatchProposalGenerated)} / retry request ${Boolean(preview.retryRequestCreationEnabled)} / retry execution ${Boolean(preview.retryExecutionEnabled)} / replan execution ${Boolean(preview.replanExecutionEnabled)} / test ${Boolean(preview.testExecutionEnabled)} / rollback ${Boolean(preview.rollbackRestoreEnabled)} / publication ${Boolean(preview.finalPublicationEnabled)} / partial reindex ${Boolean(preview.partialReindexEnabled)} / bypass ${Boolean(preview.approvalBypassAllowed)} / mutation ${Boolean(preview.mutationEnabled)}`,
+    routeText: `agent loop local agent retry proposal routes: retry input ${preview.localAgentRetryInputEndpoint || 'none'} / retry proposal ${preview.localAgentRetryProposalEndpoint || 'none'} / approval ${preview.approvalRequestEndpoint || 'none'} / release ${preview.releaseReviewEndpoint || 'none'}`,
+    reasonText: preview.reason || '',
+  };
+}
+
 function CodeAgentPanel({
   instruction = '',
   setInstruction = () => {},
@@ -444,6 +922,7 @@ function CodeAgentPanel({
   testResult,
   mutationPolicy,
   loopPreview,
+  loopSubmissionPlan,
   loopTimelines = [],
   loopRunnerPreview,
   loopRunnerToolSelectionPreview,
@@ -577,6 +1056,23 @@ function CodeAgentPanel({
   const retryAt = localAgentStatus?.nextWebSocketRetryAt;
   const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
   const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
+  const agentLoopSubmissionPlanReviewView = buildAgentLoopSubmissionPlanReviewView(loopSubmissionPlan);
+  const agentLoopApprovalIntentPreviewView = buildAgentLoopApprovalIntentPreviewView(loopSubmissionPlan);
+  const agentLoopApprovalRequestCreationPreviewView = buildAgentLoopApprovalRequestCreationPreviewView(loopSubmissionPlan);
+  const agentLoopApprovalDecisionPreviewView = buildAgentLoopApprovalDecisionPreviewView(loopSubmissionPlan);
+  const agentLoopApprovalDecisionPersistencePreviewView = buildAgentLoopApprovalDecisionPersistencePreviewView(loopSubmissionPlan);
+  const agentLoopHeldRequestReviewPreviewView = buildAgentLoopHeldRequestReviewPreviewView(loopSubmissionPlan);
+  const agentLoopApprovalActionPreviewView = buildAgentLoopApprovalActionPreviewView(loopSubmissionPlan);
+  const agentLoopApprovalActionPersistencePreviewView = buildAgentLoopApprovalActionPersistencePreviewView(loopSubmissionPlan);
+  const agentLoopApprovalRecordPreviewView = buildAgentLoopApprovalRecordPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentRequestEnvelopePreviewView = buildAgentLoopLocalAgentRequestEnvelopePreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentRequestCreationPreviewView = buildAgentLoopLocalAgentRequestCreationPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentQueuePreviewView = buildAgentLoopLocalAgentQueuePreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentClaimReadinessPreviewView = buildAgentLoopLocalAgentClaimReadinessPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentSnapshotDryRunPreviewView = buildAgentLoopLocalAgentSnapshotDryRunPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentDryRunResultPreviewView = buildAgentLoopLocalAgentDryRunResultPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentRetryInputPreviewView = buildAgentLoopLocalAgentRetryInputPreviewView(loopSubmissionPlan);
+  const agentLoopLocalAgentRetryProposalPreviewView = buildAgentLoopLocalAgentRetryProposalPreviewView(loopSubmissionPlan);
   const agentLoopTimelineHistoryView = buildAgentLoopTimelineHistoryView(loopTimelines);
   const loopRunnerHandoffSource = loopRunnerM8EntryReadiness
     || loopRunnerFinalResultPublicationPreview
@@ -606,6 +1102,20 @@ function CodeAgentPanel({
   ) && !loading(`code-agent-validated-dry-run-intent-transition-${dryRunIntentEligibilityRequestId || 'route'}`);
   const runnerToolSelectionPreviewView = buildAgentLoopRunnerToolSelectionPreviewView(loopRunnerToolSelectionPreview);
   const runnerObservationContinuationView = buildAgentLoopRunnerObservationContinuationView(loopRunnerObservationContinuation);
+  const agentLoopOneCycleView = buildAgentLoopOneCycleView({
+    runnerPreview: loopRunnerPreview,
+    toolSelectionPreview: loopRunnerToolSelectionPreview,
+    enqueueResult: loopRunnerEnqueueResult,
+    queuedObservationResult: loopRunnerQueuedObservationResult,
+    observationContinuation: loopRunnerObservationContinuation,
+    plan,
+    patch,
+    validatedDryRunIntentEligibility,
+    validatedDryRunIntentTransitionPreview,
+    localPatchDryRunRequest,
+    localPatchDryRunResult,
+    finalResultPublicationPreview: loopRunnerFinalResultPublicationPreview,
+  });
   const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
   const canPrepareLocalPatchRequest = Boolean(
     patch?.valid
@@ -1145,6 +1655,223 @@ function CodeAgentPanel({
           <WarningList warnings={agentLoopPreviewSummaryView.warnings} />
         </div>
       )}
+      {agentLoopSubmissionPlanReviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopSubmissionPlanReviewView.headerText}</strong>
+            <Badge variant="secondary">server review</Badge>
+          </div>
+          <small>{agentLoopSubmissionPlanReviewView.identityText}</small>
+          <small>{agentLoopSubmissionPlanReviewView.evidenceText}</small>
+          <small>{agentLoopSubmissionPlanReviewView.readinessText}</small>
+          <small>{agentLoopSubmissionPlanReviewView.disabledText}</small>
+          <small>{agentLoopSubmissionPlanReviewView.routeText}</small>
+          {agentLoopSubmissionPlanReviewView.reasonText && (
+            <small>{agentLoopSubmissionPlanReviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalIntentPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalIntentPreviewView.headerText}</strong>
+            <Badge variant="secondary">approval intent</Badge>
+          </div>
+          <small>{agentLoopApprovalIntentPreviewView.identityText}</small>
+          <small>{agentLoopApprovalIntentPreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalIntentPreviewView.readinessText}</small>
+          <small>{agentLoopApprovalIntentPreviewView.disabledText}</small>
+          <small>{agentLoopApprovalIntentPreviewView.routeText}</small>
+          {agentLoopApprovalIntentPreviewView.reasonText && (
+            <small>{agentLoopApprovalIntentPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalRequestCreationPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalRequestCreationPreviewView.headerText}</strong>
+            <Badge variant="secondary">approval request</Badge>
+          </div>
+          <small>{agentLoopApprovalRequestCreationPreviewView.identityText}</small>
+          <small>{agentLoopApprovalRequestCreationPreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalRequestCreationPreviewView.readinessText}</small>
+          <small>{agentLoopApprovalRequestCreationPreviewView.disabledText}</small>
+          <small>{agentLoopApprovalRequestCreationPreviewView.routeText}</small>
+          {agentLoopApprovalRequestCreationPreviewView.reasonText && (
+            <small>{agentLoopApprovalRequestCreationPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalDecisionPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalDecisionPreviewView.headerText}</strong>
+            <Badge variant="secondary">approval decision</Badge>
+          </div>
+          <small>{agentLoopApprovalDecisionPreviewView.identityText}</small>
+          <small>{agentLoopApprovalDecisionPreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalDecisionPreviewView.readinessText}</small>
+          <small>{agentLoopApprovalDecisionPreviewView.optionsText}</small>
+          <small>{agentLoopApprovalDecisionPreviewView.disabledText}</small>
+          <small>{agentLoopApprovalDecisionPreviewView.routeText}</small>
+          {agentLoopApprovalDecisionPreviewView.reasonText && (
+            <small>{agentLoopApprovalDecisionPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalDecisionPersistencePreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalDecisionPersistencePreviewView.headerText}</strong>
+            <Badge variant="secondary">decision persistence</Badge>
+          </div>
+          <small>{agentLoopApprovalDecisionPersistencePreviewView.identityText}</small>
+          <small>{agentLoopApprovalDecisionPersistencePreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalDecisionPersistencePreviewView.readinessText}</small>
+          <small>{agentLoopApprovalDecisionPersistencePreviewView.disabledText}</small>
+          <small>{agentLoopApprovalDecisionPersistencePreviewView.routeText}</small>
+          {agentLoopApprovalDecisionPersistencePreviewView.reasonText && (
+            <small>{agentLoopApprovalDecisionPersistencePreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopHeldRequestReviewPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopHeldRequestReviewPreviewView.headerText}</strong>
+            <Badge variant="secondary">held review</Badge>
+          </div>
+          <small>{agentLoopHeldRequestReviewPreviewView.identityText}</small>
+          <small>{agentLoopHeldRequestReviewPreviewView.evidenceText}</small>
+          <small>{agentLoopHeldRequestReviewPreviewView.readinessText}</small>
+          <small>{agentLoopHeldRequestReviewPreviewView.actionsText}</small>
+          <small>{agentLoopHeldRequestReviewPreviewView.disabledText}</small>
+          <small>{agentLoopHeldRequestReviewPreviewView.routeText}</small>
+          {agentLoopHeldRequestReviewPreviewView.reasonText && (
+            <small>{agentLoopHeldRequestReviewPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalActionPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalActionPreviewView.headerText}</strong>
+            <Badge variant="secondary">approval action</Badge>
+          </div>
+          <small>{agentLoopApprovalActionPreviewView.identityText}</small>
+          <small>{agentLoopApprovalActionPreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalActionPreviewView.readinessText}</small>
+          <small>{agentLoopApprovalActionPreviewView.actionsText}</small>
+          <small>{agentLoopApprovalActionPreviewView.disabledText}</small>
+          <small>{agentLoopApprovalActionPreviewView.routeText}</small>
+          {agentLoopApprovalActionPreviewView.reasonText && (
+            <small>{agentLoopApprovalActionPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalActionPersistencePreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalActionPersistencePreviewView.headerText}</strong>
+            <Badge variant="secondary">action persistence</Badge>
+          </div>
+          <small>{agentLoopApprovalActionPersistencePreviewView.identityText}</small>
+          <small>{agentLoopApprovalActionPersistencePreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalActionPersistencePreviewView.readinessText}</small>
+          <small>{agentLoopApprovalActionPersistencePreviewView.actionsText}</small>
+          <small>{agentLoopApprovalActionPersistencePreviewView.disabledText}</small>
+          <small>{agentLoopApprovalActionPersistencePreviewView.routeText}</small>
+          {agentLoopApprovalActionPersistencePreviewView.reasonText && (
+            <small>{agentLoopApprovalActionPersistencePreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopApprovalRecordPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopApprovalRecordPreviewView.headerText}</strong>
+            <Badge variant="secondary">approval record</Badge>
+          </div>
+          <small>{agentLoopApprovalRecordPreviewView.identityText}</small>
+          <small>{agentLoopApprovalRecordPreviewView.evidenceText}</small>
+          <small>{agentLoopApprovalRecordPreviewView.readinessText}</small>
+          <small>{agentLoopApprovalRecordPreviewView.actionsText}</small>
+          <small>{agentLoopApprovalRecordPreviewView.disabledText}</small>
+          <small>{agentLoopApprovalRecordPreviewView.routeText}</small>
+          {agentLoopApprovalRecordPreviewView.reasonText && (
+            <small>{agentLoopApprovalRecordPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentRequestEnvelopePreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentRequestEnvelopePreviewView.headerText}</strong>
+            <Badge variant="secondary">request envelope</Badge>
+          </div>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.readinessText}</small>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.actionsText}</small>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentRequestEnvelopePreviewView.routeText}</small>
+          {agentLoopLocalAgentRequestEnvelopePreviewView.reasonText && (
+            <small>{agentLoopLocalAgentRequestEnvelopePreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentRequestCreationPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentRequestCreationPreviewView.headerText}</strong>
+            <Badge variant="secondary">request creation</Badge>
+          </div>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.readinessText}</small>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.actionsText}</small>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentRequestCreationPreviewView.routeText}</small>
+          {agentLoopLocalAgentRequestCreationPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentRequestCreationPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentQueuePreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentQueuePreviewView.headerText}</strong>
+            <Badge variant="secondary">queue gate</Badge>
+          </div>
+          <small>{agentLoopLocalAgentQueuePreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentQueuePreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentQueuePreviewView.readinessText}</small>
+          <small>{agentLoopLocalAgentQueuePreviewView.actionsText}</small>
+          <small>{agentLoopLocalAgentQueuePreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentQueuePreviewView.routeText}</small>
+          {agentLoopLocalAgentQueuePreviewView.reasonText && (
+            <small>{agentLoopLocalAgentQueuePreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentClaimReadinessPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentClaimReadinessPreviewView.headerText}</strong>
+            <Badge variant="secondary">claim readiness</Badge>
+          </div>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.readinessText}</small>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.actionsText}</small>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentClaimReadinessPreviewView.routeText}</small>
+          {agentLoopLocalAgentClaimReadinessPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentClaimReadinessPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
       {agentLoopTimelineHistoryView && (
         <div className="code-agent-result compact-result">
           <div className="result-heading">
@@ -1164,6 +1891,38 @@ function CodeAgentPanel({
               )}
             </div>
           ))}
+        </div>
+      )}
+      {agentLoopOneCycleView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopOneCycleView.headerText}</strong>
+            <Badge variant="outline">one cycle</Badge>
+          </div>
+          <small>{agentLoopOneCycleView.phaseText}</small>
+          <small>{agentLoopOneCycleView.toolText}</small>
+          {agentLoopOneCycleView.patchText && (
+            <small>{agentLoopOneCycleView.patchText}</small>
+          )}
+          {agentLoopOneCycleView.dryRunText && (
+            <small>{agentLoopOneCycleView.dryRunText}</small>
+          )}
+          {agentLoopOneCycleView.dryRunObservationText && (
+            <small>{agentLoopOneCycleView.dryRunObservationText}</small>
+          )}
+          {agentLoopOneCycleView.finalReportText && (
+            <small>{agentLoopOneCycleView.finalReportText}</small>
+          )}
+          {agentLoopOneCycleView.budgetText && (
+            <small>{agentLoopOneCycleView.budgetText}</small>
+          )}
+          <small>{agentLoopOneCycleView.safetyText}</small>
+          {agentLoopOneCycleView.decisionText && (
+            <small>{agentLoopOneCycleView.decisionText}</small>
+          )}
+          {agentLoopOneCycleView.nextText && (
+            <small>{agentLoopOneCycleView.nextText}</small>
+          )}
         </div>
       )}
       {agentLoopRunnerHandoffSummaryView.show && (
@@ -1344,6 +2103,72 @@ function CodeAgentPanel({
           )}
           {validatedDryRunIntentTransitionPreviewView.message && (
             <small>{validatedDryRunIntentTransitionPreviewView.message}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentSnapshotDryRunPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentSnapshotDryRunPreviewView.headerText}</strong>
+            <Badge variant="secondary">snapshot dry-run</Badge>
+          </div>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.readinessText}</small>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.actionsText}</small>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.routeText}</small>
+          {agentLoopLocalAgentSnapshotDryRunPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentSnapshotDryRunPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentDryRunResultPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentDryRunResultPreviewView.headerText}</strong>
+            <Badge variant="secondary">dry-run result</Badge>
+          </div>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.analysisText}</small>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.decisionText}</small>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentDryRunResultPreviewView.routeText}</small>
+          {agentLoopLocalAgentDryRunResultPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentDryRunResultPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentRetryInputPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentRetryInputPreviewView.headerText}</strong>
+            <Badge variant="secondary">retry input</Badge>
+          </div>
+          <small>{agentLoopLocalAgentRetryInputPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentRetryInputPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentRetryInputPreviewView.decisionText}</small>
+          <small>{agentLoopLocalAgentRetryInputPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentRetryInputPreviewView.routeText}</small>
+          {agentLoopLocalAgentRetryInputPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentRetryInputPreviewView.reasonText}</small>
+          )}
+        </div>
+      )}
+      {agentLoopLocalAgentRetryProposalPreviewView && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{agentLoopLocalAgentRetryProposalPreviewView.headerText}</strong>
+            <Badge variant="secondary">retry proposal</Badge>
+          </div>
+          <small>{agentLoopLocalAgentRetryProposalPreviewView.identityText}</small>
+          <small>{agentLoopLocalAgentRetryProposalPreviewView.evidenceText}</small>
+          <small>{agentLoopLocalAgentRetryProposalPreviewView.decisionText}</small>
+          <small>{agentLoopLocalAgentRetryProposalPreviewView.disabledText}</small>
+          <small>{agentLoopLocalAgentRetryProposalPreviewView.routeText}</small>
+          {agentLoopLocalAgentRetryProposalPreviewView.reasonText && (
+            <small>{agentLoopLocalAgentRetryProposalPreviewView.reasonText}</small>
           )}
         </div>
       )}

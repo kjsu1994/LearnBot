@@ -35,6 +35,11 @@ internal sealed partial class LearnBotLocalAgent
             "git" => await GitCommand(args[1..]),
             "status" => AgentStatus(),
             "doctor" => Doctor(),
+            "m8" => M8(args[1..]),
+            "login" => LoginPlan(args[1..]),
+            "session" => await Session(args[1..]),
+            "fix" => await CodexCommandPreview("fix", args[1..]),
+            "review" => await CodexCommandPreview("review", args[1..]),
             "open" => Open(),
             "self-test" => await SelfTest(args[1..]),
             "help" or "--help" or "-h" => Help(),
@@ -285,6 +290,1328 @@ internal sealed partial class LearnBotLocalAgent
         Console.WriteLine(JsonSerializer.Serialize(BuildCliDoctorReport(), JsonOptions));
         return 0;
     }
+
+    private int M8(string[] args)
+    {
+        if (args.Length == 0 || string.Equals(args[0], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliM8ProductizationReport(), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "doctor", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliM8DoctorReport(), JsonOptions));
+            return 0;
+        }
+        return Unknown("m8 " + args[0]);
+    }
+
+    private int LoginPlan(string[] args)
+    {
+        var loginId = GetOption(args, "--login-id");
+        var email = GetOption(args, "--email");
+        var rememberLogin = args.Contains("--remember", StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine(JsonSerializer.Serialize(BuildCliWebLoginPlanReport(loginId, email, rememberLogin), JsonOptions));
+        return 0;
+    }
+
+    private async Task<int> Session(string[] args)
+    {
+        if (args.Length == 0 || string.Equals(args[0], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionStatusReport(), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "plan", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliWebSessionPlan("device-session", args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "create-plan", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliWebSessionPlan("device-session-create", args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "claim-plan", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliWebSessionPlan("claim", args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "claim-result-plan", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliWebSessionPlan("claim-result", args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-writer-preflight", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionArtifactWriterPreflightResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-writer-test-write", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionArtifactWriterTestWriteResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-reader-test-validate", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionArtifactReaderTestValidateResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-production-crypto-preview", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionProductionArtifactCryptoPreviewResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-production-writer-preview", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionProductionArtifactWriterPreviewResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "artifact-production-reader-preview", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionProductionArtifactReaderPreviewResult(args[1..]), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "stored-session-auth-readiness", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionStoredSessionAuthReadinessReport(), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "secret-provider-plan", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionSecretProviderPlanReport(), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "secret-provider-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionSecretProviderProbeResult(), JsonOptions));
+            return 0;
+        }
+        if (string.Equals(args[0], "server-plan-readiness", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliWebSessionServerPlanReadinessReport(), JsonOptions));
+            return 0;
+        }
+        return Unknown("session " + args[0]);
+    }
+
+    private async Task<int> CodexCommandPreview(string command, string[] args)
+    {
+        var goal = GetOption(args, "--goal") ?? PositionalText(args);
+        var workspace = GetOption(args, "--workspace") ?? Environment.CurrentDirectory;
+        var repositoryId = GetOption(args, "--repository-id");
+        var spaceId = GetOption(args, "--space-id");
+        var maxSteps = Math.Clamp(ParseInt(GetOption(args, "--max-steps"), 6), 1, 20);
+        var preview = BuildCliCodexCommandPreviewReport(command, goal, workspace, repositoryId, spaceId, maxSteps);
+        if (args.Contains("--observe-read-only", StringComparer.OrdinalIgnoreCase))
+        {
+            var readSelected = args.Contains("--read-selected", StringComparer.OrdinalIgnoreCase);
+            var diffSource = GetOption(args, "--diff-source");
+            var diffFile = GetOption(args, "--diff-file");
+            var diffTextProvided = GetOption(args, "--diff-text") is not null;
+            var acceptGeneratedDiffPreview = args.Contains("--accept-generated-diff-preview", StringComparer.OrdinalIgnoreCase);
+            var generatedDiffPreview = GetOption(args, "--generated-diff");
+            var runNonWritingPreflightPreview = args.Contains("--run-nonwriting-preflight-preview", StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine(JsonSerializer.Serialize(BuildCliCodexReadOnlyObservationReport(preview, readSelected, diffSource, diffFile, diffTextProvided, acceptGeneratedDiffPreview, generatedDiffPreview, runNonWritingPreflightPreview), JsonOptions));
+            return 0;
+        }
+        if (args.Contains("--server-plan", StringComparer.OrdinalIgnoreCase))
+        {
+            var webToken = GetOption(args, "--web-token") ?? Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+            CliCodexReadOnlyObservationReport? approvalHandoffPreview = null;
+            if (args.Contains("--include-approval-handoff-preview", StringComparer.OrdinalIgnoreCase))
+            {
+                var readSelected = args.Contains("--read-selected", StringComparer.OrdinalIgnoreCase);
+                var diffSource = GetOption(args, "--diff-source");
+                var diffFile = GetOption(args, "--diff-file");
+                var diffTextProvided = GetOption(args, "--diff-text") is not null;
+                var acceptGeneratedDiffPreview = args.Contains("--accept-generated-diff-preview", StringComparer.OrdinalIgnoreCase);
+                var generatedDiffPreview = GetOption(args, "--generated-diff");
+                var runNonWritingPreflightPreview = args.Contains("--run-nonwriting-preflight-preview", StringComparer.OrdinalIgnoreCase);
+                approvalHandoffPreview = BuildCliCodexReadOnlyObservationReport(preview, readSelected, diffSource, diffFile, diffTextProvided, acceptGeneratedDiffPreview, generatedDiffPreview, runNonWritingPreflightPreview);
+            }
+            Console.WriteLine(JsonSerializer.Serialize(await FetchCliCodexServerPlan(preview, webToken, approvalHandoffPreview?.PatchDryRunApprovalHandoffPreview), JsonOptions));
+            return 0;
+        }
+        Console.WriteLine(JsonSerializer.Serialize(preview, JsonOptions));
+        return 0;
+    }
+
+    private CliCodexReadOnlyObservationReport BuildCliCodexReadOnlyObservationReport(
+        CliCodexCommandPreviewReport preview,
+        bool readSelectedFiles = false,
+        string? diffSource = null,
+        string? diffFile = null,
+        bool diffTextProvided = false,
+        bool acceptGeneratedDiffPreview = false,
+        string? generatedDiffPreview = null,
+        bool runNonWritingPreflightPreview = false)
+    {
+        var blockers = preview.OneCyclePreview.ReadyForReadOnlyToolLoop
+            ? new List<string>()
+            : preview.OneCyclePreview.Blockers.ToList();
+        if (preview.WorkspaceId is null)
+        {
+            blockers.Add("workspace id is required before read-only observation execution");
+        }
+
+        var ready = preview.OneCyclePreview.ReadyForReadOnlyToolLoop && preview.WorkspaceId is not null;
+        var observations = new List<CliCodexReadOnlyObservation>();
+        CliCodexReadOnlyCandidateSelection? candidateSelection = null;
+        CliCodexSelectedFileReadReport? selectedFileRead = null;
+        CliCodexPatchIntentPreview? patchIntentPreview = null;
+        CliCodexPatchProposalPreview? patchProposalPreview = null;
+        CliCodexDiffSourceInputPreview? diffSourceInputPreview = null;
+        CliCodexPlannerDiffOutputPreview? plannerDiffOutputPreview = null;
+        CliCodexGeneratedDiffAcceptancePreview? generatedDiffAcceptancePreview = null;
+        CliCodexPlannerDiffValidationHandoffPreview? plannerDiffValidationHandoffPreview = null;
+        CliCodexDiffSourceValidationPreview? diffSourceValidationPreview = null;
+        CliCodexPatchDryRunRequestEnvelopePreview? patchDryRunRequestEnvelopePreview = null;
+        CliCodexPatchDryRunPreflightPreview? patchDryRunPreflightPreview = null;
+        CliCodexPatchDryRunApprovalHandoffPreview? patchDryRunApprovalHandoffPreview = null;
+        if (ready)
+        {
+            var config = LoadConfigOrDefault();
+            var query = string.Join(" ", preview.OneCyclePreview.FileDiscoveryReadPlan.QueryHints);
+            var workspaceId = preview.WorkspaceId!.Value;
+            var treeRequest = BuildToolRequest(workspaceId, new Dictionary<string, object?>
+            {
+                ["path"] = ".",
+                ["maxEntries"] = DefaultMaxTreeEntries,
+                ["maxDepth"] = DefaultMaxTreeDepth
+            });
+            var searchRequest = BuildToolRequest(workspaceId, new Dictionary<string, object?>
+            {
+                ["query"] = query,
+                ["path"] = ".",
+                ["maxMatches"] = DefaultMaxSearchMatches,
+                ["maxFiles"] = DefaultMaxSearchFiles,
+                ["maxBytesPerFile"] = DefaultMaxSearchFileBytes
+            });
+            var statusRequest = BuildToolRequest(workspaceId, new Dictionary<string, object?>());
+
+            var treeResponse = HandleTool(config, Guid.NewGuid(), treeRequest, "workspace.tree");
+            var searchResponse = HandleTool(config, Guid.NewGuid(), searchRequest, "workspace.search");
+            var statusResponse = HandleTool(config, Guid.NewGuid(), statusRequest, "git.status");
+            observations.Add(ToReadOnlyObservation(treeResponse));
+            observations.Add(ToReadOnlyObservation(searchResponse));
+            observations.Add(ToReadOnlyObservation(statusResponse));
+            candidateSelection = BuildCliCodexReadOnlyCandidateSelection(treeResponse, searchResponse, preview.OneCyclePreview.FileDiscoveryReadPlan);
+            selectedFileRead = BuildCliCodexSelectedFileReadReport(config, preview.WorkspaceId!.Value, candidateSelection, readSelectedFiles);
+            patchIntentPreview = BuildCliCodexPatchIntentPreview(preview.Goal, selectedFileRead);
+            patchProposalPreview = BuildCliCodexPatchProposalPreview(patchIntentPreview);
+            diffSourceInputPreview = BuildCliCodexDiffSourceInputPreview(patchProposalPreview, diffSource, diffFile, diffTextProvided);
+            plannerDiffOutputPreview = BuildCliCodexPlannerDiffOutputPreview(patchProposalPreview, diffSourceInputPreview);
+            generatedDiffAcceptancePreview = BuildCliCodexGeneratedDiffAcceptancePreview(plannerDiffOutputPreview, acceptGeneratedDiffPreview, generatedDiffPreview);
+            diffSourceValidationPreview = BuildCliCodexDiffSourceValidationPreview(patchProposalPreview, generatedDiffAcceptancePreview.GeneratedDiffAccepted ? generatedDiffPreview : null);
+            plannerDiffValidationHandoffPreview = BuildCliCodexPlannerDiffValidationHandoffPreview(plannerDiffOutputPreview, generatedDiffAcceptancePreview, diffSourceValidationPreview);
+            patchDryRunRequestEnvelopePreview = BuildCliCodexPatchDryRunRequestEnvelopePreview(diffSourceValidationPreview, preview.WorkspaceId);
+            patchDryRunPreflightPreview = runNonWritingPreflightPreview
+                ? BuildCliCodexPatchDryRunPreflightPreview(config, workspaceId, diffSourceValidationPreview, generatedDiffAcceptancePreview.GeneratedDiffAccepted ? generatedDiffPreview : null)
+                : BuildCliCodexPatchDryRunPreflightPreview(null, null, diffSourceValidationPreview);
+            patchDryRunApprovalHandoffPreview = BuildCliCodexPatchDryRunApprovalHandoffPreview(
+                patchDryRunRequestEnvelopePreview,
+                patchDryRunPreflightPreview,
+                preview.OneCyclePreview.RepositoryId);
+        }
+
+        var succeeded = ready && observations.All(item => item.Status == "SUCCEEDED");
+        candidateSelection ??= BuildBlockedCliCodexReadOnlyCandidateSelection(preview.OneCyclePreview.FileDiscoveryReadPlan);
+        selectedFileRead ??= BuildBlockedCliCodexSelectedFileReadReport(candidateSelection, readSelectedFiles);
+        patchIntentPreview ??= BuildCliCodexPatchIntentPreview(preview.Goal, selectedFileRead);
+        patchProposalPreview ??= BuildCliCodexPatchProposalPreview(patchIntentPreview);
+        diffSourceInputPreview ??= BuildCliCodexDiffSourceInputPreview(patchProposalPreview, diffSource, diffFile, diffTextProvided);
+        plannerDiffOutputPreview ??= BuildCliCodexPlannerDiffOutputPreview(patchProposalPreview, diffSourceInputPreview);
+        generatedDiffAcceptancePreview ??= BuildCliCodexGeneratedDiffAcceptancePreview(plannerDiffOutputPreview, acceptGeneratedDiffPreview, generatedDiffPreview);
+        diffSourceValidationPreview ??= BuildCliCodexDiffSourceValidationPreview(patchProposalPreview, generatedDiffAcceptancePreview.GeneratedDiffAccepted ? generatedDiffPreview : null);
+        plannerDiffValidationHandoffPreview ??= BuildCliCodexPlannerDiffValidationHandoffPreview(plannerDiffOutputPreview, generatedDiffAcceptancePreview, diffSourceValidationPreview);
+        patchDryRunRequestEnvelopePreview ??= BuildCliCodexPatchDryRunRequestEnvelopePreview(diffSourceValidationPreview, preview.WorkspaceId);
+        patchDryRunPreflightPreview ??= BuildCliCodexPatchDryRunPreflightPreview(null, null, diffSourceValidationPreview);
+        patchDryRunApprovalHandoffPreview ??= BuildCliCodexPatchDryRunApprovalHandoffPreview(
+            patchDryRunRequestEnvelopePreview,
+            patchDryRunPreflightPreview,
+            preview.OneCyclePreview.RepositoryId);
+        return new CliCodexReadOnlyObservationReport(
+            Schema: "learnbot.local-agent.codex-read-only-observation.v1",
+            Status: ready ? succeeded ? "OBSERVED_READ_ONLY_CONTEXT" : "OBSERVATION_FAILED" : "BLOCKED_PREVIEW",
+            Command: preview.Command,
+            Goal: preview.Goal,
+            WorkspacePath: preview.WorkspacePath,
+            WorkspaceId: preview.WorkspaceId,
+            RepositoryId: preview.OneCyclePreview.RepositoryId,
+            Requested: true,
+            ReadyForExecution: ready,
+            ExecutionAttempted: ready,
+            ToolExecutionEnabled: ready,
+            RequestCreationEnabled: false,
+            FileContentRead: selectedFileRead.FileContentRead,
+            SearchSnippetsRedacted: true,
+            MutationAllowed: false,
+            TokenSecretPrinted: false,
+            FileDiscoveryReadPlan: preview.OneCyclePreview.FileDiscoveryReadPlan,
+            Observations: observations,
+            CandidateSelection: candidateSelection,
+            SelectedFileRead: selectedFileRead,
+            PatchIntentPreview: patchIntentPreview,
+            PatchProposalPreview: patchProposalPreview,
+            DiffSourceInputPreview: diffSourceInputPreview,
+            PlannerDiffOutputPreview: plannerDiffOutputPreview,
+            GeneratedDiffAcceptancePreview: generatedDiffAcceptancePreview,
+            PlannerDiffValidationHandoffPreview: plannerDiffValidationHandoffPreview,
+            DiffSourceValidationPreview: diffSourceValidationPreview,
+            PatchDryRunRequestEnvelopePreview: patchDryRunRequestEnvelopePreview,
+            PatchDryRunPreflightPreview: patchDryRunPreflightPreview,
+            PatchDryRunApprovalHandoffPreview: patchDryRunApprovalHandoffPreview,
+            Blockers: ready ? observations.Where(item => item.Status != "SUCCEEDED").Select(item => $"{item.ToolName}: {item.Error ?? item.FailureCode ?? item.Status}").ToList() : blockers,
+            Reason: readSelectedFiles
+                ? "This executes read-only discovery observations and bounded selected file reads for a Codex-like local cycle. It validates the future diff-source boundary only as a disabled preview and does not create server requests, apply patches, run tests, mutate files, publish final reports, or enqueue partial reindex."
+                : "This executes only the first read-only discovery observations for a Codex-like local cycle. It does not create server requests, read selected file contents, apply patches, run tests, mutate files, publish final reports, or enqueue partial reindex.");
+    }
+
+    private static JsonElement BuildToolRequest(Guid workspaceId, Dictionary<string, object?> input) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["sessionId"] = Guid.NewGuid(),
+            ["userId"] = Guid.Empty,
+            ["executionTarget"] = "USER_LOCAL_AGENT",
+            ["workspaceId"] = workspaceId,
+            ["input"] = input
+        }, JsonOptions);
+
+    private static CliCodexReadOnlyObservation ToReadOnlyObservation(ToolResponse response) =>
+        new(
+            ToolName: response.ToolName,
+            Status: response.Status,
+            FailureCode: response.FailureCode,
+            Error: response.Error,
+            Executed: true,
+            ReadOnly: true,
+            FileContentRead: false,
+            SearchSnippetsRedacted: response.ToolName == "workspace.search",
+            MutationAllowed: false,
+            OutputSummary: SanitizeReadOnlyObservationOutput(response.ToolName, response.Output));
+
+    private static IReadOnlyDictionary<string, object?> SanitizeReadOnlyObservationOutput(string toolName, Dictionary<string, object?> output)
+    {
+        if (toolName == "workspace.search")
+        {
+            return new Dictionary<string, object?>
+            {
+                ["workspaceId"] = output.GetValueOrDefault("workspaceId"),
+                ["relativePath"] = output.GetValueOrDefault("relativePath"),
+                ["query"] = output.GetValueOrDefault("query"),
+                ["matchCount"] = output.GetValueOrDefault("matchCount"),
+                ["scannedFiles"] = output.GetValueOrDefault("scannedFiles"),
+                ["skippedFiles"] = output.GetValueOrDefault("skippedFiles"),
+                ["maxMatches"] = output.GetValueOrDefault("maxMatches"),
+                ["maxFiles"] = output.GetValueOrDefault("maxFiles"),
+                ["maxBytesPerFile"] = output.GetValueOrDefault("maxBytesPerFile"),
+                ["truncated"] = output.GetValueOrDefault("truncated"),
+                ["matchedPaths"] = ExtractSearchMatchedPaths(output),
+                ["snippetsIncluded"] = false
+            };
+        }
+        if (toolName == "workspace.tree")
+        {
+            return new Dictionary<string, object?>
+            {
+                ["workspaceId"] = output.GetValueOrDefault("workspaceId"),
+                ["relativePath"] = output.GetValueOrDefault("relativePath"),
+                ["entryCount"] = output.GetValueOrDefault("entryCount"),
+                ["maxEntries"] = output.GetValueOrDefault("maxEntries"),
+                ["maxDepth"] = output.GetValueOrDefault("maxDepth"),
+                ["truncated"] = output.GetValueOrDefault("truncated"),
+                ["entries"] = output.GetValueOrDefault("entries")
+            };
+        }
+        if (toolName == "git.status")
+        {
+            return new Dictionary<string, object?>
+            {
+                ["workspaceId"] = output.GetValueOrDefault("workspaceId"),
+                ["branch"] = output.GetValueOrDefault("branch"),
+                ["clean"] = output.GetValueOrDefault("clean"),
+                ["changes"] = output.GetValueOrDefault("changes"),
+                ["identityComplete"] = output.GetValueOrDefault("identityComplete"),
+                ["repositoryIdentity"] = output.GetValueOrDefault("repositoryIdentity")
+            };
+        }
+        return output;
+    }
+
+    private static IReadOnlyList<string> ExtractSearchMatchedPaths(Dictionary<string, object?> output)
+    {
+        if (!output.TryGetValue("matches", out var value) || value is not IEnumerable<Dictionary<string, object?>> matches)
+        {
+            return [];
+        }
+        return matches
+            .Select(match => match.TryGetValue("path", out var path) ? path?.ToString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static CliCodexReadOnlyCandidateSelection BuildCliCodexReadOnlyCandidateSelection(
+        ToolResponse treeResponse,
+        ToolResponse searchResponse,
+        CliCodexFileDiscoveryReadPlan plan)
+    {
+        var searchPaths = ExtractSearchPathsFromToolResponse(searchResponse)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var treePaths = ExtractTreeFilePathsFromToolResponse(treeResponse)
+            .Where(LooksLikeSourceFile)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selectedPaths = searchResponse.Status == "SUCCEEDED" && searchPaths.Count > 0
+            ? searchPaths
+            : treePaths;
+        var selectedFiles = selectedPaths
+            .Take(plan.MaxReadFiles)
+            .Select((path, index) => new CliCodexSelectedFile(
+                Path: path,
+                Rank: index + 1,
+                Source: searchPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "workspace.search" : "workspace.tree",
+                NextTool: "file.read"))
+            .ToList();
+        var status = selectedFiles.Count == 0
+            ? "NO_CANDIDATES"
+            : searchResponse.Status == "SUCCEEDED" && searchPaths.Count > 0
+                ? "READY_FILE_READ_PLAN"
+                : "READY_WITH_TREE_FALLBACK";
+        return new CliCodexReadOnlyCandidateSelection(
+            Schema: "learnbot.local-agent.codex-read-only-candidate-selection.v1",
+            Status: status,
+            SelectionInputs: ["workspace.tree", "workspace.search", "git.status"],
+            SelectedFiles: selectedFiles,
+            SelectedFileCount: selectedFiles.Count,
+            SearchMatchCount: CountCliSearchMatches(searchResponse),
+            TreeEntryCount: CountCliTreeEntries(treeResponse),
+            MaxReadFiles: plan.MaxReadFiles,
+            MaxReadBytesPerFile: plan.MaxReadBytesPerFile,
+            NextTool: "file.read",
+            ReadOnly: true,
+            FileReadPlanPrepared: selectedFiles.Count > 0,
+            FileReadExecutionEnabled: false,
+            FileContentRead: false,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            RequiresModelRanking: false,
+            ModelRankingEnabled: false,
+            Reason: "Candidate selection ranks sanitized discovery observations into bounded file.read candidates, but selected file contents remain unread until the next guarded step.");
+    }
+
+    private static CliCodexReadOnlyCandidateSelection BuildBlockedCliCodexReadOnlyCandidateSelection(CliCodexFileDiscoveryReadPlan plan) =>
+        new(
+            Schema: "learnbot.local-agent.codex-read-only-candidate-selection.v1",
+            Status: "BLOCKED_PREVIEW",
+            SelectionInputs: ["workspace.tree", "workspace.search", "git.status"],
+            SelectedFiles: [],
+            SelectedFileCount: 0,
+            SearchMatchCount: 0,
+            TreeEntryCount: 0,
+            MaxReadFiles: plan.MaxReadFiles,
+            MaxReadBytesPerFile: plan.MaxReadBytesPerFile,
+            NextTool: "file.read",
+            ReadOnly: true,
+            FileReadPlanPrepared: false,
+            FileReadExecutionEnabled: false,
+            FileContentRead: false,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            RequiresModelRanking: false,
+            ModelRankingEnabled: false,
+            Reason: "Candidate selection is blocked until the read-only observations run successfully.");
+
+    private static IReadOnlyList<string> ExtractSearchPathsFromToolResponse(ToolResponse response)
+    {
+        if (!response.Output.TryGetValue("matches", out var value) || value is not IEnumerable<Dictionary<string, object?>> matches)
+        {
+            return [];
+        }
+        return matches
+            .Select(match => match.TryGetValue("path", out var path) ? path?.ToString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractTreeFilePathsFromToolResponse(ToolResponse response)
+    {
+        if (!response.Output.TryGetValue("entries", out var value) || value is not IEnumerable<Dictionary<string, object?>> entries)
+        {
+            return [];
+        }
+        return entries
+            .Where(entry => !entry.TryGetValue("type", out var type) || string.Equals(type?.ToString(), "file", StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.TryGetValue("path", out var path) ? path?.ToString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static int CountCliSearchMatches(ToolResponse response) =>
+        response.Output.TryGetValue("matches", out var value) && value is IEnumerable<Dictionary<string, object?>> matches
+            ? matches.Count()
+            : 0;
+
+    private static int CountCliTreeEntries(ToolResponse response) =>
+        response.Output.TryGetValue("entries", out var value) && value is IEnumerable<Dictionary<string, object?>> entries
+            ? entries.Count()
+            : 0;
+
+    private CliCodexSelectedFileReadReport BuildCliCodexSelectedFileReadReport(
+        AgentConfig config,
+        Guid workspaceId,
+        CliCodexReadOnlyCandidateSelection candidateSelection,
+        bool readSelectedFiles)
+    {
+        if (!readSelectedFiles)
+        {
+            return BuildBlockedCliCodexSelectedFileReadReport(candidateSelection, requested: false);
+        }
+        if (!candidateSelection.FileReadPlanPrepared || candidateSelection.SelectedFiles.Count == 0)
+        {
+            return BuildBlockedCliCodexSelectedFileReadReport(candidateSelection, requested: true);
+        }
+
+        var readFiles = new List<CliCodexSelectedFileRead>();
+        foreach (var selected in candidateSelection.SelectedFiles.Take(candidateSelection.MaxReadFiles))
+        {
+            var request = BuildToolRequest(workspaceId, new Dictionary<string, object?>
+            {
+                ["path"] = selected.Path,
+                ["maxBytes"] = candidateSelection.MaxReadBytesPerFile
+            });
+            var response = HandleTool(config, Guid.NewGuid(), request, "file.read");
+            readFiles.Add(ToSelectedFileRead(selected, response));
+        }
+
+        var succeededCount = readFiles.Count(item => item.Status == "SUCCEEDED");
+        return new CliCodexSelectedFileReadReport(
+            Schema: "learnbot.local-agent.codex-selected-file-read.v1",
+            Status: succeededCount == readFiles.Count ? "SUCCEEDED" : succeededCount > 0 ? "PARTIAL" : "FAILED",
+            Requested: true,
+            ReadyForExecution: true,
+            ExecutionAttempted: true,
+            FileReadExecutionEnabled: true,
+            FileContentRead: succeededCount > 0,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            MaxReadFiles: candidateSelection.MaxReadFiles,
+            MaxReadBytesPerFile: candidateSelection.MaxReadBytesPerFile,
+            SelectedFileCount: candidateSelection.SelectedFileCount,
+            ReadFileCount: succeededCount,
+            Files: readFiles,
+            MissingSelectedFiles: candidateSelection.SelectedFiles
+                .Select(file => file.Path)
+                .Except(readFiles.Where(file => file.Status == "SUCCEEDED").Select(file => file.Path), StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            Reason: "Selected files were read through bounded file.read only after explicit --read-selected. No server request was created and no mutation was allowed.");
+    }
+
+    private static CliCodexSelectedFileReadReport BuildBlockedCliCodexSelectedFileReadReport(
+        CliCodexReadOnlyCandidateSelection candidateSelection,
+        bool requested) =>
+        new(
+            Schema: "learnbot.local-agent.codex-selected-file-read.v1",
+            Status: requested ? "BLOCKED_PREVIEW" : "NOT_REQUESTED",
+            Requested: requested,
+            ReadyForExecution: false,
+            ExecutionAttempted: false,
+            FileReadExecutionEnabled: false,
+            FileContentRead: false,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            MaxReadFiles: candidateSelection.MaxReadFiles,
+            MaxReadBytesPerFile: candidateSelection.MaxReadBytesPerFile,
+            SelectedFileCount: candidateSelection.SelectedFileCount,
+            ReadFileCount: 0,
+            Files: [],
+            MissingSelectedFiles: candidateSelection.SelectedFiles.Select(file => file.Path).ToList(),
+            Reason: requested
+                ? "Selected file read is blocked until candidate selection is ready."
+                : "Selected file read was not requested. Pass --read-selected with --observe-read-only to read bounded selected file contents.");
+
+    private static CliCodexSelectedFileRead ToSelectedFileRead(CliCodexSelectedFile selected, ToolResponse response)
+    {
+        response.Output.TryGetValue("content", out var content);
+        return new CliCodexSelectedFileRead(
+            Path: selected.Path,
+            Rank: selected.Rank,
+            Source: selected.Source,
+            Status: response.Status,
+            FailureCode: response.FailureCode,
+            Error: response.Error,
+            Bytes: TryLongOutput(response.Output, "bytes"),
+            ReturnedBytes: TryIntOutput(response.Output, "returnedBytes"),
+            Truncated: response.Output.TryGetValue("truncated", out var truncated) && truncated is bool truncatedBool && truncatedBool,
+            Content: response.Status == "SUCCEEDED" ? content?.ToString() : null);
+    }
+
+    private static CliCodexPatchIntentPreview BuildCliCodexPatchIntentPreview(string goal, CliCodexSelectedFileReadReport selectedFileRead)
+    {
+        var readFiles = selectedFileRead.Files
+            .Where(file => file.Status == "SUCCEEDED")
+            .ToList();
+        var ready = selectedFileRead.Status == "SUCCEEDED" && readFiles.Count > 0;
+        return new CliCodexPatchIntentPreview(
+            Schema: "learnbot.local-agent.codex-patch-intent-preview.v1",
+            Status: ready ? "READY_PATCH_INTENT_PREVIEW" : "READ_REQUIRED",
+            Goal: goal,
+            PlanningInputPrepared: ready,
+            ReadFileCount: readFiles.Count,
+            TargetFiles: readFiles.Select(file => file.Path).ToList(),
+            TotalReturnedBytes: readFiles.Sum(file => file.ReturnedBytes ?? 0),
+            AnyFileTruncated: readFiles.Any(file => file.Truncated),
+            NextTool: "patch.apply",
+            DryRunOnly: true,
+            DiffGenerated: false,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            FinalReportPublicationEnabled: false,
+            PartialReindexEnabled: false,
+            LocalModelPlanningEnabled: false,
+            Reason: ready
+                ? "Selected file contents are available as planning input, but no diff is generated and patch.apply dry-run execution remains disabled."
+                : "Patch intent preview requires bounded selected file reads first.");
+    }
+
+    private static CliCodexPatchProposalPreview BuildCliCodexPatchProposalPreview(CliCodexPatchIntentPreview intent)
+    {
+        var readyForProposal = intent.PlanningInputPrepared && intent.TargetFiles.Count > 0;
+        return new CliCodexPatchProposalPreview(
+            Schema: "learnbot.local-agent.codex-patch-proposal-preview.v1",
+            Status: readyForProposal ? "AWAITING_DIFF_SOURCE" : "READ_REQUIRED",
+            Goal: intent.Goal,
+            TargetFiles: intent.TargetFiles,
+            ProposalPrepared: readyForProposal,
+            DiffSource: "NONE_PLACEHOLDER_REQUIRED",
+            DiffGenerated: false,
+            DiffPreview: null,
+            UnifiedDiffRequired: true,
+            DryRunOnly: true,
+            PatchApplyInputPrepared: false,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            LocalModelPlanningEnabled: false,
+            ServerPlannerEnabled: false,
+            Reason: readyForProposal
+                ? "Read context is available, but no local-model or server-planner diff source is enabled yet; patch.apply dry-run input is therefore not prepared."
+                : "Patch proposal preview requires a ready patch intent from bounded selected file reads.");
+    }
+
+    private static CliCodexDiffSourceInputPreview BuildCliCodexDiffSourceInputPreview(
+        CliCodexPatchProposalPreview proposal,
+        string? requestedSource,
+        string? diffFile,
+        bool diffTextProvided)
+    {
+        var supported = new[] { "local-model", "server-planner", "inline", "file" };
+        var normalizedSource = string.IsNullOrWhiteSpace(requestedSource)
+            ? "none"
+            : requestedSource.Trim().ToLowerInvariant();
+        var sourceRecognized = normalizedSource == "none"
+            || supported.Contains(normalizedSource, StringComparer.OrdinalIgnoreCase);
+        var sourceRequested = normalizedSource != "none" || !string.IsNullOrWhiteSpace(diffFile) || diffTextProvided;
+        var status = !proposal.ProposalPrepared
+            ? "READ_REQUIRED"
+            : !sourceRequested
+                ? "DIFF_SOURCE_NOT_PROVIDED"
+                : !sourceRecognized
+                    ? "BLOCKED_UNSUPPORTED_DIFF_SOURCE"
+                    : "DIFF_SOURCE_DISABLED_PREVIEW";
+        return new CliCodexDiffSourceInputPreview(
+            Schema: "learnbot.local-agent.codex-diff-source-input-preview.v1",
+            Status: status,
+            Goal: proposal.Goal,
+            TargetFiles: proposal.TargetFiles,
+            RequestedSource: normalizedSource,
+            SourceRequested: sourceRequested,
+            SourceRecognized: sourceRecognized,
+            SourceEnabled: false,
+            DiffFilePathProvided: !string.IsNullOrWhiteSpace(diffFile),
+            DiffFilePathPreview: string.IsNullOrWhiteSpace(diffFile) ? null : diffFile,
+            DiffFileReadEnabled: false,
+            DiffTextProvided: diffTextProvided,
+            DiffTextAccepted: false,
+            DiffBodyLoaded: false,
+            DiffForwardedToValidation: false,
+            LocalModelPlanningEnabled: false,
+            ServerPlannerEnabled: false,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            SupportedSources: supported,
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "Diff-source input requires bounded selected file reads and a ready patch proposal first.",
+                "DIFF_SOURCE_NOT_PROVIDED" => "No diff source was provided. Future local-model, server-planner, inline, or file sources must pass this boundary before validation.",
+                "BLOCKED_UNSUPPORTED_DIFF_SOURCE" => "The requested diff source is not supported. Supported sources are local-model, server-planner, inline, and file.",
+                _ => "Diff-source metadata was received, but source execution, file reads, inline diff acceptance, validation forwarding, request creation, and mutation remain disabled."
+            });
+    }
+
+    private static CliCodexPlannerDiffOutputPreview BuildCliCodexPlannerDiffOutputPreview(
+        CliCodexPatchProposalPreview proposal,
+        CliCodexDiffSourceInputPreview input)
+    {
+        var plannerRequested = input.RequestedSource is "local-model" or "server-planner";
+        var readContextReady = proposal.ProposalPrepared && proposal.TargetFiles.Count > 0;
+        var status = !readContextReady
+            ? "READ_REQUIRED"
+            : !plannerRequested
+                ? "PLANNER_SOURCE_NOT_REQUESTED"
+                : "PLANNER_OUTPUT_DISABLED_PREVIEW";
+        return new CliCodexPlannerDiffOutputPreview(
+            Schema: "learnbot.local-agent.codex-planner-diff-output-preview.v1",
+            Status: status,
+            Goal: proposal.Goal,
+            TargetFiles: proposal.TargetFiles,
+            RequestedSource: input.RequestedSource,
+            PlannerSourceRequested: plannerRequested,
+            PlannerSourceRecognized: plannerRequested,
+            ReadContextRequired: true,
+            ReadContextReady: readContextReady,
+            PlannerExecutionEnabled: false,
+            LocalModelPlanningEnabled: false,
+            ServerPlannerEnabled: false,
+            OutputEnvelopePrepared: plannerRequested && readContextReady,
+            UnifiedDiffRequired: true,
+            DiffGenerated: false,
+            DiffBodyIncluded: false,
+            DiffForwardedToValidation: false,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            OutputEnvelopePreview: new Dictionary<string, object?>
+            {
+                ["schema"] = "learnbot.local-agent.codex-planner-diff-output-envelope.v1",
+                ["source"] = input.RequestedSource,
+                ["goal"] = proposal.Goal,
+                ["targetFiles"] = proposal.TargetFiles,
+                ["unifiedDiffRequired"] = true,
+                ["diff"] = "<disabled-unified-diff-placeholder>",
+                ["diffGenerated"] = false,
+                ["forwardToValidationEnabled"] = false,
+                ["mutationAllowed"] = false
+            },
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "Planner diff output requires bounded selected file reads and a ready patch proposal first.",
+                "PLANNER_SOURCE_NOT_REQUESTED" => "No local-model or server-planner diff source was requested, so no planner output envelope is prepared.",
+                _ => "Planner diff output envelope shape is prepared, but local model calls, server planner calls, diff generation, validation forwarding, request creation, and mutation remain disabled."
+            });
+    }
+
+    private static CliCodexGeneratedDiffAcceptancePreview BuildCliCodexGeneratedDiffAcceptancePreview(
+        CliCodexPlannerDiffOutputPreview planner,
+        bool explicitPreviewSwitchEnabled,
+        string? generatedDiff)
+    {
+        var plannerOutputReady = planner.OutputEnvelopePrepared && planner.PlannerSourceRequested;
+        var generatedDiffProvided = !string.IsNullOrWhiteSpace(generatedDiff);
+        var generatedDiffBytes = generatedDiffProvided ? Encoding.UTF8.GetByteCount(generatedDiff!) : 0;
+        var withinSizeLimit = generatedDiffBytes <= AbsoluteMaxPatchBytes;
+        var accepted = planner.ReadContextReady
+            && plannerOutputReady
+            && explicitPreviewSwitchEnabled
+            && generatedDiffProvided
+            && withinSizeLimit;
+        var status = !planner.ReadContextReady
+            ? "READ_REQUIRED"
+            : !plannerOutputReady
+                ? "PLANNER_SOURCE_REQUIRED"
+                : !generatedDiffProvided
+                    ? "GENERATED_DIFF_NOT_PROVIDED"
+                    : !explicitPreviewSwitchEnabled
+                        ? "EXPLICIT_SWITCH_REQUIRED"
+                        : !withinSizeLimit
+                            ? "BLOCKED_SIZE_LIMIT"
+                            : "ACCEPTED_FOR_VALIDATION_PREVIEW";
+
+        return new CliCodexGeneratedDiffAcceptancePreview(
+            Schema: "learnbot.local-agent.codex-generated-diff-acceptance-preview.v1",
+            Status: status,
+            Goal: planner.Goal,
+            TargetFiles: planner.TargetFiles,
+            RequestedSource: planner.RequestedSource,
+            PlannerOutputEnvelopePrepared: planner.OutputEnvelopePrepared,
+            ExplicitPreviewSwitchEnabled: explicitPreviewSwitchEnabled,
+            GeneratedDiffProvided: generatedDiffProvided,
+            GeneratedDiffAccepted: accepted,
+            GeneratedDiffBytes: generatedDiffBytes,
+            MaxGeneratedDiffBytes: AbsoluteMaxPatchBytes,
+            DiffFileReadEnabled: false,
+            InlineDiffAccepted: false,
+            ForwardToValidationPreview: accepted,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            DiffPreview: accepted
+                ? generatedDiff!.Length > 1200 ? generatedDiff[..1200] : generatedDiff
+                : null,
+            Blocker: status switch
+            {
+                "READ_REQUIRED" => "bounded selected file reads and patch proposal context are required",
+                "PLANNER_SOURCE_REQUIRED" => "a local-model or server-planner output envelope is required",
+                "GENERATED_DIFF_NOT_PROVIDED" => "a generated in-memory unified diff is required",
+                "EXPLICIT_SWITCH_REQUIRED" => "the explicit generated-diff preview switch is required",
+                "BLOCKED_SIZE_LIMIT" => "generated diff exceeds the preview size limit",
+                _ => null
+            },
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "Generated diff acceptance requires bounded selected file reads and a ready planner output envelope first.",
+                "PLANNER_SOURCE_REQUIRED" => "Generated diff acceptance is limited to local-model or server-planner output envelopes.",
+                "GENERATED_DIFF_NOT_PROVIDED" => "The planner output envelope is ready, but no generated in-memory diff body was provided.",
+                "EXPLICIT_SWITCH_REQUIRED" => "A generated diff body was provided, but it is not accepted unless --accept-generated-diff-preview is present.",
+                "BLOCKED_SIZE_LIMIT" => "The generated diff body is larger than the bounded preview limit, so it is not forwarded to validation.",
+                _ => "The generated in-memory planner diff is accepted for validation preview only. Diff-file reads, inline diff acceptance, request creation, mutation, tests, final publication, and partial reindex remain disabled."
+            });
+    }
+
+    private static CliCodexPlannerDiffValidationHandoffPreview BuildCliCodexPlannerDiffValidationHandoffPreview(
+        CliCodexPlannerDiffOutputPreview planner,
+        CliCodexGeneratedDiffAcceptancePreview acceptance,
+        CliCodexDiffSourceValidationPreview validation)
+    {
+        var plannerOutputReady = planner.OutputEnvelopePrepared && planner.PlannerSourceRequested;
+        var diffAvailable = acceptance.GeneratedDiffAccepted;
+        var status = !planner.ReadContextReady
+            ? "READ_REQUIRED"
+            : !plannerOutputReady
+                ? "PLANNER_OUTPUT_REQUIRED"
+                : !diffAvailable
+                    ? "HANDOFF_DISABLED_NO_DIFF"
+                    : validation.DiffTouchesOnlyTargetFiles
+                        ? "HANDOFF_VALIDATED_PREVIEW"
+                        : "HANDOFF_VALIDATION_BLOCKED";
+        return new CliCodexPlannerDiffValidationHandoffPreview(
+            Schema: "learnbot.local-agent.codex-planner-diff-validation-handoff-preview.v1",
+            Status: status,
+            Goal: planner.Goal,
+            TargetFiles: planner.TargetFiles,
+            RequestedSource: planner.RequestedSource,
+            PlannerOutputRequired: true,
+            PlannerOutputEnvelopePrepared: planner.OutputEnvelopePrepared,
+            DiffBodyAvailable: diffAvailable,
+            ValidationInputPrepared: diffAvailable,
+            ValidationForwardingEnabled: diffAvailable,
+            ValidationAttempted: diffAvailable,
+            DiffValidationPassed: validation.DiffTouchesOnlyTargetFiles,
+            PatchApplyInputPrepared: validation.PatchApplyInputPrepared,
+            RequestCreationEnabled: false,
+            MutationAllowed: false,
+            Blocker: status switch
+            {
+                "READ_REQUIRED" => "bounded selected file reads and patch proposal context are required",
+                "PLANNER_OUTPUT_REQUIRED" => "a local-model or server-planner output envelope is required",
+                "HANDOFF_DISABLED_NO_DIFF" => acceptance.Blocker ?? "planner output envelope is present but no accepted diff body is available",
+                "HANDOFF_VALIDATION_BLOCKED" => validation.ParseError ?? "generated diff failed validation",
+                _ => null
+            },
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "Planner-to-validation handoff requires bounded selected file reads and a ready patch proposal first.",
+                "PLANNER_OUTPUT_REQUIRED" => "Planner-to-validation handoff is skipped until a local-model or server-planner output envelope is requested.",
+                "HANDOFF_DISABLED_NO_DIFF" => "Planner output envelope shape is ready, but no generated diff body has passed the explicit acceptance preview, so validation input is not prepared.",
+                "HANDOFF_VALIDATION_BLOCKED" => "The accepted generated diff was forwarded to validation preview, but it did not pass target/path parsing guards.",
+                _ => "The accepted generated diff was forwarded to validation preview and passed selected-target guards. Request creation, snapshot-writing dry-run, mutation, tests, final publication, and partial reindex remain disabled."
+            });
+    }
+
+    private static CliCodexDiffSourceValidationPreview BuildCliCodexDiffSourceValidationPreview(
+        CliCodexPatchProposalPreview proposal,
+        string? proposedUnifiedDiff = null)
+    {
+        if (!proposal.ProposalPrepared)
+        {
+            return new CliCodexDiffSourceValidationPreview(
+                Schema: "learnbot.local-agent.codex-diff-source-validation-preview.v1",
+                Status: "READ_REQUIRED",
+                Goal: proposal.Goal,
+                TargetFiles: proposal.TargetFiles,
+                DiffProvided: false,
+                DiffParsed: false,
+                ParseError: null,
+                TouchedFiles: [],
+                RejectedFiles: [],
+                DiffTouchesOnlyTargetFiles: false,
+                DiffPreview: null,
+                UnifiedDiffRequired: true,
+                DryRunOnly: true,
+                PatchApplyInputPrepared: false,
+                PatchDryRunExecutionEnabled: false,
+                RequestCreationEnabled: false,
+                ApprovalRequiredBeforeMutation: true,
+                MutationAllowed: false,
+                TestExecutionEnabled: false,
+                LocalModelPlanningEnabled: false,
+                ServerPlannerEnabled: false,
+                Reason: "Diff source validation requires a ready patch proposal from bounded selected file reads first.");
+        }
+
+        if (string.IsNullOrWhiteSpace(proposedUnifiedDiff))
+        {
+            return new CliCodexDiffSourceValidationPreview(
+                Schema: "learnbot.local-agent.codex-diff-source-validation-preview.v1",
+                Status: "DIFF_SOURCE_REQUIRED",
+                Goal: proposal.Goal,
+                TargetFiles: proposal.TargetFiles,
+                DiffProvided: false,
+                DiffParsed: false,
+                ParseError: null,
+                TouchedFiles: [],
+                RejectedFiles: [],
+                DiffTouchesOnlyTargetFiles: false,
+                DiffPreview: null,
+                UnifiedDiffRequired: true,
+                DryRunOnly: true,
+                PatchApplyInputPrepared: false,
+                PatchDryRunExecutionEnabled: false,
+                RequestCreationEnabled: false,
+                ApprovalRequiredBeforeMutation: true,
+                MutationAllowed: false,
+                TestExecutionEnabled: false,
+                LocalModelPlanningEnabled: false,
+                ServerPlannerEnabled: false,
+                Reason: "A future local-model or server-planner unified diff must be supplied before patch.apply dry-run input can be prepared.");
+        }
+
+        var parsed = ParseUnifiedDiff(proposedUnifiedDiff);
+        var touchedFiles = parsed.Success
+            ? parsed.Files.Select(file => file.Path.Replace('\\', '/')).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : new List<string>();
+        var rejectedFiles = touchedFiles
+            .Where(file => !proposal.TargetFiles.Contains(file, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        var accepted = parsed.Success && touchedFiles.Count > 0 && rejectedFiles.Count == 0;
+        return new CliCodexDiffSourceValidationPreview(
+            Schema: "learnbot.local-agent.codex-diff-source-validation-preview.v1",
+            Status: accepted
+                ? "VALID_DIFF_SOURCE_PREVIEW"
+                : parsed.Success ? "BLOCKED_TARGET_MISMATCH" : "BLOCKED_INVALID_DIFF",
+            Goal: proposal.Goal,
+            TargetFiles: proposal.TargetFiles,
+            DiffProvided: true,
+            DiffParsed: parsed.Success,
+            ParseError: parsed.Error,
+            TouchedFiles: touchedFiles,
+            RejectedFiles: rejectedFiles,
+            DiffTouchesOnlyTargetFiles: accepted,
+            DiffPreview: proposedUnifiedDiff.Length > 1200 ? proposedUnifiedDiff[..1200] : proposedUnifiedDiff,
+            UnifiedDiffRequired: true,
+            DryRunOnly: true,
+            PatchApplyInputPrepared: accepted,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            LocalModelPlanningEnabled: false,
+            ServerPlannerEnabled: false,
+            Reason: accepted
+                ? "The supplied unified diff parses and touches only selected target files, so patch.apply dry-run input may be prepared in a later guarded step; execution remains disabled here."
+                : parsed.Success
+                    ? "The supplied unified diff touches files outside the selected target set, so patch.apply dry-run input is not prepared."
+                    : "The supplied diff is not a valid unified diff, so patch.apply dry-run input is not prepared.");
+    }
+
+    private static CliCodexPatchDryRunRequestEnvelopePreview BuildCliCodexPatchDryRunRequestEnvelopePreview(
+        CliCodexDiffSourceValidationPreview validation,
+        Guid? workspaceId)
+    {
+        var validationPassed = validation.PatchApplyInputPrepared && validation.DiffTouchesOnlyTargetFiles;
+        var status = validation.Status == "READ_REQUIRED"
+            ? "READ_REQUIRED"
+            : !validationPassed
+                ? "DIFF_VALIDATION_REQUIRED"
+                : "DRY_RUN_REQUEST_ENVELOPE_PREPARED";
+        IReadOnlyDictionary<string, object?>? envelope = null;
+        if (validationPassed)
+        {
+            envelope = new Dictionary<string, object?>
+            {
+                ["schema"] = "learnbot.local-agent.patch-apply-dry-run-request-envelope.v1",
+                ["toolName"] = "patch.apply",
+                ["executionTarget"] = "USER_LOCAL_AGENT",
+                ["approvalState"] = "REQUIRED_BEFORE_SNAPSHOT_DRY_RUN",
+                ["workspaceId"] = workspaceId?.ToString() ?? "<workspace-id>",
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["workspaceId"] = workspaceId?.ToString() ?? "<workspace-id>",
+                    ["dryRunOnly"] = true,
+                    ["allowMutation"] = false,
+                    ["targetFiles"] = validation.TargetFiles,
+                    ["diffPreview"] = validation.DiffPreview,
+                    ["maxPatchBytes"] = AbsoluteMaxPatchBytes
+                },
+                ["requestCreationEnabled"] = false,
+                ["enqueueEnabled"] = false,
+                ["claimable"] = false,
+                ["snapshotCreationEnabled"] = false,
+                ["patchDryRunExecutionEnabled"] = false,
+                ["mutationAllowed"] = false
+            };
+        }
+
+        return new CliCodexPatchDryRunRequestEnvelopePreview(
+            Schema: "learnbot.local-agent.codex-patch-dry-run-request-envelope-preview.v1",
+            Status: status,
+            Goal: validation.Goal,
+            WorkspaceId: workspaceId,
+            ToolName: "patch.apply",
+            ExecutionTarget: "USER_LOCAL_AGENT",
+            ApprovalState: validationPassed ? "REQUIRED_BEFORE_SNAPSHOT_DRY_RUN" : "NOT_PREPARED",
+            TargetFiles: validation.TargetFiles,
+            DiffValidationRequired: true,
+            DiffValidationPassed: validationPassed,
+            RequestEnvelopePrepared: validationPassed,
+            PatchApplyInputPrepared: validation.PatchApplyInputPrepared,
+            DryRunOnly: true,
+            SnapshotCreationRequiredForFullDryRun: validationPassed,
+            SnapshotCreationEnabled: false,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            EnqueueEnabled: false,
+            Claimable: false,
+            ApprovalRequiredBeforeDryRun: true,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            FinalReportPublicationEnabled: false,
+            PartialReindexEnabled: false,
+            RequestEnvelopePreview: envelope,
+            Blocker: status switch
+            {
+                "READ_REQUIRED" => "bounded selected file reads and patch proposal context are required",
+                "DIFF_VALIDATION_REQUIRED" => "a validated generated diff touching only selected target files is required",
+                _ => null
+            },
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "patch.apply dry-run request envelope preview requires selected file reads, patch proposal context, and diff validation first.",
+                "DIFF_VALIDATION_REQUIRED" => "patch.apply dry-run request envelope preview is blocked until the accepted generated diff passes validation.",
+                _ => "patch.apply dry-run request envelope shape is prepared from the validated generated diff, but request creation, enqueue, claim, snapshot creation, dry-run execution, mutation, tests, final publication, and partial reindex remain disabled."
+            });
+    }
+
+    private CliCodexPatchDryRunPreflightPreview BuildCliCodexPatchDryRunPreflightPreview(
+        AgentConfig? config,
+        Guid? workspaceId,
+        CliCodexDiffSourceValidationPreview validation,
+        string? proposedUnifiedDiff = null)
+    {
+        if (!validation.PatchApplyInputPrepared || !validation.DiffTouchesOnlyTargetFiles)
+        {
+            return new CliCodexPatchDryRunPreflightPreview(
+                Schema: "learnbot.local-agent.codex-patch-dry-run-preflight-preview.v1",
+                Status: "DIFF_VALIDATION_REQUIRED",
+                Goal: validation.Goal,
+                ToolName: "patch.apply",
+                TargetFiles: validation.TargetFiles,
+                Requested: false,
+                ReadyForExecution: false,
+                ExecutionAttempted: false,
+                DiffValidationRequired: true,
+                DiffValidationPassed: false,
+                NonWritingPreflightOnly: true,
+                FileReadAttempted: false,
+                ContextValidationAttempted: false,
+                PreflightPassed: false,
+                Files: [],
+                SnapshotCreated: false,
+                MutationApplied: false,
+                PatchApplyInputPrepared: false,
+                PatchDryRunExecutionEnabled: false,
+                RequestCreationEnabled: false,
+                ApprovalRequiredBeforeMutation: true,
+                MutationAllowed: false,
+                TestExecutionEnabled: false,
+                FinalReportPublicationEnabled: false,
+                PartialReindexEnabled: false,
+                FailureCode: null,
+                Error: null,
+                Reason: "patch.apply preflight requires a validated unified diff that touches only selected target files.");
+        }
+
+        if (config is null || workspaceId is null || string.IsNullOrWhiteSpace(proposedUnifiedDiff))
+        {
+            return new CliCodexPatchDryRunPreflightPreview(
+                Schema: "learnbot.local-agent.codex-patch-dry-run-preflight-preview.v1",
+                Status: "PREFLIGHT_INPUT_REQUIRED",
+                Goal: validation.Goal,
+                ToolName: "patch.apply",
+                TargetFiles: validation.TargetFiles,
+                Requested: false,
+                ReadyForExecution: false,
+                ExecutionAttempted: false,
+                DiffValidationRequired: true,
+                DiffValidationPassed: true,
+                NonWritingPreflightOnly: true,
+                FileReadAttempted: false,
+                ContextValidationAttempted: false,
+                PreflightPassed: false,
+                Files: [],
+                SnapshotCreated: false,
+                MutationApplied: false,
+                PatchApplyInputPrepared: true,
+                PatchDryRunExecutionEnabled: false,
+                RequestCreationEnabled: false,
+                ApprovalRequiredBeforeMutation: true,
+                MutationAllowed: false,
+                TestExecutionEnabled: false,
+                FinalReportPublicationEnabled: false,
+                PartialReindexEnabled: false,
+                FailureCode: null,
+                Error: null,
+                Reason: "Validated diff shape is available, but explicit workspace config and diff body are required before non-writing preflight can run.");
+        }
+
+        var workspace = ResolveApprovedWorkspace(config, workspaceId);
+        if (!workspace.Success)
+        {
+            return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_WORKSPACE", workspace.FailureCode, workspace.Error);
+        }
+
+        var parsed = ParseUnifiedDiff(proposedUnifiedDiff);
+        if (!parsed.Success)
+        {
+            return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_INVALID_DIFF", "TOOL_FAILED", parsed.Error ?? "Invalid unified diff.");
+        }
+
+        var fileResults = new List<IReadOnlyDictionary<string, object?>>();
+        foreach (var file in parsed.Files)
+        {
+            if (!validation.TargetFiles.Contains(file.Path, StringComparer.OrdinalIgnoreCase))
+            {
+                return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_TARGET_MISMATCH", "PATH_ESCAPE", "Patch modifies a file outside selected target files: " + file.Path, fileResults);
+            }
+
+            var target = Path.GetFullPath(Path.Combine(workspace.Root!, file.Path));
+            if (!IsWithin(workspace.Root!, target))
+            {
+                return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_PATH_ESCAPE", "PATH_ESCAPE", "Patch path escapes the approved workspace: " + file.Path, fileResults);
+            }
+            if (!File.Exists(target))
+            {
+                return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_TARGET_MISSING", "TOOL_FAILED", "Patch target file was not found: " + file.Path, fileResults);
+            }
+
+            var bytes = File.ReadAllBytes(target);
+            if (bytes.Any(value => value == 0))
+            {
+                return BuildFailedCliCodexPatchDryRunPreflight(validation, "BLOCKED_BINARY_FILE", "TOOL_FAILED", "Binary files are not supported by patch.apply preflight: " + file.Path, fileResults);
+            }
+
+            var content = Encoding.UTF8.GetString(bytes);
+            var hunkResults = file.Hunks.Select(hunk => DryRunHunk(SplitLines(content), hunk)).ToList();
+            var contextMatches = hunkResults.All(item => item.ContextMatches);
+            fileResults.Add(new Dictionary<string, object?>
+            {
+                ["path"] = file.Path,
+                ["absolutePath"] = target,
+                ["actualSha256"] = Sha256Hex(bytes),
+                ["bytes"] = bytes.LongLength,
+                ["contextMatches"] = contextMatches,
+                ["hunks"] = hunkResults.Select(item => new Dictionary<string, object?>
+                {
+                    ["oldStart"] = item.OldStart,
+                    ["oldLineCount"] = item.OldLineCount,
+                    ["contextMatches"] = item.ContextMatches,
+                    ["message"] = item.Message
+                }).ToList()
+            });
+
+            if (!contextMatches)
+            {
+                return BuildFailedCliCodexPatchDryRunPreflight(validation, "CONTEXT_MISMATCH", "CONTEXT_MISMATCH", "Patch context did not match local file: " + file.Path, fileResults);
+            }
+        }
+
+        return new CliCodexPatchDryRunPreflightPreview(
+            Schema: "learnbot.local-agent.codex-patch-dry-run-preflight-preview.v1",
+            Status: "PREFLIGHT_PASSED",
+            Goal: validation.Goal,
+            ToolName: "patch.apply",
+            TargetFiles: validation.TargetFiles,
+            Requested: true,
+            ReadyForExecution: true,
+            ExecutionAttempted: true,
+            DiffValidationRequired: true,
+            DiffValidationPassed: true,
+            NonWritingPreflightOnly: true,
+            FileReadAttempted: true,
+            ContextValidationAttempted: true,
+            PreflightPassed: true,
+            Files: fileResults,
+            SnapshotCreated: false,
+            MutationApplied: false,
+            PatchApplyInputPrepared: true,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            FinalReportPublicationEnabled: false,
+            PartialReindexEnabled: false,
+            FailureCode: null,
+            Error: null,
+            Reason: "Validated diff context matches local target files. This is a non-writing preflight only; snapshot creation, patch.apply execution, mutation, tests, final report, and partial reindex remain disabled.");
+    }
+
+    private static CliCodexPatchDryRunApprovalHandoffPreview BuildCliCodexPatchDryRunApprovalHandoffPreview(
+        CliCodexPatchDryRunRequestEnvelopePreview requestEnvelope,
+        CliCodexPatchDryRunPreflightPreview preflight,
+        Guid? repositoryId)
+    {
+        var envelopeReady = requestEnvelope.RequestEnvelopePrepared;
+        var preflightPassed = preflight.PreflightPassed;
+        var status = requestEnvelope.Status == "READ_REQUIRED"
+            ? "READ_REQUIRED"
+            : !envelopeReady
+                ? "DRY_RUN_ENVELOPE_REQUIRED"
+                : !preflight.ExecutionAttempted
+                    ? "NONWRITING_PREFLIGHT_REQUIRED"
+                    : !preflightPassed
+                        ? "NONWRITING_PREFLIGHT_FAILED"
+                        : "APPROVAL_HANDOFF_PREPARED";
+        var handoffPrepared = status == "APPROVAL_HANDOFF_PREPARED";
+        IReadOnlyDictionary<string, object?>? handoff = null;
+        if (handoffPrepared)
+        {
+            handoff = new Dictionary<string, object?>
+            {
+                ["schema"] = "learnbot.local-agent.patch-dry-run-approval-handoff.v1",
+                ["repositoryId"] = repositoryId?.ToString() ?? "<repository-id>",
+                ["workspaceId"] = requestEnvelope.WorkspaceId?.ToString() ?? "<workspace-id>",
+                ["toolName"] = "patch.apply",
+                ["executionTarget"] = "USER_LOCAL_AGENT",
+                ["approvalKind"] = "SNAPSHOT_WRITING_DRY_RUN",
+                ["approvalState"] = "AWAITING_USER_APPROVAL",
+                ["targetFiles"] = requestEnvelope.TargetFiles,
+                ["requestEnvelopeStatus"] = requestEnvelope.Status,
+                ["nonWritingPreflightStatus"] = preflight.Status,
+                ["requestEnvelopePreview"] = requestEnvelope.RequestEnvelopePreview,
+                ["requestCreationEnabled"] = false,
+                ["approvalRequestCreationEnabled"] = false,
+                ["enqueueEnabled"] = false,
+                ["claimable"] = false,
+                ["snapshotCreationEnabled"] = false,
+                ["patchDryRunExecutionEnabled"] = false,
+                ["mutationAllowed"] = false
+            };
+        }
+
+        return new CliCodexPatchDryRunApprovalHandoffPreview(
+            Schema: "learnbot.local-agent.codex-patch-dry-run-approval-handoff-preview.v1",
+            Status: status,
+            Goal: requestEnvelope.Goal,
+            WorkspaceId: requestEnvelope.WorkspaceId,
+            RepositoryId: repositoryId,
+            ToolName: "patch.apply",
+            ExecutionTarget: "USER_LOCAL_AGENT",
+            ApprovalKind: "SNAPSHOT_WRITING_DRY_RUN",
+            ApprovalState: handoffPrepared ? "AWAITING_USER_APPROVAL" : "NOT_PREPARED",
+            TargetFiles: requestEnvelope.TargetFiles,
+            DiffValidationPassed: requestEnvelope.DiffValidationPassed,
+            RequestEnvelopePrepared: envelopeReady,
+            NonWritingPreflightRequired: true,
+            NonWritingPreflightPassed: preflightPassed,
+            ApprovalHandoffPrepared: handoffPrepared,
+            DryRunApprovalRequired: true,
+            MutationApprovalRequired: true,
+            RequestCreationEnabled: false,
+            ApprovalRequestCreationEnabled: false,
+            EnqueueEnabled: false,
+            Claimable: false,
+            SnapshotCreationEnabled: false,
+            PatchDryRunExecutionEnabled: false,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            FinalReportPublicationEnabled: false,
+            PartialReindexEnabled: false,
+            HandoffPreview: handoff,
+            Blocker: status switch
+            {
+                "READ_REQUIRED" => "bounded selected file reads and patch proposal context are required",
+                "DRY_RUN_ENVELOPE_REQUIRED" => "validated patch.apply dry-run request envelope is required",
+                "NONWRITING_PREFLIGHT_REQUIRED" => "explicit non-writing preflight must pass before approval handoff",
+                "NONWRITING_PREFLIGHT_FAILED" => preflight.Error ?? preflight.FailureCode ?? "non-writing preflight failed",
+                _ => null
+            },
+            Reason: status switch
+            {
+                "READ_REQUIRED" => "Approval handoff requires the read-only discovery/read and patch proposal context first.",
+                "DRY_RUN_ENVELOPE_REQUIRED" => "Approval handoff is blocked until a validated generated diff prepares the patch.apply dry-run request envelope.",
+                "NONWRITING_PREFLIGHT_REQUIRED" => "Approval handoff is blocked until the validated diff passes the explicit non-writing local context preflight.",
+                "NONWRITING_PREFLIGHT_FAILED" => "Approval handoff is blocked because the non-writing preflight did not pass local file context validation.",
+                _ => "Snapshot-writing patch.apply dry-run approval handoff is prepared from the validated request envelope and non-writing preflight result, but request creation, approval persistence, enqueue, claim, snapshot creation, dry-run execution, mutation, tests, final publication, and partial reindex remain disabled."
+            });
+    }
+
+    private static CliCodexPatchDryRunPreflightPreview BuildFailedCliCodexPatchDryRunPreflight(
+        CliCodexDiffSourceValidationPreview validation,
+        string status,
+        string? failureCode,
+        string? error,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>>? files = null) =>
+        new(
+            Schema: "learnbot.local-agent.codex-patch-dry-run-preflight-preview.v1",
+            Status: status,
+            Goal: validation.Goal,
+            ToolName: "patch.apply",
+            TargetFiles: validation.TargetFiles,
+            Requested: true,
+            ReadyForExecution: true,
+            ExecutionAttempted: true,
+            DiffValidationRequired: true,
+            DiffValidationPassed: validation.PatchApplyInputPrepared,
+            NonWritingPreflightOnly: true,
+            FileReadAttempted: files is not null && files.Count > 0,
+            ContextValidationAttempted: files is not null && files.Count > 0,
+            PreflightPassed: false,
+            Files: files ?? [],
+            SnapshotCreated: false,
+            MutationApplied: false,
+            PatchApplyInputPrepared: validation.PatchApplyInputPrepared,
+            PatchDryRunExecutionEnabled: false,
+            RequestCreationEnabled: false,
+            ApprovalRequiredBeforeMutation: true,
+            MutationAllowed: false,
+            TestExecutionEnabled: false,
+            FinalReportPublicationEnabled: false,
+            PartialReindexEnabled: false,
+            FailureCode: failureCode,
+            Error: error,
+            Reason: "patch.apply non-writing preflight failed before any snapshot, mutation, test, final report, or partial reindex execution.");
+
+    private static long? TryLongOutput(Dictionary<string, object?> output, string key) =>
+        output.TryGetValue(key, out var value)
+            ? value switch
+            {
+                long longValue => longValue,
+                int intValue => intValue,
+                _ => null
+            }
+            : null;
+
+    private static int? TryIntOutput(Dictionary<string, object?> output, string key) =>
+        output.TryGetValue(key, out var value)
+            ? value switch
+            {
+                int intValue => intValue,
+                long longValue when longValue <= int.MaxValue && longValue >= int.MinValue => (int)longValue,
+                _ => null
+            }
+            : null;
 
     private int FileCommand(string[] args)
     {
@@ -1676,6 +3003,8 @@ internal sealed partial class LearnBotLocalAgent
 
     private static string StatePath() => Path.Combine(AgentDataDirectory(), "agent-state.json");
 
+    private static string WebSessionPath() => Path.Combine(AgentDataDirectory(), "web-session.json");
+
     private static void Log(string message)
     {
         var path = LogPath();
@@ -1741,6 +3070,730 @@ internal sealed partial class LearnBotLocalAgent
     private static StringContent Json(object value) =>
         new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
 
+    private static IReadOnlyDictionary<string, object?> BuildCliCodexServerSubmissionBody(
+        CliCodexCommandPreviewReport preview,
+        CliCodexPatchDryRunApprovalHandoffPreview? patchDryRunApprovalHandoffPreview = null)
+    {
+        var body = new Dictionary<string, object?>(preview.ServerSubmissionPlan.BodyPreview, StringComparer.Ordinal);
+        if (patchDryRunApprovalHandoffPreview is not null)
+        {
+            body["patchDryRunApprovalHandoffPreview"] = patchDryRunApprovalHandoffPreview;
+        }
+        return body;
+    }
+
+    private async Task<CliCodexServerPlanFetchResult> FetchCliCodexServerPlan(
+        CliCodexCommandPreviewReport preview,
+        string? webToken,
+        CliCodexPatchDryRunApprovalHandoffPreview? patchDryRunApprovalHandoffPreview = null)
+    {
+        var readiness = BuildCliWebSessionServerPlanReadinessReport();
+        var submissionBody = BuildCliCodexServerSubmissionBody(preview, patchDryRunApprovalHandoffPreview);
+        if (string.IsNullOrWhiteSpace(webToken))
+        {
+            return BuildCliCodexServerPlanFetchResult(
+                preview,
+                submissionBody,
+                readiness,
+                status: "BLOCKED_AUTH_REQUIRED",
+                attempted: false,
+                networkCallEnabled: false,
+                webTokenProvided: false,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: "web token is required; pass --web-token or set LEARNBOT_WEB_TOKEN");
+        }
+        if (!preview.ServerSubmissionPlan.ReadyForDisabledPlan)
+        {
+            return BuildCliCodexServerPlanFetchResult(
+                preview,
+                submissionBody,
+                readiness,
+                status: "BLOCKED_PREVIEW",
+                attempted: false,
+                networkCallEnabled: false,
+                webTokenProvided: true,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: "server submission plan is not ready");
+        }
+
+        try
+        {
+            var server = (LoadConfigOrDefault().ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+            using var client = new HttpClient { BaseAddress = new Uri(server) };
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", webToken);
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
+            using var response = await client.PostAsync(preview.ServerSubmissionPlan.Endpoint, Json(submissionBody));
+            var body = await response.Content.ReadAsStringAsync();
+            var responseBody = string.IsNullOrWhiteSpace(body) ? null : JsonSerializer.Deserialize<object>(body, JsonOptions);
+            return BuildCliCodexServerPlanFetchResult(
+                preview,
+                submissionBody,
+                readiness,
+                status: response.IsSuccessStatusCode ? "FETCHED_DISABLED_PLAN" : "FAILED",
+                attempted: true,
+                networkCallEnabled: true,
+                webTokenProvided: true,
+                httpStatusCode: (int)response.StatusCode,
+                serverResponse: responseBody,
+                error: response.IsSuccessStatusCode ? null : "server returned a non-success status");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return BuildCliCodexServerPlanFetchResult(
+                preview,
+                submissionBody,
+                readiness,
+                status: "FAILED",
+                attempted: true,
+                networkCallEnabled: true,
+                webTokenProvided: true,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: ex.Message);
+        }
+    }
+
+    private static CliCodexServerPlanFetchResult BuildCliCodexServerPlanFetchResult(
+        CliCodexCommandPreviewReport preview,
+        IReadOnlyDictionary<string, object?> submissionBody,
+        CliWebSessionServerPlanReadinessReport webSessionReadiness,
+        string status,
+        bool attempted,
+        bool networkCallEnabled,
+        bool webTokenProvided,
+        int? httpStatusCode,
+        object? serverResponse,
+        string? error) =>
+        new(
+            Schema: "learnbot.local-agent.codex-server-plan-fetch-result.v1",
+            CommandName: preview.CommandName,
+            Command: preview.Command,
+            Version: preview.Version,
+            Status: status,
+            WebSessionReadiness: webSessionReadiness,
+            OneCyclePreview: preview.OneCyclePreview,
+            ReadOnlyServerBridge: BuildCliCodexReadOnlyServerBridge(preview, webSessionReadiness, status, attempted, networkCallEnabled, webTokenProvided, httpStatusCode, serverResponse),
+            Attempted: attempted,
+            NetworkCallEnabled: networkCallEnabled,
+            UsedLocalAgentToken: false,
+            WebTokenProvided: webTokenProvided,
+            TokenSecretPrinted: false,
+            RequestCreated: false,
+            MutationAllowed: false,
+            Endpoint: preview.ServerSubmissionPlan.Endpoint,
+            Method: preview.ServerSubmissionPlan.Method,
+            ServerSubmissionPlan: preview.ServerSubmissionPlan with { BodyPreview = submissionBody },
+            Blockers: status.StartsWith("BLOCKED", StringComparison.Ordinal) && error is not null
+                ? preview.ServerSubmissionPlan.Blockers.Concat([error]).Distinct(StringComparer.Ordinal).ToList()
+                : preview.ServerSubmissionPlan.Blockers,
+            HttpStatusCode: httpStatusCode,
+            ServerResponse: serverResponse,
+            Error: error);
+
+    private static CliCodexReadOnlyServerBridge BuildCliCodexReadOnlyServerBridge(
+        CliCodexCommandPreviewReport preview,
+        CliWebSessionServerPlanReadinessReport readiness,
+        string fetchStatus,
+        bool attempted,
+        bool networkCallEnabled,
+        bool webTokenProvided,
+        int? httpStatusCode,
+        object? serverResponse)
+    {
+        var oneCycle = preview.OneCyclePreview;
+        var canAttemptServerPlan = oneCycle.ReadyForReadOnlyToolLoop
+            && preview.ServerSubmissionPlan.ReadyForDisabledPlan
+            && webTokenProvided
+            && (readiness.EnvironmentWebTokenUsableForServerPlanFetch || readiness.StoredSessionUsableForServerPlanFetch);
+        var planFetched = attempted && httpStatusCode is >= 200 and <= 299 && serverResponse is not null;
+        var bridgeReady = canAttemptServerPlan && (planFetched || !networkCallEnabled);
+        var blockers = new List<string>();
+        if (!oneCycle.ReadyForReadOnlyToolLoop)
+        {
+            blockers.AddRange(oneCycle.Blockers);
+        }
+        if (!webTokenProvided)
+        {
+            blockers.Add("web token is required before authenticated server loop/runner preview fetch");
+        }
+        if (!readiness.EnvironmentWebTokenUsableForServerPlanFetch && !readiness.StoredSessionUsableForServerPlanFetch)
+        {
+            blockers.Add("no usable web-session auth is available for server loop/runner preview");
+        }
+        if (!preview.ServerSubmissionPlan.ReadyForDisabledPlan)
+        {
+            blockers.AddRange(preview.ServerSubmissionPlan.Blockers);
+        }
+        if (attempted && !planFetched)
+        {
+            blockers.Add("server submission-plan fetch did not return a successful disabled plan");
+        }
+
+        return new CliCodexReadOnlyServerBridge(
+            Schema: "learnbot.local-agent.codex-read-only-server-bridge.v1",
+            Status: bridgeReady ? "READY_FOR_RUNNER_PREVIEW_HANDOFF" : "BLOCKED_OR_WAITING",
+            FetchStatus: fetchStatus,
+            OneCycleReadyForReadOnlyToolLoop: oneCycle.ReadyForReadOnlyToolLoop,
+            AuthenticatedServerPlanReady: canAttemptServerPlan,
+            ServerPlanFetchAttempted: attempted,
+            ServerPlanFetched: planFetched,
+            ServerPlanNetworkCallEnabled: networkCallEnabled,
+            EnvironmentTokenFallbackUsed: webTokenProvided && readiness.EnvironmentWebTokenUsableForServerPlanFetch,
+            StoredSessionAuthUsed: false,
+            StoredSessionAuthEnabled: readiness.ServerPlanFetchFromStoredSessionEnabled,
+            RequestCreationEnabled: false,
+            RunnerPreviewFetchEnabled: planFetched,
+            RunnerPreviewEndpoint: "/api/code-agent/loop/runner/preview",
+            SelectToolPreviewEndpoint: "/api/code-agent/loop/runner/select-tool-preview",
+            EnqueueSelectedReadOnlyEndpoint: "/api/code-agent/loop/runner/enqueue-selected-read-only",
+            FileDiscoveryReadPlan: oneCycle.FileDiscoveryReadPlan,
+            FileDiscoveryPlanEnabled: oneCycle.FileDiscoveryReadPlan.FileDiscoveryPlanEnabled,
+            FileReadPlanEnabled: oneCycle.FileDiscoveryReadPlan.FileReadPlanEnabled,
+            PatchDryRunEnabled: false,
+            MutationAllowed: false,
+            TokenSecretPrinted: false,
+            OrderedReadOnlyStages: oneCycle.Stages
+                .Where(stage => stage.Name is "goal-input" or "workspace-discovery" or "file-discovery" or "file-read" or "plan")
+                .Select(stage => stage.Name)
+                .ToList(),
+            Blockers: blockers.Distinct(StringComparer.Ordinal).ToList(),
+            Reason: "This bridge ties the CLI one-cycle preview to the server loop/runner preview endpoints for read-only work only. It never creates Local Agent requests, fetches files, enqueues tools, applies patches, runs tests, or mutates code.");
+    }
+
+    private async Task<CliWebSessionPlanFetchResult> FetchCliWebSessionPlan(string planKind, string[] args)
+    {
+        var config = LoadConfigOrDefault();
+        var server = (GetOption(args, "--server") ?? config.ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        var claim = string.Equals(planKind, "claim", StringComparison.OrdinalIgnoreCase);
+        var claimResult = string.Equals(planKind, "claim-result", StringComparison.OrdinalIgnoreCase);
+        var create = string.Equals(planKind, "device-session-create", StringComparison.OrdinalIgnoreCase);
+        var endpoint = claim
+            ? "/api/auth/cli-device-session/claim/plan"
+            : claimResult
+                ? "/api/auth/cli-device-session/claim-result/plan"
+                : create
+                    ? "/api/auth/cli-device-session/create/plan"
+                    : "/api/auth/cli-device-session/plan";
+        var normalizedPlanKind = claim ? "claim" : claimResult ? "claim-result" : create ? "device-session-create" : "device-session";
+        var localPlan = BuildCliWebSessionLocalFallbackPlan(normalizedPlanKind, server, endpoint);
+        var offline = args.Contains("--offline", StringComparer.OrdinalIgnoreCase);
+        if (offline)
+        {
+            return BuildCliWebSessionPlanFetchResult(
+                planKind: normalizedPlanKind,
+                serverUrl: server,
+                endpoint: endpoint,
+                status: "LOCAL_STATIC_FALLBACK",
+                attempted: false,
+                networkCallEnabled: false,
+                fallbackUsed: true,
+                localPlan: localPlan,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: "offline mode requested");
+        }
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(server) };
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
+            var body = claim
+                ? new Dictionary<string, object?>
+                {
+                    ["deviceCode"] = GetOption(args, "--device-code") ?? "<device-code>",
+                    ["clientName"] = "learnbot",
+                    ["cliVersion"] = Version
+                }
+                : claimResult
+                    ? new Dictionary<string, object?>
+                    {
+                        ["claimStatus"] = GetOption(args, "--claim-status") ?? "<claim-status>",
+                        ["clientName"] = "learnbot",
+                        ["cliVersion"] = Version
+                    }
+                : new Dictionary<string, object?>
+                {
+                    ["clientName"] = "learnbot",
+                    ["cliVersion"] = Version
+                };
+            using var response = await client.PostAsync(endpoint, Json(body));
+            var text = await response.Content.ReadAsStringAsync();
+            var responseBody = string.IsNullOrWhiteSpace(text) ? null : JsonSerializer.Deserialize<object>(text, JsonOptions);
+            return BuildCliWebSessionPlanFetchResult(
+                planKind: normalizedPlanKind,
+                serverUrl: server,
+                endpoint: endpoint,
+                status: response.IsSuccessStatusCode ? "FETCHED_DISABLED_PLAN" : "LOCAL_STATIC_FALLBACK",
+                attempted: true,
+                networkCallEnabled: true,
+                fallbackUsed: !response.IsSuccessStatusCode,
+                localPlan: localPlan,
+                httpStatusCode: (int)response.StatusCode,
+                serverResponse: responseBody,
+                error: response.IsSuccessStatusCode ? null : "server returned a non-success status");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return BuildCliWebSessionPlanFetchResult(
+                planKind: normalizedPlanKind,
+                serverUrl: server,
+                endpoint: endpoint,
+                status: "LOCAL_STATIC_FALLBACK",
+                attempted: true,
+                networkCallEnabled: true,
+                fallbackUsed: true,
+                localPlan: localPlan,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: ex.Message);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildCliWebSessionLocalFallbackPlan(string planKind, string serverUrl, string endpoint)
+    {
+        var claim = string.Equals(planKind, "claim", StringComparison.Ordinal);
+        var claimResult = string.Equals(planKind, "claim-result", StringComparison.Ordinal);
+        var create = string.Equals(planKind, "device-session-create", StringComparison.Ordinal);
+        return new Dictionary<string, object?>
+        {
+            ["schema"] = claim
+                ? "learnbot.local-agent.web-session-claim-static-plan.v1"
+                : claimResult
+                    ? "learnbot.local-agent.web-session-claim-result-static-plan.v1"
+                : create
+                    ? "learnbot.local-agent.web-device-session-create-static-plan.v1"
+                    : "learnbot.local-agent.web-device-session-static-plan.v1",
+            ["serverUrl"] = serverUrl,
+            ["method"] = "POST",
+            ["endpoint"] = endpoint,
+            ["absoluteEndpointPreview"] = serverUrl + endpoint,
+            ["verificationUriPath"] = create ? "/settings/local-agent/device" : null,
+            ["userCodeFormat"] = create ? "XXXX-XXXX" : null,
+            ["userCodeLength"] = create ? 8 : null,
+            ["expiresInSeconds"] = create ? 600 : null,
+            ["pollingIntervalSeconds"] = create ? 5 : null,
+            ["claimResultRequired"] = claimResult,
+            ["claimResultAccepted"] = false,
+            ["accessTokenRequired"] = claimResult,
+            ["refreshTokenRequired"] = claimResult,
+            ["plaintextTokenSerializationAllowed"] = false,
+            ["enabled"] = false,
+            ["networkCallEnabled"] = false,
+            ["deviceCodeIssuanceEnabled"] = false,
+            ["deviceCodeIssued"] = false,
+            ["userCodeCreated"] = false,
+            ["claimPollingEnabled"] = false,
+            ["sessionClaimEnabled"] = false,
+            ["accessTokenIssued"] = false,
+            ["refreshTokenIssued"] = false,
+            ["cookiePersistenceEnabled"] = false,
+            ["localSessionArtifactWriteEnabled"] = false,
+            ["localSessionArtifactEncryptedRequired"] = claim || claimResult,
+            ["artifactWriterPreflightEnabled"] = false,
+            ["artifactWriterExecutionEnabled"] = false,
+            ["tokenRefreshEnabled"] = false,
+            ["localAgentTokenAccepted"] = false,
+            ["deviceCodeSecretPrinted"] = false,
+            ["tokenSecretPrinted"] = false,
+            ["webSessionArtifactBodyPreview"] = claim ? BuildCliWebSessionArtifactBodyPreview(serverUrl) : null,
+            ["artifactWriterPlanPreview"] = claimResult ? BuildCliWebSessionArtifactWriterPlanPreview(serverUrl) : null,
+            ["reason"] = claim
+                ? "Local fallback only describes future claim polling and encrypted web-session storage; it does not poll, claim, issue tokens, or write files."
+                : claimResult
+                    ? "Local fallback only describes future browser-approved claim-result validation and encrypted web-session artifact writing; it does not accept tokens, serialize plaintext secrets, or write files."
+                : create
+                    ? "Local fallback only describes the future device-code creation response shape; it does not issue device codes, user codes, tokens, cookies, or stored sessions."
+                : "Local fallback only describes future browser/device-code login; it does not issue device codes, tokens, cookies, or stored sessions."
+        };
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildCliWebSessionArtifactBodyPreview(string serverUrl) =>
+        new Dictionary<string, object?>
+        {
+            ["schema"] = "learnbot.local-agent.web-session-artifact.v1",
+            ["serverUrl"] = serverUrl,
+            ["encryptedAccessToken"] = "<encrypted-access-token>",
+            ["encryptedRefreshToken"] = "<encrypted-refresh-token>",
+            ["expiresAt"] = "<expires-at>",
+            ["refreshExpiresAt"] = "<refresh-expires-at>",
+            ["createdAt"] = "<created-at>",
+            ["encryption"] = new Dictionary<string, object?>
+            {
+                ["required"] = true,
+                ["provider"] = "LOCAL_OS_SECRET_STORE_OR_DPAPI",
+                ["plaintextTokenSerializationAllowed"] = false
+            }
+        };
+
+    private static IReadOnlyDictionary<string, object?> BuildCliWebSessionArtifactWriterPlanPreview(string serverUrl) =>
+        new Dictionary<string, object?>
+        {
+            ["schema"] = "learnbot.local-agent.web-session-artifact-writer-plan.v1",
+            ["preconditions"] = new[]
+            {
+                "browser-approved claim result",
+                "access token present",
+                "refresh token present",
+                "expiresAt present",
+                "refreshExpiresAt present",
+                "local OS secret store or DPAPI available"
+            },
+            ["artifactBodyPreview"] = BuildCliWebSessionArtifactBodyPreview(serverUrl),
+            ["write"] = new Dictionary<string, object?>
+            {
+                ["enabled"] = false,
+                ["atomicReplaceRequired"] = true,
+                ["plaintextTokenSerializationAllowed"] = false,
+                ["path"] = WebSessionPath()
+            }
+        };
+
+    private CliWebSessionArtifactWriterPreflightResult BuildCliWebSessionArtifactWriterPreflightResult(string[] args)
+    {
+        var config = LoadConfigOrDefault();
+        var serverUrl = (GetOption(args, "--server") ?? config.ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        var claimResultAccepted = args.Contains("--approved", StringComparer.OrdinalIgnoreCase);
+        var accessTokenPresent = args.Contains("--access-token-present", StringComparer.OrdinalIgnoreCase);
+        var refreshTokenPresent = args.Contains("--refresh-token-present", StringComparer.OrdinalIgnoreCase);
+        var plaintextAllowed = args.Contains("--allow-plaintext-token-serialization", StringComparer.OrdinalIgnoreCase);
+        var writeRequested = args.Contains("--write", StringComparer.OrdinalIgnoreCase);
+        var expiresAt = GetOption(args, "--expires-at");
+        var refreshExpiresAt = GetOption(args, "--refresh-expires-at");
+        var expiresAtValid = DateTimeOffset.TryParse(expiresAt, out _);
+        var refreshExpiresAtValid = DateTimeOffset.TryParse(refreshExpiresAt, out _);
+        var missing = new List<string>();
+        var blockers = new List<string>();
+
+        if (!claimResultAccepted)
+        {
+            missing.Add("claimResult=APPROVED");
+            blockers.Add("browser-approved claim result is required before a local web-session artifact can be prepared.");
+        }
+        if (!accessTokenPresent)
+        {
+            missing.Add("accessToken");
+            blockers.Add("access token presence must be proven by claim-result metadata; token values are not accepted by this preflight.");
+        }
+        if (!refreshTokenPresent)
+        {
+            missing.Add("refreshToken");
+            blockers.Add("refresh token presence must be proven by claim-result metadata; token values are not accepted by this preflight.");
+        }
+        if (string.IsNullOrWhiteSpace(expiresAt) || !expiresAtValid)
+        {
+            missing.Add("expiresAt");
+            blockers.Add("expiresAt must be present and parseable before artifact writing can be considered.");
+        }
+        if (string.IsNullOrWhiteSpace(refreshExpiresAt) || !refreshExpiresAtValid)
+        {
+            missing.Add("refreshExpiresAt");
+            blockers.Add("refreshExpiresAt must be present and parseable before artifact writing can be considered.");
+        }
+        if (plaintextAllowed)
+        {
+            blockers.Add("plaintext token serialization is not allowed for web-session artifacts.");
+        }
+        if (writeRequested)
+        {
+            blockers.Add("local web-session artifact writing is still disabled; this command performs preflight only.");
+        }
+
+        var passed = blockers.Count == 0;
+        return new CliWebSessionArtifactWriterPreflightResult(
+            Schema: "learnbot.local-agent.web-session-artifact-writer-preflight-result.v1",
+            CommandName: "learnbot",
+            Version: Version,
+            Status: passed ? "READY_FOR_DISABLED_WRITER" : "BLOCKED_PRECONDITION_FAILED",
+            ServerUrl: serverUrl,
+            SessionPath: WebSessionPath(),
+            ClaimResultAccepted: claimResultAccepted,
+            AccessTokenPresent: accessTokenPresent,
+            RefreshTokenPresent: refreshTokenPresent,
+            ExpiresAtPresent: !string.IsNullOrWhiteSpace(expiresAt),
+            RefreshExpiresAtPresent: !string.IsNullOrWhiteSpace(refreshExpiresAt),
+            ExpiryFieldsValid: expiresAtValid && refreshExpiresAtValid,
+            PlaintextTokenSerializationAllowed: false,
+            PlaintextTokenSerializationRequested: plaintextAllowed,
+            EncryptionRequired: true,
+            EncryptionProvider: "LOCAL_OS_SECRET_STORE_OR_DPAPI",
+            EncryptionProviderProbeEnabled: false,
+            AtomicReplaceRequired: true,
+            ArtifactBodyPreview: BuildCliWebSessionArtifactBodyPreview(serverUrl),
+            RequiredClaimResultFields: [
+                "claimResult=APPROVED",
+                "serverUrl",
+                "accessToken",
+                "refreshToken",
+                "expiresAt",
+                "refreshExpiresAt"
+            ],
+            MissingOrInvalidFields: missing,
+            ArtifactWriterPreflightPassed: passed,
+            ArtifactWriteRequested: writeRequested,
+            ArtifactWriterExecutionEnabled: false,
+            LocalSessionArtifactWritten: false,
+            LocalAgentTokenUsed: false,
+            TokenSecretPrinted: false,
+            Blockers: blockers,
+            Reason: "This preflight validates a simulated browser-approved claim-result boundary without accepting token values, serializing plaintext secrets, writing files, or using the Local Agent pairing token.");
+    }
+
+    private CliWebSessionArtifactWriterTestWriteResult BuildCliWebSessionArtifactWriterTestWriteResult(string[] args)
+    {
+        var testOnly = args.Contains("--test-only", StringComparer.OrdinalIgnoreCase);
+        var preflight = BuildCliWebSessionArtifactWriterPreflightResult(args.Where(arg => !string.Equals(arg, "--test-only", StringComparison.OrdinalIgnoreCase)).ToArray());
+        var blockers = preflight.Blockers.ToList();
+        if (!testOnly)
+        {
+            blockers.Add("test-only artifact writing requires explicit --test-only.");
+        }
+
+        var path = WebSessionPath();
+        var written = false;
+        var atomicReplaceUsed = false;
+        long? bytesWritten = null;
+        string? artifactSha256 = null;
+        string? error = null;
+
+        if (blockers.Count == 0)
+        {
+            try
+            {
+                var artifact = BuildTestOnlyEncryptedWebSessionArtifact(preflight.ServerUrl);
+                var payload = JsonSerializer.Serialize(artifact, JsonOptions);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+                File.WriteAllText(tempPath, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                File.Move(tempPath, path, overwrite: true);
+                atomicReplaceUsed = true;
+                written = true;
+                var bytes = File.ReadAllBytes(path);
+                bytesWritten = bytes.LongLength;
+                artifactSha256 = Sha256Hex(bytes);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+            {
+                error = ex.Message;
+                blockers.Add("test-only artifact write failed: " + ex.Message);
+            }
+        }
+
+        return new CliWebSessionArtifactWriterTestWriteResult(
+            Schema: "learnbot.local-agent.web-session-artifact-writer-test-write-result.v1",
+            CommandName: "learnbot",
+            Version: Version,
+            Status: written ? "TEST_ONLY_ARTIFACT_WRITTEN" : "BLOCKED_PRECONDITION_FAILED",
+            SessionPath: path,
+            TestOnlyMode: testOnly,
+            Preflight: preflight,
+            ArtifactWriterExecutionEnabled: testOnly && blockers.Count == 0,
+            LocalSessionArtifactWritten: written,
+            AtomicReplaceUsed: atomicReplaceUsed,
+            EncryptionProvider: "TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION",
+            PlaintextTokenSerializationAllowed: false,
+            PlaintextTokenSerializationDetected: written && ContainsTestOnlyPlaintextTokenMaterial(path),
+            TokenSecretPrinted: false,
+            LocalAgentTokenUsed: false,
+            BytesWritten: bytesWritten,
+            ArtifactSha256: artifactSha256,
+            Blockers: blockers,
+            Error: error,
+            Reason: "This test-only writer proves atomic encrypted artifact creation using placeholder token material. It is not a real browser claim-result writer and the key material is not persisted in the artifact.");
+    }
+
+    private CliWebSessionArtifactReaderTestValidateResult BuildCliWebSessionArtifactReaderTestValidateResult(string[] args)
+    {
+        var testOnly = args.Contains("--test-only", StringComparer.OrdinalIgnoreCase);
+        var path = WebSessionPath();
+        var blockers = new List<string>();
+        var fileExists = File.Exists(path);
+        var jsonParsed = false;
+        var schemaValidated = false;
+        var encryptionProviderAccepted = false;
+        var decrypted = false;
+        var plaintextDetected = false;
+        string? accessTokenFingerprint = null;
+        string? refreshTokenFingerprint = null;
+        string? error = null;
+
+        if (!testOnly)
+        {
+            blockers.Add("test-only artifact read/decrypt validation requires explicit --test-only.");
+        }
+        if (!fileExists)
+        {
+            blockers.Add("web-session artifact is missing.");
+        }
+
+        if (testOnly && fileExists)
+        {
+            try
+            {
+                var text = File.ReadAllText(path);
+                plaintextDetected = text.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                    || text.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+                using var document = JsonDocument.Parse(text);
+                jsonParsed = true;
+                var root = document.RootElement;
+                schemaValidated = root.TryGetProperty("schema", out var schema)
+                    && schema.GetString() == "learnbot.local-agent.web-session-artifact.v1";
+                var encryption = root.GetProperty("encryption");
+                var provider = encryption.GetProperty("provider").GetString();
+                encryptionProviderAccepted = provider == "TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION";
+                if (!schemaValidated)
+                {
+                    blockers.Add("web-session artifact schema is invalid.");
+                }
+                if (!encryptionProviderAccepted)
+                {
+                    blockers.Add("only TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION can be decrypted by this test validator.");
+                }
+                if (plaintextDetected)
+                {
+                    blockers.Add("plaintext test token material was detected in the artifact.");
+                }
+                if (schemaValidated && encryptionProviderAccepted && !plaintextDetected)
+                {
+                    var access = DecryptTestOnlyTokenMaterial(root.GetProperty("encryptedAccessToken").GetString() ?? "");
+                    var refresh = DecryptTestOnlyTokenMaterial(root.GetProperty("encryptedRefreshToken").GetString() ?? "");
+                    decrypted = access == "test-only-access-token-material" && refresh == "test-only-refresh-token-material";
+                    accessTokenFingerprint = TokenFingerprint(access);
+                    refreshTokenFingerprint = TokenFingerprint(refresh);
+                    if (!decrypted)
+                    {
+                        blockers.Add("test-only encrypted token material could not be verified.");
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException or FormatException or KeyNotFoundException)
+            {
+                error = ex.Message;
+                blockers.Add("test-only artifact read/decrypt validation failed: " + ex.Message);
+            }
+        }
+
+        return new CliWebSessionArtifactReaderTestValidateResult(
+            Schema: "learnbot.local-agent.web-session-artifact-reader-test-validate-result.v1",
+            CommandName: "learnbot",
+            Version: Version,
+            Status: blockers.Count == 0 ? "TEST_ONLY_ARTIFACT_DECRYPTED" : "BLOCKED_OR_INVALID",
+            SessionPath: path,
+            TestOnlyMode: testOnly,
+            FileExists: fileExists,
+            ReadAttempted: testOnly && fileExists,
+            JsonParsed: jsonParsed,
+            SchemaValidated: schemaValidated,
+            EncryptionProviderAccepted: encryptionProviderAccepted,
+            DecryptionAttempted: schemaValidated && encryptionProviderAccepted && !plaintextDetected,
+            DecryptionSucceeded: decrypted,
+            AccessTokenFingerprint: accessTokenFingerprint,
+            RefreshTokenFingerprint: refreshTokenFingerprint,
+            PlaintextTokenSerializationDetected: plaintextDetected,
+            TokenSecretPrinted: false,
+            LocalAgentTokenUsed: false,
+            ProductionStoredSessionLoaded: false,
+            Blockers: blockers,
+            Error: error,
+            Reason: "This validator reads and decrypts only the test-only web-session artifact provider. Production stored-session loading stays disabled.");
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildTestOnlyEncryptedWebSessionArtifact(string serverUrl) =>
+        new Dictionary<string, object?>
+        {
+            ["schema"] = "learnbot.local-agent.web-session-artifact.v1",
+            ["serverUrl"] = serverUrl,
+            ["encryptedAccessToken"] = EncryptTestOnlyTokenMaterial("test-only-access-token-material"),
+            ["encryptedRefreshToken"] = EncryptTestOnlyTokenMaterial("test-only-refresh-token-material"),
+            ["expiresAt"] = "2026-07-03T12:00:00Z",
+            ["refreshExpiresAt"] = "2026-07-04T12:00:00Z",
+            ["createdAt"] = DateTimeOffset.UtcNow.ToString("O"),
+            ["encryption"] = new Dictionary<string, object?>
+            {
+                ["required"] = true,
+                ["provider"] = "TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION",
+                ["plaintextTokenSerializationAllowed"] = false,
+                ["keyPersisted"] = false
+            }
+        };
+
+    private static string EncryptTestOnlyTokenMaterial(string value)
+    {
+        var key = TestOnlyArtifactKey();
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var plaintext = Encoding.UTF8.GetBytes(value);
+        var ciphertext = new byte[plaintext.Length];
+        var tag = new byte[16];
+        using var aes = new AesGcm(key, tag.Length);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+        return Convert.ToBase64String(nonce) + "." + Convert.ToBase64String(ciphertext) + "." + Convert.ToBase64String(tag);
+    }
+
+    private static string DecryptTestOnlyTokenMaterial(string value)
+    {
+        var parts = value.Split('.');
+        if (parts.Length != 3)
+        {
+            throw new FormatException("test-only encrypted token material must contain nonce, ciphertext, and tag");
+        }
+        var nonce = Convert.FromBase64String(parts[0]);
+        var ciphertext = Convert.FromBase64String(parts[1]);
+        var tag = Convert.FromBase64String(parts[2]);
+        var plaintext = new byte[ciphertext.Length];
+        using var aes = new AesGcm(TestOnlyArtifactKey(), tag.Length);
+        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        return Encoding.UTF8.GetString(plaintext);
+    }
+
+    private static byte[] TestOnlyArtifactKey() =>
+        SHA256.HashData(Encoding.UTF8.GetBytes("learnbot-local-agent-test-only-web-session-artifact-key-v1"));
+
+    private static bool ContainsTestOnlyPlaintextTokenMaterial(string path)
+    {
+        var text = File.ReadAllText(path);
+        return text.Contains("test-only-access-token-material", StringComparison.Ordinal)
+            || text.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+    }
+
+    private static CliWebSessionPlanFetchResult BuildCliWebSessionPlanFetchResult(
+        string planKind,
+        string serverUrl,
+        string endpoint,
+        string status,
+        bool attempted,
+        bool networkCallEnabled,
+        bool fallbackUsed,
+        IReadOnlyDictionary<string, object?> localPlan,
+        int? httpStatusCode,
+        object? serverResponse,
+        string? error) =>
+        new(
+            Schema: "learnbot.local-agent.web-session-plan-fetch-result.v1",
+            CommandName: "learnbot",
+            Version: Version,
+            PlanKind: planKind,
+            Status: status,
+            ServerUrl: serverUrl,
+            Attempted: attempted,
+            NetworkCallEnabled: networkCallEnabled,
+            FallbackUsed: fallbackUsed,
+            UsedLocalAgentToken: false,
+            TokenSecretPrinted: false,
+            RequestCreated: false,
+            DeviceCodeIssued: false,
+            SessionClaimed: false,
+            AccessTokenIssued: false,
+            RefreshTokenIssued: false,
+            CookiePersistenceEnabled: false,
+            LocalSessionArtifactWritten: false,
+            Endpoint: endpoint,
+            Method: "POST",
+            LocalPlan: localPlan,
+            HttpStatusCode: httpStatusCode,
+            ServerResponse: serverResponse,
+            Error: error);
+
     private static string? GetOption(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -1749,6 +3802,32 @@ internal sealed partial class LearnBotLocalAgent
         }
         return null;
     }
+
+    private static string PositionalText(string[] args)
+    {
+        var values = new List<string>();
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                if (!IsBooleanOption(args[i]) && i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    i++;
+                }
+                continue;
+            }
+            values.Add(args[i]);
+        }
+        return string.Join(' ', values).Trim();
+    }
+
+    private static bool IsBooleanOption(string option) =>
+        string.Equals(option, "--server-plan", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--remember", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--offline", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--accept-generated-diff-preview", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--run-nonwriting-preflight-preview", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--include-approval-handoff-preview", StringComparison.OrdinalIgnoreCase);
 
     private static int ParseInt(string? value, int fallback) => int.TryParse(value, out var parsed) ? parsed : fallback;
 
@@ -2647,6 +4726,78 @@ internal sealed partial class LearnBotLocalAgent
         {
             return SelfTestCliStatusDoctorContract();
         }
+        if (string.Equals(args[0], "m8-productization-status-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestM8ProductizationStatusContract();
+        }
+        if (string.Equals(args[0], "m8-doctor-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestM8DoctorContract();
+        }
+        if (string.Equals(args[0], "codex-command-preview-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCodexCommandPreviewContract();
+        }
+        if (string.Equals(args[0], "codex-read-only-observation-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCodexReadOnlyObservationContract();
+        }
+        if (string.Equals(args[0], "codex-server-plan-fetch-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCodexServerPlanFetchContract();
+        }
+        if (string.Equals(args[0], "web-login-session-preview-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebLoginSessionPreviewContract();
+        }
+        if (string.Equals(args[0], "web-session-plan-fetch-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return await SelfTestWebSessionPlanFetchContract();
+        }
+        if (string.Equals(args[0], "web-session-server-plan-readiness-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionServerPlanReadinessContract();
+        }
+        if (string.Equals(args[0], "web-session-secret-provider-plan-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionSecretProviderPlanContract();
+        }
+        if (string.Equals(args[0], "web-session-secret-provider-probe-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionSecretProviderProbeContract();
+        }
+        if (string.Equals(args[0], "web-session-production-artifact-crypto-preview-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionProductionArtifactCryptoPreviewContract();
+        }
+        if (string.Equals(args[0], "web-session-production-artifact-writer-preview-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionProductionArtifactWriterPreviewContract();
+        }
+        if (string.Equals(args[0], "web-session-production-artifact-reader-preview-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionProductionArtifactReaderPreviewContract();
+        }
+        if (string.Equals(args[0], "web-session-stored-session-auth-readiness-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionStoredSessionAuthReadinessContract();
+        }
+        if (string.Equals(args[0], "web-session-artifact-validation-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionArtifactValidationContract();
+        }
+        if (string.Equals(args[0], "web-session-artifact-writer-preflight-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionArtifactWriterPreflightContract();
+        }
+        if (string.Equals(args[0], "web-session-artifact-writer-test-write-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionArtifactWriterTestWriteContract();
+        }
+        if (string.Equals(args[0], "web-session-artifact-reader-test-validate-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestWebSessionArtifactReaderTestValidateContract();
+        }
         if (string.Equals(args[0], "pair-atomic-config-contract", StringComparison.OrdinalIgnoreCase))
         {
             return await SelfTestPairAtomicConfigContract();
@@ -2771,6 +4922,2687 @@ internal sealed partial class LearnBotLocalAgent
                 return 1;
             }
             Console.WriteLine("cli-status-doctor-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestM8ProductizationStatusContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-m8-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var config = new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(Guid.Parse("11111111-1111-1111-1111-111111111111"), "workspace", workspaceRoot, true)]
+            };
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(config);
+
+            var report = app.BuildCliM8ProductizationReport();
+            var unpaired = LearnBotLocalAgent.BuildM8NextCommands(new CliStatusReport(
+                "learnbot",
+                Version,
+                false,
+                "http://localhost:8083",
+                Guid.Empty,
+                "polling",
+                0,
+                0,
+                Path.Combine(agentRoot, "missing.json"),
+                false,
+                Path.Combine(agentRoot, "agent.log"),
+                false,
+                Path.Combine(agentRoot, "agent-state.json"),
+                false,
+                Environment.ProcessPath,
+                null));
+            var pairedStopped = LearnBotLocalAgent.BuildM8NextCommands(new CliStatusReport(
+                "learnbot",
+                Version,
+                true,
+                "http://localhost:8083",
+                config.AgentId,
+                "auto",
+                1,
+                1,
+                Path.Combine(agentRoot, "agent.json"),
+                true,
+                Path.Combine(agentRoot, "agent.log"),
+                false,
+                Path.Combine(agentRoot, "agent-state.json"),
+                false,
+                Environment.ProcessPath,
+                null));
+            var pairedRunning = LearnBotLocalAgent.BuildM8NextCommands(new CliStatusReport(
+                "learnbot",
+                Version,
+                true,
+                "http://localhost:8083",
+                config.AgentId,
+                "auto",
+                1,
+                1,
+                Path.Combine(agentRoot, "agent.json"),
+                true,
+                Path.Combine(agentRoot, "agent.log"),
+                true,
+                Path.Combine(agentRoot, "agent-state.json"),
+                true,
+                Environment.ProcessPath,
+                null));
+            var json = JsonSerializer.Serialize(report, JsonOptions);
+            var itemNames = report.Items.Select(item => item.Name).ToHashSet(StringComparer.Ordinal);
+            var ok = report.Schema == "learnbot.local-agent.m8-productization-status.v1"
+                && report.CommandName == "learnbot"
+                && report.ReadyForInternalPilot
+                && !report.ReadyForMatureDistribution
+                && !report.M8WorkEnabled
+                && !report.ServiceCommandExecutionEnabled
+                && !report.InstallerSigningEnabled
+                && !report.AutoUpdateEnabled
+                && report.DoctorReady
+                && itemNames.Contains("guidedSetup")
+                && itemNames.Contains("backgroundLifecycle")
+                && itemNames.Contains("windowsServicePreview")
+                && itemNames.Contains("codexLikeCommands")
+                && itemNames.Contains("signedInstaller")
+                && itemNames.Contains("autoUpdate")
+                && report.NextCommands.Any(item => item.Phase == "start" && item.Command.Contains("m8-lifecycle-run", StringComparison.Ordinal))
+                && unpaired.Any(item => item.Phase == "pair" && item.Command.Contains("<pairing-token>", StringComparison.Ordinal) && !item.Enabled)
+                && pairedStopped.Any(item => item.Phase == "start" && item.Command.Contains("m8-lifecycle-run", StringComparison.Ordinal) && item.Enabled)
+                && pairedRunning.Any(item => item.Phase == "servicePreview" && item.Command.Contains("service-plan", StringComparison.Ordinal) && item.Enabled)
+                && !json.Contains("secret-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("m8 productization status contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("m8-productization-status-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestM8DoctorContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-m8-doctor-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var config = new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(Guid.Parse("11111111-1111-1111-1111-111111111111"), "workspace", workspaceRoot, true)]
+            };
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(config);
+
+            var report = app.BuildCliM8DoctorReport();
+            var json = JsonSerializer.Serialize(report, JsonOptions);
+            var sectionNames = report.Sections.Select(section => section.Name).ToHashSet(StringComparer.Ordinal);
+            var ok = report.Schema == "learnbot.local-agent.m8-doctor.v1"
+                && report.CommandName == "learnbot"
+                && report.ReadyForInternalPilot
+                && !report.ReadyForMatureDistribution
+                && !report.M8WorkEnabled
+                && !report.ServiceCommandExecutionEnabled
+                && !report.InstallerSigningEnabled
+                && !report.AutoUpdateEnabled
+                && !report.TokenSecretPrinted
+                && report.ProductizationStatus.Schema == "learnbot.local-agent.m8-productization-status.v1"
+                && sectionNames.Contains("setup")
+                && sectionNames.Contains("lifecycle")
+                && sectionNames.Contains("runtime")
+                && sectionNames.Contains("logs")
+                && sectionNames.Contains("servicePreview")
+                && sectionNames.Contains("distribution")
+                && report.NextCommands.Any(item => item.Phase == "start" && item.Command.Contains("m8-lifecycle-run", StringComparison.Ordinal))
+                && !json.Contains("secret-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("m8 doctor contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("m8-doctor-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestCodexCommandPreviewContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-codex-preview-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var config = new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            };
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(config);
+
+            var repositoryId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+            var spaceId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+            var fix = app.BuildCliCodexCommandPreviewReport("fix", "repair failing tests", workspaceRoot, repositoryId.ToString(), spaceId.ToString(), 8);
+            var review = app.BuildCliCodexCommandPreviewReport("review", "review auth changes", workspaceRoot);
+            var missingGoal = app.BuildCliCodexCommandPreviewReport("fix", "", workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "unpaired.json"));
+            var unpaired = new LearnBotLocalAgent().BuildCliCodexCommandPreviewReport("review", "review changes", workspaceRoot);
+
+            var json = JsonSerializer.Serialize(new { fix, review, missingGoal, unpaired }, JsonOptions);
+            var ok = fix.Schema == "learnbot.local-agent.codex-command-preview.v1"
+                && fix.Command == "fix"
+                && fix.ReadyForPreview
+                && fix.Status == "READY_PREVIEW"
+                && fix.WorkspaceMatched
+                && fix.WorkspaceId == workspaceId
+                && !fix.SubmitEnabled
+                && fix.ReadOnlyPreview
+                && !fix.RequestCreationEnabled
+                && !fix.MutationAllowed
+                && !fix.ApprovalBypassAllowed
+                && !fix.TestExecutionEnabled
+                && !fix.RollbackExecutionEnabled
+                && !fix.FinalPublicationEnabled
+                && !fix.PartialReindexEnabled
+                && !fix.TokenSecretPrinted
+                && fix.OneCyclePreview.Schema == "learnbot.local-agent.codex-one-cycle-preview.v1"
+                && fix.OneCyclePreview.Status == "READY_READ_ONLY_LOOP_PREVIEW"
+                && fix.OneCyclePreview.ReadyForReadOnlyToolLoop
+                && !fix.OneCyclePreview.ReadyForPatchTestLoop
+                && !fix.OneCyclePreview.ReadyForFinalReport
+                && !fix.OneCyclePreview.ReadyForPartialReindex
+                && fix.OneCyclePreview.LocalAgentExecutionTarget == "USER_LOCAL_AGENT"
+                && fix.OneCyclePreview.ServerPlanningRequired
+                && !fix.OneCyclePreview.RequestCreationEnabled
+                && !fix.OneCyclePreview.MutationAllowed
+                && fix.OneCyclePreview.ApprovalRequiredBeforeMutation
+                && !fix.OneCyclePreview.ApprovalBypassAllowed
+                && !fix.OneCyclePreview.TestExecutionEnabled
+                && !fix.OneCyclePreview.RollbackExecutionEnabled
+                && !fix.OneCyclePreview.FinalReportPublicationEnabled
+                && !fix.OneCyclePreview.PartialReindexEnabled
+                && !fix.OneCyclePreview.TokenSecretPrinted
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.Schema == "learnbot.local-agent.codex-file-discovery-read-plan.v1"
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.Status == "READY_DRY_RUN_PLAN"
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.DryRunOnly
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.PlanPrepared
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.ToolExecutionEnabled
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.FileDiscoveryPlanEnabled
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.FileReadPlanEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.FileTreeExecutionEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.FileSearchExecutionEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.FileReadExecutionEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.GitStatusExecutionEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.FileContentRead
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.FileBytesLoaded
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.RequestCreationEnabled
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.MutationAllowed
+                && !fix.OneCyclePreview.FileDiscoveryReadPlan.TokenSecretPrinted
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.CandidateTools.Contains("file.tree")
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.CandidateTools.Contains("file.search")
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.CandidateTools.Contains("file.read")
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.CandidateTools.Contains("git.status")
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.QueryHints.Contains("repair")
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "workspace.tree"
+                    && envelope.Schema == "learnbot.local-agent.codex-read-only-request-envelope-preview.v1"
+                    && envelope.ExecutionTarget == "USER_LOCAL_AGENT"
+                    && envelope.ApprovalState == "NOT_REQUIRED"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.EnqueueEnabled
+                    && !envelope.Claimable
+                    && !envelope.ExecutionEnabled
+                    && !envelope.SideEffectful
+                    && !envelope.RequiresApproval
+                    && !envelope.MutationAllowed
+                    && !envelope.FileContentRead
+                    && !envelope.TokenSecretPrinted
+                    && envelope.InputPreview.TryGetValue("workspaceId", out var treeWorkspaceId)
+                    && treeWorkspaceId is Guid treeWorkspaceGuid
+                    && treeWorkspaceGuid == workspaceId)
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "workspace.search"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.ExecutionEnabled
+                    && !envelope.MutationAllowed
+                    && envelope.InputPreview.TryGetValue("query", out var queryPreview)
+                    && queryPreview is string queryPreviewText
+                    && queryPreviewText.Contains("repair", StringComparison.Ordinal))
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "git.status"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.ExecutionEnabled
+                    && !envelope.MutationAllowed)
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.PlannedSteps.Any(step => step.Name == "search" && step.ToolName == "file.search" && !step.ExecutionEnabled && !step.MutationAllowed)
+                && fix.OneCyclePreview.FileDiscoveryReadPlan.PlannedSteps.Any(step => step.Name == "read" && step.ToolName == "file.read" && !step.ExecutionEnabled && !step.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "file-discovery" && stage.ReadOnly && stage.Ready && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "file-read" && stage.ReadOnly && stage.Ready && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "patch-dry-run" && !stage.Ready && stage.RequiresApproval && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "apply-and-test" && !stage.Ready && stage.RequiresApproval && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "final-report" && !stage.Ready && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Stages.Any(stage => stage.Name == "rag-freshness-update" && !stage.Ready && !stage.MutationAllowed)
+                && fix.OneCyclePreview.Blockers.Contains("authenticated server handoff is required before request creation")
+                && fix.ServerSubmissionPlan.Schema == "learnbot.local-agent.codex-server-submission-plan.v1"
+                && fix.ServerSubmissionPlan.Endpoint == "/api/code-agent/loop/submission-plan"
+                && fix.ServerSubmissionPlan.RepositoryId == repositoryId
+                && fix.ServerSubmissionPlan.SpaceId == spaceId
+                && fix.ServerSubmissionPlan.AgentId == config.AgentId
+                && fix.ServerSubmissionPlan.WorkspaceId == workspaceId
+                && fix.ServerSubmissionPlan.ReadyForDisabledPlan
+                && !fix.ServerSubmissionPlan.Enabled
+                && !fix.ServerSubmissionPlan.NetworkCallEnabled
+                && !fix.ServerSubmissionPlan.RequestCreationEnabled
+                && !fix.ServerSubmissionPlan.ServerConversationCreationEnabled
+                && !fix.ServerSubmissionPlan.LoopPreviewExecutionEnabled
+                && fix.ServerSubmissionPlan.BodyPreview.TryGetValue("repositoryId", out var bodyRepositoryId)
+                && bodyRepositoryId is Guid bodyRepositoryGuid
+                && bodyRepositoryGuid == repositoryId
+                && fix.ServerSubmissionPlan.FollowUpEndpoints.Contains("POST /api/code-agent/loop/runner/preview")
+                && review.Command == "review"
+                && review.ReadyForPreview
+                && review.OneCyclePreview.Schema == "learnbot.local-agent.codex-one-cycle-preview.v1"
+                && !review.OneCyclePreview.ReadyForReadOnlyToolLoop
+                && review.OneCyclePreview.FileDiscoveryReadPlan.Schema == "learnbot.local-agent.codex-file-discovery-read-plan.v1"
+                && !review.OneCyclePreview.FileDiscoveryReadPlan.PlanPrepared
+                && !review.OneCyclePreview.FileDiscoveryReadPlan.FileContentRead
+                && review.OneCyclePreview.Blockers.Contains("repository id is required for server handoff preview")
+                && !review.ServerSubmissionPlan.ReadyForDisabledPlan
+                && review.ServerSubmissionPlan.Blockers.Contains("repository id is required for server handoff preview")
+                && missingGoal.Status == "BLOCKED_PREVIEW"
+                && missingGoal.Blockers.Contains("goal is required")
+                && missingGoal.OneCyclePreview.Blockers.Contains("goal is required")
+                && missingGoal.ServerSubmissionPlan.Blockers.Contains("goal is required")
+                && unpaired.Status == "BLOCKED_PREVIEW"
+                && unpaired.Blockers.Contains("agent is not paired")
+                && unpaired.OneCyclePreview.Blockers.Contains("agent is not paired")
+                && unpaired.ServerSubmissionPlan.Blockers.Contains("agent is not paired")
+                && !json.Contains("secret-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("codex command preview contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("codex-command-preview-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestCodexReadOnlyObservationContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-codex-observe-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(Path.Combine(workspaceRoot, "src"));
+            File.WriteAllText(Path.Combine(workspaceRoot, "src", "Calculator.cs"), "class Calculator { string Goal = \"repair failing tests hidden-content\"; }\n");
+            File.WriteAllText(Path.Combine(workspaceRoot, "README.md"), "fixture\n");
+            if (!RunGitForSelfTest(workspaceRoot, "init"))
+            {
+                Console.Error.WriteLine("codex read-only observation contract self-test could not initialize git");
+                return 1;
+            }
+
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            var workspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(workspaceId, "workspace", workspaceRoot, true)]
+            });
+
+            var repositoryId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+            var preview = app.BuildCliCodexCommandPreviewReport("fix", "repair failing tests", workspaceRoot, repositoryId.ToString(), null, 6);
+            var observed = app.BuildCliCodexReadOnlyObservationReport(preview);
+            var readObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true);
+            var inlineSourceObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "inline", diffTextProvided: true);
+            var localModelSourceObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "local-model");
+            var unsupportedSourceObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "network-share");
+            var generatedDiff = """
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -1 +1 @@
+-class Calculator { string Goal = "repair failing tests hidden-content"; }
++class Calculator { string Goal = "repair passing tests hidden-content"; }
+""";
+            var acceptedGeneratedDiffObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "local-model", acceptGeneratedDiffPreview: true, generatedDiffPreview: generatedDiff);
+            var acceptedGeneratedDiffPreflightObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "local-model", acceptGeneratedDiffPreview: true, generatedDiffPreview: generatedDiff, runNonWritingPreflightPreview: true);
+            var generatedDiffWithoutSwitchObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "local-model", generatedDiffPreview: generatedDiff);
+            var generatedDiffWrongTargetObserved = app.BuildCliCodexReadOnlyObservationReport(preview, readSelectedFiles: true, diffSource: "server-planner", acceptGeneratedDiffPreview: true, generatedDiffPreview: """
+--- a/src/Other.cs
++++ b/src/Other.cs
+@@ -1 +1 @@
+-old
++new
+""");
+            var validDiffPreview = BuildCliCodexDiffSourceValidationPreview(readObserved.PatchProposalPreview, generatedDiff);
+            var validPreflightPreview = app.BuildCliCodexPatchDryRunPreflightPreview(app.LoadConfigOrDefault(), workspaceId, validDiffPreview, """
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -1 +1 @@
+-class Calculator { string Goal = "repair failing tests hidden-content"; }
++class Calculator { string Goal = "repair passing tests hidden-content"; }
+""");
+            var mismatchDiffPreview = BuildCliCodexDiffSourceValidationPreview(readObserved.PatchProposalPreview, """
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -1 +1 @@
+-class Calculator { string Goal = "does not match"; }
++class Calculator { string Goal = "repair passing tests hidden-content"; }
+""");
+            var mismatchPreflightPreview = app.BuildCliCodexPatchDryRunPreflightPreview(app.LoadConfigOrDefault(), workspaceId, mismatchDiffPreview, """
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -1 +1 @@
+-class Calculator { string Goal = "does not match"; }
++class Calculator { string Goal = "repair passing tests hidden-content"; }
+""");
+            var rejectedDiffPreview = BuildCliCodexDiffSourceValidationPreview(readObserved.PatchProposalPreview, """
+--- a/src/Other.cs
++++ b/src/Other.cs
+@@ -1 +1 @@
+-old
++new
+""");
+
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "unpaired.json"));
+            var blockedApp = new LearnBotLocalAgent();
+            var blockedPreview = blockedApp.BuildCliCodexCommandPreviewReport("fix", "repair failing tests", workspaceRoot, repositoryId.ToString(), null, 6);
+            var blocked = blockedApp.BuildCliCodexReadOnlyObservationReport(blockedPreview);
+
+            var json = JsonSerializer.Serialize(new { observed, blocked }, JsonOptions);
+            var readJson = JsonSerializer.Serialize(readObserved, JsonOptions);
+            var search = observed.Observations.SingleOrDefault(item => item.ToolName == "workspace.search");
+            var ok = observed.Schema == "learnbot.local-agent.codex-read-only-observation.v1"
+                && observed.Status == "OBSERVED_READ_ONLY_CONTEXT"
+                && observed.ReadyForExecution
+                && observed.ExecutionAttempted
+                && observed.ToolExecutionEnabled
+                && !observed.RequestCreationEnabled
+                && !observed.FileContentRead
+                && observed.SearchSnippetsRedacted
+                && !observed.MutationAllowed
+                && !observed.TokenSecretPrinted
+                && observed.FileDiscoveryReadPlan.Schema == "learnbot.local-agent.codex-file-discovery-read-plan.v1"
+                && observed.Observations.Count == 3
+                && observed.Observations.All(item => item.Status == "SUCCEEDED" && item.ReadOnly && !item.FileContentRead && !item.MutationAllowed)
+                && observed.Observations.Any(item => item.ToolName == "workspace.tree")
+                && observed.Observations.Any(item => item.ToolName == "git.status")
+                && observed.CandidateSelection.Schema == "learnbot.local-agent.codex-read-only-candidate-selection.v1"
+                && observed.CandidateSelection.Status == "READY_FILE_READ_PLAN"
+                && observed.CandidateSelection.SelectedFileCount == 1
+                && observed.CandidateSelection.SelectedFiles.Any(file =>
+                    file.Path == "src/Calculator.cs"
+                    && file.Rank == 1
+                    && file.Source == "workspace.search"
+                    && file.NextTool == "file.read")
+                && observed.CandidateSelection.FileReadPlanPrepared
+                && !observed.CandidateSelection.FileReadExecutionEnabled
+                && !observed.CandidateSelection.FileContentRead
+                && !observed.CandidateSelection.RequestCreationEnabled
+                && !observed.CandidateSelection.MutationAllowed
+                && !observed.CandidateSelection.ModelRankingEnabled
+                && observed.SelectedFileRead.Schema == "learnbot.local-agent.codex-selected-file-read.v1"
+                && observed.SelectedFileRead.Status == "NOT_REQUESTED"
+                && !observed.SelectedFileRead.ExecutionAttempted
+                && !observed.SelectedFileRead.FileContentRead
+                && observed.PatchIntentPreview.Schema == "learnbot.local-agent.codex-patch-intent-preview.v1"
+                && observed.PatchIntentPreview.Status == "READ_REQUIRED"
+                && !observed.PatchIntentPreview.PlanningInputPrepared
+                && observed.PatchIntentPreview.DryRunOnly
+                && !observed.PatchIntentPreview.DiffGenerated
+                && !observed.PatchIntentPreview.PatchDryRunExecutionEnabled
+                && !observed.PatchIntentPreview.RequestCreationEnabled
+                && observed.PatchIntentPreview.ApprovalRequiredBeforeMutation
+                && !observed.PatchIntentPreview.MutationAllowed
+                && observed.PatchProposalPreview.Schema == "learnbot.local-agent.codex-patch-proposal-preview.v1"
+                && observed.PatchProposalPreview.Status == "READ_REQUIRED"
+                && !observed.PatchProposalPreview.ProposalPrepared
+                && observed.PatchProposalPreview.DiffSource == "NONE_PLACEHOLDER_REQUIRED"
+                && !observed.PatchProposalPreview.DiffGenerated
+                && observed.PatchProposalPreview.DiffPreview is null
+                && observed.PatchProposalPreview.UnifiedDiffRequired
+                && observed.PatchProposalPreview.DryRunOnly
+                && !observed.PatchProposalPreview.PatchApplyInputPrepared
+                && !observed.PatchProposalPreview.PatchDryRunExecutionEnabled
+                && !observed.PatchProposalPreview.RequestCreationEnabled
+                && observed.PatchProposalPreview.ApprovalRequiredBeforeMutation
+                && !observed.PatchProposalPreview.MutationAllowed
+                && observed.DiffSourceInputPreview.Schema == "learnbot.local-agent.codex-diff-source-input-preview.v1"
+                && observed.DiffSourceInputPreview.Status == "READ_REQUIRED"
+                && !observed.DiffSourceInputPreview.SourceRequested
+                && !observed.DiffSourceInputPreview.SourceEnabled
+                && !observed.DiffSourceInputPreview.DiffBodyLoaded
+                && !observed.DiffSourceInputPreview.DiffForwardedToValidation
+                && !observed.DiffSourceInputPreview.RequestCreationEnabled
+                && !observed.DiffSourceInputPreview.MutationAllowed
+                && observed.PlannerDiffOutputPreview.Schema == "learnbot.local-agent.codex-planner-diff-output-preview.v1"
+                && observed.PlannerDiffOutputPreview.Status == "READ_REQUIRED"
+                && !observed.PlannerDiffOutputPreview.PlannerSourceRequested
+                && !observed.PlannerDiffOutputPreview.ReadContextReady
+                && !observed.PlannerDiffOutputPreview.OutputEnvelopePrepared
+                && !observed.PlannerDiffOutputPreview.DiffGenerated
+                && !observed.PlannerDiffOutputPreview.DiffBodyIncluded
+                && !observed.PlannerDiffOutputPreview.DiffForwardedToValidation
+                && !observed.PlannerDiffOutputPreview.RequestCreationEnabled
+                && !observed.PlannerDiffOutputPreview.MutationAllowed
+                && observed.GeneratedDiffAcceptancePreview.Schema == "learnbot.local-agent.codex-generated-diff-acceptance-preview.v1"
+                && observed.GeneratedDiffAcceptancePreview.Status == "READ_REQUIRED"
+                && !observed.GeneratedDiffAcceptancePreview.PlannerOutputEnvelopePrepared
+                && !observed.GeneratedDiffAcceptancePreview.ExplicitPreviewSwitchEnabled
+                && !observed.GeneratedDiffAcceptancePreview.GeneratedDiffProvided
+                && !observed.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !observed.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && !observed.GeneratedDiffAcceptancePreview.DiffFileReadEnabled
+                && !observed.GeneratedDiffAcceptancePreview.RequestCreationEnabled
+                && !observed.GeneratedDiffAcceptancePreview.MutationAllowed
+                && observed.PlannerDiffValidationHandoffPreview.Schema == "learnbot.local-agent.codex-planner-diff-validation-handoff-preview.v1"
+                && observed.PlannerDiffValidationHandoffPreview.Status == "READ_REQUIRED"
+                && !observed.PlannerDiffValidationHandoffPreview.PlannerOutputEnvelopePrepared
+                && !observed.PlannerDiffValidationHandoffPreview.DiffBodyAvailable
+                && !observed.PlannerDiffValidationHandoffPreview.ValidationInputPrepared
+                && !observed.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && !observed.PlannerDiffValidationHandoffPreview.ValidationAttempted
+                && !observed.PlannerDiffValidationHandoffPreview.PatchApplyInputPrepared
+                && !observed.PlannerDiffValidationHandoffPreview.RequestCreationEnabled
+                && !observed.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && observed.DiffSourceValidationPreview.Schema == "learnbot.local-agent.codex-diff-source-validation-preview.v1"
+                && observed.DiffSourceValidationPreview.Status == "READ_REQUIRED"
+                && !observed.DiffSourceValidationPreview.DiffProvided
+                && !observed.DiffSourceValidationPreview.DiffParsed
+                && !observed.DiffSourceValidationPreview.PatchApplyInputPrepared
+                && !observed.DiffSourceValidationPreview.PatchDryRunExecutionEnabled
+                && !observed.DiffSourceValidationPreview.RequestCreationEnabled
+                && observed.DiffSourceValidationPreview.ApprovalRequiredBeforeMutation
+                && !observed.DiffSourceValidationPreview.MutationAllowed
+                && observed.PatchDryRunRequestEnvelopePreview.Schema == "learnbot.local-agent.codex-patch-dry-run-request-envelope-preview.v1"
+                && observed.PatchDryRunRequestEnvelopePreview.Status == "READ_REQUIRED"
+                && observed.PatchDryRunRequestEnvelopePreview.ToolName == "patch.apply"
+                && observed.PatchDryRunRequestEnvelopePreview.ExecutionTarget == "USER_LOCAL_AGENT"
+                && observed.PatchDryRunRequestEnvelopePreview.ApprovalState == "NOT_PREPARED"
+                && !observed.PatchDryRunRequestEnvelopePreview.DiffValidationPassed
+                && !observed.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && !observed.PatchDryRunRequestEnvelopePreview.SnapshotCreationEnabled
+                && !observed.PatchDryRunRequestEnvelopePreview.PatchDryRunExecutionEnabled
+                && !observed.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !observed.PatchDryRunRequestEnvelopePreview.EnqueueEnabled
+                && !observed.PatchDryRunRequestEnvelopePreview.Claimable
+                && observed.PatchDryRunRequestEnvelopePreview.ApprovalRequiredBeforeDryRun
+                && observed.PatchDryRunRequestEnvelopePreview.ApprovalRequiredBeforeMutation
+                && !observed.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && observed.PatchDryRunPreflightPreview.Schema == "learnbot.local-agent.codex-patch-dry-run-preflight-preview.v1"
+                && observed.PatchDryRunPreflightPreview.Status == "DIFF_VALIDATION_REQUIRED"
+                && !observed.PatchDryRunPreflightPreview.Requested
+                && !observed.PatchDryRunPreflightPreview.ExecutionAttempted
+                && observed.PatchDryRunPreflightPreview.NonWritingPreflightOnly
+                && !observed.PatchDryRunPreflightPreview.PreflightPassed
+                && !observed.PatchDryRunPreflightPreview.SnapshotCreated
+                && !observed.PatchDryRunPreflightPreview.MutationApplied
+                && !observed.PatchDryRunPreflightPreview.PatchDryRunExecutionEnabled
+                && !observed.PatchDryRunPreflightPreview.RequestCreationEnabled
+                && !observed.PatchDryRunPreflightPreview.MutationAllowed
+                && observed.PatchDryRunApprovalHandoffPreview.Schema == "learnbot.local-agent.codex-patch-dry-run-approval-handoff-preview.v1"
+                && observed.PatchDryRunApprovalHandoffPreview.Status == "READ_REQUIRED"
+                && observed.PatchDryRunApprovalHandoffPreview.ToolName == "patch.apply"
+                && observed.PatchDryRunApprovalHandoffPreview.ExecutionTarget == "USER_LOCAL_AGENT"
+                && observed.PatchDryRunApprovalHandoffPreview.ApprovalKind == "SNAPSHOT_WRITING_DRY_RUN"
+                && observed.PatchDryRunApprovalHandoffPreview.ApprovalState == "NOT_PREPARED"
+                && !observed.PatchDryRunApprovalHandoffPreview.RequestEnvelopePrepared
+                && !observed.PatchDryRunApprovalHandoffPreview.NonWritingPreflightPassed
+                && !observed.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && observed.PatchDryRunApprovalHandoffPreview.DryRunApprovalRequired
+                && observed.PatchDryRunApprovalHandoffPreview.MutationApprovalRequired
+                && !observed.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !observed.PatchDryRunApprovalHandoffPreview.ApprovalRequestCreationEnabled
+                && !observed.PatchDryRunApprovalHandoffPreview.EnqueueEnabled
+                && !observed.PatchDryRunApprovalHandoffPreview.Claimable
+                && !observed.PatchDryRunApprovalHandoffPreview.SnapshotCreationEnabled
+                && !observed.PatchDryRunApprovalHandoffPreview.PatchDryRunExecutionEnabled
+                && !observed.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && readObserved.Status == "OBSERVED_READ_ONLY_CONTEXT"
+                && readObserved.FileContentRead
+                && readObserved.SelectedFileRead.Schema == "learnbot.local-agent.codex-selected-file-read.v1"
+                && readObserved.SelectedFileRead.Status == "SUCCEEDED"
+                && readObserved.SelectedFileRead.Requested
+                && readObserved.SelectedFileRead.ExecutionAttempted
+                && readObserved.SelectedFileRead.FileReadExecutionEnabled
+                && readObserved.SelectedFileRead.FileContentRead
+                && !readObserved.SelectedFileRead.RequestCreationEnabled
+                && !readObserved.SelectedFileRead.MutationAllowed
+                && readObserved.SelectedFileRead.ReadFileCount == 1
+                && readObserved.SelectedFileRead.Files.Any(file =>
+                    file.Path == "src/Calculator.cs"
+                    && file.Status == "SUCCEEDED"
+                    && file.Content is not null
+                    && file.Content.Contains("hidden-content", StringComparison.Ordinal))
+                && readObserved.PatchIntentPreview.Schema == "learnbot.local-agent.codex-patch-intent-preview.v1"
+                && readObserved.PatchIntentPreview.Status == "READY_PATCH_INTENT_PREVIEW"
+                && readObserved.PatchIntentPreview.PlanningInputPrepared
+                && readObserved.PatchIntentPreview.TargetFiles.Contains("src/Calculator.cs")
+                && readObserved.PatchIntentPreview.ReadFileCount == 1
+                && readObserved.PatchIntentPreview.NextTool == "patch.apply"
+                && readObserved.PatchIntentPreview.DryRunOnly
+                && !readObserved.PatchIntentPreview.DiffGenerated
+                && !readObserved.PatchIntentPreview.PatchDryRunExecutionEnabled
+                && !readObserved.PatchIntentPreview.RequestCreationEnabled
+                && readObserved.PatchIntentPreview.ApprovalRequiredBeforeMutation
+                && !readObserved.PatchIntentPreview.MutationAllowed
+                && !readObserved.PatchIntentPreview.TestExecutionEnabled
+                && !readObserved.PatchIntentPreview.FinalReportPublicationEnabled
+                && !readObserved.PatchIntentPreview.PartialReindexEnabled
+                && !readObserved.PatchIntentPreview.LocalModelPlanningEnabled
+                && readObserved.PatchProposalPreview.Schema == "learnbot.local-agent.codex-patch-proposal-preview.v1"
+                && readObserved.PatchProposalPreview.Status == "AWAITING_DIFF_SOURCE"
+                && readObserved.PatchProposalPreview.ProposalPrepared
+                && readObserved.PatchProposalPreview.TargetFiles.Contains("src/Calculator.cs")
+                && readObserved.PatchProposalPreview.DiffSource == "NONE_PLACEHOLDER_REQUIRED"
+                && !readObserved.PatchProposalPreview.DiffGenerated
+                && readObserved.PatchProposalPreview.DiffPreview is null
+                && readObserved.PatchProposalPreview.UnifiedDiffRequired
+                && readObserved.PatchProposalPreview.DryRunOnly
+                && !readObserved.PatchProposalPreview.PatchApplyInputPrepared
+                && !readObserved.PatchProposalPreview.PatchDryRunExecutionEnabled
+                && !readObserved.PatchProposalPreview.RequestCreationEnabled
+                && readObserved.PatchProposalPreview.ApprovalRequiredBeforeMutation
+                && !readObserved.PatchProposalPreview.MutationAllowed
+                && !readObserved.PatchProposalPreview.TestExecutionEnabled
+                && !readObserved.PatchProposalPreview.LocalModelPlanningEnabled
+                && !readObserved.PatchProposalPreview.ServerPlannerEnabled
+                && readObserved.DiffSourceInputPreview.Schema == "learnbot.local-agent.codex-diff-source-input-preview.v1"
+                && readObserved.DiffSourceInputPreview.Status == "DIFF_SOURCE_NOT_PROVIDED"
+                && readObserved.DiffSourceInputPreview.RequestedSource == "none"
+                && !readObserved.DiffSourceInputPreview.SourceRequested
+                && readObserved.DiffSourceInputPreview.SourceRecognized
+                && !readObserved.DiffSourceInputPreview.SourceEnabled
+                && !readObserved.DiffSourceInputPreview.DiffBodyLoaded
+                && !readObserved.DiffSourceInputPreview.DiffForwardedToValidation
+                && !readObserved.DiffSourceInputPreview.LocalModelPlanningEnabled
+                && !readObserved.DiffSourceInputPreview.ServerPlannerEnabled
+                && !readObserved.DiffSourceInputPreview.RequestCreationEnabled
+                && !readObserved.DiffSourceInputPreview.MutationAllowed
+                && readObserved.PlannerDiffOutputPreview.Schema == "learnbot.local-agent.codex-planner-diff-output-preview.v1"
+                && readObserved.PlannerDiffOutputPreview.Status == "PLANNER_SOURCE_NOT_REQUESTED"
+                && !readObserved.PlannerDiffOutputPreview.PlannerSourceRequested
+                && readObserved.PlannerDiffOutputPreview.ReadContextReady
+                && !readObserved.PlannerDiffOutputPreview.PlannerExecutionEnabled
+                && !readObserved.PlannerDiffOutputPreview.OutputEnvelopePrepared
+                && readObserved.PlannerDiffOutputPreview.UnifiedDiffRequired
+                && !readObserved.PlannerDiffOutputPreview.DiffGenerated
+                && !readObserved.PlannerDiffOutputPreview.DiffBodyIncluded
+                && !readObserved.PlannerDiffOutputPreview.DiffForwardedToValidation
+                && !readObserved.PlannerDiffOutputPreview.RequestCreationEnabled
+                && !readObserved.PlannerDiffOutputPreview.MutationAllowed
+                && readObserved.GeneratedDiffAcceptancePreview.Schema == "learnbot.local-agent.codex-generated-diff-acceptance-preview.v1"
+                && readObserved.GeneratedDiffAcceptancePreview.Status == "PLANNER_SOURCE_REQUIRED"
+                && !readObserved.GeneratedDiffAcceptancePreview.PlannerOutputEnvelopePrepared
+                && !readObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !readObserved.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && !readObserved.GeneratedDiffAcceptancePreview.RequestCreationEnabled
+                && !readObserved.GeneratedDiffAcceptancePreview.MutationAllowed
+                && readObserved.PlannerDiffValidationHandoffPreview.Schema == "learnbot.local-agent.codex-planner-diff-validation-handoff-preview.v1"
+                && readObserved.PlannerDiffValidationHandoffPreview.Status == "PLANNER_OUTPUT_REQUIRED"
+                && !readObserved.PlannerDiffValidationHandoffPreview.PlannerOutputEnvelopePrepared
+                && !readObserved.PlannerDiffValidationHandoffPreview.DiffBodyAvailable
+                && !readObserved.PlannerDiffValidationHandoffPreview.ValidationInputPrepared
+                && !readObserved.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && !readObserved.PlannerDiffValidationHandoffPreview.ValidationAttempted
+                && !readObserved.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && inlineSourceObserved.DiffSourceInputPreview.Status == "DIFF_SOURCE_DISABLED_PREVIEW"
+                && inlineSourceObserved.DiffSourceInputPreview.RequestedSource == "inline"
+                && inlineSourceObserved.DiffSourceInputPreview.SourceRequested
+                && inlineSourceObserved.DiffSourceInputPreview.SourceRecognized
+                && !inlineSourceObserved.DiffSourceInputPreview.SourceEnabled
+                && inlineSourceObserved.DiffSourceInputPreview.DiffTextProvided
+                && !inlineSourceObserved.DiffSourceInputPreview.DiffTextAccepted
+                && !inlineSourceObserved.DiffSourceInputPreview.DiffBodyLoaded
+                && !inlineSourceObserved.DiffSourceInputPreview.DiffForwardedToValidation
+                && !inlineSourceObserved.DiffSourceInputPreview.MutationAllowed
+                && inlineSourceObserved.PlannerDiffOutputPreview.Status == "PLANNER_SOURCE_NOT_REQUESTED"
+                && !inlineSourceObserved.PlannerDiffOutputPreview.PlannerSourceRequested
+                && !inlineSourceObserved.PlannerDiffOutputPreview.OutputEnvelopePrepared
+                && inlineSourceObserved.GeneratedDiffAcceptancePreview.Status == "PLANNER_SOURCE_REQUIRED"
+                && !inlineSourceObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !inlineSourceObserved.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && inlineSourceObserved.PlannerDiffValidationHandoffPreview.Status == "PLANNER_OUTPUT_REQUIRED"
+                && !inlineSourceObserved.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && !inlineSourceObserved.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && localModelSourceObserved.DiffSourceInputPreview.Status == "DIFF_SOURCE_DISABLED_PREVIEW"
+                && localModelSourceObserved.DiffSourceInputPreview.RequestedSource == "local-model"
+                && localModelSourceObserved.PlannerDiffOutputPreview.Status == "PLANNER_OUTPUT_DISABLED_PREVIEW"
+                && localModelSourceObserved.PlannerDiffOutputPreview.PlannerSourceRequested
+                && localModelSourceObserved.PlannerDiffOutputPreview.PlannerSourceRecognized
+                && localModelSourceObserved.PlannerDiffOutputPreview.ReadContextReady
+                && !localModelSourceObserved.PlannerDiffOutputPreview.PlannerExecutionEnabled
+                && !localModelSourceObserved.PlannerDiffOutputPreview.LocalModelPlanningEnabled
+                && !localModelSourceObserved.PlannerDiffOutputPreview.ServerPlannerEnabled
+                && localModelSourceObserved.PlannerDiffOutputPreview.OutputEnvelopePrepared
+                && localModelSourceObserved.PlannerDiffOutputPreview.UnifiedDiffRequired
+                && !localModelSourceObserved.PlannerDiffOutputPreview.DiffGenerated
+                && !localModelSourceObserved.PlannerDiffOutputPreview.DiffBodyIncluded
+                && !localModelSourceObserved.PlannerDiffOutputPreview.DiffForwardedToValidation
+                && !localModelSourceObserved.PlannerDiffOutputPreview.RequestCreationEnabled
+                && !localModelSourceObserved.PlannerDiffOutputPreview.MutationAllowed
+                && localModelSourceObserved.GeneratedDiffAcceptancePreview.Status == "GENERATED_DIFF_NOT_PROVIDED"
+                && localModelSourceObserved.GeneratedDiffAcceptancePreview.PlannerOutputEnvelopePrepared
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.ExplicitPreviewSwitchEnabled
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.GeneratedDiffProvided
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.RequestCreationEnabled
+                && !localModelSourceObserved.GeneratedDiffAcceptancePreview.MutationAllowed
+                && localModelSourceObserved.PlannerDiffValidationHandoffPreview.Status == "HANDOFF_DISABLED_NO_DIFF"
+                && localModelSourceObserved.PlannerDiffValidationHandoffPreview.PlannerOutputEnvelopePrepared
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.DiffBodyAvailable
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.ValidationInputPrepared
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.ValidationAttempted
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.DiffValidationPassed
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.PatchApplyInputPrepared
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.RequestCreationEnabled
+                && !localModelSourceObserved.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && unsupportedSourceObserved.DiffSourceInputPreview.Status == "BLOCKED_UNSUPPORTED_DIFF_SOURCE"
+                && unsupportedSourceObserved.DiffSourceInputPreview.SourceRequested
+                && !unsupportedSourceObserved.DiffSourceInputPreview.SourceRecognized
+                && !unsupportedSourceObserved.DiffSourceInputPreview.SourceEnabled
+                && !unsupportedSourceObserved.DiffSourceInputPreview.DiffForwardedToValidation
+                && !unsupportedSourceObserved.DiffSourceInputPreview.MutationAllowed
+                && unsupportedSourceObserved.GeneratedDiffAcceptancePreview.Status == "PLANNER_SOURCE_REQUIRED"
+                && !unsupportedSourceObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && readObserved.DiffSourceValidationPreview.Schema == "learnbot.local-agent.codex-diff-source-validation-preview.v1"
+                && readObserved.DiffSourceValidationPreview.Status == "DIFF_SOURCE_REQUIRED"
+                && readObserved.DiffSourceValidationPreview.TargetFiles.Contains("src/Calculator.cs")
+                && !readObserved.DiffSourceValidationPreview.DiffProvided
+                && !readObserved.DiffSourceValidationPreview.PatchApplyInputPrepared
+                && !readObserved.DiffSourceValidationPreview.PatchDryRunExecutionEnabled
+                && !readObserved.DiffSourceValidationPreview.RequestCreationEnabled
+                && readObserved.DiffSourceValidationPreview.ApprovalRequiredBeforeMutation
+                && !readObserved.DiffSourceValidationPreview.MutationAllowed
+                && readObserved.PatchDryRunRequestEnvelopePreview.Schema == "learnbot.local-agent.codex-patch-dry-run-request-envelope-preview.v1"
+                && readObserved.PatchDryRunRequestEnvelopePreview.Status == "DIFF_VALIDATION_REQUIRED"
+                && !readObserved.PatchDryRunRequestEnvelopePreview.DiffValidationPassed
+                && !readObserved.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && !readObserved.PatchDryRunRequestEnvelopePreview.SnapshotCreationEnabled
+                && !readObserved.PatchDryRunRequestEnvelopePreview.PatchDryRunExecutionEnabled
+                && !readObserved.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !readObserved.PatchDryRunRequestEnvelopePreview.EnqueueEnabled
+                && !readObserved.PatchDryRunRequestEnvelopePreview.Claimable
+                && !readObserved.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && readObserved.PatchDryRunPreflightPreview.Status == "DIFF_VALIDATION_REQUIRED"
+                && !readObserved.PatchDryRunPreflightPreview.ExecutionAttempted
+                && readObserved.PatchDryRunPreflightPreview.NonWritingPreflightOnly
+                && !readObserved.PatchDryRunPreflightPreview.SnapshotCreated
+                && !readObserved.PatchDryRunPreflightPreview.MutationApplied
+                && readObserved.PatchDryRunApprovalHandoffPreview.Status == "DRY_RUN_ENVELOPE_REQUIRED"
+                && !readObserved.PatchDryRunApprovalHandoffPreview.RequestEnvelopePrepared
+                && !readObserved.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && !readObserved.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !readObserved.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && generatedDiffWithoutSwitchObserved.GeneratedDiffAcceptancePreview.Status == "EXPLICIT_SWITCH_REQUIRED"
+                && generatedDiffWithoutSwitchObserved.GeneratedDiffAcceptancePreview.GeneratedDiffProvided
+                && !generatedDiffWithoutSwitchObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !generatedDiffWithoutSwitchObserved.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && generatedDiffWithoutSwitchObserved.DiffSourceValidationPreview.Status == "DIFF_SOURCE_REQUIRED"
+                && !generatedDiffWithoutSwitchObserved.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.Status == "ACCEPTED_FOR_VALIDATION_PREVIEW"
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.PlannerOutputEnvelopePrepared
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.ExplicitPreviewSwitchEnabled
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.GeneratedDiffProvided
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.GeneratedDiffBytes > 0
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.MaxGeneratedDiffBytes == AbsoluteMaxPatchBytes
+                && !acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.DiffFileReadEnabled
+                && !acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.InlineDiffAccepted
+                && acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && !acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.GeneratedDiffAcceptancePreview.MutationAllowed
+                && acceptedGeneratedDiffObserved.DiffSourceValidationPreview.Status == "VALID_DIFF_SOURCE_PREVIEW"
+                && acceptedGeneratedDiffObserved.DiffSourceValidationPreview.DiffProvided
+                && acceptedGeneratedDiffObserved.DiffSourceValidationPreview.DiffParsed
+                && acceptedGeneratedDiffObserved.DiffSourceValidationPreview.DiffTouchesOnlyTargetFiles
+                && acceptedGeneratedDiffObserved.DiffSourceValidationPreview.PatchApplyInputPrepared
+                && !acceptedGeneratedDiffObserved.DiffSourceValidationPreview.PatchDryRunExecutionEnabled
+                && !acceptedGeneratedDiffObserved.DiffSourceValidationPreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.DiffSourceValidationPreview.MutationAllowed
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.Status == "HANDOFF_VALIDATED_PREVIEW"
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.DiffBodyAvailable
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.ValidationInputPrepared
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.ValidationAttempted
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.DiffValidationPassed
+                && acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.PatchApplyInputPrepared
+                && !acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.Status == "DRY_RUN_REQUEST_ENVELOPE_PREPARED"
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.WorkspaceId == workspaceId
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.ToolName == "patch.apply"
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.ExecutionTarget == "USER_LOCAL_AGENT"
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.ApprovalState == "REQUIRED_BEFORE_SNAPSHOT_DRY_RUN"
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.TargetFiles.Contains("src/Calculator.cs")
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.DiffValidationPassed
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.PatchApplyInputPrepared
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.DryRunOnly
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.SnapshotCreationRequiredForFullDryRun
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.SnapshotCreationEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.PatchDryRunExecutionEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.EnqueueEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.Claimable
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.ApprovalRequiredBeforeDryRun
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.ApprovalRequiredBeforeMutation
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.TestExecutionEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.FinalReportPublicationEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.PartialReindexEnabled
+                && acceptedGeneratedDiffObserved.PatchDryRunRequestEnvelopePreview.RequestEnvelopePreview is not null
+                && acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.Status == "PREFLIGHT_INPUT_REQUIRED"
+                && acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.DiffValidationPassed
+                && acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.PatchApplyInputPrepared
+                && !acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.ExecutionAttempted
+                && !acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.SnapshotCreated
+                && !acceptedGeneratedDiffObserved.PatchDryRunPreflightPreview.MutationApplied
+                && acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.Status == "NONWRITING_PREFLIGHT_REQUIRED"
+                && acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.RequestEnvelopePrepared
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.NonWritingPreflightPassed
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.ApprovalRequestCreationEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.EnqueueEnabled
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.Claimable
+                && !acceptedGeneratedDiffObserved.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.Status == "DRY_RUN_REQUEST_ENVELOPE_PREPARED"
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.EnqueueEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.Claimable
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.SnapshotCreationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.Status == "PREFLIGHT_PASSED"
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.Requested
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.ReadyForExecution
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.ExecutionAttempted
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.DiffValidationPassed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.NonWritingPreflightOnly
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.FileReadAttempted
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.ContextValidationAttempted
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.PreflightPassed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.Files.Count == 1
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.SnapshotCreated
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.MutationApplied
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.PatchApplyInputPrepared
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.PatchDryRunExecutionEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.RequestCreationEnabled
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.ApprovalRequiredBeforeMutation
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.MutationAllowed
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.TestExecutionEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.FinalReportPublicationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunPreflightPreview.PartialReindexEnabled
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.Status == "APPROVAL_HANDOFF_PREPARED"
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.WorkspaceId == workspaceId
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.RepositoryId == repositoryId
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.TargetFiles.Contains("src/Calculator.cs")
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.DiffValidationPassed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.RequestEnvelopePrepared
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.NonWritingPreflightRequired
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.NonWritingPreflightPassed
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.ApprovalState == "AWAITING_USER_APPROVAL"
+                && acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.HandoffPreview is not null
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.ApprovalRequestCreationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.EnqueueEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.Claimable
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.SnapshotCreationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.PatchDryRunExecutionEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.TestExecutionEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.FinalReportPublicationEnabled
+                && !acceptedGeneratedDiffPreflightObserved.PatchDryRunApprovalHandoffPreview.PartialReindexEnabled
+                && generatedDiffWrongTargetObserved.GeneratedDiffAcceptancePreview.Status == "ACCEPTED_FOR_VALIDATION_PREVIEW"
+                && generatedDiffWrongTargetObserved.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && generatedDiffWrongTargetObserved.DiffSourceValidationPreview.Status == "BLOCKED_TARGET_MISMATCH"
+                && generatedDiffWrongTargetObserved.DiffSourceValidationPreview.RejectedFiles.Contains("src/Other.cs")
+                && !generatedDiffWrongTargetObserved.DiffSourceValidationPreview.PatchApplyInputPrepared
+                && generatedDiffWrongTargetObserved.PlannerDiffValidationHandoffPreview.Status == "HANDOFF_VALIDATION_BLOCKED"
+                && generatedDiffWrongTargetObserved.PlannerDiffValidationHandoffPreview.ValidationAttempted
+                && !generatedDiffWrongTargetObserved.PlannerDiffValidationHandoffPreview.DiffValidationPassed
+                && !generatedDiffWrongTargetObserved.PlannerDiffValidationHandoffPreview.PatchApplyInputPrepared
+                && !generatedDiffWrongTargetObserved.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.Status == "DIFF_VALIDATION_REQUIRED"
+                && !generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && !generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.PatchApplyInputPrepared
+                && !generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.PatchDryRunExecutionEnabled
+                && !generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !generatedDiffWrongTargetObserved.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && generatedDiffWrongTargetObserved.PatchDryRunApprovalHandoffPreview.Status == "DRY_RUN_ENVELOPE_REQUIRED"
+                && !generatedDiffWrongTargetObserved.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && !generatedDiffWrongTargetObserved.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !generatedDiffWrongTargetObserved.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && validDiffPreview.Status == "VALID_DIFF_SOURCE_PREVIEW"
+                && validDiffPreview.DiffProvided
+                && validDiffPreview.DiffParsed
+                && validDiffPreview.TouchedFiles.SequenceEqual(new[] { "src/Calculator.cs" })
+                && validDiffPreview.RejectedFiles.Count == 0
+                && validDiffPreview.DiffTouchesOnlyTargetFiles
+                && validDiffPreview.PatchApplyInputPrepared
+                && !validDiffPreview.PatchDryRunExecutionEnabled
+                && !validDiffPreview.RequestCreationEnabled
+                && validDiffPreview.ApprovalRequiredBeforeMutation
+                && !validDiffPreview.MutationAllowed
+                && validPreflightPreview.Status == "PREFLIGHT_PASSED"
+                && validPreflightPreview.Requested
+                && validPreflightPreview.ReadyForExecution
+                && validPreflightPreview.ExecutionAttempted
+                && validPreflightPreview.DiffValidationPassed
+                && validPreflightPreview.NonWritingPreflightOnly
+                && validPreflightPreview.FileReadAttempted
+                && validPreflightPreview.ContextValidationAttempted
+                && validPreflightPreview.PreflightPassed
+                && validPreflightPreview.Files.Count == 1
+                && !validPreflightPreview.SnapshotCreated
+                && !validPreflightPreview.MutationApplied
+                && validPreflightPreview.PatchApplyInputPrepared
+                && !validPreflightPreview.PatchDryRunExecutionEnabled
+                && !validPreflightPreview.RequestCreationEnabled
+                && validPreflightPreview.ApprovalRequiredBeforeMutation
+                && !validPreflightPreview.MutationAllowed
+                && !validPreflightPreview.TestExecutionEnabled
+                && !validPreflightPreview.FinalReportPublicationEnabled
+                && !validPreflightPreview.PartialReindexEnabled
+                && mismatchPreflightPreview.Status == "CONTEXT_MISMATCH"
+                && mismatchPreflightPreview.ExecutionAttempted
+                && mismatchPreflightPreview.DiffValidationPassed
+                && !mismatchPreflightPreview.PreflightPassed
+                && mismatchPreflightPreview.FailureCode == "CONTEXT_MISMATCH"
+                && !mismatchPreflightPreview.SnapshotCreated
+                && !mismatchPreflightPreview.MutationApplied
+                && !mismatchPreflightPreview.PatchDryRunExecutionEnabled
+                && !mismatchPreflightPreview.MutationAllowed
+                && rejectedDiffPreview.Status == "BLOCKED_TARGET_MISMATCH"
+                && rejectedDiffPreview.DiffProvided
+                && rejectedDiffPreview.DiffParsed
+                && rejectedDiffPreview.RejectedFiles.Contains("src/Other.cs")
+                && !rejectedDiffPreview.DiffTouchesOnlyTargetFiles
+                && !rejectedDiffPreview.PatchApplyInputPrepared
+                && !rejectedDiffPreview.PatchDryRunExecutionEnabled
+                && !rejectedDiffPreview.RequestCreationEnabled
+                && !rejectedDiffPreview.MutationAllowed
+                && search is not null
+                && search.SearchSnippetsRedacted
+                && search.OutputSummary.TryGetValue("snippetsIncluded", out var snippetsIncluded)
+                && snippetsIncluded is false
+                && search.OutputSummary.TryGetValue("matchedPaths", out var matchedPaths)
+                && matchedPaths is IEnumerable<string> paths
+                && paths.Contains("src/Calculator.cs", StringComparer.OrdinalIgnoreCase)
+                && blocked.Status == "BLOCKED_PREVIEW"
+                && !blocked.ExecutionAttempted
+                && blocked.CandidateSelection.Status == "BLOCKED_PREVIEW"
+                && !blocked.CandidateSelection.FileReadPlanPrepared
+                && !blocked.CandidateSelection.FileContentRead
+                && !blocked.CandidateSelection.MutationAllowed
+                && blocked.SelectedFileRead.Status == "NOT_REQUESTED"
+                && !blocked.SelectedFileRead.FileContentRead
+                && blocked.PatchIntentPreview.Status == "READ_REQUIRED"
+                && !blocked.PatchIntentPreview.PlanningInputPrepared
+                && !blocked.PatchIntentPreview.MutationAllowed
+                && blocked.PatchProposalPreview.Status == "READ_REQUIRED"
+                && !blocked.PatchProposalPreview.ProposalPrepared
+                && !blocked.PatchProposalPreview.DiffGenerated
+                && !blocked.PatchProposalPreview.MutationAllowed
+                && blocked.DiffSourceInputPreview.Status == "READ_REQUIRED"
+                && !blocked.DiffSourceInputPreview.SourceEnabled
+                && !blocked.DiffSourceInputPreview.MutationAllowed
+                && blocked.PlannerDiffOutputPreview.Status == "READ_REQUIRED"
+                && !blocked.PlannerDiffOutputPreview.OutputEnvelopePrepared
+                && !blocked.PlannerDiffOutputPreview.MutationAllowed
+                && blocked.GeneratedDiffAcceptancePreview.Status == "READ_REQUIRED"
+                && !blocked.GeneratedDiffAcceptancePreview.GeneratedDiffAccepted
+                && !blocked.GeneratedDiffAcceptancePreview.ForwardToValidationPreview
+                && !blocked.GeneratedDiffAcceptancePreview.MutationAllowed
+                && blocked.PlannerDiffValidationHandoffPreview.Status == "READ_REQUIRED"
+                && !blocked.PlannerDiffValidationHandoffPreview.ValidationForwardingEnabled
+                && !blocked.PlannerDiffValidationHandoffPreview.MutationAllowed
+                && blocked.DiffSourceValidationPreview.Status == "READ_REQUIRED"
+                && !blocked.DiffSourceValidationPreview.DiffProvided
+                && !blocked.DiffSourceValidationPreview.PatchApplyInputPrepared
+                && !blocked.DiffSourceValidationPreview.MutationAllowed
+                && blocked.PatchDryRunRequestEnvelopePreview.Status == "READ_REQUIRED"
+                && !blocked.PatchDryRunRequestEnvelopePreview.RequestEnvelopePrepared
+                && !blocked.PatchDryRunRequestEnvelopePreview.PatchApplyInputPrepared
+                && !blocked.PatchDryRunRequestEnvelopePreview.PatchDryRunExecutionEnabled
+                && !blocked.PatchDryRunRequestEnvelopePreview.RequestCreationEnabled
+                && !blocked.PatchDryRunRequestEnvelopePreview.EnqueueEnabled
+                && !blocked.PatchDryRunRequestEnvelopePreview.Claimable
+                && !blocked.PatchDryRunRequestEnvelopePreview.MutationAllowed
+                && blocked.PatchDryRunPreflightPreview.Status == "DIFF_VALIDATION_REQUIRED"
+                && !blocked.PatchDryRunPreflightPreview.ExecutionAttempted
+                && !blocked.PatchDryRunPreflightPreview.MutationAllowed
+                && blocked.PatchDryRunApprovalHandoffPreview.Status == "READ_REQUIRED"
+                && !blocked.PatchDryRunApprovalHandoffPreview.RequestEnvelopePrepared
+                && !blocked.PatchDryRunApprovalHandoffPreview.NonWritingPreflightPassed
+                && !blocked.PatchDryRunApprovalHandoffPreview.ApprovalHandoffPrepared
+                && !blocked.PatchDryRunApprovalHandoffPreview.RequestCreationEnabled
+                && !blocked.PatchDryRunApprovalHandoffPreview.ApprovalRequestCreationEnabled
+                && !blocked.PatchDryRunApprovalHandoffPreview.EnqueueEnabled
+                && !blocked.PatchDryRunApprovalHandoffPreview.Claimable
+                && !blocked.PatchDryRunApprovalHandoffPreview.SnapshotCreationEnabled
+                && !blocked.PatchDryRunApprovalHandoffPreview.PatchDryRunExecutionEnabled
+                && !blocked.PatchDryRunApprovalHandoffPreview.MutationAllowed
+                && blocked.Blockers.Contains("agent is not paired")
+                && !json.Contains("secret-token", StringComparison.Ordinal)
+                && !json.Contains("hidden-content", StringComparison.Ordinal)
+                && readJson.Contains("hidden-content", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("codex read-only observation contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("codex-read-only-observation-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static bool RunGitForSelfTest(string workingDirectory, params string[] args)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            foreach (var arg in args)
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+            process.WaitForExit(10_000);
+            return process.HasExited && process.ExitCode == 0;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static int SelfTestCodexServerPlanFetchContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-codex-server-plan-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            var workspaceRoot = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(agentRoot);
+            Directory.CreateDirectory(workspaceRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto",
+                Workspaces = [new AgentWorkspace(Guid.Parse("11111111-1111-1111-1111-111111111111"), "workspace", workspaceRoot, true)]
+            });
+            var preview = app.BuildCliCodexCommandPreviewReport(
+                "fix",
+                "repair failing tests",
+                workspaceRoot,
+                "33333333-3333-3333-3333-333333333333",
+                "44444444-4444-4444-4444-444444444444",
+                8);
+            var readiness = app.BuildCliWebSessionServerPlanReadinessReport();
+            var handoffPreview = new CliCodexPatchDryRunApprovalHandoffPreview(
+                Schema: "learnbot.local-agent.codex-patch-dry-run-approval-handoff-preview.v1",
+                Status: "APPROVAL_HANDOFF_PREPARED",
+                Goal: "repair failing tests",
+                WorkspaceId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                RepositoryId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                ToolName: "patch.apply",
+                ExecutionTarget: "USER_LOCAL_AGENT",
+                ApprovalKind: "SNAPSHOT_WRITING_DRY_RUN",
+                ApprovalState: "AWAITING_USER_APPROVAL",
+                TargetFiles: ["src/Calculator.cs"],
+                DiffValidationPassed: true,
+                RequestEnvelopePrepared: true,
+                NonWritingPreflightRequired: true,
+                NonWritingPreflightPassed: true,
+                ApprovalHandoffPrepared: true,
+                DryRunApprovalRequired: true,
+                MutationApprovalRequired: true,
+                RequestCreationEnabled: false,
+                ApprovalRequestCreationEnabled: false,
+                EnqueueEnabled: false,
+                Claimable: false,
+                SnapshotCreationEnabled: false,
+                PatchDryRunExecutionEnabled: false,
+                MutationAllowed: false,
+                TestExecutionEnabled: false,
+                FinalReportPublicationEnabled: false,
+                PartialReindexEnabled: false,
+                HandoffPreview: new Dictionary<string, object?>
+                {
+                    ["schema"] = "learnbot.local-agent.patch-dry-run-approval-handoff.v1",
+                    ["approvalState"] = "AWAITING_USER_APPROVAL"
+                },
+                Blocker: null,
+                Reason: "self-test handoff");
+            var submissionBodyWithHandoff = BuildCliCodexServerSubmissionBody(preview, handoffPreview);
+            var blocked = BuildCliCodexServerPlanFetchResult(
+                preview,
+                submissionBodyWithHandoff,
+                readiness,
+                status: "BLOCKED_AUTH_REQUIRED",
+                attempted: false,
+                networkCallEnabled: false,
+                webTokenProvided: false,
+                httpStatusCode: null,
+                serverResponse: null,
+                error: "web token is required; pass --web-token or set LEARNBOT_WEB_TOKEN");
+            var json = JsonSerializer.Serialize(blocked, JsonOptions);
+
+            var ok = blocked.Schema == "learnbot.local-agent.codex-server-plan-fetch-result.v1"
+                && blocked.Status == "BLOCKED_AUTH_REQUIRED"
+                && blocked.WebSessionReadiness.Schema == "learnbot.local-agent.web-session-server-plan-readiness.v1"
+                && blocked.OneCyclePreview.Schema == "learnbot.local-agent.codex-one-cycle-preview.v1"
+                && blocked.OneCyclePreview.ReadyForReadOnlyToolLoop
+                && !blocked.OneCyclePreview.MutationAllowed
+                && blocked.ReadOnlyServerBridge.Schema == "learnbot.local-agent.codex-read-only-server-bridge.v1"
+                && blocked.ReadOnlyServerBridge.Status == "BLOCKED_OR_WAITING"
+                && blocked.ReadOnlyServerBridge.FetchStatus == "BLOCKED_AUTH_REQUIRED"
+                && blocked.ReadOnlyServerBridge.OneCycleReadyForReadOnlyToolLoop
+                && !blocked.ReadOnlyServerBridge.AuthenticatedServerPlanReady
+                && !blocked.ReadOnlyServerBridge.ServerPlanFetchAttempted
+                && !blocked.ReadOnlyServerBridge.ServerPlanFetched
+                && !blocked.ReadOnlyServerBridge.ServerPlanNetworkCallEnabled
+                && !blocked.ReadOnlyServerBridge.EnvironmentTokenFallbackUsed
+                && !blocked.ReadOnlyServerBridge.StoredSessionAuthUsed
+                && !blocked.ReadOnlyServerBridge.StoredSessionAuthEnabled
+                && !blocked.ReadOnlyServerBridge.RequestCreationEnabled
+                && !blocked.ReadOnlyServerBridge.RunnerPreviewFetchEnabled
+                && blocked.ReadOnlyServerBridge.RunnerPreviewEndpoint == "/api/code-agent/loop/runner/preview"
+                && blocked.ReadOnlyServerBridge.SelectToolPreviewEndpoint == "/api/code-agent/loop/runner/select-tool-preview"
+                && blocked.ReadOnlyServerBridge.EnqueueSelectedReadOnlyEndpoint == "/api/code-agent/loop/runner/enqueue-selected-read-only"
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.Schema == "learnbot.local-agent.codex-file-discovery-read-plan.v1"
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.DryRunOnly
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.PlanPrepared
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.FileDiscoveryPlanEnabled
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.FileReadPlanEnabled
+                && !blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.ToolExecutionEnabled
+                && !blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.FileContentRead
+                && !blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.RequestCreationEnabled
+                && !blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.MutationAllowed
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.CandidateTools.Contains("file.search")
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "workspace.tree"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.EnqueueEnabled
+                    && !envelope.Claimable
+                    && !envelope.ExecutionEnabled
+                    && !envelope.MutationAllowed)
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "workspace.search"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.ExecutionEnabled
+                    && !envelope.FileContentRead)
+                && blocked.ReadOnlyServerBridge.FileDiscoveryReadPlan.RequestEnvelopePreviews.Any(envelope =>
+                    envelope.ToolName == "git.status"
+                    && !envelope.RequestCreationEnabled
+                    && !envelope.ExecutionEnabled)
+                && blocked.ReadOnlyServerBridge.FileDiscoveryPlanEnabled
+                && blocked.ReadOnlyServerBridge.FileReadPlanEnabled
+                && !blocked.ReadOnlyServerBridge.PatchDryRunEnabled
+                && !blocked.ReadOnlyServerBridge.MutationAllowed
+                && !blocked.ReadOnlyServerBridge.TokenSecretPrinted
+                && blocked.ReadOnlyServerBridge.OrderedReadOnlyStages.Contains("file-discovery")
+                && blocked.ReadOnlyServerBridge.OrderedReadOnlyStages.Contains("file-read")
+                && blocked.ReadOnlyServerBridge.Blockers.Contains("web token is required before authenticated server loop/runner preview fetch")
+                && blocked.WebSessionReadiness.Status == "BLOCKED_NO_WEB_SESSION"
+                && !blocked.WebSessionReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && blocked.WebSessionReadiness.StoredSessionAuthReadiness.Schema == "learnbot.local-agent.web-session-stored-session-auth-readiness.v1"
+                && !blocked.WebSessionReadiness.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !blocked.WebSessionReadiness.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && !blocked.WebSessionReadiness.StoredSessionTokenLoaded
+                && !blocked.WebSessionReadiness.LocalAgentTokenUsed
+                && !blocked.WebSessionReadiness.TokenSecretPrinted
+                && !blocked.Attempted
+                && !blocked.NetworkCallEnabled
+                && !blocked.UsedLocalAgentToken
+                && !blocked.WebTokenProvided
+                && !blocked.TokenSecretPrinted
+                && !blocked.RequestCreated
+                && !blocked.MutationAllowed
+                && blocked.Endpoint == "/api/code-agent/loop/submission-plan"
+                && blocked.Method == "POST"
+                && blocked.ServerSubmissionPlan.ReadyForDisabledPlan
+                && blocked.ServerSubmissionPlan.BodyPreview.TryGetValue("patchDryRunApprovalHandoffPreview", out var submittedHandoff)
+                && ReferenceEquals(submittedHandoff, handoffPreview)
+                && blocked.ServerSubmissionPlan.BodyPreview.TryGetValue("repositoryId", out var submittedRepositoryId)
+                && submittedRepositoryId is Guid
+                && blocked.Blockers.Contains("web token is required; pass --web-token or set LEARNBOT_WEB_TOKEN")
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("secret-web-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("codex server plan fetch contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("codex-server-plan-fetch-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebLoginSessionPreviewContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-login-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+            var loginPlan = app.BuildCliWebLoginPlanReport("jinsu.kim", null, rememberLogin: true);
+            var missingIdentifier = app.BuildCliWebLoginPlanReport(null, null, rememberLogin: false);
+            var session = app.BuildCliWebSessionStatusReport();
+            var json = JsonSerializer.Serialize(new { loginPlan, missingIdentifier, session }, JsonOptions);
+
+            var ok = loginPlan.Schema == "learnbot.local-agent.web-login-plan.v1"
+                && loginPlan.Status == "DISABLED_PREVIEW"
+                && loginPlan.Endpoint == "/api/auth/login"
+                && loginPlan.DeviceSessionPlanEndpoint == "/api/auth/cli-device-session/plan"
+                && loginPlan.DeviceSessionCreatePlanEndpoint == "/api/auth/cli-device-session/create/plan"
+                && loginPlan.AbsoluteDeviceSessionCreatePlanEndpointPreview == "http://localhost:8083/api/auth/cli-device-session/create/plan"
+                && loginPlan.IdentifierProvided
+                && loginPlan.RememberLogin
+                && !loginPlan.PasswordCollected
+                && !loginPlan.NetworkCallEnabled
+                && !loginPlan.LoginExecutionEnabled
+                && !loginPlan.SessionStorageEnabled
+                && !loginPlan.CookiePersistenceEnabled
+                && !loginPlan.LocalAgentTokenUsed
+                && !loginPlan.TokenSecretPrinted
+                && loginPlan.BodyPreview.TryGetValue("password", out var passwordPreview)
+                && passwordPreview is string passwordPreviewText
+                && string.Equals(passwordPreviewText, "<not-collected>", StringComparison.Ordinal)
+                && loginPlan.FollowUpCommands.Contains("learnbot session create-plan")
+                && loginPlan.FollowUpCommands.Contains("POST /api/auth/cli-device-session/create/plan")
+                && missingIdentifier.Blockers.Contains("login id or email is required for a future login execution.")
+                && session.Schema == "learnbot.local-agent.web-session-status.v1"
+                && session.Status == "ENV_TOKEN_AVAILABLE"
+                && session.ArtifactValidation.Schema == "learnbot.local-agent.web-session-artifact-validation.v1"
+                && session.ArtifactValidation.Status == "MISSING"
+                && !session.ArtifactValidation.ReadAttempted
+                && session.ArtifactValidation.EncryptionRequired
+                && !session.ArtifactValidation.AccessTokenLoaded
+                && !session.ArtifactValidation.RefreshTokenLoaded
+                && !session.ArtifactValidation.TokenSecretPrinted
+                && session.ArtifactValidation.ProductionCryptoPreviewRequirement.Schema == "learnbot.local-agent.web-session-artifact-crypto-preview-requirement.v1"
+                && session.ArtifactValidation.ProductionCryptoPreviewRequirement.ProofCommand == "learnbot session artifact-production-crypto-preview --preview-only"
+                && !session.ArtifactValidation.ProductionCryptoPreviewRequirement.AutoRunEnabled
+                && !session.ArtifactValidation.ProductionCryptoPreviewRequirement.ArtifactWriteEnabled
+                && !session.ArtifactValidation.ProductionCryptoPreviewRequirement.StoredSessionLoadingEnabled
+                && !session.ArtifactValidation.ProductionCryptoPreviewRequirement.TokenSecretPrinted
+                && session.SecretProviderPlan.Schema == "learnbot.local-agent.web-session-secret-provider-plan.v1"
+                && session.SecretProviderPlan.Status == "PRODUCTION_PROVIDER_DISABLED_PREVIEW"
+                && session.SecretProviderPlan.Provider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && !session.SecretProviderPlan.ProviderProbeEnabled
+                && session.SecretProviderPlan.ManualNoSecretProbeAvailable == OperatingSystem.IsWindows()
+                && !session.SecretProviderPlan.ProductionEncryptionEnabled
+                && !session.SecretProviderPlan.ProductionDecryptionEnabled
+                && !session.SecretProviderPlan.ProductionStoredSessionLoadingEnabled
+                && !session.SecretProviderPlan.TestOnlyProviderAcceptedForProduction
+                && !session.SecretProviderPlan.PlaintextTokenSerializationAllowed
+                && !session.SecretProviderPlan.TokenSecretPrinted
+                && session.StoredSessionAuthReadiness.Schema == "learnbot.local-agent.web-session-stored-session-auth-readiness.v1"
+                && session.StoredSessionAuthReadiness.Status == "STORED_SESSION_AUTH_DISABLED_PREVIEW"
+                && !session.StoredSessionAuthReadiness.FileReadAttempted
+                && !session.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !session.StoredSessionAuthReadiness.StoredSessionLoaded
+                && !session.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && !session.StoredSessionAuthReadiness.TokenSecretPrinted
+                && session.ClaimPlanEndpoint == "/api/auth/cli-device-session/claim/plan"
+                && !session.ClaimPollingEnabled
+                && session.EnvironmentWebTokenPresent
+                && !string.IsNullOrWhiteSpace(session.EnvironmentWebTokenFingerprint)
+                && session.UsableForServerPlanFetch
+                && !session.LocalSessionArtifactWriteEnabled
+                && session.LocalSessionArtifactEncryptedRequired
+                && !session.LocalAgentTokenUsed
+                && !session.TokenSecretPrinted
+                && !session.LoginExecutionEnabled
+                && !session.SessionStorageEnabled
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web login/session preview contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-login-session-preview-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static async Task<int> SelfTestWebSessionPlanFetchContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-plan-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+            var devicePlan = await app.FetchCliWebSessionPlan("device-session", ["--offline"]);
+            var createPlan = await app.FetchCliWebSessionPlan("device-session-create", ["--offline"]);
+            var claimPlan = await app.FetchCliWebSessionPlan("claim", ["--offline", "--device-code", "secret-device-code"]);
+            var claimResultPlan = await app.FetchCliWebSessionPlan("claim-result", ["--offline", "--claim-status", "secret-claim-status"]);
+            var json = JsonSerializer.Serialize(new { devicePlan, createPlan, claimPlan, claimResultPlan }, JsonOptions);
+            var ok = devicePlan.Schema == "learnbot.local-agent.web-session-plan-fetch-result.v1"
+                && devicePlan.PlanKind == "device-session"
+                && devicePlan.Status == "LOCAL_STATIC_FALLBACK"
+                && !devicePlan.Attempted
+                && !devicePlan.NetworkCallEnabled
+                && devicePlan.FallbackUsed
+                && !devicePlan.UsedLocalAgentToken
+                && !devicePlan.TokenSecretPrinted
+                && !devicePlan.RequestCreated
+                && !devicePlan.DeviceCodeIssued
+                && !devicePlan.SessionClaimed
+                && !devicePlan.AccessTokenIssued
+                && !devicePlan.RefreshTokenIssued
+                && !devicePlan.CookiePersistenceEnabled
+                && !devicePlan.LocalSessionArtifactWritten
+                && devicePlan.Endpoint == "/api/auth/cli-device-session/plan"
+                && devicePlan.LocalPlan.TryGetValue("schema", out var deviceSchema)
+                && string.Equals(deviceSchema?.ToString(), "learnbot.local-agent.web-device-session-static-plan.v1", StringComparison.Ordinal)
+                && createPlan.PlanKind == "device-session-create"
+                && createPlan.Status == "LOCAL_STATIC_FALLBACK"
+                && !createPlan.Attempted
+                && !createPlan.NetworkCallEnabled
+                && createPlan.FallbackUsed
+                && !createPlan.UsedLocalAgentToken
+                && !createPlan.TokenSecretPrinted
+                && !createPlan.RequestCreated
+                && !createPlan.DeviceCodeIssued
+                && !createPlan.SessionClaimed
+                && !createPlan.AccessTokenIssued
+                && !createPlan.RefreshTokenIssued
+                && !createPlan.CookiePersistenceEnabled
+                && !createPlan.LocalSessionArtifactWritten
+                && createPlan.Endpoint == "/api/auth/cli-device-session/create/plan"
+                && createPlan.LocalPlan.TryGetValue("schema", out var createSchema)
+                && string.Equals(createSchema?.ToString(), "learnbot.local-agent.web-device-session-create-static-plan.v1", StringComparison.Ordinal)
+                && createPlan.LocalPlan.TryGetValue("userCodeFormat", out var userCodeFormat)
+                && string.Equals(userCodeFormat?.ToString(), "XXXX-XXXX", StringComparison.Ordinal)
+                && createPlan.LocalPlan.TryGetValue("expiresInSeconds", out var expiresInSeconds)
+                && expiresInSeconds is 600
+                && claimPlan.PlanKind == "claim"
+                && claimPlan.Status == "LOCAL_STATIC_FALLBACK"
+                && !claimPlan.Attempted
+                && !claimPlan.NetworkCallEnabled
+                && claimPlan.FallbackUsed
+                && !claimPlan.UsedLocalAgentToken
+                && !claimPlan.TokenSecretPrinted
+                && !claimPlan.RequestCreated
+                && !claimPlan.DeviceCodeIssued
+                && !claimPlan.SessionClaimed
+                && !claimPlan.AccessTokenIssued
+                && !claimPlan.RefreshTokenIssued
+                && !claimPlan.CookiePersistenceEnabled
+                && !claimPlan.LocalSessionArtifactWritten
+                && claimPlan.Endpoint == "/api/auth/cli-device-session/claim/plan"
+                && claimPlan.LocalPlan.TryGetValue("schema", out var claimSchema)
+                && string.Equals(claimSchema?.ToString(), "learnbot.local-agent.web-session-claim-static-plan.v1", StringComparison.Ordinal)
+                && claimPlan.LocalPlan.TryGetValue("localSessionArtifactEncryptedRequired", out var encryptedRequired)
+                && encryptedRequired is true
+                && claimPlan.LocalPlan.TryGetValue("webSessionArtifactBodyPreview", out var artifactPreview)
+                && artifactPreview is IReadOnlyDictionary<string, object?> artifact
+                && string.Equals(artifact["schema"]?.ToString(), "learnbot.local-agent.web-session-artifact.v1", StringComparison.Ordinal)
+                && string.Equals(artifact["encryptedAccessToken"]?.ToString(), "<encrypted-access-token>", StringComparison.Ordinal)
+                && string.Equals(artifact["encryptedRefreshToken"]?.ToString(), "<encrypted-refresh-token>", StringComparison.Ordinal)
+                && artifact.TryGetValue("encryption", out var encryption)
+                && encryption is IReadOnlyDictionary<string, object?> encryptionPreview
+                && encryptionPreview.TryGetValue("plaintextTokenSerializationAllowed", out var plaintextAllowed)
+                && plaintextAllowed is false
+                && claimResultPlan.PlanKind == "claim-result"
+                && claimResultPlan.Status == "LOCAL_STATIC_FALLBACK"
+                && !claimResultPlan.Attempted
+                && !claimResultPlan.NetworkCallEnabled
+                && claimResultPlan.FallbackUsed
+                && !claimResultPlan.UsedLocalAgentToken
+                && !claimResultPlan.TokenSecretPrinted
+                && !claimResultPlan.RequestCreated
+                && !claimResultPlan.SessionClaimed
+                && !claimResultPlan.AccessTokenIssued
+                && !claimResultPlan.RefreshTokenIssued
+                && !claimResultPlan.LocalSessionArtifactWritten
+                && claimResultPlan.Endpoint == "/api/auth/cli-device-session/claim-result/plan"
+                && claimResultPlan.LocalPlan.TryGetValue("schema", out var claimResultSchema)
+                && string.Equals(claimResultSchema?.ToString(), "learnbot.local-agent.web-session-claim-result-static-plan.v1", StringComparison.Ordinal)
+                && claimResultPlan.LocalPlan.TryGetValue("claimResultRequired", out var claimResultRequired)
+                && claimResultRequired is true
+                && claimResultPlan.LocalPlan.TryGetValue("plaintextTokenSerializationAllowed", out var plaintextSerializationAllowed)
+                && plaintextSerializationAllowed is false
+                && claimResultPlan.LocalPlan.TryGetValue("artifactWriterPlanPreview", out var writerPreview)
+                && writerPreview is IReadOnlyDictionary<string, object?> writer
+                && string.Equals(writer["schema"]?.ToString(), "learnbot.local-agent.web-session-artifact-writer-plan.v1", StringComparison.Ordinal)
+                && writer.TryGetValue("artifactBodyPreview", out var writerArtifactPreview)
+                && writerArtifactPreview is IReadOnlyDictionary<string, object?> writerArtifact
+                && string.Equals(writerArtifact["encryptedAccessToken"]?.ToString(), "<encrypted-access-token>", StringComparison.Ordinal)
+                && writer.TryGetValue("write", out var writePreview)
+                && writePreview is IReadOnlyDictionary<string, object?> write
+                && write.TryGetValue("enabled", out var writeEnabled)
+                && writeEnabled is false
+                && write.TryGetValue("plaintextTokenSerializationAllowed", out var writerPlaintextAllowed)
+                && writerPlaintextAllowed is false
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("secret-device-code", StringComparison.Ordinal)
+                && !json.Contains("secret-claim-status", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session plan fetch contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-plan-fetch-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionServerPlanReadinessContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-server-plan-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", null);
+            var blocked = app.BuildCliWebSessionServerPlanReadinessReport();
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+            var ready = app.BuildCliWebSessionServerPlanReadinessReport();
+            var json = JsonSerializer.Serialize(new { blocked, ready }, JsonOptions);
+
+            var ok = blocked.Schema == "learnbot.local-agent.web-session-server-plan-readiness.v1"
+                && blocked.Status == "BLOCKED_NO_WEB_SESSION"
+                && blocked.ArtifactValidation.Schema == "learnbot.local-agent.web-session-artifact-validation.v1"
+                && blocked.ArtifactValidation.Status == "MISSING"
+                && !blocked.ArtifactValidation.ReadAttempted
+                && !blocked.ArtifactValidation.AccessTokenLoaded
+                && !blocked.ArtifactValidation.RefreshTokenLoaded
+                && blocked.ArtifactValidation.EncryptionRequired
+                && blocked.ArtifactValidation.ProductionCryptoPreviewRequirement.Schema == "learnbot.local-agent.web-session-artifact-crypto-preview-requirement.v1"
+                && !blocked.ArtifactValidation.ProductionCryptoPreviewRequirement.AutoRunEnabled
+                && !blocked.ArtifactValidation.ProductionCryptoPreviewRequirement.StoredSessionLoadingEnabled
+                && !blocked.ArtifactValidation.ProductionCryptoPreviewRequirement.TokenSecretPrinted
+                && blocked.SecretProviderPlan.Schema == "learnbot.local-agent.web-session-secret-provider-plan.v1"
+                && blocked.SecretProviderPlan.Status == "PRODUCTION_PROVIDER_DISABLED_PREVIEW"
+                && !blocked.SecretProviderPlan.ProviderProbeEnabled
+                && blocked.SecretProviderPlan.ManualNoSecretProbeAvailable == OperatingSystem.IsWindows()
+                && !blocked.SecretProviderPlan.ProductionDecryptionEnabled
+                && !blocked.SecretProviderPlan.ProductionStoredSessionLoadingEnabled
+                && !blocked.SecretProviderPlan.TokenSecretPrinted
+                && blocked.StoredSessionAuthReadiness.Schema == "learnbot.local-agent.web-session-stored-session-auth-readiness.v1"
+                && !blocked.StoredSessionAuthReadiness.FileReadAttempted
+                && !blocked.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !blocked.StoredSessionAuthReadiness.StoredSessionLoaded
+                && !blocked.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && !blocked.StoredSessionAuthReadiness.TokenSecretPrinted
+                && !blocked.StoredSessionReadable
+                && !blocked.StoredSessionTokenLoaded
+                && blocked.StoredSessionTokenFingerprint is null
+                && !blocked.EnvironmentWebTokenPresent
+                && !blocked.EnvironmentWebTokenUsableForServerPlanFetch
+                && !blocked.StoredSessionUsableForServerPlanFetch
+                && !blocked.ServerPlanFetchFromStoredSessionEnabled
+                && !blocked.LocalSessionArtifactWriteEnabled
+                && blocked.LocalSessionArtifactEncryptedRequired
+                && !blocked.LocalAgentTokenUsed
+                && !blocked.TokenSecretPrinted
+                && !blocked.RequestCreated
+                && !blocked.MutationAllowed
+                && blocked.FollowUpCommand == "learnbot session create-plan"
+                && blocked.Blockers.Contains("no LEARNBOT_WEB_TOKEN is present and stored web-session artifact loading is disabled")
+                && ready.Status == "ENV_TOKEN_FALLBACK_READY"
+                && ready.ArtifactValidation.Schema == "learnbot.local-agent.web-session-artifact-validation.v1"
+                && !ready.ArtifactValidation.ReadAttempted
+                && ready.ArtifactValidation.EncryptionRequired
+                && ready.ArtifactValidation.ProductionCryptoPreviewRequirement.Schema == "learnbot.local-agent.web-session-artifact-crypto-preview-requirement.v1"
+                && !ready.ArtifactValidation.ProductionCryptoPreviewRequirement.AutoRunEnabled
+                && !ready.ArtifactValidation.ProductionCryptoPreviewRequirement.StoredSessionLoadingEnabled
+                && !ready.ArtifactValidation.ProductionCryptoPreviewRequirement.TokenSecretPrinted
+                && ready.SecretProviderPlan.Schema == "learnbot.local-agent.web-session-secret-provider-plan.v1"
+                && !ready.SecretProviderPlan.ProviderProbeEnabled
+                && ready.SecretProviderPlan.ManualNoSecretProbeAvailable == OperatingSystem.IsWindows()
+                && !ready.SecretProviderPlan.ProductionDecryptionEnabled
+                && !ready.SecretProviderPlan.ProductionStoredSessionLoadingEnabled
+                && !ready.SecretProviderPlan.TokenSecretPrinted
+                && ready.StoredSessionAuthReadiness.Schema == "learnbot.local-agent.web-session-stored-session-auth-readiness.v1"
+                && !ready.StoredSessionAuthReadiness.FileReadAttempted
+                && !ready.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !ready.StoredSessionAuthReadiness.StoredSessionLoaded
+                && !ready.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && !ready.StoredSessionAuthReadiness.TokenSecretPrinted
+                && ready.EnvironmentWebTokenPresent
+                && !string.IsNullOrWhiteSpace(ready.EnvironmentWebTokenFingerprint)
+                && ready.EnvironmentWebTokenUsableForServerPlanFetch
+                && !ready.StoredSessionUsableForServerPlanFetch
+                && !ready.ServerPlanFetchFromStoredSessionEnabled
+                && !ready.LocalSessionArtifactWriteEnabled
+                && ready.LocalSessionArtifactEncryptedRequired
+                && !ready.LocalAgentTokenUsed
+                && !ready.TokenSecretPrinted
+                && !ready.RequestCreated
+                && !ready.MutationAllowed
+                && ready.FollowUpCommand.Contains("--server-plan", StringComparison.Ordinal)
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session server-plan readiness contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-server-plan-readiness-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionSecretProviderPlanContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-secret-provider-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var provider = app.BuildCliWebSessionSecretProviderPlanReport();
+            var session = app.BuildCliWebSessionStatusReport();
+            var readiness = app.BuildCliWebSessionServerPlanReadinessReport();
+            var json = JsonSerializer.Serialize(new { provider, session, readiness }, JsonOptions);
+
+            var ok = provider.Schema == "learnbot.local-agent.web-session-secret-provider-plan.v1"
+                && provider.Status == "PRODUCTION_PROVIDER_DISABLED_PREVIEW"
+                && provider.Provider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && provider.OsSecretStoreRequired
+                && !provider.ProviderProbeEnabled
+                && provider.ManualNoSecretProbeAvailable == OperatingSystem.IsWindows()
+                && !provider.ProductionEncryptionEnabled
+                && !provider.ProductionDecryptionEnabled
+                && !provider.ProductionStoredSessionLoadingEnabled
+                && !provider.TestOnlyProviderAcceptedForProduction
+                && !provider.PlaintextTokenSerializationAllowed
+                && !provider.TokenSecretPrinted
+                && !provider.LocalAgentTokenUsed
+                && provider.FollowUpCommand == (OperatingSystem.IsWindows()
+                    ? "learnbot session secret-provider-probe"
+                    : "learnbot session artifact-reader-test-validate --test-only")
+                && provider.Blockers.Count == 1
+                && session.SecretProviderPlan.Schema == provider.Schema
+                && !session.SecretProviderPlan.ProductionStoredSessionLoadingEnabled
+                && readiness.SecretProviderPlan.Schema == provider.Schema
+                && !readiness.SecretProviderPlan.ProductionStoredSessionLoadingEnabled
+                && !readiness.StoredSessionTokenLoaded
+                && !readiness.ServerPlanFetchFromStoredSessionEnabled
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session secret-provider plan contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-secret-provider-plan-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionSecretProviderProbeContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-secret-provider-probe-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var probe = app.BuildCliWebSessionSecretProviderProbeResult();
+            var json = JsonSerializer.Serialize(probe, JsonOptions);
+            var windows = OperatingSystem.IsWindows();
+
+            var ok = probe.Schema == "learnbot.local-agent.web-session-secret-provider-probe-result.v1"
+                && probe.Provider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && probe.WindowsDpapiCandidate == windows
+                && probe.ProbeAttempted == windows
+                && !probe.ProbeInputContainsTokenSecret
+                && probe.ProtectSucceeded == windows
+                && probe.UnprotectSucceeded == windows
+                && probe.RoundTripSucceeded == windows
+                && !probe.ProductionEncryptionEnabled
+                && !probe.ProductionDecryptionEnabled
+                && !probe.ProductionStoredSessionLoadingEnabled
+                && !probe.PlaintextTokenSerializationAllowed
+                && !probe.TokenSecretPrinted
+                && !probe.LocalAgentTokenUsed
+                && !probe.StoredSessionLoaded
+                && (windows
+                    ? probe.Status == "NO_SECRET_PROVIDER_PROBE_SUCCEEDED" && probe.Blockers.Count == 0 && probe.Error is null
+                    : probe.Status == "NO_SECRET_PROVIDER_PROBE_BLOCKED" && probe.Blockers.Contains("Windows DPAPI probe is not available on this platform."))
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session secret-provider probe contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-secret-provider-probe-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionProductionArtifactCryptoPreviewContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-production-artifact-crypto-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var missingOptIn = app.BuildCliWebSessionProductionArtifactCryptoPreviewResult([]);
+            var preview = app.BuildCliWebSessionProductionArtifactCryptoPreviewResult(["--preview-only"]);
+            var json = JsonSerializer.Serialize(new { missingOptIn, preview }, JsonOptions);
+            var windows = OperatingSystem.IsWindows();
+
+            var ok = missingOptIn.Schema == "learnbot.local-agent.web-session-production-artifact-crypto-preview-result.v1"
+                && missingOptIn.Status == "BLOCKED_OR_FAILED"
+                && !missingOptIn.PreviewOnly
+                && !missingOptIn.CryptoAttempted
+                && missingOptIn.Blockers.Contains("production artifact crypto preview requires explicit --preview-only.")
+                && preview.Schema == "learnbot.local-agent.web-session-production-artifact-crypto-preview-result.v1"
+                && preview.Provider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && preview.PreviewOnly
+                && preview.WindowsDpapiCandidate == windows
+                && preview.ArtifactSchema == "learnbot.local-agent.web-session-artifact.v1"
+                && preview.EncryptionRequired
+                && !preview.PlaintextTokenSerializationAllowed
+                && !preview.ArtifactWriteEnabled
+                && !preview.LocalSessionArtifactWritten
+                && !preview.ArtifactReadEnabled
+                && !preview.StoredSessionLoaded
+                && !preview.ProductionStoredSessionLoadingEnabled
+                && !preview.TokenSecretPrinted
+                && !preview.LocalAgentTokenUsed
+                && (windows
+                    ? preview.Status == "PRODUCTION_ARTIFACT_CRYPTO_PREVIEW_SUCCEEDED"
+                        && preview.CryptoAttempted
+                        && preview.EncryptedAccessTokenPresent
+                        && preview.EncryptedRefreshTokenPresent
+                        && preview.DecryptionVerified
+                        && !string.IsNullOrWhiteSpace(preview.AccessTokenFingerprint)
+                        && !string.IsNullOrWhiteSpace(preview.RefreshTokenFingerprint)
+                        && !preview.PlaintextTokenSerializationDetected
+                        && preview.Blockers.Count == 0
+                        && preview.Error is null
+                    : preview.Status == "BLOCKED_OR_FAILED"
+                        && !preview.CryptoAttempted
+                        && preview.Blockers.Contains("Windows DPAPI current-user provider is required for this preview."))
+                && !File.Exists(WebSessionPath())
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("production-preview-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("production-preview-refresh-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session production artifact crypto preview contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-production-artifact-crypto-preview-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionProductionArtifactWriterPreviewContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-production-artifact-writer-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var missingOptIn = app.BuildCliWebSessionProductionArtifactWriterPreviewResult([
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var ready = app.BuildCliWebSessionProductionArtifactWriterPreviewResult([
+                "--preview-only",
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var missingMetadata = app.BuildCliWebSessionProductionArtifactWriterPreviewResult(["--preview-only", "--approved"]);
+            var writeRequested = app.BuildCliWebSessionProductionArtifactWriterPreviewResult([
+                "--preview-only",
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z",
+                "--write"
+            ]);
+            var json = JsonSerializer.Serialize(new { missingOptIn, ready, missingMetadata, writeRequested }, JsonOptions);
+            var windows = OperatingSystem.IsWindows();
+
+            var readyExpected = windows;
+            var ok = missingOptIn.Schema == "learnbot.local-agent.web-session-production-artifact-writer-preview-result.v1"
+                && missingOptIn.Status == "BLOCKED_OR_FAILED"
+                && !missingOptIn.PreviewOnly
+                && !missingOptIn.ArtifactBodyPreviewPrepared
+                && missingOptIn.Blockers.Contains("production artifact writer preview requires explicit --preview-only.")
+                && ready.Schema == "learnbot.local-agent.web-session-production-artifact-writer-preview-result.v1"
+                && ready.PreviewOnly
+                && ready.Preflight.Schema == "learnbot.local-agent.web-session-artifact-writer-preflight-result.v1"
+                && ready.Preflight.ArtifactWriterPreflightPassed
+                && ready.CryptoPreview.Schema == "learnbot.local-agent.web-session-production-artifact-crypto-preview-result.v1"
+                && ready.CryptoPreview.PreviewOnly
+                && ready.ArtifactBodyPreviewPrepared == readyExpected
+                && ready.Status == (readyExpected ? "PRODUCTION_ARTIFACT_WRITER_PREVIEW_READY" : "BLOCKED_OR_FAILED")
+                && ready.BodyFieldNames.Contains("encryptedAccessToken")
+                && ready.BodyFieldNames.Contains("encryptedRefreshToken")
+                && ready.AtomicWritePlan.Schema == "learnbot.local-agent.web-session-production-artifact-atomic-write-plan.v1"
+                && ready.AtomicWritePlan.SessionPath == WebSessionPath()
+                && ready.AtomicWritePlan.TempPathPattern.EndsWith(".tmp-<nonce>", StringComparison.Ordinal)
+                && ready.AtomicWritePlan.ParentDirectoryCreationRequired
+                && ready.AtomicWritePlan.AtomicReplaceRequired
+                && !ready.AtomicWritePlan.WriteRequested
+                && !ready.AtomicWritePlan.WriteEnabled
+                && !ready.AtomicWritePlan.WriteRefused
+                && !ready.AtomicWritePlan.LocalSessionArtifactWritten
+                && !ready.AtomicWritePlan.ArtifactReadAfterWriteEnabled
+                && !ready.AtomicWritePlan.StoredSessionLoadingEnabled
+                && !ready.AtomicWritePlan.PlaintextTokenSerializationAllowed
+                && !ready.AtomicWritePlan.TokenSecretPrinted
+                && !ready.AtomicWritePlan.LocalAgentTokenUsed
+                && ready.EncryptionProvider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && !ready.PlaintextTokenSerializationAllowed
+                && !ready.PlaintextTokenSerializationDetected
+                && !ready.ArtifactWriteEnabled
+                && !ready.LocalSessionArtifactWritten
+                && !ready.ArtifactReadEnabled
+                && !ready.StoredSessionLoaded
+                && !ready.ProductionStoredSessionLoadingEnabled
+                && !ready.TokenSecretPrinted
+                && !ready.LocalAgentTokenUsed
+                && (readyExpected
+                    ? ready.Blockers.Count == 0
+                        && ready.ArtifactBodyPreview is not null
+                        && ready.ArtifactBodyPreview.TryGetValue("schema", out var schema)
+                        && string.Equals(schema?.ToString(), "learnbot.local-agent.web-session-artifact.v1", StringComparison.Ordinal)
+                        && ready.ArtifactBodyPreview.TryGetValue("encryptedAccessToken", out var encryptedAccessToken)
+                        && string.Equals(encryptedAccessToken?.ToString(), "<dpapi-current-user-protected-access-token>", StringComparison.Ordinal)
+                        && !string.IsNullOrWhiteSpace(ready.ArtifactBodyPreviewSha256)
+                    : ready.Blockers.Contains("production artifact crypto preview proof is required before preparing the writer body preview."))
+                && missingMetadata.Status == "BLOCKED_OR_FAILED"
+                && !missingMetadata.Preflight.ArtifactWriterPreflightPassed
+                && missingMetadata.Preflight.MissingOrInvalidFields.Contains("accessToken")
+                && missingMetadata.Preflight.MissingOrInvalidFields.Contains("refreshToken")
+                && missingMetadata.Preflight.MissingOrInvalidFields.Contains("expiresAt")
+                && writeRequested.Status == "BLOCKED_OR_FAILED"
+                && writeRequested.AtomicWritePlan.WriteRequested
+                && !writeRequested.AtomicWritePlan.WriteEnabled
+                && writeRequested.AtomicWritePlan.WriteRefused
+                && !writeRequested.AtomicWritePlan.LocalSessionArtifactWritten
+                && writeRequested.Blockers.Contains("local web-session artifact writing is still disabled; this command performs preflight only.")
+                && !File.Exists(WebSessionPath())
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("production-preview-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("production-preview-refresh-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session production artifact writer preview contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-production-artifact-writer-preview-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionProductionArtifactReaderPreviewContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-production-artifact-reader-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            Directory.CreateDirectory(Path.GetDirectoryName(WebSessionPath())!);
+            File.WriteAllText(WebSessionPath(), "{\"encryptedAccessToken\":\"secret-web-token\"}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var missingOptIn = app.BuildCliWebSessionProductionArtifactReaderPreviewResult([]);
+            var ready = app.BuildCliWebSessionProductionArtifactReaderPreviewResult(["--preview-only"]);
+            var json = JsonSerializer.Serialize(new { missingOptIn, ready }, JsonOptions);
+            var windows = OperatingSystem.IsWindows();
+
+            var ok = missingOptIn.Schema == "learnbot.local-agent.web-session-production-artifact-reader-preview-result.v1"
+                && missingOptIn.Status == "BLOCKED_OR_FAILED"
+                && !missingOptIn.PreviewOnly
+                && !missingOptIn.FileReadAttempted
+                && missingOptIn.Blockers.Contains("production artifact reader preview requires explicit --preview-only.")
+                && ready.Schema == "learnbot.local-agent.web-session-production-artifact-reader-preview-result.v1"
+                && ready.PreviewOnly
+                && ready.SessionPath == WebSessionPath()
+                && ready.CryptoPreview.Schema == "learnbot.local-agent.web-session-production-artifact-crypto-preview-result.v1"
+                && ready.RequiredArtifactSchema == "learnbot.local-agent.web-session-artifact.v1"
+                && ready.AcceptedEncryptionProvider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && ready.RequiredFields.Contains("encryptedAccessToken")
+                && ready.RequiredFields.Contains("encryptedRefreshToken")
+                && !ready.FileReadEnabled
+                && !ready.FileReadAttempted
+                && !ready.JsonParseEnabled
+                && !ready.SchemaValidationEnabled
+                && ready.ProductionDecryptionPrimitiveVerified == windows
+                && !ready.ProductionDecryptionEnabled
+                && !ready.AccessTokenLoaded
+                && !ready.RefreshTokenLoaded
+                && !ready.StoredSessionLoaded
+                && !ready.StoredSessionUsableForServerPlanFetch
+                && !ready.ServerPlanFetchFromStoredSessionEnabled
+                && !ready.TokenRefreshEnabled
+                && !ready.PlaintextTokenSerializationAllowed
+                && !ready.TokenSecretPrinted
+                && !ready.LocalAgentTokenUsed
+                && ready.FollowUpCommand == "learnbot session server-plan-readiness"
+                && (windows
+                    ? ready.Status == "PRODUCTION_ARTIFACT_READER_PREVIEW_READY" && ready.Blockers.Count == 0
+                    : ready.Status == "BLOCKED_OR_FAILED" && ready.Blockers.Contains("production artifact crypto preview proof is required before modeling reader/decrypt readiness."))
+                && json.Contains("secret-web-token", StringComparison.Ordinal) == false
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("production-preview-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("production-preview-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session production artifact reader preview contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-production-artifact-reader-preview-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionStoredSessionAuthReadinessContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-stored-auth-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var previousWebToken = Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", "secret-web-token");
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            Directory.CreateDirectory(Path.GetDirectoryName(WebSessionPath())!);
+            File.WriteAllText(WebSessionPath(), "{\"encryptedAccessToken\":\"secret-web-token\",\"encryptedRefreshToken\":\"secret-refresh-token\"}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            var readiness = app.BuildCliWebSessionStoredSessionAuthReadinessReport();
+            var session = app.BuildCliWebSessionStatusReport();
+            var serverPlan = app.BuildCliWebSessionServerPlanReadinessReport();
+            var json = JsonSerializer.Serialize(new { readiness, session, serverPlan }, JsonOptions);
+
+            var ok = readiness.Schema == "learnbot.local-agent.web-session-stored-session-auth-readiness.v1"
+                && readiness.Status == "STORED_SESSION_AUTH_DISABLED_PREVIEW"
+                && readiness.SessionPath == WebSessionPath()
+                && readiness.ReaderPreview.Schema == "learnbot.local-agent.web-session-production-artifact-reader-preview-result.v1"
+                && readiness.RequiresBrowserClaimResult
+                && readiness.RequiresProductionArtifactRead
+                && readiness.RequiresAccessToken
+                && readiness.RequiresRefreshToken
+                && readiness.RequiresExpiresAt
+                && readiness.RequiresRefreshExpiresAt
+                && !readiness.ExpiryValidationEnabled
+                && !readiness.RefreshEligibilityCheckEnabled
+                && !readiness.TokenRefreshEnabled
+                && !readiness.AccessTokenLoaded
+                && !readiness.RefreshTokenLoaded
+                && !readiness.StoredSessionLoaded
+                && !readiness.StoredSessionUsableForServerPlanFetch
+                && !readiness.ServerPlanFetchFromStoredSessionEnabled
+                && readiness.EnvironmentTokenFallbackAllowed
+                && !readiness.FileReadAttempted
+                && !readiness.JsonParseAttempted
+                && !readiness.DecryptionAttempted
+                && !readiness.NetworkRefreshAttempted
+                && !readiness.RequestCreated
+                && !readiness.MutationAllowed
+                && !readiness.LocalAgentTokenUsed
+                && !readiness.TokenSecretPrinted
+                && readiness.FollowUpCommand == "learnbot session server-plan-readiness"
+                && readiness.Blockers.Contains("stored-session token refresh is disabled.")
+                && readiness.Blockers.Contains("stored-session authenticated server-plan fetch is disabled.")
+                && session.StoredSessionAuthReadiness.Schema == readiness.Schema
+                && !session.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !session.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && serverPlan.StoredSessionAuthReadiness.Schema == readiness.Schema
+                && !serverPlan.StoredSessionAuthReadiness.TokenRefreshEnabled
+                && !serverPlan.StoredSessionAuthReadiness.ServerPlanFetchFromStoredSessionEnabled
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-refresh-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("production-preview-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("production-preview-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session stored-session auth readiness contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-stored-session-auth-readiness-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            Environment.SetEnvironmentVariable("LEARNBOT_WEB_TOKEN", previousWebToken);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionArtifactValidationContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-artifact-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var missing = app.BuildCliWebSessionArtifactValidationReport();
+            Directory.CreateDirectory(Path.GetDirectoryName(WebSessionPath())!);
+            File.WriteAllText(WebSessionPath(), "{\"accessToken\":\"secret-web-token\"}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var present = app.BuildCliWebSessionArtifactValidationReport();
+            var json = JsonSerializer.Serialize(new { missing, present }, JsonOptions);
+
+            var ok = missing.Schema == "learnbot.local-agent.web-session-artifact-validation.v1"
+                && missing.Status == "MISSING"
+                && !missing.FileExists
+                && !missing.ReadAttempted
+                && !missing.JsonParsed
+                && !missing.SchemaValidated
+                && !missing.Encrypted
+                && missing.EncryptionRequired
+                && !missing.AccessTokenLoaded
+                && !missing.RefreshTokenLoaded
+                && !missing.TokenSecretPrinted
+                && !missing.LocalAgentTokenUsed
+                && missing.ProductionCryptoPreviewRequirement.Schema == "learnbot.local-agent.web-session-artifact-crypto-preview-requirement.v1"
+                && missing.ProductionCryptoPreviewRequirement.RequiredBeforeProductionStoredSessionLoading
+                && missing.ProductionCryptoPreviewRequirement.ProofCommand == "learnbot session artifact-production-crypto-preview --preview-only"
+                && missing.ProductionCryptoPreviewRequirement.ProofSchema == "learnbot.local-agent.web-session-production-artifact-crypto-preview-result.v1"
+                && missing.ProductionCryptoPreviewRequirement.Provider == "WINDOWS_DPAPI_CURRENT_USER_OR_OS_SECRET_STORE"
+                && missing.ProductionCryptoPreviewRequirement.PreviewOnlyRequired
+                && !missing.ProductionCryptoPreviewRequirement.AutoRunEnabled
+                && !missing.ProductionCryptoPreviewRequirement.ArtifactWriteEnabled
+                && !missing.ProductionCryptoPreviewRequirement.ArtifactReadEnabled
+                && !missing.ProductionCryptoPreviewRequirement.StoredSessionLoadingEnabled
+                && !missing.ProductionCryptoPreviewRequirement.TokenSecretPrinted
+                && !missing.ProductionCryptoPreviewRequirement.LocalAgentTokenUsed
+                && missing.RequiredSchema == "learnbot.local-agent.web-session-artifact.v1"
+                && missing.RequiredFields.Contains("encryptedAccessToken")
+                && missing.RequiredFields.Contains("encryptedRefreshToken")
+                && present.Status == "VALIDATION_DISABLED_FILE_PRESENT"
+                && present.FileExists
+                && !present.ReadAttempted
+                && !present.JsonParsed
+                && !present.SchemaValidated
+                && !present.Encrypted
+                && present.EncryptionRequired
+                && !present.AccessTokenLoaded
+                && !present.RefreshTokenLoaded
+                && !present.TokenSecretPrinted
+                && !present.LocalAgentTokenUsed
+                && present.ProductionCryptoPreviewRequirement.Schema == "learnbot.local-agent.web-session-artifact-crypto-preview-requirement.v1"
+                && !present.ProductionCryptoPreviewRequirement.AutoRunEnabled
+                && !present.ProductionCryptoPreviewRequirement.ArtifactWriteEnabled
+                && !present.ProductionCryptoPreviewRequirement.StoredSessionLoadingEnabled
+                && !present.ProductionCryptoPreviewRequirement.TokenSecretPrinted
+                && present.Blockers.Contains("stored web-session artifact validation is disabled until encrypted read/decrypt support is implemented")
+                && !json.Contains("secret-web-token", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session artifact validation contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-artifact-validation-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionArtifactWriterPreflightContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-writer-preflight-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var ready = app.BuildCliWebSessionArtifactWriterPreflightResult([
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var missing = app.BuildCliWebSessionArtifactWriterPreflightResult([
+                "--approved",
+                "--expires-at",
+                "not-a-date"
+            ]);
+            var unsafePlaintext = app.BuildCliWebSessionArtifactWriterPreflightResult([
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z",
+                "--allow-plaintext-token-serialization"
+            ]);
+            var writeRequested = app.BuildCliWebSessionArtifactWriterPreflightResult([
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z",
+                "--write"
+            ]);
+            var json = JsonSerializer.Serialize(new { ready, missing, unsafePlaintext, writeRequested }, JsonOptions);
+
+            var ok = ready.Schema == "learnbot.local-agent.web-session-artifact-writer-preflight-result.v1"
+                && ready.Status == "READY_FOR_DISABLED_WRITER"
+                && ready.ClaimResultAccepted
+                && ready.AccessTokenPresent
+                && ready.RefreshTokenPresent
+                && ready.ExpiresAtPresent
+                && ready.RefreshExpiresAtPresent
+                && ready.ExpiryFieldsValid
+                && !ready.PlaintextTokenSerializationAllowed
+                && !ready.PlaintextTokenSerializationRequested
+                && ready.EncryptionRequired
+                && ready.EncryptionProvider == "LOCAL_OS_SECRET_STORE_OR_DPAPI"
+                && !ready.EncryptionProviderProbeEnabled
+                && ready.AtomicReplaceRequired
+                && ready.ArtifactWriterPreflightPassed
+                && !ready.ArtifactWriteRequested
+                && !ready.ArtifactWriterExecutionEnabled
+                && !ready.LocalSessionArtifactWritten
+                && !ready.LocalAgentTokenUsed
+                && !ready.TokenSecretPrinted
+                && ready.MissingOrInvalidFields.Count == 0
+                && ready.ArtifactBodyPreview.TryGetValue("encryptedAccessToken", out var encryptedAccessToken)
+                && string.Equals(encryptedAccessToken?.ToString(), "<encrypted-access-token>", StringComparison.Ordinal)
+                && missing.Status == "BLOCKED_PRECONDITION_FAILED"
+                && !missing.ArtifactWriterPreflightPassed
+                && missing.MissingOrInvalidFields.Contains("accessToken")
+                && missing.MissingOrInvalidFields.Contains("refreshToken")
+                && missing.MissingOrInvalidFields.Contains("expiresAt")
+                && unsafePlaintext.Status == "BLOCKED_PRECONDITION_FAILED"
+                && unsafePlaintext.PlaintextTokenSerializationRequested
+                && !unsafePlaintext.PlaintextTokenSerializationAllowed
+                && unsafePlaintext.Blockers.Contains("plaintext token serialization is not allowed for web-session artifacts.")
+                && writeRequested.Status == "BLOCKED_PRECONDITION_FAILED"
+                && writeRequested.ArtifactWriteRequested
+                && !writeRequested.ArtifactWriterExecutionEnabled
+                && !writeRequested.LocalSessionArtifactWritten
+                && writeRequested.Blockers.Contains("local web-session artifact writing is still disabled; this command performs preflight only.")
+                && !File.Exists(WebSessionPath())
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("secret-access-token", StringComparison.Ordinal)
+                && !json.Contains("secret-refresh-token", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session artifact writer preflight contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-artifact-writer-preflight-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionArtifactWriterTestWriteContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-writer-test-write-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var missingOptIn = app.BuildCliWebSessionArtifactWriterTestWriteResult([
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var written = app.BuildCliWebSessionArtifactWriterTestWriteResult([
+                "--test-only",
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var artifactText = File.Exists(WebSessionPath()) ? File.ReadAllText(WebSessionPath()) : "";
+            using var document = JsonDocument.Parse(artifactText);
+            var rootElement = document.RootElement;
+            var encryptedAccessToken = rootElement.GetProperty("encryptedAccessToken").GetString();
+            var encryptedRefreshToken = rootElement.GetProperty("encryptedRefreshToken").GetString();
+            var encryption = rootElement.GetProperty("encryption");
+            var json = JsonSerializer.Serialize(new { missingOptIn, written }, JsonOptions);
+
+            var ok = missingOptIn.Schema == "learnbot.local-agent.web-session-artifact-writer-test-write-result.v1"
+                && missingOptIn.Status == "BLOCKED_PRECONDITION_FAILED"
+                && !missingOptIn.TestOnlyMode
+                && !missingOptIn.LocalSessionArtifactWritten
+                && missingOptIn.Blockers.Contains("test-only artifact writing requires explicit --test-only.")
+                && written.Status == "TEST_ONLY_ARTIFACT_WRITTEN"
+                && written.TestOnlyMode
+                && written.Preflight.ArtifactWriterPreflightPassed
+                && written.ArtifactWriterExecutionEnabled
+                && written.LocalSessionArtifactWritten
+                && written.AtomicReplaceUsed
+                && written.EncryptionProvider == "TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION"
+                && !written.PlaintextTokenSerializationAllowed
+                && !written.PlaintextTokenSerializationDetected
+                && !written.TokenSecretPrinted
+                && !written.LocalAgentTokenUsed
+                && written.BytesWritten > 0
+                && !string.IsNullOrWhiteSpace(written.ArtifactSha256)
+                && File.Exists(WebSessionPath())
+                && rootElement.GetProperty("schema").GetString() == "learnbot.local-agent.web-session-artifact.v1"
+                && rootElement.GetProperty("serverUrl").GetString() == "http://localhost:8083"
+                && !string.IsNullOrWhiteSpace(encryptedAccessToken)
+                && !string.IsNullOrWhiteSpace(encryptedRefreshToken)
+                && encryptedAccessToken!.Split('.').Length == 3
+                && encryptedRefreshToken!.Split('.').Length == 3
+                && encryption.GetProperty("required").GetBoolean()
+                && encryption.GetProperty("provider").GetString() == "TEST_ONLY_AES_GCM_DERIVED_KEY_NOT_FOR_PRODUCTION"
+                && !encryption.GetProperty("plaintextTokenSerializationAllowed").GetBoolean()
+                && !encryption.GetProperty("keyPersisted").GetBoolean()
+                && !artifactText.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !artifactText.Contains("test-only-refresh-token-material", StringComparison.Ordinal)
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session artifact writer test-write contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-artifact-writer-test-write-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+    }
+
+    private static int SelfTestWebSessionArtifactReaderTestValidateContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-web-session-reader-test-validate-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+
+            var app = new LearnBotLocalAgent();
+            app.SaveConfig(new AgentConfig
+            {
+                ServerUrl = "http://localhost:8083",
+                AgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                Token = "secret-agent-token",
+                Version = Version,
+                Transport = "auto"
+            });
+
+            var missingOptIn = app.BuildCliWebSessionArtifactReaderTestValidateResult([]);
+            var written = app.BuildCliWebSessionArtifactWriterTestWriteResult([
+                "--test-only",
+                "--approved",
+                "--access-token-present",
+                "--refresh-token-present",
+                "--expires-at",
+                "2026-07-03T12:00:00Z",
+                "--refresh-expires-at",
+                "2026-07-04T12:00:00Z"
+            ]);
+            var validated = app.BuildCliWebSessionArtifactReaderTestValidateResult(["--test-only"]);
+            var json = JsonSerializer.Serialize(new { missingOptIn, written, validated }, JsonOptions);
+
+            var ok = missingOptIn.Schema == "learnbot.local-agent.web-session-artifact-reader-test-validate-result.v1"
+                && missingOptIn.Status == "BLOCKED_OR_INVALID"
+                && !missingOptIn.TestOnlyMode
+                && !missingOptIn.ReadAttempted
+                && missingOptIn.Blockers.Contains("test-only artifact read/decrypt validation requires explicit --test-only.")
+                && written.Status == "TEST_ONLY_ARTIFACT_WRITTEN"
+                && validated.Status == "TEST_ONLY_ARTIFACT_DECRYPTED"
+                && validated.TestOnlyMode
+                && validated.FileExists
+                && validated.ReadAttempted
+                && validated.JsonParsed
+                && validated.SchemaValidated
+                && validated.EncryptionProviderAccepted
+                && validated.DecryptionAttempted
+                && validated.DecryptionSucceeded
+                && !string.IsNullOrWhiteSpace(validated.AccessTokenFingerprint)
+                && !string.IsNullOrWhiteSpace(validated.RefreshTokenFingerprint)
+                && !validated.PlaintextTokenSerializationDetected
+                && !validated.TokenSecretPrinted
+                && !validated.LocalAgentTokenUsed
+                && !validated.ProductionStoredSessionLoaded
+                && validated.Blockers.Count == 0
+                && !json.Contains("secret-agent-token", StringComparison.Ordinal)
+                && !json.Contains("test-only-access-token-material", StringComparison.Ordinal)
+                && !json.Contains("test-only-refresh-token-material", StringComparison.Ordinal);
+            if (!ok)
+            {
+                Console.Error.WriteLine("web session artifact reader test-validate contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("web-session-artifact-reader-test-validate-contract-ok");
             return 0;
         }
         finally
@@ -3466,6 +8298,24 @@ internal sealed partial class LearnBotLocalAgent
         learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]
         learnbot status
         learnbot doctor
+        learnbot m8 status
+        learnbot m8 doctor
+        learnbot login [--login-id <login-id>|--email <email>] [--remember]
+        learnbot session status
+        learnbot session plan [--server <url>] [--offline]
+        learnbot session create-plan [--server <url>] [--offline]
+        learnbot session claim-plan [--server <url>] [--device-code <device-code>] [--offline]
+        learnbot session claim-result-plan [--server <url>] [--claim-status <status>] [--offline]
+        learnbot session artifact-writer-preflight --approved --access-token-present --refresh-token-present --expires-at <iso> --refresh-expires-at <iso>
+        learnbot session artifact-writer-test-write --test-only --approved --access-token-present --refresh-token-present --expires-at <iso> --refresh-expires-at <iso>
+        learnbot session artifact-reader-test-validate --test-only
+        learnbot session artifact-production-crypto-preview --preview-only
+        learnbot session artifact-production-writer-preview --preview-only --approved --access-token-present --refresh-token-present --expires-at <iso> --refresh-expires-at <iso>
+        learnbot session artifact-production-reader-preview --preview-only
+        learnbot session stored-session-auth-readiness
+        learnbot session secret-provider-plan
+        learnbot session secret-provider-probe
+        learnbot session server-plan-readiness
         learnbot agent start [--once] [--interval-seconds 15] [--transport polling|websocket|auto]
         learnbot agent status
         learnbot agent token
@@ -3478,6 +8328,8 @@ internal sealed partial class LearnBotLocalAgent
         learnbot file read --workspace-id <workspace-id> --path <relative-path>
         learnbot git status --workspace-id <workspace-id>
         learnbot git diff --workspace-id <workspace-id> [--path <relative-path>] [--max-bytes <bytes>]
+        learnbot fix --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--include-approval-handoff-preview]] [--web-token <token>]
+        learnbot review --goal "<goal>" [--workspace <path>] [--repository-id <repository-id>] [--space-id <space-id>] [--max-steps 6] [--observe-read-only [--read-selected]|--server-plan [--include-approval-handoff-preview]] [--web-token <token>]
         learnbot open
         """);
         return 0;

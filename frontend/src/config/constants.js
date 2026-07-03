@@ -6,6 +6,7 @@ export const routePaths = {
   home: '/app',
   login: '/login',
   code: '/code',
+  localAgentDevice: '/settings/local-agent/device',
   docs: '/docs',
   saved: '/saved',
   admin: '/admin',

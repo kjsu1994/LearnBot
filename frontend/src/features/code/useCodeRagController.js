@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildSavedConversationPayload } from '../../lib/ragConversationSave.js';
 import { inspectApprovedExecutionFlow } from './approvedExecutionFlowInspectionClient.js';
+import { previewAgentLoopSubmissionPlan } from './agentLoopSubmissionPlanClient.js';
 import { previewAgentLoopRunner } from './agentLoopRunnerPreviewClient.js';
 import { enqueueAgentLoopRunnerReadOnly } from './agentLoopRunnerReadOnlyEnqueueClient.js';
 import { reviewAgentLoopRunnerReleaseGate } from './agentLoopRunnerReleaseReviewClient.js';
@@ -56,6 +57,7 @@ export function useCodeRagController({
   const [codeAgentTestResult, setCodeAgentTestResult] = useState(null);
   const [codeAgentMutationPolicy, setCodeAgentMutationPolicy] = useState(null);
   const [codeAgentLoopPreview, setCodeAgentLoopPreview] = useState(null);
+  const [codeAgentLoopSubmissionPlan, setCodeAgentLoopSubmissionPlan] = useState(null);
   const [codeAgentLoopTimelines, setCodeAgentLoopTimelines] = useState([]);
   const [codeAgentLoopRunnerPreview, setCodeAgentLoopRunnerPreview] = useState(null);
   const [codeAgentLoopRunnerToolSelectionPreview, setCodeAgentLoopRunnerToolSelectionPreview] = useState(null);
@@ -96,6 +98,7 @@ export function useCodeRagController({
       setHighlightRange(null);
       setCodeModalOpen(false);
       setCodeAgentLoopTimelines([]);
+      setCodeAgentLoopSubmissionPlan(null);
       setCodeAgentLoopRunnerPreview(null);
       setCodeAgentLoopRunnerToolSelectionPreview(null);
       setCodeAgentLoopRunnerEnqueueResult(null);
@@ -112,6 +115,7 @@ export function useCodeRagController({
     setHighlightRange(null);
     setCodeModalOpen(false);
     setCodeAgentLoopRunnerPreview(null);
+    setCodeAgentLoopSubmissionPlan(null);
     setCodeAgentLoopRunnerToolSelectionPreview(null);
     setCodeAgentLoopRunnerEnqueueResult(null);
     setCodeAgentLoopRunnerReleaseReviewResult(null);
@@ -163,6 +167,7 @@ export function useCodeRagController({
     setCodeAgentTestResult(null);
     setCodeAgentMutationPolicy(null);
     setCodeAgentLoopPreview(null);
+    setCodeAgentLoopSubmissionPlan(null);
     setCodeAgentLoopTimelines([]);
     setCodeAgentLoopRunnerPreview(null);
     setCodeAgentLoopRunnerToolSelectionPreview(null);
@@ -631,6 +636,7 @@ export function useCodeRagController({
       setCodeAgentApplyResult(null);
       setCodeAgentTestResult(null);
       setCodeAgentLoopPreview(null);
+      setCodeAgentLoopSubmissionPlan(null);
       setCodeAgentLoopRunnerPreview(null);
       setCodeAgentLoopRunnerEnqueueResult(null);
       setCodeAgentLoopRunnerReleaseReviewResult(null);
@@ -651,9 +657,52 @@ export function useCodeRagController({
             maxSteps: 6,
           },
         });
+        const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
+        try {
+          await previewAgentLoopSubmissionPlan({
+            request,
+            run: async (_label, task) => await task(),
+            repositoryId: selectedRepositoryId,
+            spaceId: activeSpaceId,
+            instruction,
+            maxSteps: 6,
+            agentId: localAgentStatus?.agentId || null,
+            workspaceId: approvedWorkspace?.workspaceId || null,
+            setSubmissionPlan: setCodeAgentLoopSubmissionPlan,
+          });
+        } catch {
+          setCodeAgentLoopSubmissionPlan({
+            schema: 'learnbot.web.code-agent.loop-submission-plan-unavailable.v1',
+            readyForDisabledPlan: false,
+            enabled: false,
+            requestCreationEnabled: false,
+            mutationEnabled: false,
+            patchDryRunApprovalReviewPreview: {
+              schema: 'learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1',
+              status: 'SUBMISSION_PLAN_UNAVAILABLE',
+              reviewSurface: 'CODE_WORKSPACE_LOOP_REVIEW',
+              approvalReviewPrepared: false,
+              browserReviewReady: false,
+              userApprovalRequired: false,
+              requestCreationEnabled: false,
+              approvalRequestCreationEnabled: false,
+              approvalPersistenceEnabled: false,
+              enqueueEnabled: false,
+              claimEnabled: false,
+              snapshotCreationEnabled: false,
+              patchDryRunExecutionEnabled: false,
+              mutationEnabled: false,
+              testExecutionEnabled: false,
+              finalPublicationEnabled: false,
+              partialReindexEnabled: false,
+              reason: 'Server submission-plan approval review preview could not be loaded. No approval, queue, dry-run, mutation, publication, or reindex work was created.',
+            },
+          });
+        }
         setCodeAgentLoopPreview(preview);
         await previewCodeAgentLoopRunner(preview);
       } catch {
+        setCodeAgentLoopSubmissionPlan(null);
         setCodeAgentLoopPreview({
           status: 'PREVIEW_UNAVAILABLE',
           maxSteps: 6,
@@ -787,9 +836,7 @@ export function useCodeRagController({
 
   async function previewCodeAgentLoopRunnerFinalResultPublication(loopPreview = codeAgentLoopPreview) {
     const loopId = loopPreview?.loopId || codeAgentLoopPreview?.loopId || codeAgentLoopRunnerPreview?.loopId || null;
-    const canPreviewFinalResult = codeAgentLoopRunnerPreview?.recommendedAction?.actionKey === 'STOP_AND_REPORT'
-      || codeAgentLoopRunnerPreview?.actionKey === 'APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED'
-      || codeAgentLoopRunnerPreview?.runnerDecision === 'READY_FINAL_RESULT_DISABLED';
+    const canPreviewFinalResult = isFinalResultPreviewRunnerState(codeAgentLoopRunnerPreview);
     if (!selectedRepositoryId || !loopId || !canPreviewFinalResult) {
       setCodeAgentLoopRunnerFinalResultPublicationPreview(null);
       return null;
@@ -1117,8 +1164,41 @@ export function useCodeRagController({
       setCodeAgentValidatedDryRunIntentEligibility(null);
       setCodeAgentValidatedDryRunIntentTransitionPreview(null);
       await refreshReadinessForLinkedReleaseObservation(result);
+      await refreshCodeAgentLoopAfterLocalDryRunObservation();
       return result;
     });
+  }
+
+  async function refreshCodeAgentLoopAfterLocalDryRunObservation() {
+    const loopId = codeAgentLoopPreview?.loopId || codeAgentLoopRunnerPreview?.loopId || null;
+    if (!selectedRepositoryId || !loopId) {
+      return null;
+    }
+    try {
+      await refreshCodeAgentLoopTimelines(selectedRepositoryId);
+      const runnerPreview = await previewCodeAgentLoopRunner({ loopId });
+      if (isFinalResultPreviewRunnerState(runnerPreview)) {
+        const approvedWorkspace = (localAgentStatus?.workspaces || []).find((workspace) => workspace.approved);
+        return await previewAgentLoopRunnerFinalResultPublication({
+          request,
+          run,
+          repositoryId: selectedRepositoryId,
+          loopId,
+          agentId: localAgentStatus?.agentId || null,
+          workspaceId: approvedWorkspace?.workspaceId || null,
+          setFinalResultPublicationPreview: setCodeAgentLoopRunnerFinalResultPublicationPreview,
+        });
+      }
+      return runnerPreview;
+    } catch {
+      return null;
+    }
+  }
+
+  function isFinalResultPreviewRunnerState(runnerPreview) {
+    return runnerPreview?.recommendedAction?.actionKey === 'STOP_AND_REPORT'
+      || runnerPreview?.actionKey === 'APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED'
+      || runnerPreview?.runnerDecision === 'READY_FINAL_RESULT_DISABLED';
   }
 
   async function queueCodeAgentLocalRepositoryObservation() {
@@ -1320,6 +1400,7 @@ export function useCodeRagController({
     codeAgentTestResult,
     codeAgentMutationPolicy,
     codeAgentLoopPreview,
+    codeAgentLoopSubmissionPlan,
     codeAgentLoopTimelines,
     codeAgentLoopRunnerPreview,
     codeAgentLoopRunnerToolSelectionPreview,

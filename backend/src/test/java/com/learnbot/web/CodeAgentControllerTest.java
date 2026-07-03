@@ -22,6 +22,24 @@ import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSideEffectBoundaryResponse;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalActionPersistencePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalActionPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalRecordPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalDecisionPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalDecisionPersistencePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopHeldRequestReviewPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalIntentPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestCreationPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentClaimReadinessPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentDryRunResultPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRequestEnvelopePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRequestCreationPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentQueuePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRetryInputPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRetryProposalPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentSnapshotDryRunPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopSubmissionPlanRequest;
+import com.learnbot.dto.loop.CodeAgentLoopSubmissionPlanResponse;
 import com.learnbot.dto.loop.CodeAgentLoopToolSelectionResponse;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
@@ -110,6 +128,1162 @@ class CodeAgentControllerTest {
 
         verify(authService).requireSpace(user, repositorySpaceId);
         verify(loopPreviewService).preview(userId, repositoryId, repositorySpaceId, "fix this bug", 7);
+    }
+
+    @Test
+    void loopSubmissionPlanResolvesRepositorySpaceAndDelegatesWithoutExecutingPreview() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        CodeAgentLoopSubmissionPlanResponse expected = new CodeAgentLoopSubmissionPlanResponse(
+                "learnbot.server.code-agent.loop-submission-plan.v1",
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                "fix this bug",
+                6,
+                "POST",
+                "/api/code-agent/loop/preview",
+                Map.of("repositoryId", repositoryId, "instruction", "fix this bug", "maxSteps", 6),
+                Map.of("schema", "learnbot.server.code-agent.patch-dry-run-approval-handoff-plan.v1"),
+                Map.of("schema", "learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1"),
+                List.of("POST /api/code-agent/loop/runner/preview"),
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+                true,
+                "disabled"
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.submissionPlan(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                "fix this bug",
+                6,
+                Map.of("status", "APPROVAL_HANDOFF_PREPARED")
+        )).thenReturn(expected);
+
+        var result = controller.loopSubmissionPlan(new CodeAgentLoopSubmissionPlanRequest(
+                repositoryId,
+                requestedSpaceId,
+                "fix this bug",
+                6,
+                agentId,
+                workspaceId,
+                Map.of("status", "APPROVAL_HANDOFF_PREPARED")
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result.enabled()).isFalse();
+        assertThat(result.networkCallEnabled()).isFalse();
+        assertThat(result.loopPreviewExecutionEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).submissionPlan(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                "fix this bug",
+                6,
+                Map.of("status", "APPROVAL_HANDOFF_PREPARED")
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalIntentPreviewResolvesRepositorySpaceAndDelegatesWithoutCreatingRequests() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> review = Map.of("status", "READY_BROWSER_REVIEW_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1",
+                "status", "READY_APPROVAL_INTENT_DISABLED",
+                "requestCreationEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalIntentPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                review
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalIntentPreview(new CodeAgentLoopApprovalIntentPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                review
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalIntentPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                review
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalRequestCreationPreviewResolvesRepositorySpaceAndDelegatesWithoutPersistingApproval() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> intent = Map.of("status", "READY_APPROVAL_INTENT_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1",
+                "status", "READY_APPROVAL_REQUEST_CREATION_DISABLED",
+                "approvalPersistenceEnabled", false,
+                "requestCreationEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalRequestCreationPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                intent
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalRequestCreationPreview(new CodeAgentLoopApprovalRequestCreationPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                intent
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalPersistenceEnabled", false);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalRequestCreationPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                intent
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalDecisionPreviewResolvesRepositorySpaceAndDelegatesWithoutRecordingDecision() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> requestCreation = Map.of("status", "READY_APPROVAL_REQUEST_CREATION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1",
+                "status", "READY_APPROVAL_DECISION_DISABLED",
+                "approvalDecisionPersistenceEnabled", false,
+                "requestCreationEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalDecisionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestCreation
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalDecisionPreview(new CodeAgentLoopApprovalDecisionPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                requestCreation
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalDecisionPersistenceEnabled", false);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalDecisionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestCreation
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalDecisionPersistencePreviewResolvesRepositorySpaceAndDelegatesWithoutPersistingDecision() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> decision = Map.of("status", "READY_APPROVAL_DECISION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1",
+                "status", "READY_APPROVAL_DECISION_PERSISTENCE_DISABLED",
+                "approvalDecisionPersistenceEnabled", false,
+                "approvalDecisionPersisted", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalDecisionPersistencePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                decision
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalDecisionPersistencePreview(new CodeAgentLoopApprovalDecisionPersistencePreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                decision
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalDecisionPersistenceEnabled", false);
+        assertThat(result).containsEntry("approvalDecisionPersisted", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalDecisionPersistencePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                decision
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunHeldRequestReviewPreviewResolvesRepositorySpaceAndDelegatesWithoutCreatingHeldRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> persistence = Map.of("status", "READY_APPROVAL_DECISION_PERSISTENCE_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1",
+                "status", "READY_HELD_REQUEST_REVIEW_ACTION_DISABLED",
+                "heldRequestReviewEnabled", false,
+                "heldRequestCreated", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.heldRequestReviewActionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                persistence
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunHeldRequestReviewPreview(new CodeAgentLoopHeldRequestReviewPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                persistence
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("heldRequestReviewEnabled", false);
+        assertThat(result).containsEntry("heldRequestCreated", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).heldRequestReviewActionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                persistence
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalActionPreviewResolvesRepositorySpaceAndDelegatesWithoutPersistingAction() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> heldReview = Map.of("status", "READY_HELD_REQUEST_REVIEW_ACTION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1",
+                "status", "READY_APPROVAL_ACTION_DISABLED",
+                "approvalActionEnabled", false,
+                "approvalActionPersisted", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalActionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                heldReview
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalActionPreview(new CodeAgentLoopApprovalActionPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                heldReview
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalActionEnabled", false);
+        assertThat(result).containsEntry("approvalActionPersisted", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalActionPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                heldReview
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalActionPersistencePreviewResolvesRepositorySpaceAndDelegatesWithoutPersistingAction() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> approvalAction = Map.of("status", "READY_APPROVAL_ACTION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1",
+                "status", "READY_APPROVAL_ACTION_PERSISTENCE_DISABLED",
+                "approvalActionPersistenceEnabled", false,
+                "approvalActionPersisted", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalActionPersistencePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                approvalAction
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalActionPersistencePreview(new CodeAgentLoopApprovalActionPersistencePreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                approvalAction
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalActionPersistenceEnabled", false);
+        assertThat(result).containsEntry("approvalActionPersisted", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalActionPersistencePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                approvalAction
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunApprovalRecordPreviewResolvesRepositorySpaceAndDelegatesWithoutCreatingRecordOrRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> actionPersistence = Map.of("status", "READY_APPROVAL_ACTION_PERSISTENCE_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1",
+                "status", "READY_APPROVAL_RECORD_DISABLED",
+                "approvalRecordCreationEnabled", false,
+                "requestCreationEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.approvalRecordPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                actionPersistence
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunApprovalRecordPreview(new CodeAgentLoopApprovalRecordPreviewRequest(
+                repositoryId,
+                requestedSpaceId,
+                agentId,
+                workspaceId,
+                actionPersistence
+        ));
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("approvalRecordCreationEnabled", false);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).approvalRecordPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                actionPersistence
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentRequestEnvelopePreviewResolvesRepositorySpaceAndDelegatesWithoutCreatingRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> approvalRecord = Map.of("status", "READY_APPROVAL_RECORD_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1",
+                "status", "READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED",
+                "requestCreationEnabled", false,
+                "localAgentToolRequestCreated", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentRequestEnvelopePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                approvalRecord
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentRequestEnvelopePreview(
+                new CodeAgentLoopLocalAgentRequestEnvelopePreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        approvalRecord
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("localAgentToolRequestCreated", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentRequestEnvelopePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                approvalRecord
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentRequestCreationPreviewResolvesRepositorySpaceAndDelegatesWithoutCreatingRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> requestEnvelope = Map.of("status", "READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1",
+                "status", "READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED",
+                "requestCreationEnabled", false,
+                "durableLocalAgentRequestCreated", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentRequestCreationPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestEnvelope
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentRequestCreationPreview(
+                new CodeAgentLoopLocalAgentRequestCreationPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        requestEnvelope
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("requestCreationEnabled", false);
+        assertThat(result).containsEntry("durableLocalAgentRequestCreated", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentRequestCreationPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestEnvelope
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentQueuePreviewResolvesRepositorySpaceAndDelegatesWithoutQueuePushOrClaim() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> requestCreation = Map.of("status", "READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1",
+                "status", "READY_LOCAL_AGENT_QUEUE_DISABLED",
+                "enqueueEnabled", false,
+                "pushEnabled", false,
+                "claimEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentQueuePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestCreation
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentQueuePreview(
+                new CodeAgentLoopLocalAgentQueuePreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        requestCreation
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("enqueueEnabled", false);
+        assertThat(result).containsEntry("pushEnabled", false);
+        assertThat(result).containsEntry("claimEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentQueuePreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                requestCreation
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentClaimReadinessPreviewResolvesRepositorySpaceAndDelegatesWithoutClaimOrSnapshot() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> queue = Map.of("status", "READY_LOCAL_AGENT_QUEUE_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness-preview.v1",
+                "status", "READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED",
+                "claimEnabled", false,
+                "snapshotCreationEnabled", false,
+                "patchDryRunExecutionEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentClaimReadinessPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                queue
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentClaimReadinessPreview(
+                new CodeAgentLoopLocalAgentClaimReadinessPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        queue
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("claimEnabled", false);
+        assertThat(result).containsEntry("snapshotCreationEnabled", false);
+        assertThat(result).containsEntry("patchDryRunExecutionEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentClaimReadinessPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                queue
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentSnapshotDryRunPreviewResolvesRepositorySpaceAndDelegatesWithoutExecution() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> claimReadiness = Map.of("status", "READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-preview.v1",
+                "status", "READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED",
+                "snapshotCreationEnabled", false,
+                "patchDryRunExecutionEnabled", false,
+                "patchDryRunExecuted", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentSnapshotDryRunPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                claimReadiness
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentSnapshotDryRunPreview(
+                new CodeAgentLoopLocalAgentSnapshotDryRunPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        claimReadiness
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("snapshotCreationEnabled", false);
+        assertThat(result).containsEntry("patchDryRunExecutionEnabled", false);
+        assertThat(result).containsEntry("patchDryRunExecuted", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentSnapshotDryRunPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                claimReadiness
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentDryRunResultPreviewResolvesRepositorySpaceAndDelegatesWithoutResultRecording() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> snapshotDryRun = Map.of("status", "READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result-preview.v1",
+                "status", "READY_DRY_RUN_RESULT_ANALYSIS_DISABLED",
+                "dryRunResultRecorded", false,
+                "retryDecisionRecorded", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentDryRunResultPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                snapshotDryRun
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentDryRunResultPreview(
+                new CodeAgentLoopLocalAgentDryRunResultPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        snapshotDryRun
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("dryRunResultRecorded", false);
+        assertThat(result).containsEntry("retryDecisionRecorded", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentDryRunResultPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                snapshotDryRun
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentRetryInputPreviewResolvesRepositorySpaceAndDelegatesWithoutRetryCreation() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> dryRunResult = Map.of("status", "READY_DRY_RUN_RESULT_ANALYSIS_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-input-preview.v1",
+                "status", "READY_RETRY_INPUT_REPLAN_DISABLED",
+                "retryPatchGenerated", false,
+                "retryExecutionEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentRetryInputPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                dryRunResult
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentRetryInputPreview(
+                new CodeAgentLoopLocalAgentRetryInputPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        dryRunResult
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("retryPatchGenerated", false);
+        assertThat(result).containsEntry("retryExecutionEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentRetryInputPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                dryRunResult
+        );
+    }
+
+    @Test
+    void loopRunnerPatchDryRunLocalAgentRetryProposalPreviewResolvesRepositorySpaceAndDelegatesWithoutRetryPatchGeneration() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID requestedSpaceId = UUID.randomUUID();
+        UUID repositorySpaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = new AppUser(UUID.randomUUID(), "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeIndexingService indexingService = mock(CodeIndexingService.class);
+        AuthService authService = mock(AuthService.class);
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CodeAgentController controller = new CodeAgentController(
+                mock(CodeAgentService.class),
+                mock(CodeAgentApplyService.class),
+                mock(CodeAgentLocalPatchRequestService.class),
+                loopPreviewService,
+                mock(CodeAgentLoopRunnerService.class),
+                mock(CodeAgentLoopToolSelectionService.class),
+                indexingService,
+                authService,
+                currentUserProvider,
+                new LearnBotProperties()
+        );
+        Map<String, Object> retryInput = Map.of("status", "READY_RETRY_INPUT_REPLAN_DISABLED");
+        Map<String, Object> expected = Map.of(
+                "schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-proposal-preview.v1",
+                "status", "READY_RETRY_PROPOSAL_FINAL_STOP_DISABLED",
+                "retryPatchGenerated", false,
+                "retryPatchProposalGenerated", false,
+                "retryExecutionEnabled", false,
+                "mutationEnabled", false
+        );
+        when(currentUserProvider.currentUser()).thenReturn(user);
+        when(authService.resolveSpace(user, requestedSpaceId)).thenReturn(requestedSpaceId);
+        when(indexingService.repositorySpace(user, repositoryId)).thenReturn(repositorySpaceId);
+        when(loopPreviewService.localAgentRetryProposalPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                retryInput
+        )).thenReturn(expected);
+
+        var result = controller.loopRunnerPatchDryRunLocalAgentRetryProposalPreview(
+                new CodeAgentLoopLocalAgentRetryProposalPreviewRequest(
+                        repositoryId,
+                        requestedSpaceId,
+                        agentId,
+                        workspaceId,
+                        retryInput
+                )
+        );
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result).containsEntry("retryPatchGenerated", false);
+        assertThat(result).containsEntry("retryPatchProposalGenerated", false);
+        assertThat(result).containsEntry("retryExecutionEnabled", false);
+        assertThat(result).containsEntry("mutationEnabled", false);
+        verify(authService).requireSpace(user, repositorySpaceId);
+        verify(loopPreviewService).localAgentRetryProposalPreview(
+                repositoryId,
+                repositorySpaceId,
+                agentId,
+                workspaceId,
+                retryInput
+        );
     }
 
     @Test

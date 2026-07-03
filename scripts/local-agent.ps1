@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("setup-plan", "setup-run-plan", "browser-pairing-plan", "pair-from-web-token-plan", "pair-from-web-token", "setup", "start", "background-start", "background-stop", "lifecycle-command", "lifecycle-status", "service-plan", "service-command-plan", "status", "token", "logs", "doctor", "open")]
+    [ValidateSet("setup-plan", "setup-run-plan", "browser-pairing-plan", "pair-from-web-token-plan", "pair-from-web-token", "setup", "start", "background-start", "background-stop", "lifecycle-command", "lifecycle-status", "service-plan", "service-command-plan", "m8-status", "m8-doctor", "m8-lifecycle-run", "status", "token", "logs", "doctor", "open")]
     [string]$Action = "status",
     [string]$Server = "http://localhost:8083",
     [string]$LoginId = $env:LEARNBOT_AGENT_LOGIN_ID,
@@ -32,6 +32,7 @@ $defaultAgentExe = Join-Path $env:USERPROFILE ".learnbot\bin\learnbot.exe"
 . (Join-Path $PSScriptRoot "local-agent\setup\LocalAgentPairFromWebTokenResult.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentLifecycleStatus.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentLifecycleCommandResult.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentM8LifecycleRunResult.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServicePlan.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServiceCommandPlan.ps1")
 
@@ -298,6 +299,37 @@ function Invoke-LifecycleCommand {
         } | ConvertTo-Json -Depth 10
 }
 
+function Invoke-M8LifecycleRun {
+    $initialStatus = Get-AgentStatus
+    Invoke-LearnBotLocalAgentM8LifecycleRunResult `
+        -InitialStatus $initialStatus `
+        -InvokeLifecycleCommand {
+            param([string]$LifecycleAction)
+            try {
+                switch ($LifecycleAction) {
+                    "background-start" {
+                        $output = & { Start-AgentBackground } 2>&1 | Out-String
+                        [pscustomobject]@{ exitCode = 0; status = "SUCCEEDED"; output = $output.Trim() }
+                    }
+                    "status" {
+                        $result = Invoke-AgentResult -Arguments @("agent", "status")
+                        [pscustomobject]@{ exitCode = $result.exitCode; status = if ($result.exitCode -eq 0) { "SUCCEEDED" } else { "FAILED" }; output = $result.output }
+                    }
+                    "logs" {
+                        $result = Invoke-AgentResult -Arguments @("agent", "logs", "--tail", "$Tail")
+                        [pscustomobject]@{ exitCode = $result.exitCode; status = if ($result.exitCode -eq 0) { "SUCCEEDED" } else { "FAILED" }; output = $result.output }
+                    }
+                }
+            } catch {
+                [pscustomobject]@{
+                    exitCode = 1
+                    status = "FAILED"
+                    output = $_.Exception.Message
+                }
+            }
+        } | ConvertTo-Json -Depth 10
+}
+
 switch ($Action) {
     "setup-plan" {
         Get-LearnBotLocalAgentSetupPlan `
@@ -392,6 +424,15 @@ switch ($Action) {
             -Transport $Transport `
             -IntervalSeconds $IntervalSeconds
         Get-LearnBotLocalAgentServiceCommandPlan -ServiceAction $ServiceAction -ServicePlan $plan | ConvertTo-Json -Depth 10
+    }
+    "m8-status" {
+        Invoke-Agent -Arguments @("m8", "status")
+    }
+    "m8-doctor" {
+        Invoke-Agent -Arguments @("m8", "doctor")
+    }
+    "m8-lifecycle-run" {
+        Invoke-M8LifecycleRun
     }
     "status" {
         Invoke-Agent -Arguments @("agent", "status")

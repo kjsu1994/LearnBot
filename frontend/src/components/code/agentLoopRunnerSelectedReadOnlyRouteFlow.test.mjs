@@ -356,6 +356,18 @@ try {
     toolSelectionMarkup,
     /agent loop runner model tool controls: request creation false \/ enqueue false \/ push false \/ claim false \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
   );
+  assert.match(
+    toolSelectionMarkup,
+    /agent loop one-cycle: tool selected/
+  );
+  assert.match(
+    toolSelectionMarkup,
+    /agent loop one-cycle phases: runner PREPARED_READ_ONLY_CANDIDATE \/ model tool MODEL_SELECTED_READ_ONLY_CANDIDATE \/ queued none \/ observation pending \/ next PREPARED_READ_ONLY_CANDIDATE/
+  );
+  assert.match(
+    toolSelectionMarkup,
+    /agent loop one-cycle safety: request creation false \/ enqueue false \/ push false \/ claim false \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
+  );
 
   await props.enqueueCodeAgentLoopRunnerSelectedReadOnly(props.codeAgentLoopPreview);
 
@@ -403,6 +415,18 @@ try {
   assert.match(
     queuedMarkup,
     /agent loop runner selected read-only tool: git\.status \/ approval NOT_REQUIRED \/ mutation false \/ fresh observation true/
+  );
+  assert.match(
+    queuedMarkup,
+    /agent loop one-cycle: tool queued/
+  );
+  assert.match(
+    queuedMarkup,
+    /agent loop one-cycle phases: runner PREPARED_READ_ONLY_CANDIDATE \/ model tool pending \/ queued request-selected-read-only-1 \/ observation pending \/ next PREPARED_READ_ONLY_CANDIDATE/
+  );
+  assert.match(
+    queuedMarkup,
+    /agent loop one-cycle safety: request creation true \/ enqueue true \/ push true \/ claim false \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
   );
   assert.match(
     queuedMarkup,
@@ -467,6 +491,22 @@ try {
   assert.match(
     observationMarkup,
     /agent loop runner observation continuation next model preview: QUEUE_READ_ONLY_OBSERVATION \/ MODEL_SELECTED_READ_ONLY_CANDIDATE \/ tool git\.status \/ mutation false/
+  );
+  assert.match(
+    observationMarkup,
+    /agent loop one-cycle: observation returned/
+  );
+  assert.match(
+    observationMarkup,
+    /agent loop one-cycle phases: runner PREPARED_READ_ONLY_CANDIDATE \/ model tool MODEL_SELECTED_READ_ONLY_CANDIDATE \/ queued request-selected-read-only-1 \/ observation SUCCEEDED \/ next NEXT_MODEL_TOOL_PREVIEW_READY/
+  );
+  assert.match(
+    observationMarkup,
+    /agent loop one-cycle budget: iteration 1 \/ max 6 \/ remaining 5 \/ limit reached false/
+  );
+  assert.match(
+    observationMarkup,
+    /agent loop one-cycle safety: request creation true \/ enqueue true \/ push true \/ claim false \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
   );
   assert.match(
     observationMarkup,

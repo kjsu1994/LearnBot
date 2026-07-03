@@ -1123,6 +1123,7 @@ export default function App() {
             loading={loading}
             codeFileLoading={loadingPrefix('code-file-')}
             showSourceManagement={false}
+            routePath={routePath}
           />
         )}
 

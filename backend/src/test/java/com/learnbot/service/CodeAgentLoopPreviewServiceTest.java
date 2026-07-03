@@ -68,6 +68,1975 @@ class CodeAgentLoopPreviewServiceTest {
     }
 
     @Test
+    void submissionPlanIsAuthoritativeButDisabledAndDoesNotCreateTimeline() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+
+        var plan = service.submissionPlan(repositoryId, spaceId, agentId, workspaceId, "repair parser failure", 99, null);
+
+        assertThat(plan.schema()).isEqualTo("learnbot.server.code-agent.loop-submission-plan.v1");
+        assertThat(plan.repositoryId()).isEqualTo(repositoryId);
+        assertThat(plan.spaceId()).isEqualTo(spaceId);
+        assertThat(plan.agentId()).isEqualTo(agentId);
+        assertThat(plan.workspaceId()).isEqualTo(workspaceId);
+        assertThat(plan.instruction()).isEqualTo("repair parser failure");
+        assertThat(plan.maxSteps()).isEqualTo(8);
+        assertThat(plan.method()).isEqualTo("POST");
+        assertThat(plan.endpoint()).isEqualTo("/api/code-agent/loop/preview");
+        assertThat(plan.bodyPreview())
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("instruction", "repair parser failure")
+                .containsEntry("maxSteps", 8)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId);
+        assertThat(plan.patchDryRunApprovalHandoffPlan())
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-handoff-plan.v1")
+                .containsEntry("status", "HANDOFF_NOT_PROVIDED")
+                .containsEntry("handoffProvided", false)
+                .containsEntry("handoffPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(plan.patchDryRunApprovalReviewPreview())
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1")
+                .containsEntry("status", "HANDOFF_NOT_PROVIDED")
+                .containsEntry("reviewSurface", "CODE_WORKSPACE_LOOP_REVIEW")
+                .containsEntry("approvalReviewPrepared", false)
+                .containsEntry("browserReviewReady", false)
+                .containsEntry("userApprovalRequired", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(plan.followUpEndpoints())
+                .contains("POST /api/code-agent/loop/runner/preview",
+                        "POST /api/code-agent/loop/runner/select-tool-preview",
+                        "POST /api/code-agent/loop/runner/enqueue-selected-read-only",
+                        "POST /api/code-agent/loop/runner/validated-patch-approval-request");
+        assertThat(plan.readyForDisabledPlan()).isTrue();
+        assertThat(plan.enabled()).isFalse();
+        assertThat(plan.networkCallEnabled()).isFalse();
+        assertThat(plan.requestCreationEnabled()).isFalse();
+        assertThat(plan.serverConversationCreationEnabled()).isFalse();
+        assertThat(plan.loopPreviewExecutionEnabled()).isFalse();
+        assertThat(plan.mutationEnabled()).isFalse();
+        assertThat(plan.testExecutionEnabled()).isFalse();
+        assertThat(plan.rollbackExecutionEnabled()).isFalse();
+        assertThat(plan.finalPublicationEnabled()).isFalse();
+        assertThat(plan.partialReindexEnabled()).isFalse();
+        assertThat(plan.requiresAuthenticatedWebSession()).isTrue();
+        assertThat(plan.requiresRepositoryAuthorization()).isTrue();
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void submissionPlanShapesReadyCliDryRunApprovalHandoffWithoutCreatingRequests() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> handoff = Map.ofEntries(
+                Map.entry("schema", "learnbot.local-agent.codex-patch-dry-run-approval-handoff-preview.v1"),
+                Map.entry("status", "APPROVAL_HANDOFF_PREPARED"),
+                Map.entry("approvalHandoffPrepared", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java"))
+        );
+
+        var plan = service.submissionPlan(repositoryId, spaceId, agentId, workspaceId, "repair parser failure", 6, handoff);
+
+        assertThat(plan.bodyPreview())
+                .containsEntry("patchDryRunApprovalHandoffPreview", handoff);
+        assertThat(plan.patchDryRunApprovalHandoffPlan())
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-handoff-plan.v1")
+                .containsEntry("status", "READY_APPROVAL_REQUEST_PREVIEW_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("handoffProvided", true)
+                .containsEntry("handoffPrepared", true)
+                .containsEntry("sourceSchema", "learnbot.local-agent.codex-patch-dry-run-approval-handoff-preview.v1")
+                .containsEntry("sourceStatus", "APPROVAL_HANDOFF_PREPARED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "REQUIRED_BEFORE_SNAPSHOT_DRY_RUN")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("approvalRequestEndpoint", "/api/code-agent/loop/runner/validated-patch-approval-request")
+                .containsEntry("releaseReviewEndpoint", "/api/code-agent/loop/runner/release-review")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(plan.patchDryRunApprovalHandoffPlan().get("targetFiles"))
+                .isEqualTo(List.of("src/App.java"));
+        assertThat(plan.patchDryRunApprovalReviewPreview())
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1")
+                .containsEntry("status", "READY_BROWSER_REVIEW_DISABLED")
+                .containsEntry("reviewSurface", "CODE_WORKSPACE_LOOP_REVIEW")
+                .containsEntry("sourcePlanSchema", "learnbot.server.code-agent.patch-dry-run-approval-handoff-plan.v1")
+                .containsEntry("sourcePlanStatus", "READY_APPROVAL_REQUEST_PREVIEW_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "AWAITING_USER_REVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("approvalReviewPrepared", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalRequestEndpoint", "/api/code-agent/loop/runner/validated-patch-approval-request")
+                .containsEntry("releaseReviewEndpoint", "/api/code-agent/loop/runner/release-review")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(plan.patchDryRunApprovalReviewPreview().get("targetFiles"))
+                .isEqualTo(List.of("src/App.java"));
+        assertThat(plan.requestCreationEnabled()).isFalse();
+        assertThat(plan.mutationEnabled()).isFalse();
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalIntentPreviewShapesReadyBrowserReviewWithoutCreatingRequests() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> review = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1"),
+                Map.entry("status", "READY_BROWSER_REVIEW_DISABLED"),
+                Map.entry("reviewSurface", "CODE_WORKSPACE_LOOP_REVIEW"),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("approvalReviewPrepared", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true)
+        );
+
+        var preview = service.approvalIntentPreview(repositoryId, spaceId, agentId, workspaceId, review);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_INTENT_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("reviewProvided", true)
+                .containsEntry("approvalIntentPrepared", true)
+                .containsEntry("sourceReviewSchema", "learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1")
+                .containsEntry("sourceReviewStatus", "READY_BROWSER_REVIEW_DISABLED")
+                .containsEntry("sourceReviewSurface", "CODE_WORKSPACE_LOOP_REVIEW")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "USER_REVIEW_REQUIRED")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalRequestEndpoint", "/api/code-agent/loop/runner/validated-patch-approval-request")
+                .containsEntry("releaseReviewEndpoint", "/api/code-agent/loop/runner/release-review")
+                .containsEntry("approvalIntentCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("approvalIntent"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-intent.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalAction", "APPROVE_SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalIntentPrepared", true)
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalIntentPreviewBlocksMissingBrowserReview() {
+        var preview = service.approvalIntentPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1")
+                .containsEntry("status", "REVIEW_NOT_PROVIDED")
+                .containsEntry("reviewProvided", false)
+                .containsEntry("approvalIntentPrepared", false)
+                .containsEntry("approvalIntentCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalRequestCreationPreviewShapesReadyIntentWithoutPersistingOrCreatingRequests() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> intent = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_INTENT_DISABLED"),
+                Map.entry("approvalIntentPrepared", true),
+                Map.entry("reviewProvided", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true)
+        );
+
+        var preview = service.approvalRequestCreationPreview(repositoryId, spaceId, agentId, workspaceId, intent);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_REQUEST_CREATION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalIntentProvided", true)
+                .containsEntry("approvalRequestCreationPrepared", true)
+                .containsEntry("approvalPersistencePrepared", true)
+                .containsEntry("sourceIntentSchema", "learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1")
+                .containsEntry("sourceIntentStatus", "READY_APPROVAL_INTENT_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVAL_REQUIRED_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalRequestEndpoint", "/api/code-agent/loop/runner/validated-patch-approval-request")
+                .containsEntry("releaseReviewEndpoint", "/api/code-agent/loop/runner/release-review")
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("approvalPersistencePreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-persistence-preview.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalPersistencePrepared", true)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalBypassAllowed", false)
+                .containsEntry("mutationEnabled", false);
+        assertThat((Map<String, Object>) preview.get("approvalRequestPreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-request-preview.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalRequestCreationPrepared", true)
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("mutationAllowed", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalRequestCreationPreviewBlocksMissingIntent() {
+        var preview = service.approvalRequestCreationPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1")
+                .containsEntry("status", "APPROVAL_INTENT_NOT_PROVIDED")
+                .containsEntry("approvalIntentProvided", false)
+                .containsEntry("approvalRequestCreationPrepared", false)
+                .containsEntry("approvalPersistencePrepared", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalDecisionPreviewShapesReadyRequestCreationWithoutRecordingDecision() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> requestCreation = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_REQUEST_CREATION_DISABLED"),
+                Map.entry("approvalRequestCreationPrepared", true),
+                Map.entry("approvalPersistencePrepared", true),
+                Map.entry("approvalIntentProvided", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true)
+        );
+
+        var preview = service.approvalDecisionPreview(repositoryId, spaceId, agentId, workspaceId, requestCreation);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_DECISION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalRequestCreationProvided", true)
+                .containsEntry("approvalDecisionPrepared", true)
+                .containsEntry("sourceRequestCreationSchema", "learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1")
+                .containsEntry("sourceRequestCreationStatus", "READY_APPROVAL_REQUEST_CREATION_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "AWAITING_BROWSER_DECISION_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalDecisionEndpoint", "/api/code-agent/loop/runner/patch-dry-run-approval-decision-preview")
+                .containsEntry("approvalRequestEndpoint", "/api/code-agent/loop/runner/validated-patch-approval-request")
+                .containsEntry("releaseReviewEndpoint", "/api/code-agent/loop/runner/release-review")
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((List<Map<String, Object>>) preview.get("decisionOptions"))
+                .extracting("action")
+                .containsExactly("APPROVE_SNAPSHOT_WRITING_DRY_RUN", "DENY_SNAPSHOT_WRITING_DRY_RUN");
+        assertThat((List<Map<String, Object>>) preview.get("decisionOptions"))
+                .allSatisfy(option -> {
+                    assertThat(option).containsEntry("prepared", true);
+                    assertThat(option).containsEntry("enabled", false);
+                    assertThat(option).containsEntry("approvalDecisionPersistenceEnabled", false);
+                    assertThat(option).containsEntry("requestCreationEnabled", false);
+                    assertThat(option).containsEntry("mutationEnabled", false);
+                });
+        assertThat((Map<String, Object>) preview.get("heldRequestReview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1")
+                .containsEntry("status", "READY_HELD_REQUEST_REVIEW_DISABLED")
+                .containsEntry("heldRequestReviewPrepared", true)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalDecisionPreviewBlocksMissingRequestCreationPreview() {
+        var preview = service.approvalDecisionPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1")
+                .containsEntry("status", "APPROVAL_REQUEST_CREATION_NOT_PROVIDED")
+                .containsEntry("approvalRequestCreationProvided", false)
+                .containsEntry("approvalDecisionPrepared", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalDecisionPersistencePreviewShapesReadyDecisionWithoutPersisting() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> decision = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_DECISION_DISABLED"),
+                Map.entry("approvalDecisionPrepared", true),
+                Map.entry("approvalRequestCreationProvided", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("decisionOptions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                )),
+                Map.entry("heldRequestReview", Map.of("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1"))
+        );
+
+        var preview = service.approvalDecisionPersistencePreview(repositoryId, spaceId, agentId, workspaceId, decision);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_DECISION_PERSISTENCE_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalDecisionProvided", true)
+                .containsEntry("approvalDecisionPersistencePrepared", true)
+                .containsEntry("heldRequestReviewPrepared", true)
+                .containsEntry("sourceDecisionSchema", "learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1")
+                .containsEntry("sourceDecisionStatus", "READY_APPROVAL_DECISION_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVAL_DECISION_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("decisionPersistencePreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalDecisionPersistencePrepared", true)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("mutationEnabled", false);
+        assertThat((Map<String, Object>) preview.get("heldRequestReview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1");
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalDecisionPersistencePreviewBlocksMissingDecision() {
+        var preview = service.approvalDecisionPersistencePreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1")
+                .containsEntry("status", "APPROVAL_DECISION_NOT_PROVIDED")
+                .containsEntry("approvalDecisionProvided", false)
+                .containsEntry("approvalDecisionPersistencePrepared", false)
+                .containsEntry("heldRequestReviewPrepared", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void heldRequestReviewActionPreviewShapesReadyPersistenceWithoutEnablingReviewActions() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> persistence = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_DECISION_PERSISTENCE_DISABLED"),
+                Map.entry("approvalDecisionPersistencePrepared", true),
+                Map.entry("heldRequestReviewPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("heldRequestReview", Map.of(
+                        "schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1",
+                        "status", "READY_HELD_REQUEST_REVIEW_DISABLED"
+                ))
+        );
+
+        var preview = service.heldRequestReviewActionPreview(repositoryId, spaceId, agentId, workspaceId, persistence);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1")
+                .containsEntry("status", "READY_HELD_REQUEST_REVIEW_ACTION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalDecisionPersistenceProvided", true)
+                .containsEntry("heldRequestReviewActionPrepared", true)
+                .containsEntry("heldRequestReviewPrepared", true)
+                .containsEntry("sourceDecisionPersistenceSchema", "learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1")
+                .containsEntry("sourceDecisionPersistenceStatus", "READY_APPROVAL_DECISION_PERSISTENCE_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "HELD_REQUEST_BROWSER_REVIEW_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("heldRequestReviewEnabled", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("heldRequestReview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1")
+                .containsEntry("status", "READY_HELD_REQUEST_REVIEW_DISABLED");
+        assertThat((List<Map<String, Object>>) preview.get("reviewActions"))
+                .allSatisfy(action -> assertThat(action)
+                        .containsEntry("prepared", true)
+                        .containsEntry("enabled", false)
+                        .containsEntry("heldRequestReviewEnabled", false)
+                        .containsEntry("requestCreationEnabled", false)
+                        .containsEntry("mutationEnabled", false));
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void heldRequestReviewActionPreviewBlocksMissingDecisionPersistence() {
+        var preview = service.heldRequestReviewActionPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1")
+                .containsEntry("status", "DECISION_PERSISTENCE_NOT_PROVIDED")
+                .containsEntry("approvalDecisionPersistenceProvided", false)
+                .containsEntry("heldRequestReviewActionPrepared", false)
+                .containsEntry("heldRequestReviewPrepared", false)
+                .containsEntry("heldRequestReviewEnabled", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalActionPreviewShapesReadyHeldReviewWithoutPersistingAction() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> heldReview = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1"),
+                Map.entry("status", "READY_HELD_REQUEST_REVIEW_ACTION_DISABLED"),
+                Map.entry("heldRequestReviewActionPrepared", true),
+                Map.entry("heldRequestReviewPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("reviewActions", List.of(
+                        Map.of("action", "REVIEW_HELD_APPROVAL", "enabled", false),
+                        Map.of("action", "APPROVE_HELD_APPROVAL", "enabled", false),
+                        Map.of("action", "DENY_HELD_APPROVAL", "enabled", false)
+                ))
+        );
+
+        var preview = service.approvalActionPreview(repositoryId, spaceId, agentId, workspaceId, heldReview);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_ACTION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("heldRequestReviewProvided", true)
+                .containsEntry("approvalActionPrepared", true)
+                .containsEntry("heldRequestReviewPrepared", true)
+                .containsEntry("sourceHeldRequestReviewSchema", "learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1")
+                .containsEntry("sourceHeldRequestReviewStatus", "READY_HELD_REQUEST_REVIEW_ACTION_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "AWAITING_APPROVE_OR_DENY_ACTION_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalActionEnabled", false)
+                .containsEntry("heldRequestReviewEnabled", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((List<Map<String, Object>>) preview.get("approvalActions"))
+                .allSatisfy(action -> assertThat(action)
+                        .containsEntry("prepared", true)
+                        .containsEntry("enabled", false)
+                        .containsEntry("approvalActionEnabled", false)
+                        .containsEntry("requestCreationEnabled", false)
+                        .containsEntry("mutationEnabled", false));
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalActionPreviewBlocksMissingHeldReview() {
+        var preview = service.approvalActionPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1")
+                .containsEntry("status", "HELD_REQUEST_REVIEW_NOT_PROVIDED")
+                .containsEntry("heldRequestReviewProvided", false)
+                .containsEntry("approvalActionPrepared", false)
+                .containsEntry("heldRequestReviewPrepared", false)
+                .containsEntry("approvalActionEnabled", false)
+                .containsEntry("heldRequestReviewEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalActionPersistencePreviewShapesReadyActionWithoutPersisting() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> action = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_ACTION_DISABLED"),
+                Map.entry("approvalActionPrepared", true),
+                Map.entry("heldRequestReviewProvided", true),
+                Map.entry("heldRequestReviewPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.approvalActionPersistencePreview(repositoryId, spaceId, agentId, workspaceId, action);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_ACTION_PERSISTENCE_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalActionProvided", true)
+                .containsEntry("approvalActionPersistencePrepared", true)
+                .containsEntry("heldRequestReviewPrepared", true)
+                .containsEntry("sourceApprovalActionSchema", "learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1")
+                .containsEntry("sourceApprovalActionStatus", "READY_APPROVAL_ACTION_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVAL_ACTION_PERSISTENCE_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalActionPersistenceEnabled", false)
+                .containsEntry("approvalActionEnabled", false)
+                .containsEntry("heldRequestReviewEnabled", false)
+                .containsEntry("heldRequestCreated", false)
+                .containsEntry("approvalDecisionPersistenceEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalDecisionRecorded", false)
+                .containsEntry("approvalDecisionPersisted", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("approvalActionPersistence"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalActionPersistencePrepared", true)
+                .containsEntry("approvalActionPersistenceEnabled", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalActionPersistencePreviewBlocksMissingAction() {
+        var preview = service.approvalActionPersistencePreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1")
+                .containsEntry("status", "APPROVAL_ACTION_NOT_PROVIDED")
+                .containsEntry("approvalActionProvided", false)
+                .containsEntry("approvalActionPersistencePrepared", false)
+                .containsEntry("approvalActionPersistenceEnabled", false)
+                .containsEntry("approvalActionEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalRecordPreviewShapesReadyPersistenceWithoutCreatingRecordOrRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> actionPersistence = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_ACTION_PERSISTENCE_DISABLED"),
+                Map.entry("approvalActionPersistencePrepared", true),
+                Map.entry("approvalActionProvided", true),
+                Map.entry("heldRequestReviewPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.approvalRecordPreview(repositoryId, spaceId, agentId, workspaceId, actionPersistence);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1")
+                .containsEntry("status", "READY_APPROVAL_RECORD_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalActionPersistenceProvided", true)
+                .containsEntry("approvalRecordPrepared", true)
+                .containsEntry("localAgentRequestCreationPrepared", true)
+                .containsEntry("sourceApprovalActionPersistenceSchema", "learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1")
+                .containsEntry("sourceApprovalActionPersistenceStatus", "READY_APPROVAL_ACTION_PERSISTENCE_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVAL_RECORD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalRecordCreationEnabled", false)
+                .containsEntry("approvalActionPersistenceEnabled", false)
+                .containsEntry("approvalActionEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalActionRecorded", false)
+                .containsEntry("approvalActionPersisted", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("approvalRecord"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-record.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("approvalRecordPrepared", true)
+                .containsEntry("approvalRecordCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void approvalRecordPreviewBlocksMissingPersistence() {
+        var preview = service.approvalRecordPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1")
+                .containsEntry("status", "APPROVAL_ACTION_PERSISTENCE_NOT_PROVIDED")
+                .containsEntry("approvalActionPersistenceProvided", false)
+                .containsEntry("approvalRecordPrepared", false)
+                .containsEntry("localAgentRequestCreationPrepared", false)
+                .containsEntry("approvalRecordCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRequestEnvelopePreviewShapesReadyRecordWithoutCreatingRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> approvalRecord = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1"),
+                Map.entry("status", "READY_APPROVAL_RECORD_DISABLED"),
+                Map.entry("approvalRecordPrepared", true),
+                Map.entry("localAgentRequestCreationPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.localAgentRequestEnvelopePreview(repositoryId, spaceId, agentId, workspaceId, approvalRecord);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1")
+                .containsEntry("status", "READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("approvalRecordProvided", true)
+                .containsEntry("localAgentRequestEnvelopePrepared", true)
+                .containsEntry("localAgentRequestCreationPrepared", true)
+                .containsEntry("sourceApprovalRecordSchema", "learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1")
+                .containsEntry("sourceApprovalRecordStatus", "READY_APPROVAL_RECORD_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVED_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("approvalRecordCreationEnabled", false)
+                .containsEntry("approvalPersistenceEnabled", false)
+                .containsEntry("approvalRequestCreationEnabled", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("serverApprovalRecordCreated", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentRequestEnvelope"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("allowMutation", false)
+                .containsEntry("localAgentRequestEnvelopePrepared", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRequestEnvelopePreviewBlocksMissingApprovalRecord() {
+        var preview = service.localAgentRequestEnvelopePreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1")
+                .containsEntry("status", "APPROVAL_RECORD_NOT_PROVIDED")
+                .containsEntry("approvalRecordProvided", false)
+                .containsEntry("localAgentRequestEnvelopePrepared", false)
+                .containsEntry("localAgentRequestCreationPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRequestCreationPreviewShapesReadyEnvelopeWithoutCreatingRequestOrQueue() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> requestEnvelope = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1"),
+                Map.entry("status", "READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED"),
+                Map.entry("localAgentRequestEnvelopePrepared", true),
+                Map.entry("localAgentRequestCreationPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.localAgentRequestCreationPreview(repositoryId, spaceId, agentId, workspaceId, requestEnvelope);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1")
+                .containsEntry("status", "READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentRequestEnvelopeProvided", true)
+                .containsEntry("localAgentRequestEnvelopePrepared", true)
+                .containsEntry("localAgentRequestCreationPrepared", true)
+                .containsEntry("queueHandoffPrepared", true)
+                .containsEntry("sourceLocalAgentRequestEnvelopeSchema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1")
+                .containsEntry("sourceLocalAgentRequestEnvelopeStatus", "READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVED_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentRequestCreation"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("dryRunOnly", true)
+                .containsEntry("allowMutation", false)
+                .containsEntry("localAgentRequestCreationPrepared", true)
+                .containsEntry("queueHandoffPrepared", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRequestCreationPreviewBlocksMissingEnvelope() {
+        var preview = service.localAgentRequestCreationPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_REQUEST_ENVELOPE_NOT_PROVIDED")
+                .containsEntry("localAgentRequestEnvelopeProvided", false)
+                .containsEntry("localAgentRequestEnvelopePrepared", false)
+                .containsEntry("localAgentRequestCreationPrepared", false)
+                .containsEntry("queueHandoffPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentQueuePreviewShapesReadyCreationWithoutQueuePushOrClaim() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> requestCreation = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1"),
+                Map.entry("status", "READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED"),
+                Map.entry("localAgentRequestCreationPrepared", true),
+                Map.entry("queueHandoffPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.localAgentQueuePreview(repositoryId, spaceId, agentId, workspaceId, requestCreation);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1")
+                .containsEntry("status", "READY_LOCAL_AGENT_QUEUE_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentRequestCreationProvided", true)
+                .containsEntry("localAgentRequestCreationPrepared", true)
+                .containsEntry("queueHandoffPrepared", true)
+                .containsEntry("pushHandoffPrepared", true)
+                .containsEntry("claimHandoffPrepared", true)
+                .containsEntry("sourceLocalAgentRequestCreationSchema", "learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1")
+                .containsEntry("sourceLocalAgentRequestCreationStatus", "READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVED_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentQueue"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("queueHandoffPrepared", true)
+                .containsEntry("pushHandoffPrepared", true)
+                .containsEntry("claimHandoffPrepared", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentQueuePreviewBlocksMissingCreation() {
+        var preview = service.localAgentQueuePreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_REQUEST_CREATION_NOT_PROVIDED")
+                .containsEntry("localAgentRequestCreationProvided", false)
+                .containsEntry("localAgentRequestCreationPrepared", false)
+                .containsEntry("queueHandoffPrepared", false)
+                .containsEntry("pushHandoffPrepared", false)
+                .containsEntry("claimHandoffPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentClaimReadinessPreviewShapesReadyQueueWithoutClaimOrSnapshotDryRun() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> queue = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1"),
+                Map.entry("status", "READY_LOCAL_AGENT_QUEUE_DISABLED"),
+                Map.entry("queueHandoffPrepared", true),
+                Map.entry("pushHandoffPrepared", true),
+                Map.entry("claimHandoffPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true),
+                Map.entry("approvalActions", List.of(
+                        Map.of("action", "APPROVE_SNAPSHOT_WRITING_DRY_RUN", "enabled", false),
+                        Map.of("action", "DENY_SNAPSHOT_WRITING_DRY_RUN", "enabled", false)
+                ))
+        );
+
+        var preview = service.localAgentClaimReadinessPreview(repositoryId, spaceId, agentId, workspaceId, queue);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness-preview.v1")
+                .containsEntry("status", "READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentQueueProvided", true)
+                .containsEntry("queueHandoffPrepared", true)
+                .containsEntry("pushHandoffPrepared", true)
+                .containsEntry("claimHandoffPrepared", true)
+                .containsEntry("snapshotDryRunReadinessPrepared", true)
+                .containsEntry("sourceLocalAgentQueueSchema", "learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1")
+                .containsEntry("sourceLocalAgentQueueStatus", "READY_LOCAL_AGENT_QUEUE_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVED_HELD_PREVIEW")
+                .containsEntry("diffValidationPassed", true)
+                .containsEntry("requestEnvelopePrepared", true)
+                .containsEntry("nonWritingPreflightPassed", true)
+                .containsEntry("browserReviewReady", true)
+                .containsEntry("userApprovalRequired", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentClaimReadiness"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("snapshotDryRunReadinessPrepared", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentClaimReadinessPreviewBlocksMissingQueue() {
+        var preview = service.localAgentClaimReadinessPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_QUEUE_NOT_PROVIDED")
+                .containsEntry("localAgentQueueProvided", false)
+                .containsEntry("queueHandoffPrepared", false)
+                .containsEntry("pushHandoffPrepared", false)
+                .containsEntry("claimHandoffPrepared", false)
+                .containsEntry("snapshotDryRunReadinessPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false)
+                .containsEntry("approvalBypassAllowed", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentSnapshotDryRunPreviewShapesReadyClaimReadinessWithoutExecution() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> claimReadiness = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness-preview.v1"),
+                Map.entry("status", "READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED"),
+                Map.entry("queueHandoffPrepared", true),
+                Map.entry("pushHandoffPrepared", true),
+                Map.entry("claimHandoffPrepared", true),
+                Map.entry("snapshotDryRunReadinessPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true)
+        );
+
+        var preview = service.localAgentSnapshotDryRunPreview(repositoryId, spaceId, agentId, workspaceId, claimReadiness);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-preview.v1")
+                .containsEntry("status", "READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentClaimReadinessProvided", true)
+                .containsEntry("snapshotDryRunReadinessPrepared", true)
+                .containsEntry("patchDryRunExecutionObservationPrepared", true)
+                .containsEntry("sourceLocalAgentClaimReadinessStatus", "READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED")
+                .containsEntry("toolName", "patch.apply")
+                .containsEntry("executionTarget", "USER_LOCAL_AGENT")
+                .containsEntry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN")
+                .containsEntry("approvalState", "APPROVED_HELD_PREVIEW")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("localAgentToolRequestCreated", false)
+                .containsEntry("durableLocalAgentRequestCreated", false)
+                .containsEntry("enqueueEnabled", false)
+                .containsEntry("pushEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("claimable", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("patchDryRunExecuted", false)
+                .containsEntry("patchDryRunObservationRecorded", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentSnapshotDryRunObservation"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-observation.v1")
+                .containsEntry("status", "READY_DISABLED")
+                .containsEntry("patchDryRunExecutionObservationPrepared", true)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("patchDryRunExecuted", false)
+                .containsEntry("patchDryRunObservationRecorded", false)
+                .containsEntry("mutationEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentSnapshotDryRunPreviewBlocksMissingClaimReadiness() {
+        var preview = service.localAgentSnapshotDryRunPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_CLAIM_READINESS_NOT_PROVIDED")
+                .containsEntry("localAgentClaimReadinessProvided", false)
+                .containsEntry("snapshotDryRunReadinessPrepared", false)
+                .containsEntry("patchDryRunExecutionObservationPrepared", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("patchDryRunExecuted", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentDryRunResultPreviewShapesReadySnapshotDryRunWithoutRecordingResult() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> snapshotDryRun = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-preview.v1"),
+                Map.entry("status", "READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED"),
+                Map.entry("snapshotDryRunReadinessPrepared", true),
+                Map.entry("patchDryRunExecutionObservationPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("diffValidationPassed", true),
+                Map.entry("requestEnvelopePrepared", true),
+                Map.entry("nonWritingPreflightPassed", true),
+                Map.entry("browserReviewReady", true),
+                Map.entry("userApprovalRequired", true)
+        );
+
+        var preview = service.localAgentDryRunResultPreview(repositoryId, spaceId, agentId, workspaceId, snapshotDryRun);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result-preview.v1")
+                .containsEntry("status", "READY_DRY_RUN_RESULT_ANALYSIS_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentSnapshotDryRunProvided", true)
+                .containsEntry("dryRunResultAnalysisPrepared", true)
+                .containsEntry("failureLogAnalysisPrepared", true)
+                .containsEntry("retryDecisionPrepared", true)
+                .containsEntry("sourceLocalAgentSnapshotDryRunStatus", "READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED")
+                .containsEntry("dryRunResultStatus", "NOT_EXECUTED_PREVIEW")
+                .containsEntry("dryRunFailureCode", "NOT_EXECUTED")
+                .containsEntry("dryRunSucceeded", false)
+                .containsEntry("dryRunFailed", false)
+                .containsEntry("contextMismatchDetected", false)
+                .containsEntry("unsafePatchDetected", false)
+                .containsEntry("retryRecommended", true)
+                .containsEntry("retryDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT")
+                .containsEntry("replanRequired", false)
+                .containsEntry("userReviewRequired", true)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("patchDryRunExecuted", false)
+                .containsEntry("patchDryRunObservationRecorded", false)
+                .containsEntry("dryRunResultRecorded", false)
+                .containsEntry("failureLogAnalysisRecorded", false)
+                .containsEntry("retryDecisionRecorded", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentDryRunResult"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result.v1")
+                .containsEntry("status", "NOT_EXECUTED_PREVIEW")
+                .containsEntry("dryRunResultRecorded", false)
+                .containsEntry("mutationEnabled", false);
+        assertThat((Map<String, Object>) preview.get("failureLogAnalysis"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-failure-log-analysis.v1")
+                .containsEntry("status", "WAITING_FOR_RESULT_DISABLED")
+                .containsEntry("analysisRecorded", false);
+        assertThat((Map<String, Object>) preview.get("retryDecisionPreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-decision.v1")
+                .containsEntry("status", "WAITING_FOR_RESULT_DISABLED")
+                .containsEntry("retryExecutionEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentDryRunResultPreviewBlocksMissingSnapshotDryRun() {
+        var preview = service.localAgentDryRunResultPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_SNAPSHOT_DRY_RUN_NOT_PROVIDED")
+                .containsEntry("localAgentSnapshotDryRunProvided", false)
+                .containsEntry("dryRunResultAnalysisPrepared", false)
+                .containsEntry("failureLogAnalysisPrepared", false)
+                .containsEntry("retryDecisionPrepared", false)
+                .containsEntry("dryRunResultStatus", "UNAVAILABLE")
+                .containsEntry("dryRunFailureCode", "NO_RESULT")
+                .containsEntry("retryRecommended", false)
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("dryRunResultRecorded", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRetryInputPreviewShapesReadyDryRunResultWithoutCreatingRetry() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> dryRunResult = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result-preview.v1"),
+                Map.entry("status", "READY_DRY_RUN_RESULT_ANALYSIS_DISABLED"),
+                Map.entry("dryRunResultAnalysisPrepared", true),
+                Map.entry("failureLogAnalysisPrepared", true),
+                Map.entry("retryDecisionPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("dryRunResultStatus", "NOT_EXECUTED_PREVIEW"),
+                Map.entry("dryRunFailureCode", "NOT_EXECUTED"),
+                Map.entry("retryRecommended", true),
+                Map.entry("retryDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT"),
+                Map.entry("replanRequired", false)
+        );
+
+        var preview = service.localAgentRetryInputPreview(repositoryId, spaceId, agentId, workspaceId, dryRunResult);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-input-preview.v1")
+                .containsEntry("status", "READY_RETRY_INPUT_REPLAN_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentDryRunResultProvided", true)
+                .containsEntry("retryInputPrepared", true)
+                .containsEntry("boundedRetryPatchInputPrepared", true)
+                .containsEntry("replanDecisionPrepared", true)
+                .containsEntry("sourceLocalAgentDryRunResultStatus", "READY_DRY_RUN_RESULT_ANALYSIS_DISABLED")
+                .containsEntry("dryRunResultStatus", "NOT_EXECUTED_PREVIEW")
+                .containsEntry("dryRunFailureCode", "NOT_EXECUTED")
+                .containsEntry("retryRecommended", true)
+                .containsEntry("sourceRetryDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT")
+                .containsEntry("retryInputDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT")
+                .containsEntry("replanRequired", false)
+                .containsEntry("userVisibleDecision", "WAIT_FOR_DRY_RUN_RESULT_BEFORE_RETRY_OR_REPLAN")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("dryRunResultRecorded", false)
+                .containsEntry("failureLogAnalysisRecorded", false)
+                .containsEntry("retryDecisionRecorded", false)
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryRequestCreationEnabled", false)
+                .containsEntry("retryExecutionEnabled", false)
+                .containsEntry("replanExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentRetryInput"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-input.v1")
+                .containsEntry("status", "WAITING_FOR_RESULT_DISABLED")
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryExecutionEnabled", false);
+        assertThat((Map<String, Object>) preview.get("replanPreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-replan-preview.v1")
+                .containsEntry("status", "WAITING_FOR_RESULT_DISABLED")
+                .containsEntry("replanExecutionEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRetryInputPreviewBlocksMissingDryRunResult() {
+        var preview = service.localAgentRetryInputPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-input-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_DRY_RUN_RESULT_NOT_PROVIDED")
+                .containsEntry("localAgentDryRunResultProvided", false)
+                .containsEntry("retryInputPrepared", false)
+                .containsEntry("boundedRetryPatchInputPrepared", false)
+                .containsEntry("replanDecisionPrepared", false)
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryRequestCreationEnabled", false)
+                .containsEntry("retryExecutionEnabled", false)
+                .containsEntry("replanExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRetryProposalPreviewShapesReadyRetryInputWithoutGeneratingRetryPatch() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        Map<String, Object> retryInput = Map.ofEntries(
+                Map.entry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-input-preview.v1"),
+                Map.entry("status", "READY_RETRY_INPUT_REPLAN_DISABLED"),
+                Map.entry("retryInputPrepared", true),
+                Map.entry("boundedRetryPatchInputPrepared", true),
+                Map.entry("replanDecisionPrepared", true),
+                Map.entry("toolName", "patch.apply"),
+                Map.entry("executionTarget", "USER_LOCAL_AGENT"),
+                Map.entry("approvalKind", "SNAPSHOT_WRITING_DRY_RUN"),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("dryRunResultStatus", "NOT_EXECUTED_PREVIEW"),
+                Map.entry("dryRunFailureCode", "NOT_EXECUTED"),
+                Map.entry("retryRecommended", true),
+                Map.entry("retryInputDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT"),
+                Map.entry("replanRequired", false)
+        );
+
+        var preview = service.localAgentRetryProposalPreview(repositoryId, spaceId, agentId, workspaceId, retryInput);
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-proposal-preview.v1")
+                .containsEntry("status", "READY_RETRY_PROPOSAL_FINAL_STOP_DISABLED")
+                .containsEntry("repositoryId", repositoryId)
+                .containsEntry("spaceId", spaceId)
+                .containsEntry("agentId", agentId)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("localAgentRetryInputProvided", true)
+                .containsEntry("retryProposalPrepared", true)
+                .containsEntry("boundedRetryPatchProposalPrepared", true)
+                .containsEntry("finalStopDecisionPrepared", true)
+                .containsEntry("sourceLocalAgentRetryInputStatus", "READY_RETRY_INPUT_REPLAN_DISABLED")
+                .containsEntry("dryRunResultStatus", "NOT_EXECUTED_PREVIEW")
+                .containsEntry("dryRunFailureCode", "NOT_EXECUTED")
+                .containsEntry("retryRecommended", true)
+                .containsEntry("sourceRetryInputDecision", "WAIT_FOR_ACTUAL_DRY_RUN_RESULT")
+                .containsEntry("replanRequired", false)
+                .containsEntry("userVisibleDecision", "WAIT_FOR_RETRY_PATCH_PROPOSAL")
+                .containsEntry("finalStopDecision", "WAIT_FOR_RETRY_PATCH_PROPOSAL")
+                .containsEntry("requestCreationEnabled", false)
+                .containsEntry("claimEnabled", false)
+                .containsEntry("snapshotCreationEnabled", false)
+                .containsEntry("patchDryRunExecutionEnabled", false)
+                .containsEntry("dryRunResultRecorded", false)
+                .containsEntry("failureLogAnalysisRecorded", false)
+                .containsEntry("retryDecisionRecorded", false)
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryPatchProposalGenerated", false)
+                .containsEntry("retryRequestCreationEnabled", false)
+                .containsEntry("retryExecutionEnabled", false)
+                .containsEntry("replanExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("testExecutionEnabled", false)
+                .containsEntry("rollbackRestoreEnabled", false)
+                .containsEntry("finalPublicationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        assertThat(preview.get("targetFiles")).isEqualTo(List.of("src/App.java"));
+        assertThat((Map<String, Object>) preview.get("localAgentRetryPatchProposal"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-patch-proposal.v1")
+                .containsEntry("status", "WAITING_FOR_RETRY_PATCH_DISABLED")
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryExecutionEnabled", false);
+        assertThat((Map<String, Object>) preview.get("finalStopDecisionPreview"))
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-final-stop-decision-preview.v1")
+                .containsEntry("status", "WAITING_FOR_ACTUAL_RESULT_DISABLED")
+                .containsEntry("replanExecutionEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
+    void localAgentRetryProposalPreviewBlocksMissingRetryInput() {
+        var preview = service.localAgentRetryProposalPreview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null
+        );
+
+        assertThat(preview)
+                .containsEntry("schema", "learnbot.server.code-agent.patch-dry-run-local-agent-retry-proposal-preview.v1")
+                .containsEntry("status", "LOCAL_AGENT_RETRY_INPUT_NOT_PROVIDED")
+                .containsEntry("localAgentRetryInputProvided", false)
+                .containsEntry("retryProposalPrepared", false)
+                .containsEntry("boundedRetryPatchProposalPrepared", false)
+                .containsEntry("finalStopDecisionPrepared", false)
+                .containsEntry("retryPatchGenerated", false)
+                .containsEntry("retryPatchProposalGenerated", false)
+                .containsEntry("retryRequestCreationEnabled", false)
+                .containsEntry("retryExecutionEnabled", false)
+                .containsEntry("replanExecutionEnabled", false)
+                .containsEntry("mutationEnabled", false)
+                .containsEntry("partialReindexEnabled", false);
+        org.mockito.Mockito.verifyNoInteractions(timelineRepository);
+    }
+
+    @Test
     void recentTimelinesClampReadOnlyHistoryLimit() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();

@@ -252,6 +252,67 @@ const validatedDryRunIntentTransitionPreviewResponse = {
   message: 'This is a disabled transition preview only; it creates no request, pushes nothing, and makes no Local Agent work claimable.',
 };
 
+const completedLocalDryRunRequest = {
+  requestId: 'local-dry-run-request-1',
+  request: {
+    toolName: 'patch.apply',
+    approvalState: 'NOT_REQUIRED',
+    input: {
+      sourceRequestId: 'request-route-flow-1',
+      dryRunOnly: true,
+      mutationAllowed: false,
+    },
+  },
+};
+
+const completedLocalDryRunResult = {
+  requestId: 'local-dry-run-request-1',
+  status: 'REJECTED',
+  toolName: 'patch.apply',
+  approvalState: 'NOT_REQUIRED',
+  failureCode: 'UNSAFE_TOOL',
+  error: 'Patch dry-run passed and a local snapshot was created, but file mutation is disabled until approval.',
+  input: {
+    sourceRequestId: 'request-route-flow-1',
+    dryRunOnly: true,
+    mutationAllowed: false,
+  },
+  output: {
+    dryRun: true,
+    preflightPassed: true,
+    snapshotCreated: true,
+    mutationApplied: false,
+    files: [
+      {
+        path: 'README.md',
+        contextMatched: true,
+      },
+    ],
+  },
+  responseWarnings: ['dry-run completed without mutation'],
+};
+
+const failedLocalDryRunResult = {
+  requestId: 'local-dry-run-request-2',
+  status: 'FAILED',
+  toolName: 'patch.apply',
+  approvalState: 'NOT_REQUIRED',
+  failureCode: 'CONTEXT_MISMATCH',
+  error: 'Patch context did not match the current workspace file.',
+  input: {
+    sourceRequestId: 'request-route-flow-1',
+    dryRunOnly: true,
+    mutationAllowed: false,
+  },
+  output: {
+    dryRun: true,
+    preflightPassed: false,
+    snapshotCreated: false,
+    mutationApplied: false,
+  },
+  responseWarnings: ['dry-run failed without mutation'],
+};
+
 const releaseGateRunnerPreviewResponse = {
   status: 'RECORDED',
   actionKey: 'WAIT_FOR_RELEASE_GATE',
@@ -667,6 +728,1000 @@ const m8EntryReadinessResponse = {
   finalResultPublicationPreview: finalResultPublicationPreviewResponse,
 };
 
+const submissionPlanReviewPreviewResponse = {
+  schema: 'learnbot.server.code-agent.loop-submission-plan.v1',
+  repositoryId: 'repo-1',
+  spaceId: 'space-1',
+  agentId: 'agent-1',
+  workspaceId: 'workspace-1',
+  instruction: 'test',
+  maxSteps: 6,
+  readyForDisabledPlan: true,
+  enabled: false,
+  requestCreationEnabled: false,
+  mutationEnabled: false,
+  patchDryRunApprovalHandoffPlan: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-handoff-plan.v1',
+    status: 'READY_APPROVAL_REQUEST_PREVIEW_DISABLED',
+    requestCreationEnabled: false,
+    approvalRequestCreationEnabled: false,
+    enqueueEnabled: false,
+    claimEnabled: false,
+    mutationEnabled: false,
+  },
+  patchDryRunApprovalReviewPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-review-preview.v1',
+    status: 'READY_BROWSER_REVIEW_DISABLED',
+    reviewSurface: 'CODE_WORKSPACE_LOOP_REVIEW',
+    sourcePlanStatus: 'READY_APPROVAL_REQUEST_PREVIEW_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'AWAITING_USER_REVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    requestCreationEnabled: false,
+    approvalRequestCreationEnabled: false,
+    approvalPersistenceEnabled: false,
+    enqueueEnabled: false,
+    claimEnabled: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    reason: 'CLI dry-run approval evidence is ready for browser review, but all execution remains disabled.',
+  },
+  patchDryRunApprovalIntentPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-intent-preview.v1',
+    status: 'READY_APPROVAL_INTENT_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    reviewProvided: true,
+    approvalIntentPrepared: true,
+    sourceReviewStatus: 'READY_BROWSER_REVIEW_DISABLED',
+    sourceReviewSurface: 'CODE_WORKSPACE_LOOP_REVIEW',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'USER_REVIEW_REQUIRED',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalIntentCreationEnabled: false,
+    approvalPersistenceEnabled: false,
+    requestCreationEnabled: false,
+    approvalRequestCreationEnabled: false,
+    enqueueEnabled: false,
+    claimEnabled: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Browser review evidence is ready to shape an approval intent, but all execution remains disabled.',
+  },
+  patchDryRunApprovalRequestCreationPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-request-creation-preview.v1',
+    status: 'READY_APPROVAL_REQUEST_CREATION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalIntentProvided: true,
+    approvalRequestCreationPrepared: true,
+    approvalPersistencePrepared: true,
+    sourceIntentStatus: 'READY_APPROVAL_INTENT_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVAL_REQUIRED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Approval intent is ready to model browser approval persistence and approval-request creation, but all execution remains disabled.',
+  },
+  patchDryRunApprovalDecisionPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-decision-preview.v1',
+    status: 'READY_APPROVAL_DECISION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalRequestCreationProvided: true,
+    approvalDecisionPrepared: true,
+    sourceRequestCreationStatus: 'READY_APPROVAL_REQUEST_CREATION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'AWAITING_BROWSER_DECISION_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    decisionOptions: [
+      {
+        action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN',
+        prepared: true,
+        enabled: false,
+        approvalDecisionPersistenceEnabled: false,
+        requestCreationEnabled: false,
+        mutationEnabled: false,
+      },
+      {
+        action: 'DENY_SNAPSHOT_WRITING_DRY_RUN',
+        prepared: true,
+        enabled: false,
+        approvalDecisionPersistenceEnabled: false,
+        requestCreationEnabled: false,
+        mutationEnabled: false,
+      },
+    ],
+    heldRequestReview: {
+      schema: 'learnbot.server.code-agent.patch-dry-run-held-request-review-preview.v1',
+      status: 'READY_HELD_REQUEST_REVIEW_DISABLED',
+      heldRequestReviewPrepared: true,
+      heldRequestCreated: false,
+      approvalDecisionRecorded: false,
+      requestCreationEnabled: false,
+      claimable: false,
+      mutationEnabled: false,
+    },
+    approvalDecisionEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-decision-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    localAgentToolRequestCreated: false,
+    heldRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Browser approval decision can be modeled for approve or deny, but all execution remains disabled.',
+  },
+  patchDryRunApprovalDecisionPersistencePreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-decision-persistence-preview.v1',
+    status: 'READY_APPROVAL_DECISION_PERSISTENCE_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalDecisionProvided: true,
+    approvalDecisionPersistencePrepared: true,
+    heldRequestReviewPrepared: true,
+    sourceDecisionStatus: 'READY_APPROVAL_DECISION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVAL_DECISION_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalDecisionEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-decision-preview',
+    approvalDecisionPersistenceEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-decision-persistence-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    localAgentToolRequestCreated: false,
+    heldRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Approval decision persistence and held-request review can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunHeldRequestReviewPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-held-request-review-action-preview.v1',
+    status: 'READY_HELD_REQUEST_REVIEW_ACTION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalDecisionPersistenceProvided: true,
+    heldRequestReviewActionPrepared: true,
+    heldRequestReviewPrepared: true,
+    sourceDecisionPersistenceStatus: 'READY_APPROVAL_DECISION_PERSISTENCE_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'HELD_REQUEST_BROWSER_REVIEW_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    reviewActions: [
+      { action: 'REVIEW_HELD_APPROVAL', prepared: true, enabled: false },
+      { action: 'APPROVE_HELD_APPROVAL', prepared: true, enabled: false },
+      { action: 'DENY_HELD_APPROVAL', prepared: true, enabled: false },
+    ],
+    approvalDecisionPersistenceEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-decision-persistence-preview',
+    heldRequestReviewEndpoint: '/api/code-agent/loop/runner/patch-dry-run-held-request-review-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Held request review actions can be displayed for browser review, but all execution remains disabled.',
+  },
+  patchDryRunApprovalActionPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-action-preview.v1',
+    status: 'READY_APPROVAL_ACTION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    heldRequestReviewProvided: true,
+    approvalActionPrepared: true,
+    heldRequestReviewPrepared: true,
+    sourceHeldRequestReviewStatus: 'READY_HELD_REQUEST_REVIEW_ACTION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'AWAITING_APPROVE_OR_DENY_ACTION_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    heldRequestReviewEndpoint: '/api/code-agent/loop/runner/patch-dry-run-held-request-review-preview',
+    approvalActionEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-action-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Approve and deny actions can be displayed for browser review, but all execution remains disabled.',
+  },
+  patchDryRunApprovalActionPersistencePreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-action-persistence-preview.v1',
+    status: 'READY_APPROVAL_ACTION_PERSISTENCE_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalActionProvided: true,
+    approvalActionPersistencePrepared: true,
+    heldRequestReviewPrepared: true,
+    sourceApprovalActionStatus: 'READY_APPROVAL_ACTION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVAL_ACTION_PERSISTENCE_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    approvalActionEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-action-preview',
+    approvalActionPersistenceEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-action-persistence-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Approval action persistence can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunApprovalRecordPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-approval-record-preview.v1',
+    status: 'READY_APPROVAL_RECORD_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalActionPersistenceProvided: true,
+    approvalRecordPrepared: true,
+    localAgentRequestCreationPrepared: true,
+    sourceApprovalActionPersistenceStatus: 'READY_APPROVAL_ACTION_PERSISTENCE_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVAL_RECORD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    approvalActionPersistenceEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-action-persistence-preview',
+    approvalRecordEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-record-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Approval record and Local Agent request creation can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentRequestEnvelopePreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-request-envelope-preview.v1',
+    status: 'READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    approvalRecordProvided: true,
+    localAgentRequestEnvelopePrepared: true,
+    localAgentRequestCreationPrepared: true,
+    sourceApprovalRecordStatus: 'READY_APPROVAL_RECORD_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    approvalRecordEndpoint: '/api/code-agent/loop/runner/patch-dry-run-approval-record-preview',
+    localAgentRequestEnvelopeEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-request-envelope-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'The future Local Agent patch.apply dry-run request envelope can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentRequestCreationPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-request-creation-preview.v1',
+    status: 'READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentRequestEnvelopeProvided: true,
+    localAgentRequestEnvelopePrepared: true,
+    localAgentRequestCreationPrepared: true,
+    queueHandoffPrepared: true,
+    sourceLocalAgentRequestEnvelopeStatus: 'READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    localAgentRequestEnvelopeEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-request-envelope-preview',
+    localAgentRequestCreationEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-request-creation-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Durable Local Agent patch.apply dry-run request creation can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentQueuePreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-queue-preview.v1',
+    status: 'READY_LOCAL_AGENT_QUEUE_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentRequestCreationProvided: true,
+    localAgentRequestCreationPrepared: true,
+    queueHandoffPrepared: true,
+    pushHandoffPrepared: true,
+    claimHandoffPrepared: true,
+    sourceLocalAgentRequestCreationStatus: 'READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    localAgentRequestCreationEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-request-creation-preview',
+    localAgentQueueEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-queue-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Local Agent queue, push, and claim handoff can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentClaimReadinessPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-claim-readiness-preview.v1',
+    status: 'READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentQueueProvided: true,
+    queueHandoffPrepared: true,
+    pushHandoffPrepared: true,
+    claimHandoffPrepared: true,
+    snapshotDryRunReadinessPrepared: true,
+    sourceLocalAgentQueueStatus: 'READY_LOCAL_AGENT_QUEUE_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    localAgentQueueEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-queue-preview',
+    localAgentClaimReadinessEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-claim-readiness-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Claim and snapshot-writing dry-run readiness can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentSnapshotDryRunPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-snapshot-dry-run-preview.v1',
+    status: 'READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentClaimReadinessProvided: true,
+    queueHandoffPrepared: true,
+    pushHandoffPrepared: true,
+    claimHandoffPrepared: true,
+    snapshotDryRunReadinessPrepared: true,
+    patchDryRunExecutionObservationPrepared: true,
+    sourceLocalAgentClaimReadinessStatus: 'READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    diffValidationPassed: true,
+    requestEnvelopePrepared: true,
+    nonWritingPreflightPassed: true,
+    browserReviewReady: true,
+    userApprovalRequired: true,
+    approvalActions: [
+      { action: 'APPROVE_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+      { action: 'DENY_SNAPSHOT_WRITING_DRY_RUN', prepared: true, enabled: false },
+    ],
+    localAgentClaimReadinessEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-claim-readiness-preview',
+    localAgentSnapshotDryRunEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-snapshot-dry-run-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    patchDryRunExecuted: false,
+    patchDryRunObservationRecorded: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Snapshot-writing dry-run observation can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentDryRunResultPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-dry-run-result-preview.v1',
+    status: 'READY_DRY_RUN_RESULT_ANALYSIS_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentSnapshotDryRunProvided: true,
+    snapshotDryRunReadinessPrepared: true,
+    patchDryRunExecutionObservationPrepared: true,
+    dryRunResultAnalysisPrepared: true,
+    failureLogAnalysisPrepared: true,
+    retryDecisionPrepared: true,
+    sourceLocalAgentSnapshotDryRunStatus: 'READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    dryRunResultStatus: 'NOT_EXECUTED_PREVIEW',
+    dryRunFailureCode: 'NOT_EXECUTED',
+    dryRunSucceeded: false,
+    dryRunFailed: false,
+    contextMismatchDetected: false,
+    unsafePatchDetected: false,
+    retryRecommended: true,
+    retryDecision: 'WAIT_FOR_ACTUAL_DRY_RUN_RESULT',
+    replanRequired: false,
+    userReviewRequired: true,
+    localAgentSnapshotDryRunEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-snapshot-dry-run-preview',
+    localAgentDryRunResultEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-dry-run-result-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    patchDryRunExecuted: false,
+    patchDryRunObservationRecorded: false,
+    dryRunResultRecorded: false,
+    failureLogAnalysisRecorded: false,
+    retryDecisionRecorded: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Dry-run result and retry decision can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentRetryInputPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-retry-input-preview.v1',
+    status: 'READY_RETRY_INPUT_REPLAN_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentDryRunResultProvided: true,
+    retryInputPrepared: true,
+    boundedRetryPatchInputPrepared: true,
+    replanDecisionPrepared: true,
+    sourceLocalAgentDryRunResultStatus: 'READY_DRY_RUN_RESULT_ANALYSIS_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    dryRunResultStatus: 'NOT_EXECUTED_PREVIEW',
+    dryRunFailureCode: 'NOT_EXECUTED',
+    contextMismatchDetected: false,
+    unsafePatchDetected: false,
+    retryRecommended: true,
+    sourceRetryDecision: 'WAIT_FOR_ACTUAL_DRY_RUN_RESULT',
+    retryInputDecision: 'WAIT_FOR_ACTUAL_DRY_RUN_RESULT',
+    replanRequired: false,
+    userVisibleDecision: 'WAIT_FOR_DRY_RUN_RESULT_BEFORE_RETRY_OR_REPLAN',
+    localAgentDryRunResultEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-dry-run-result-preview',
+    localAgentRetryInputEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-retry-input-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    patchDryRunExecuted: false,
+    patchDryRunObservationRecorded: false,
+    dryRunResultRecorded: false,
+    failureLogAnalysisRecorded: false,
+    retryDecisionRecorded: false,
+    retryPatchGenerated: false,
+    retryRequestCreationEnabled: false,
+    retryExecutionEnabled: false,
+    replanExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Retry input and replan decisions can be modeled, but all execution remains disabled.',
+  },
+  patchDryRunLocalAgentRetryProposalPreview: {
+    schema: 'learnbot.server.code-agent.patch-dry-run-local-agent-retry-proposal-preview.v1',
+    status: 'READY_RETRY_PROPOSAL_FINAL_STOP_DISABLED',
+    repositoryId: 'repo-1',
+    spaceId: 'space-1',
+    agentId: 'agent-1',
+    workspaceId: 'workspace-1',
+    localAgentRetryInputProvided: true,
+    retryProposalPrepared: true,
+    boundedRetryPatchProposalPrepared: true,
+    finalStopDecisionPrepared: true,
+    sourceLocalAgentRetryInputStatus: 'READY_RETRY_INPUT_REPLAN_DISABLED',
+    toolName: 'patch.apply',
+    executionTarget: 'USER_LOCAL_AGENT',
+    approvalKind: 'SNAPSHOT_WRITING_DRY_RUN',
+    approvalState: 'APPROVED_HELD_PREVIEW',
+    targetFiles: ['README.md'],
+    dryRunResultStatus: 'NOT_EXECUTED_PREVIEW',
+    dryRunFailureCode: 'NOT_EXECUTED',
+    contextMismatchDetected: false,
+    unsafePatchDetected: false,
+    retryRecommended: true,
+    sourceRetryInputDecision: 'WAIT_FOR_ACTUAL_DRY_RUN_RESULT',
+    replanRequired: false,
+    userVisibleDecision: 'WAIT_FOR_RETRY_PATCH_PROPOSAL',
+    finalStopDecision: 'WAIT_FOR_RETRY_PATCH_PROPOSAL',
+    localAgentRetryInputEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-retry-input-preview',
+    localAgentRetryProposalEndpoint: '/api/code-agent/loop/runner/patch-dry-run-local-agent-retry-proposal-preview',
+    approvalRequestEndpoint: '/api/code-agent/loop/runner/validated-patch-approval-request',
+    releaseReviewEndpoint: '/api/code-agent/loop/runner/release-review',
+    approvalRecordCreationEnabled: false,
+    approvalActionPersistenceEnabled: false,
+    approvalActionEnabled: false,
+    heldRequestReviewEnabled: false,
+    heldRequestCreated: false,
+    approvalDecisionPersistenceEnabled: false,
+    approvalPersistenceEnabled: false,
+    approvalRequestCreationEnabled: false,
+    requestCreationEnabled: false,
+    serverApprovalRecordCreated: false,
+    approvalDecisionRecorded: false,
+    approvalDecisionPersisted: false,
+    approvalActionRecorded: false,
+    approvalActionPersisted: false,
+    localAgentToolRequestCreated: false,
+    durableLocalAgentRequestCreated: false,
+    enqueueEnabled: false,
+    pushEnabled: false,
+    claimEnabled: false,
+    claimable: false,
+    snapshotCreationEnabled: false,
+    patchDryRunExecutionEnabled: false,
+    patchDryRunExecuted: false,
+    patchDryRunObservationRecorded: false,
+    dryRunResultRecorded: false,
+    failureLogAnalysisRecorded: false,
+    retryDecisionRecorded: false,
+    retryPatchGenerated: false,
+    retryPatchProposalGenerated: false,
+    retryRequestCreationEnabled: false,
+    retryExecutionEnabled: false,
+    replanExecutionEnabled: false,
+    mutationEnabled: false,
+    testExecutionEnabled: false,
+    rollbackRestoreEnabled: false,
+    finalPublicationEnabled: false,
+    partialReindexEnabled: false,
+    approvalBypassAllowed: false,
+    reason: 'Retry proposal or final-stop decision can be modeled, but all execution remains disabled.',
+  },
+};
+
 const vite = await createServer({
   server: { middlewareMode: true },
   appType: 'custom',
@@ -693,6 +1748,7 @@ try {
       latestAttempt,
     }),
     codeAgentLoopRunnerPreview: null,
+    codeAgentLoopSubmissionPlan: submissionPlanReviewPreviewResponse,
     codeAgentLoopRunnerEnqueueResult: null,
     localAgentStatus: {
       state: 'CONNECTED',
@@ -827,6 +1883,7 @@ try {
   assert.equal(assertNoForbiddenTrueFlags(completedFlowRunnerPreviewResponse, 'completedFlowRunnerPreviewResponse'), true);
   assert.equal(assertNoForbiddenTrueFlags(finalResultPublicationPreviewResponse, 'finalResultPublicationPreviewResponse'), true);
   assert.equal(assertNoForbiddenTrueFlags(m8EntryReadinessResponse, 'm8EntryReadinessResponse'), true);
+  assert.equal(assertNoForbiddenTrueFlags(submissionPlanReviewPreviewResponse, 'submissionPlanReviewPreviewResponse'), true);
   const initialMarkup = renderToStaticMarkup(React.createElement(CodeWorkspace, props));
   assert.match(
     initialMarkup,
@@ -835,6 +1892,294 @@ try {
   assert.match(
     initialMarkup,
     /<button\b(?=[^>]*class="ghost-button")(?=[^>]*disabled="")[^>]*>(?:(?!<\/button>)[\s\S])*Check enqueue refusal(?:(?!<\/button>)[\s\S])*<\/button>/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop server approval review: READY_BROWSER_REVIEW_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-review-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop server approval review evidence: tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state AWAITING_USER_REVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop server approval review readiness: source READY_APPROVAL_REQUEST_PREVIEW_DISABLED \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop server approval review disabled: request creation false \/ approval request creation false \/ approval persistence false \/ enqueue false \/ claim false \/ snapshot false \/ patch dry-run false \/ test false \/ publication false \/ partial reindex false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval intent preview: READY_APPROVAL_INTENT_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-intent-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval intent evidence: source READY_BROWSER_REVIEW_DISABLED \/ surface CODE_WORKSPACE_LOOP_REVIEW \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state USER_REVIEW_REQUIRED \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval intent readiness: review provided true \/ prepared true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval intent disabled: intent creation false \/ approval persistence false \/ request creation false \/ approval request creation false \/ enqueue false \/ claim false \/ snapshot false \/ patch dry-run false \/ test false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval request creation preview: READY_APPROVAL_REQUEST_CREATION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-request-creation-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval request creation evidence: source READY_APPROVAL_INTENT_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVAL_REQUIRED_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval request creation readiness: intent provided true \/ request prepared true \/ persistence prepared true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval request creation disabled: approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision preview: READY_APPROVAL_DECISION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-decision-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision evidence: source READY_APPROVAL_REQUEST_CREATION_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state AWAITING_BROWSER_DECISION_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision readiness: request creation provided true \/ decision prepared true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision options: APPROVE_SNAPSHOT_WRITING_DRY_RUN:false, DENY_SNAPSHOT_WRITING_DRY_RUN:false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision disabled: decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ tool request false \/ held request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision persistence preview: READY_APPROVAL_DECISION_PERSISTENCE_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-decision-persistence-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision persistence evidence: source READY_APPROVAL_DECISION_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVAL_DECISION_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision persistence readiness: decision provided true \/ persistence prepared true \/ held review true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval decision persistence disabled: decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ tool request false \/ held request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop held request review preview: READY_HELD_REQUEST_REVIEW_ACTION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-held-request-review-action-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop held request review evidence: source READY_APPROVAL_DECISION_PERSISTENCE_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state HELD_REQUEST_BROWSER_REVIEW_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop held request review readiness: decision persistence provided true \/ action prepared true \/ held review true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop held request review actions: REVIEW_HELD_APPROVAL:false, APPROVE_HELD_APPROVAL:false, DENY_HELD_APPROVAL:false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop held request review disabled: held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action preview: READY_APPROVAL_ACTION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-action-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action evidence: source READY_HELD_REQUEST_REVIEW_ACTION_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state AWAITING_APPROVE_OR_DENY_ACTION_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action readiness: held review provided true \/ action prepared true \/ held review true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action options: APPROVE_SNAPSHOT_WRITING_DRY_RUN:false, DENY_SNAPSHOT_WRITING_DRY_RUN:false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action disabled: action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action persistence preview: READY_APPROVAL_ACTION_PERSISTENCE_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-action-persistence-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action persistence evidence: source READY_APPROVAL_ACTION_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVAL_ACTION_PERSISTENCE_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action persistence readiness: action provided true \/ persistence prepared true \/ held review true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action persistence options: APPROVE_SNAPSHOT_WRITING_DRY_RUN:false, DENY_SNAPSHOT_WRITING_DRY_RUN:false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval action persistence disabled: action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval record preview: READY_APPROVAL_RECORD_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-approval-record-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval record evidence: source READY_APPROVAL_ACTION_PERSISTENCE_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVAL_RECORD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval record readiness: action persistence provided true \/ record prepared true \/ request prepared true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval record options: APPROVE_SNAPSHOT_WRITING_DRY_RUN:false, DENY_SNAPSHOT_WRITING_DRY_RUN:false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop approval record disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request envelope preview: READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-request-envelope-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request envelope evidence: source READY_APPROVAL_RECORD_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVED_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request envelope readiness: approval record provided true \/ envelope prepared true \/ request prepared true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request envelope disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request creation preview: READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-request-creation-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request creation evidence: source READY_LOCAL_AGENT_REQUEST_ENVELOPE_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVED_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request creation readiness: request envelope provided true \/ envelope prepared true \/ request creation prepared true \/ queue handoff true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent request creation disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent queue preview: READY_LOCAL_AGENT_QUEUE_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-queue-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent queue evidence: source READY_LOCAL_AGENT_REQUEST_CREATION_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVED_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent queue readiness: request creation provided true \/ request creation prepared true \/ queue handoff true \/ push handoff true \/ claim handoff true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent queue disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent claim readiness preview: READY_CLAIM_SNAPSHOT_DRY_RUN_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-claim-readiness-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent claim readiness evidence: source READY_LOCAL_AGENT_QUEUE_DISABLED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ approval SNAPSHOT_WRITING_DRY_RUN \/ state APPROVED_HELD_PREVIEW \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent claim readiness: queue provided true \/ queue handoff true \/ push handoff true \/ claim handoff true \/ snapshot dry-run true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent claim readiness disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent snapshot dry-run preview: READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-snapshot-dry-run-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent snapshot dry-run readiness: claim readiness provided true \/ queue handoff true \/ push handoff true \/ claim handoff true \/ snapshot dry-run true \/ observation true \/ diff true \/ envelope true \/ preflight true \/ browser review true \/ user approval true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent dry-run result preview: READY_DRY_RUN_RESULT_ANALYSIS_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-dry-run-result-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent dry-run result evidence: source READY_SNAPSHOT_DRY_RUN_OBSERVATION_DISABLED \/ result NOT_EXECUTED_PREVIEW \/ failure NOT_EXECUTED \/ tool patch\.apply \/ target USER_LOCAL_AGENT \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent dry-run result analysis: snapshot provided true \/ result analysis true \/ failure-log true \/ retry decision true \/ succeeded false \/ failed false \/ context mismatch false \/ unsafe patch false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent dry-run retry decision: recommended true \/ decision WAIT_FOR_ACTUAL_DRY_RUN_RESULT \/ replan false \/ user review true/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent dry-run result disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ dry-run executed false \/ observation recorded false \/ result recorded false \/ failure-log recorded false \/ retry recorded false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry input preview: READY_RETRY_INPUT_REPLAN_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-retry-input-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry input evidence: source READY_DRY_RUN_RESULT_ANALYSIS_DISABLED \/ result NOT_EXECUTED_PREVIEW \/ failure NOT_EXECUTED \/ retry WAIT_FOR_ACTUAL_DRY_RUN_RESULT \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry input decision: dry-run result provided true \/ retry input true \/ bounded patch input true \/ replan decision true \/ context mismatch false \/ unsafe patch false \/ retry recommended true \/ decision WAIT_FOR_ACTUAL_DRY_RUN_RESULT \/ replan false \/ user visible WAIT_FOR_DRY_RUN_RESULT_BEFORE_RETRY_OR_REPLAN/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry input disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ dry-run executed false \/ observation recorded false \/ result recorded false \/ failure-log recorded false \/ retry decision recorded false \/ retry patch false \/ retry request false \/ retry execution false \/ replan execution false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry proposal preview: READY_RETRY_PROPOSAL_FINAL_STOP_DISABLED \/ learnbot\.server\.code-agent\.patch-dry-run-local-agent-retry-proposal-preview\.v1/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry proposal evidence: source READY_RETRY_INPUT_REPLAN_DISABLED \/ result NOT_EXECUTED_PREVIEW \/ failure NOT_EXECUTED \/ retry input WAIT_FOR_ACTUAL_DRY_RUN_RESULT \/ files README\.md/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry proposal decision: retry input provided true \/ proposal true \/ bounded proposal true \/ final stop true \/ context mismatch false \/ unsafe patch false \/ retry recommended true \/ replan false \/ user visible WAIT_FOR_RETRY_PATCH_PROPOSAL \/ stop WAIT_FOR_RETRY_PATCH_PROPOSAL/
+  );
+  assert.match(
+    initialMarkup,
+    /agent loop local agent retry proposal disabled: record creation false \/ action persistence false \/ action false \/ held review false \/ held request false \/ decision persistence false \/ approval persistence false \/ approval request creation false \/ request creation false \/ approval record false \/ decision recorded false \/ decision persisted false \/ action recorded false \/ action persisted false \/ tool request false \/ durable request false \/ enqueue false \/ push false \/ claim false \/ claimable false \/ snapshot false \/ patch dry-run false \/ dry-run executed false \/ observation recorded false \/ result recorded false \/ failure-log recorded false \/ retry decision recorded false \/ retry patch false \/ retry proposal false \/ retry request false \/ retry execution false \/ replan execution false \/ test false \/ rollback false \/ publication false \/ partial reindex false \/ bypass false \/ mutation false/
   );
   assert.doesNotMatch(initialMarkup, /agent loop runner handoff: READY_HANDOFF_CREATION_DISABLED/);
 
@@ -902,6 +2247,22 @@ try {
   assert.match(validatedDryRunIntentMarkup, /dry-run review/);
   assert.match(
     validatedDryRunIntentMarkup,
+    /agent loop one-cycle: dry-run transition previewed/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /agent loop one-cycle patch: plan pending \/ patch valid \/ target files README\.md/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /agent loop one-cycle dry-run: eligibility READY_DRY_RUN_RELEASE_DISABLED \/ transition READY_CLAIMABLE_DRY_RUN_TRANSITION_DISABLED \/ request dry-run-intent-1 \/ result pending \/ claimable false \/ mutation false/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
+    /agent loop one-cycle decision: ask for approval \/ action WAIT_FOR_APPROVAL \/ runner WAIT_FOR_APPROVAL \/ approval true \/ replan false \/ report false/
+  );
+  assert.match(
+    validatedDryRunIntentMarkup,
     /agent loop runner release handoff routes: eligibility GET \/api\/code-agent\/local-patch-request\/dry-run-intent\/dry-run-intent-1\/eligibility/
   );
   assert.match(
@@ -949,6 +2310,65 @@ try {
       transitionRoute: 'GET /api/code-agent/local-patch-request/dry-run-intent/dry-run-intent-1/claimable-dry-run-preview',
     },
   ]);
+
+  const completedLocalDryRunMarkup = renderToStaticMarkup(React.createElement(CodeWorkspace, {
+    ...props,
+    codeAgentLocalPatchDryRunRequest: completedLocalDryRunRequest,
+    codeAgentLocalPatchDryRunResult: completedLocalDryRunResult,
+  }));
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle: dry-run observation returned/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle tool: patch\.apply \/ request local-dry-run-request-1 \/ approval NOT_REQUIRED/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle dry-run: eligibility pending \/ transition pending \/ request local-dry-run-request-1 \/ result REJECTED \/ claimable false \/ mutation false/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle dry-run observation: dry-run true \/ preflight true \/ snapshot true \/ mutation applied false \/ expected refusal true/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle safety: request creation true \/ enqueue true \/ push true \/ claim true \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle decision: ask for approval \/ action pending \/ runner pending \/ approval true \/ replan false \/ report false/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /agent loop one-cycle next: dry-run observation recorded; refresh readiness or runner next-action before any release; mutation remains disabled/
+  );
+  assert.match(
+    completedLocalDryRunMarkup,
+    /Dry-run completed; mutation refused as expected/
+  );
+
+  const failedLocalDryRunMarkup = renderToStaticMarkup(React.createElement(CodeWorkspace, {
+    ...props,
+    codeAgentLocalPatchDryRunRequest: {
+      ...completedLocalDryRunRequest,
+      requestId: 'local-dry-run-request-2',
+    },
+    codeAgentLocalPatchDryRunResult: failedLocalDryRunResult,
+  }));
+  assert.match(
+    failedLocalDryRunMarkup,
+    /agent loop one-cycle: dry-run observation returned/
+  );
+  assert.match(
+    failedLocalDryRunMarkup,
+    /agent loop one-cycle dry-run observation: dry-run true \/ preflight false \/ snapshot false \/ mutation applied false \/ expected refusal false/
+  );
+  assert.match(
+    failedLocalDryRunMarkup,
+    /agent loop one-cycle decision: replan from failure logs \/ action pending \/ runner pending \/ approval false \/ replan true \/ report false/
+  );
 
   await props.enqueueCodeAgentLoopRunnerReadOnly(props.codeAgentLoopPreview);
 
@@ -1202,6 +2622,22 @@ try {
   assert.match(
     finalResultPublicationMarkup,
     /agent loop runner final-result publication preview: READY_FINAL_RESULT_PUBLICATION_DISABLED \/ final result ready true \/ publication false \/ acknowledgement save false \/ mutation false/
+  );
+  assert.match(
+    finalResultPublicationMarkup,
+    /agent loop one-cycle: final report previewed/
+  );
+  assert.match(
+    finalResultPublicationMarkup,
+    /agent loop one-cycle final report: APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED \/ ready true \/ final result false \/ publication false \/ acknowledgement false \/ mutation false/
+  );
+  assert.match(
+    finalResultPublicationMarkup,
+    /agent loop one-cycle decision: stop with report \/ action STOP_AND_REPORT \/ runner READY_FINAL_RESULT_DISABLED \/ approval false \/ replan false \/ report true/
+  );
+  assert.match(
+    finalResultPublicationMarkup,
+    /agent loop one-cycle next: final report preview is ready for review; publication, acknowledgement, and mutation remain disabled/
   );
   assert.match(
     finalResultPublicationMarkup,

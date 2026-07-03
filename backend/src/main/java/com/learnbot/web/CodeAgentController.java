@@ -23,7 +23,25 @@ import com.learnbot.dto.LocalAgentToolExecutionResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalDecisionPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalDecisionPersistencePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalActionPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalActionPersistencePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalIntentPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalRecordPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestCreationPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopHeldRequestReviewPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentClaimReadinessPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentDryRunResultPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRequestCreationPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRequestEnvelopePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentQueuePreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRetryInputPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentRetryProposalPreviewRequest;
+import com.learnbot.dto.loop.CodeAgentLoopLocalAgentSnapshotDryRunPreviewRequest;
 import com.learnbot.dto.loop.CodeAgentLoopReleaseReviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopSubmissionPlanRequest;
+import com.learnbot.dto.loop.CodeAgentLoopSubmissionPlanResponse;
 import com.learnbot.dto.loop.CodeAgentLoopApprovalRequestPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopM8EntryReadinessResponse;
@@ -235,6 +253,312 @@ public class CodeAgentController {
                 selectedSpaceId,
                 request.instruction(),
                 request.maxSteps()
+        );
+    }
+
+    @PostMapping("/loop/submission-plan")
+    CodeAgentLoopSubmissionPlanResponse loopSubmissionPlan(@Valid @RequestBody CodeAgentLoopSubmissionPlanRequest request) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.submissionPlan(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.instruction(),
+                request.maxSteps(),
+                request.patchDryRunApprovalHandoffPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-intent-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalIntentPreview(
+            @Valid @RequestBody CodeAgentLoopApprovalIntentPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalIntentPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalReviewPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-request-creation-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalRequestCreationPreview(
+            @Valid @RequestBody CodeAgentLoopApprovalRequestCreationPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalRequestCreationPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalIntentPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-decision-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalDecisionPreview(
+            @Valid @RequestBody CodeAgentLoopApprovalDecisionPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalDecisionPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalRequestCreationPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-decision-persistence-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalDecisionPersistencePreview(
+            @Valid @RequestBody CodeAgentLoopApprovalDecisionPersistencePreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalDecisionPersistencePreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalDecisionPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-held-request-review-preview")
+    Map<String, Object> loopRunnerPatchDryRunHeldRequestReviewPreview(
+            @Valid @RequestBody CodeAgentLoopHeldRequestReviewPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.heldRequestReviewActionPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalDecisionPersistencePreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-action-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalActionPreview(
+            @Valid @RequestBody CodeAgentLoopApprovalActionPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalActionPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunHeldRequestReviewPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-action-persistence-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalActionPersistencePreview(
+            @Valid @RequestBody CodeAgentLoopApprovalActionPersistencePreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalActionPersistencePreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalActionPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-approval-record-preview")
+    Map<String, Object> loopRunnerPatchDryRunApprovalRecordPreview(
+            @Valid @RequestBody CodeAgentLoopApprovalRecordPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.approvalRecordPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalActionPersistencePreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-request-envelope-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentRequestEnvelopePreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentRequestEnvelopePreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentRequestEnvelopePreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunApprovalRecordPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-request-creation-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentRequestCreationPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentRequestCreationPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentRequestCreationPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentRequestEnvelopePreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-queue-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentQueuePreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentQueuePreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentQueuePreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentRequestCreationPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-claim-readiness-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentClaimReadinessPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentClaimReadinessPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentClaimReadinessPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentQueuePreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-snapshot-dry-run-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentSnapshotDryRunPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentSnapshotDryRunPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentSnapshotDryRunPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentClaimReadinessPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-dry-run-result-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentDryRunResultPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentDryRunResultPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentDryRunResultPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentSnapshotDryRunPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-retry-input-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentRetryInputPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentRetryInputPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentRetryInputPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentDryRunResultPreview()
+        );
+    }
+
+    @PostMapping("/loop/runner/patch-dry-run-local-agent-retry-proposal-preview")
+    Map<String, Object> loopRunnerPatchDryRunLocalAgentRetryProposalPreview(
+            @Valid @RequestBody CodeAgentLoopLocalAgentRetryProposalPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        return loopPreviewService.localAgentRetryProposalPreview(
+                request.repositoryId(),
+                selectedSpaceId,
+                request.agentId(),
+                request.workspaceId(),
+                request.patchDryRunLocalAgentRetryInputPreview()
         );
     }
 

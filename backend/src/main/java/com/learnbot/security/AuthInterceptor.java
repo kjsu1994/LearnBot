@@ -22,7 +22,11 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI();
-        if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)) {
+        if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)
+                || "/api/auth/cli-device-session/plan".equals(path)
+                || "/api/auth/cli-device-session/create/plan".equals(path)
+                || "/api/auth/cli-device-session/claim/plan".equals(path)
+                || "/api/auth/cli-device-session/claim-result/plan".equals(path)) {
             return true;
         }
         if (isLocalAgentTokenEndpoint(path) && hasLocalAgentToken(request)) {
