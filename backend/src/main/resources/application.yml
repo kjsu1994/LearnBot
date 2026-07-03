@@ -127,6 +127,8 @@ learnbot:
     index-threads: ${LEARNBOT_CODE_INDEX_THREADS:2}
     credential-secret: ${LEARNBOT_CODE_CREDENTIAL_SECRET:learnbot-local-dev-secret-change-me}
     server-local-mutation-enabled: ${LEARNBOT_CODE_SERVER_LOCAL_MUTATION_ENABLED:false}
+    final-result-publication-enabled: ${LEARNBOT_CODE_AGENT_FINAL_RESULT_PUBLICATION_ENABLED:true}
+    final-answer-save-enabled: ${LEARNBOT_CODE_AGENT_FINAL_ANSWER_SAVE_ENABLED:true}
     context:
       enabled: ${LEARNBOT_CODE_CONTEXT_ENABLED:true}
       llm-summary-enabled: ${LEARNBOT_CODE_CONTEXT_LLM_SUMMARY_ENABLED:true}

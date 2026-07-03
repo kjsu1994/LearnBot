@@ -2583,14 +2583,15 @@ class LocalAgentToolGatewayServiceTest {
         var released = enabledService.releaseHeldPatchForExecution(userId, requestId);
 
         var requestCaptor = forClass(LocalAgentToolRequest.class);
-        verify(repository, times(3)).create(any(UUID.class), requestCaptor.capture());
+        verify(repository, times(2)).create(any(UUID.class), requestCaptor.capture());
         assertThat(released.status()).isEqualTo(LocalAgentToolStatus.APPROVED);
         assertThat(requestCaptor.getAllValues()).extracting(LocalAgentToolRequest::toolName)
                 .containsExactly(
                         LocalAgentToolName.COMMAND_RUN_ALLOWED,
-                        LocalAgentToolName.GIT_STATUS,
-                        LocalAgentToolName.ROLLBACK_RESTORE
+                        LocalAgentToolName.GIT_STATUS
                 );
+        assertThat(requestCaptor.getAllValues()).extracting(LocalAgentToolRequest::toolName)
+                .doesNotContain(LocalAgentToolName.ROLLBACK_RESTORE);
         assertThat(requestCaptor.getAllValues()).allSatisfy(created -> {
             assertThat(created.approvalState()).isEqualTo(LocalAgentApprovalState.APPROVED);
             assertThat(created.executionTarget()).isEqualTo(AgentExecutionTarget.USER_LOCAL_AGENT);
@@ -2609,11 +2610,6 @@ class LocalAgentToolGatewayServiceTest {
                 .containsEntry("maxOutputBytes", 4096);
         assertThat(requestCaptor.getAllValues().get(0).createdAt())
                 .isBefore(requestCaptor.getAllValues().get(1).createdAt());
-        assertThat(requestCaptor.getAllValues().get(1).createdAt())
-                .isBefore(requestCaptor.getAllValues().get(2).createdAt());
-        assertThat(requestCaptor.getAllValues().get(2).input())
-                .containsEntry("manifestId", "snap-1234")
-                .containsEntry("snapshotManifestId", "snap-1234");
         verify(toolPusher, never()).sendToolRequest(any());
     }
 
@@ -3459,7 +3455,7 @@ class LocalAgentToolGatewayServiceTest {
         UUID sourceRequestId = UUID.randomUUID();
         UUID releaseAttemptId = UUID.randomUUID();
         UUID approvalRequestId = UUID.randomUUID();
-        List<UUID> requestIds = List.of(sourceRequestId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        List<UUID> requestIds = List.of(sourceRequestId, UUID.randomUUID(), UUID.randomUUID());
         LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId, repositoryId, loopId);
         Map<String, Object> sourceInput = new LinkedHashMap<>(sourceRequest.input());
         sourceInput.put("sourceRequestId", sourceRequestId.toString());
@@ -3490,27 +3486,25 @@ class LocalAgentToolGatewayServiceTest {
                 flowExecution(requestIds.get(1), sessionId, userId, agentId, workspaceId, LocalAgentToolName.COMMAND_RUN_ALLOWED,
                         sourceRequestId, releaseAttemptId, Map.of("commandId", "maven.backend.test", "exitCode", 0)),
                 flowExecution(requestIds.get(2), sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
-                        sourceRequestId, releaseAttemptId, Map.of("clean", false, "branch", "main")),
-                flowExecution(requestIds.get(3), sessionId, userId, agentId, workspaceId, LocalAgentToolName.ROLLBACK_RESTORE,
-                        sourceRequestId, releaseAttemptId, Map.of("restored", true, "manifestId", "snap-flow"))
+                        sourceRequestId, releaseAttemptId, Map.of("clean", false, "branch", "main"))
         );
         LocalAgentToolResponse response = new LocalAgentToolResponse(
                 sessionId,
-                requestIds.get(3),
+                requestIds.get(2),
                 userId,
                 agentId,
                 workspaceId,
                 AgentExecutionTarget.USER_LOCAL_AGENT,
-                LocalAgentToolName.ROLLBACK_RESTORE,
+                LocalAgentToolName.GIT_STATUS,
                 LocalAgentToolStatus.SUCCEEDED,
-                Map.of("restored", true, "manifestId", "snap-flow"),
+                Map.of("clean", false, "branch", "main"),
                 null,
                 null,
                 OffsetDateTime.now(),
                 OffsetDateTime.now(),
                 List.of()
         );
-        when(repository.find(requestIds.get(3))).thenReturn(java.util.Optional.of(flowRows.get(3)));
+        when(repository.find(requestIds.get(2))).thenReturn(java.util.Optional.of(flowRows.get(2)));
         when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(sourceExecution));
         when(repository.findCompletedApprovedExecutionFlowRowsForReleaseAttempt(userId, releaseAttemptId)).thenReturn(flowRows);
         when(releaseAttemptRepository.find(releaseAttemptId)).thenReturn(java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
@@ -9210,6 +9204,11 @@ class LocalAgentToolGatewayServiceTest {
                 "preflightPassed", true,
                 "mutationApplied", false,
                 "snapshotCreated", snapshotCreated,
+                "files", List.of(Map.of(
+                        "path", "README.md",
+                        "hashMatches", true,
+                        "contextMatches", true
+                )),
                 "snapshotObservation", Map.of(
                         "manifestPreview", Map.of(
                                 "id", "snap-1234",

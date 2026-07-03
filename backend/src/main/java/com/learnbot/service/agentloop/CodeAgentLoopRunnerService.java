@@ -1,5 +1,6 @@
 package com.learnbot.service.agentloop;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
@@ -9,15 +10,23 @@ import com.learnbot.dto.LocalAgentQueuedToolRequest;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
+import com.learnbot.dto.SavedAnswerDetail;
+import com.learnbot.dto.SavedAnswerRequest;
 import com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationResponse;
 import com.learnbot.dto.loop.CodeAgentLoopM8EntryReadinessResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopReleaseReviewResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRecommendedActionFactory;
 import com.learnbot.dto.loop.CodeAgentLoopToolCandidate;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.service.CodeAgentLoopPreviewService;
+import com.learnbot.service.AppUser;
 import com.learnbot.service.LocalAgentToolGatewayService;
+import com.learnbot.service.SavedAnswerService;
+import com.learnbot.repository.CodeAgentLoopTimelineRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -32,13 +41,33 @@ import java.util.UUID;
 public class CodeAgentLoopRunnerService {
     private final CodeAgentLoopPreviewService loopPreviewService;
     private final LocalAgentToolGatewayService toolGatewayService;
+    private final SavedAnswerService savedAnswerService;
+    private final CodeAgentLoopTimelineRepository timelineRepository;
+    private final LearnBotProperties properties;
+    private final ObjectMapper objectMapper;
 
     public CodeAgentLoopRunnerService(
             CodeAgentLoopPreviewService loopPreviewService,
             LocalAgentToolGatewayService toolGatewayService
     ) {
+        this(loopPreviewService, toolGatewayService, null, null, new LearnBotProperties(), new ObjectMapper());
+    }
+
+    @Autowired
+    public CodeAgentLoopRunnerService(
+            CodeAgentLoopPreviewService loopPreviewService,
+            LocalAgentToolGatewayService toolGatewayService,
+            SavedAnswerService savedAnswerService,
+            CodeAgentLoopTimelineRepository timelineRepository,
+            LearnBotProperties properties,
+            ObjectMapper objectMapper
+    ) {
         this.loopPreviewService = loopPreviewService;
         this.toolGatewayService = toolGatewayService;
+        this.savedAnswerService = savedAnswerService;
+        this.timelineRepository = timelineRepository;
+        this.properties = properties == null ? new LearnBotProperties() : properties;
+        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
     public CodeAgentLoopRunnerPreviewResponse previewNextStep(
@@ -129,7 +158,7 @@ public class CodeAgentLoopRunnerService {
         input.put("mutationAllowed", false);
 
         CodeAgentLoopTimelineEventSummary latestTreeOrSearch = latestDiscoveryObservation(userId, repositoryId, nextAction.loopId());
-        LocalAgentToolName selectedTool = selectReadOnlyTool(userId, repositoryId, nextAction.loopId());
+        LocalAgentToolName selectedTool = selectReadOnlyTool(userId, repositoryId, nextAction);
         if (selectedTool == LocalAgentToolName.WORKSPACE_TREE) {
             input.put("path", ".");
             input.put("maxEntries", 240);
@@ -146,7 +175,7 @@ public class CodeAgentLoopRunnerService {
             input.put("maxBytes", 6000);
         }
         if (selectedTool == LocalAgentToolName.FILE_READ) {
-            String path = selectFileReadPath(userId, repositoryId, nextAction.loopId());
+            String path = selectFileReadPath(userId, repositoryId, nextAction);
             if (path == null) {
                 return response(
                         nextAction,
@@ -304,6 +333,83 @@ public class CodeAgentLoopRunnerService {
         );
     }
 
+    public CodeAgentLoopFinalResultPublicationResponse publishFinalResult(
+            AppUser user,
+            UUID repositoryId,
+            UUID loopId,
+            UUID agentId,
+            UUID workspaceId
+    ) {
+        UUID userId = user.id();
+        CodeAgentLoopFinalResultPublicationPreviewResponse preview =
+                previewFinalResultPublication(userId, repositoryId, loopId, agentId, workspaceId);
+        if (!preview.finalResultReady()) {
+            return finalPublicationNotPublished(preview, "NOT_READY_FOR_FINAL_RESULT_PUBLICATION", preview.reason());
+        }
+        if (!properties.getCode().isFinalResultPublicationEnabled()
+                || !properties.getCode().isFinalAnswerSaveEnabled()
+                || savedAnswerService == null
+                || timelineRepository == null) {
+            return finalPublicationNotPublished(
+                    preview,
+                    "FINAL_RESULT_PUBLICATION_DISABLED",
+                    "Final-result publication is disabled or required persistence services are unavailable."
+            );
+        }
+
+        UUID spaceId = timelineRepository.findSpaceId(userId, repositoryId, loopId);
+        Map<String, Object> finalResult = finalResultMap(preview);
+        String finalAnswer = finalAnswerText(finalResult, preview.finalResultHandoff());
+        SavedAnswerDetail saved = savedAnswerService.create(user, new SavedAnswerRequest(
+                spaceId,
+                "CODE",
+                "Code Agent final result for loop " + loopId,
+                "LOCAL_AGENT_CODE_AGENT_LOOP",
+                finalAnswer,
+                objectMapper.createArrayNode(),
+                objectMapper.valueToTree(List.of(finalResult)),
+                "HIGH",
+                objectMapper.valueToTree(List.of(Map.of(
+                        "schema", "learnbot.code-agent.final-result-publication.diagnostics.v1",
+                        "publicationDecision", "FINAL_RESULT_PUBLISHED",
+                        "partialReindexEnabled", false,
+                        "ragFreshnessUpdateEnabled", false
+                ))),
+                repositoryId,
+                "Code Agent final result"
+        ));
+        Map<String, Object> savedFinalResult = new LinkedHashMap<>(finalResult);
+        savedFinalResult.put("savedAnswerId", saved.id().toString());
+        timelineRepository.appendFinalResultPublished(userId, repositoryId, loopId, saved.id(), savedFinalResult);
+
+        return new CodeAgentLoopFinalResultPublicationResponse(
+                preview.loopId(),
+                preview.repositoryId(),
+                "FINAL_RESULT_PUBLISHED",
+                "FINAL_RESULT_PUBLISHED",
+                "FINAL_RESULT_PUBLISHED",
+                "Final result was published and saved. RAG freshness still requires partial reindex or explicit stale-index disclosure.",
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                saved.id(),
+                finalAnswer,
+                stringValue(finalResult.get("staleIndexDisclosure")),
+                preview.handoffSummary(),
+                preview.finalResultHandoff(),
+                saved,
+                preview
+        );
+    }
+
     public CodeAgentLoopM8EntryReadinessResponse previewM8EntryReadiness(
             UUID userId,
             UUID repositoryId,
@@ -412,7 +518,8 @@ public class CodeAgentLoopRunnerService {
         return Map.copyOf(guardrails);
     }
 
-    private LocalAgentToolName selectReadOnlyTool(UUID userId, UUID repositoryId, UUID loopId) {
+    private LocalAgentToolName selectReadOnlyTool(UUID userId, UUID repositoryId, CodeAgentLoopNextActionResponse nextAction) {
+        UUID loopId = nextAction == null ? null : nextAction.loopId();
         if (loopId == null) {
             return LocalAgentToolName.GIT_STATUS;
         }
@@ -435,7 +542,7 @@ public class CodeAgentLoopRunnerService {
                     if (succeededSearch == 0) {
                         return LocalAgentToolName.WORKSPACE_SEARCH;
                     }
-                    if (succeededFileReads < Math.min(3, fileReadCandidates(timeline).size())) {
+                    if (succeededFileReads < Math.min(3, fileReadCandidates(timeline, instructionText(nextAction)).size())) {
                         return LocalAgentToolName.FILE_READ;
                     }
                     return succeededStatus > succeededDiff ? LocalAgentToolName.GIT_DIFF : LocalAgentToolName.GIT_STATUS;
@@ -464,7 +571,8 @@ public class CodeAgentLoopRunnerService {
                 && !candidate.mutationAllowed();
     }
 
-    private String selectFileReadPath(UUID userId, UUID repositoryId, UUID loopId) {
+    private String selectFileReadPath(UUID userId, UUID repositoryId, CodeAgentLoopNextActionResponse nextAction) {
+        UUID loopId = nextAction == null ? null : nextAction.loopId();
         CodeAgentLoopTimelineSummary timeline = timeline(userId, repositoryId, loopId);
         if (timeline == null) {
             return null;
@@ -480,13 +588,13 @@ public class CodeAgentLoopRunnerService {
                 }
             }
         }
-        return fileReadCandidates(timeline).stream()
+        return fileReadCandidates(timeline, instructionText(nextAction)).stream()
                 .filter(path -> !alreadyRead.contains(path))
                 .findFirst()
                 .orElse(null);
     }
 
-    private List<String> fileReadCandidates(CodeAgentLoopTimelineSummary timeline) {
+    private List<String> fileReadCandidates(CodeAgentLoopTimelineSummary timeline, String instruction) {
         if (timeline == null || timeline.events() == null) {
             return List.of();
         }
@@ -507,10 +615,70 @@ public class CodeAgentLoopRunnerService {
                         .forEach(ranked::add);
             }
         }
+        List<String> hints = filenameHints(instruction);
         return ranked.stream()
                 .filter(this::safeRelativePath)
+                .sorted((left, right) -> Integer.compare(candidateScore(right, hints), candidateScore(left, hints)))
                 .limit(5)
                 .toList();
+    }
+
+    private List<String> filenameHints(String instruction) {
+        if (instruction == null || instruction.isBlank()) {
+            return List.of();
+        }
+        String[] tokens = instruction.toLowerCase(java.util.Locale.ROOT).split("[^a-z0-9_.-]+");
+        LinkedHashSet<String> hints = new LinkedHashSet<>();
+        for (String token : tokens) {
+            String clean = trimFilenameToken(token);
+            if (clean.length() >= 2) {
+                hints.add(clean);
+                int dot = clean.lastIndexOf('.');
+                if (dot > 0) {
+                    hints.add(clean.substring(0, dot));
+                }
+            }
+        }
+        return List.copyOf(hints);
+    }
+
+    private String trimFilenameToken(String token) {
+        if (token == null) {
+            return "";
+        }
+        String clean = token;
+        while (!clean.isBlank() && "._-".indexOf(clean.charAt(0)) >= 0) {
+            clean = clean.substring(1);
+        }
+        while (!clean.isBlank() && "._-".indexOf(clean.charAt(clean.length() - 1)) >= 0) {
+            clean = clean.substring(0, clean.length() - 1);
+        }
+        return clean;
+    }
+
+    private int candidateScore(String path, List<String> hints) {
+        if (hints == null || hints.isEmpty() || path == null) {
+            return 0;
+        }
+        String normalized = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+        String fileName = normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
+        String stem = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+        int score = 0;
+        for (String hint : hints) {
+            if (hint.isBlank()) {
+                continue;
+            }
+            if (fileName.equals(hint) || stem.equals(hint)) {
+                score = Math.max(score, 100);
+            } else if (fileName.startsWith(hint + ".")) {
+                score = Math.max(score, 90);
+            } else if (fileName.contains(hint)) {
+                score = Math.max(score, 60);
+            } else if (normalized.contains("/" + hint) || normalized.contains(hint)) {
+                score = Math.max(score, 20);
+            }
+        }
+        return score;
     }
 
     private List<String> pathsFromOutputSummary(CodeAgentLoopTimelineEventSummary event, String key) {
@@ -561,6 +729,10 @@ public class CodeAgentLoopRunnerService {
                 || lower.contains("/obj/")) {
             return false;
         }
+        String fileName = lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower;
+        if (fileName.equals("readme") || fileName.startsWith("readme.")) {
+            return true;
+        }
         return lower.endsWith(".java")
                 || lower.endsWith(".cs")
                 || lower.endsWith(".js")
@@ -572,6 +744,7 @@ public class CodeAgentLoopRunnerService {
                 || lower.endsWith(".rs")
                 || lower.endsWith(".kt")
                 || lower.endsWith(".md")
+                || lower.endsWith(".txt")
                 || lower.endsWith(".json")
                 || lower.endsWith(".yml")
                 || lower.endsWith(".yaml")
@@ -615,8 +788,7 @@ public class CodeAgentLoopRunnerService {
     }
 
     private String searchQuery(CodeAgentLoopNextActionResponse nextAction) {
-        Object value = nextAction.sourceDetails() == null ? null : nextAction.sourceDetails().get("instruction");
-        String raw = value == null ? "" : String.valueOf(value).trim();
+        String raw = instructionText(nextAction);
         if (raw.isBlank()) {
             return "TODO";
         }
@@ -625,6 +797,11 @@ public class CodeAgentLoopRunnerService {
             return "TODO";
         }
         return normalized.length() > 80 ? normalized.substring(0, 80).trim() : normalized;
+    }
+
+    private String instructionText(CodeAgentLoopNextActionResponse nextAction) {
+        Object value = nextAction == null || nextAction.sourceDetails() == null ? null : nextAction.sourceDetails().get("instruction");
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private Map<String, Object> objectMap(Object value) {
@@ -770,6 +947,127 @@ public class CodeAgentLoopRunnerService {
                 preview,
                 boundary
         );
+    }
+
+    private CodeAgentLoopFinalResultPublicationResponse finalPublicationNotPublished(
+            CodeAgentLoopFinalResultPublicationPreviewResponse preview,
+            String decision,
+            String reason
+    ) {
+        return new CodeAgentLoopFinalResultPublicationResponse(
+                preview.loopId(),
+                preview.repositoryId(),
+                preview.status(),
+                preview.actionKey(),
+                decision,
+                reason,
+                preview.finalResultReady(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                stringValue(preview.finalResultHandoff().get("staleIndexDisclosureText")),
+                preview.handoffSummary(),
+                preview.finalResultHandoff(),
+                null,
+                preview
+        );
+    }
+
+    private Map<String, Object> finalResultMap(CodeAgentLoopFinalResultPublicationPreviewResponse preview) {
+        Map<String, Object> handoff = preview.finalResultHandoff();
+        Map<String, Object> approvedFlow = objectMap(preview.handoffSummary().get("approvedFlowInspection"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("schema", "learnbot.code-agent.final-result-publication.v1");
+        result.put("status", "FINAL_RESULT_PUBLISHED");
+        result.put("loopId", preview.loopId() == null ? null : preview.loopId().toString());
+        result.put("repositoryId", preview.repositoryId() == null ? null : preview.repositoryId().toString());
+        result.put("sourceRequestId", stringValue(firstNonNull(handoff.get("sourceRequestId"), approvedFlow.get("sourceRequestId"))));
+        result.put("releaseAttemptId", stringValue(firstNonNull(handoff.get("releaseAttemptId"), approvedFlow.get("releaseAttemptId"))));
+        result.put("stepCount", firstNonNull(approvedFlow.get("stepCount"), preview.handoffSummary().get("stepCount")));
+        result.put("ordered", firstNonNull(approvedFlow.get("ordered"), preview.handoffSummary().get("ordered")));
+        result.put("allTerminal", firstNonNull(approvedFlow.get("allTerminal"), preview.handoffSummary().get("allTerminal")));
+        result.put("allSucceeded", firstNonNull(preview.handoffSummary().get("allSucceeded"), true));
+        result.put("steps", approvedFlow.getOrDefault("steps", List.of()));
+        result.put("targetFiles", handoff.getOrDefault("targetFiles", List.of()));
+        result.put("finalMutationReportSummaryStatus", handoff.get("finalMutationReportSummaryStatus"));
+        result.put("postRetryVerificationPassed", handoff.get("postRetryVerificationPassed"));
+        result.put("ragFreshnessMarkerStatus", handoff.get("ragFreshnessMarkerStatus"));
+        result.put("partialReindexPlanStatus", handoff.get("partialReindexPlanStatus"));
+        result.put("partialReindexEnabled", false);
+        result.put("ragFreshnessUpdateEnabled", false);
+        result.put("staleIndexDisclosure", staleIndexDisclosure(handoff));
+        result.put("publicationEnabled", true);
+        result.put("acknowledgementSaveEnabled", true);
+        result.put("mutationEnabled", false);
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private String finalAnswerText(Map<String, Object> finalResult, Map<String, Object> handoff) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Code Agent work completed.");
+        lines.add("");
+        lines.add("- Patch applied: completed");
+        lines.add("- Verification: " + boolText(finalResult.get("postRetryVerificationPassed")));
+        lines.add("- Execution steps: " + stringValue(finalResult.get("stepCount")) + ", ordered=" + stringValue(finalResult.get("ordered")));
+        lines.add("- Rollback verification: " + rollbackStatus(finalResult.get("steps")));
+        lines.add("- Target files: " + joined(finalResult.get("targetFiles")));
+        lines.add("- RAG freshness: " + stringValue(finalResult.get("ragFreshnessMarkerStatus")));
+        lines.add("");
+        lines.add(staleIndexDisclosure(handoff));
+        lines.add("");
+        lines.add("Execution evidence was saved to Saved Answers and the loop timeline.");
+        return String.join("\n", lines);
+    }
+
+    private String rollbackStatus(Object stepsValue) {
+        if (stepsValue instanceof List<?> steps) {
+            for (Object item : steps) {
+                Map<String, Object> step = objectMap(item);
+                if ("rollback.restore".equals(stringValue(step.get("toolName")))) {
+                    return "SUCCEEDED".equals(stringValue(step.get("status"))) ? "completed" : stringValue(step.get("status"));
+                }
+            }
+        }
+        return "not observed";
+    }
+
+    private String staleIndexDisclosure(Map<String, Object> handoff) {
+        String text = stringValue(firstNonNull(
+                handoff.get("staleIndexDisclosureText"),
+                handoff.get("staleIndexDisclosure")
+        ));
+        if (text != null && !text.isBlank()) {
+            return text;
+        }
+        return "Local files changed and code RAG may be stale until partial reindex completes.";
+    }
+
+    private Object firstNonNull(Object first, Object second) {
+        return first != null ? first : second;
+    }
+
+    private String boolText(Object value) {
+        return Boolean.TRUE.equals(value) ? "passed" : "needs review";
+    }
+
+    private String joined(Object value) {
+        if (value instanceof List<?> list && !list.isEmpty()) {
+            return String.join(", ", list.stream().map(String::valueOf).toList());
+        }
+        return "none";
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private UUID uuidValue(Object value) {

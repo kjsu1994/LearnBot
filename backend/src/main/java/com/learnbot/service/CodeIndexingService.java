@@ -155,6 +155,37 @@ public class CodeIndexingService {
         return new ZipRepositoryIndexResult(record, job);
     }
 
+    public CodeRepositoryRecord createLocalRepository(
+            AppUser user,
+            UUID spaceId,
+            String localPath,
+            String name,
+            String branch,
+            String headCommit,
+            String gitRemote
+    ) {
+        String cleanLocalPath = localPath == null ? "" : localPath.trim();
+        if (cleanLocalPath.isBlank()) {
+            throw new IllegalArgumentException("localPath is required.");
+        }
+        UUID resolvedSpaceId = authService.resolveSpace(user, spaceId);
+        String cleanBranch = branch == null || branch.isBlank() ? "HEAD" : branch.trim();
+        String repositoryName = name == null || name.isBlank()
+                ? Path.of(cleanLocalPath).getFileName().toString()
+                : name.trim();
+        CodeRepositoryRecord record = repository.createLocalRepository(
+                repositoryName,
+                cleanLocalPath,
+                cleanBranch,
+                headCommit == null || headCommit.isBlank() ? null : headCommit.trim(),
+                gitRemote == null || gitRemote.isBlank() ? null : gitRemote.trim(),
+                resolvedSpaceId,
+                user.id()
+        );
+        auditService.log(user, "CODE_LOCAL_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Local code repository was registered for Local Agent work.");
+        return record;
+    }
+
     public List<CodeRepositorySummary> listRepositories(AppUser user, UUID spaceId) {
         UUID selectedSpaceId = spaceId == null ? null : authService.resolveSpace(user, spaceId);
         return repository.listRepositories(authService.accessibleSpaceIds(user), selectedSpaceId);

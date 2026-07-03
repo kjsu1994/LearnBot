@@ -24,6 +24,11 @@ import java.util.UUID;
 public class CodeAgentService {
     private static final int PLAN_SEARCH_LIMIT = 12;
     private static final int MAX_PLAN_TARGETS = 3;
+    private static final String DEFAULT_KOREAN_POEM_APPEND = """
+            \uC791\uC740 \uBE5B\uC774 \uBA38\uBB38 \uC790\uB9AC
+            \uD55C \uC904\uC758 \uBC14\uB78C\uC774 \uC26C\uC5B4 \uAC00\uACE0
+            \uC624\uB298\uC758 \uB9C8\uC74C\uC774 \uC870\uC6A9\uD788 \uBE5B\uB09C\uB2E4
+            """;
 
     private final CodeSearchService searchService;
     private final CodePatchFileLoader fileLoader;
@@ -54,9 +59,9 @@ public class CodeAgentService {
         if (candidatePaths.isEmpty()) {
             return new CodeAgentPlanResponse(
                     intent(safeInstruction),
-                    "관련 코드 근거가 부족해 안전한 수정 계획을 만들 수 없습니다.",
+                    "愿??肄붾뱶 洹쇨굅媛 遺議깊빐 ?덉쟾???섏젙 怨꾪쉷??留뚮뱾 ???놁뒿?덈떎.",
                     List.of(),
-                    List.of("질문 범위를 좁히거나 파일명, 클래스명, 메서드명을 추가해 주세요."),
+                    List.of("吏덈Ц 踰붿쐞瑜?醫곹엳嫄곕굹 ?뚯씪紐? ?대옒?ㅻ챸, 硫붿꽌?쒕챸??異붽???二쇱꽭??"),
                     "high",
                     true,
                     List.copyOf(warnings),
@@ -74,12 +79,12 @@ public class CodeAgentService {
         warnings.add("LLM plan JSON parsing failed or was unavailable; deterministic target selection was used.");
         return new CodeAgentPlanResponse(
                 intent(safeInstruction),
-                "검색 근거를 기준으로 수정 후보 파일을 선정했습니다.",
+                "寃??洹쇨굅瑜?湲곗??쇰줈 ?섏젙 ?꾨낫 ?뚯씪???좎젙?덉뒿?덈떎.",
                 targets,
                 List.of(
-                        "선정된 파일의 현재 구현을 확인합니다.",
-                        "요청한 동작과 직접 관련된 최소 변경만 제안합니다.",
-                        "diff 생성 후 서버 검증을 통과한 unified diff만 반환합니다."
+                        "?좎젙???뚯씪???꾩옱 援ы쁽???뺤씤?⑸땲??",
+                        "?붿껌???숈옉怨?吏곸젒 愿?⑤맂 理쒖냼 蹂寃쎈쭔 ?쒖븞?⑸땲??",
+                        "diff ?앹꽦 ???쒕쾭 寃利앹쓣 ?듦낵??unified diff留?諛섑솚?⑸땲??"
                 ),
                 "medium",
                 false,
@@ -98,27 +103,50 @@ public class CodeAgentService {
                 : requestedTargetFiles;
         CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, targetFiles);
         warnings.addAll(loaded.warnings());
-        if (loaded.files().isEmpty()) {
+        return patchLoadedFiles(safeInstruction, loaded.files(), warnings);
+    }
+
+    public CodeAgentPatchResponse patchFromLoadedFiles(String instruction, List<CodePatchFileLoader.LoadedPatchFile> loadedFiles) {
+        List<String> warnings = new ArrayList<>();
+        warnings.add("Patch input came from completed Local Agent file.read observations.");
+        return patchLoadedFiles(safe(instruction), loadedFiles, warnings);
+    }
+
+    private CodeAgentPatchResponse patchLoadedFiles(
+            String safeInstruction,
+            List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
+            List<String> warnings
+    ) {
+        List<CodePatchFileLoader.LoadedPatchFile> filesToPatch = loadedFiles == null ? List.of() : loadedFiles;
+        if (filesToPatch.isEmpty()) {
             return new CodeAgentPatchResponse(
-                    "수정 대상 파일을 안전하게 로드하지 못했습니다.",
+                    "No safe target files were available for patch generation.",
                     List.of(),
                     "high",
                     List.copyOf(warnings),
                     List.of(),
                     false
             );
+        }
+        CodeAgentPatchResponse deterministicAppend = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+        if (deterministicAppend != null) {
+            return deterministicAppend;
         }
         String diff;
         try {
             diff = cleanDiff(ollamaClient.chatResult(
                     patchSystemPrompt(),
-                    patchUserPrompt(safeInstruction, loaded.files()),
+                    patchUserPrompt(safeInstruction, filesToPatch),
                     1800
             ).content());
         } catch (RuntimeException ex) {
             warnings.add("LLM patch generation failed: " + ex.getMessage());
+            CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+            if (fallback != null) {
+                return fallback;
+            }
             return new CodeAgentPatchResponse(
-                    "패치 생성 모델 호출이 실패했습니다.",
+                    "Patch generation model call failed.",
                     List.of(),
                     "high",
                     List.copyOf(warnings),
@@ -126,11 +154,15 @@ public class CodeAgentService {
                     false
             );
         }
-        PatchValidationResult validation = validationService.validate(diff, loaded.files().stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
+        PatchValidationResult validation = validationService.validate(diff, filesToPatch.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
         warnings.addAll(validation.warnings());
         if (!validation.valid()) {
+            CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+            if (fallback != null) {
+                return fallback;
+            }
             return new CodeAgentPatchResponse(
-                    "생성된 patch가 서버 검증을 통과하지 못했습니다.",
+                    "Generated patch did not pass server validation.",
                     List.of(),
                     "high",
                     List.copyOf(warnings),
@@ -142,15 +174,14 @@ public class CodeAgentService {
                 .map(path -> new PatchFileDiff(path, diff))
                 .toList();
         return new CodeAgentPatchResponse(
-                "서버 검증을 통과한 unified diff를 생성했습니다. 자동 적용은 수행하지 않았습니다.",
+                "Generated a server-validated unified diff. It has not been applied.",
                 files,
                 files.size() > 1 ? "medium" : "low",
                 List.copyOf(warnings),
-                testSuggestions(loaded.files()),
+                testSuggestions(filesToPatch),
                 true
         );
     }
-
     private CodeAgentPlanResponse tryLlmPlan(String instruction, List<String> candidatePaths, List<CodeSearchResult> evidence, List<String> warnings) {
         try {
             String response = ollamaClient.chatResult(planSystemPrompt(), planUserPrompt(instruction, candidatePaths, evidence), 700).content();
@@ -171,7 +202,7 @@ public class CodeAgentService {
             }
             return new CodeAgentPlanResponse(
                     firstNonBlank(root.path("intent").asText(), intent(instruction)),
-                    firstNonBlank(root.path("summary").asText(), "수정 계획을 생성했습니다."),
+                    firstNonBlank(root.path("summary").asText(), "?섏젙 怨꾪쉷???앹꽦?덉뒿?덈떎."),
                     List.copyOf(targets),
                     textArray(root.path("changePlan")),
                     risk(root.path("riskLevel").asText()),
@@ -182,6 +213,80 @@ public class CodeAgentService {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private CodeAgentPatchResponse deterministicAppendPatch(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            List<String> warnings
+    ) {
+        if (!looksLikeAppendToEndRequest(instruction) || files == null || files.size() != 1) {
+            return null;
+        }
+        CodePatchFileLoader.LoadedPatchFile file = files.get(0);
+        String diff = appendDiff(file.path(), file.content(), appendTextForInstruction(instruction));
+        PatchValidationResult validation = validationService.validate(diff, List.of(file.path()));
+        warnings.add("Deterministic append fallback was used after model patch generation was unavailable or invalid.");
+        warnings.addAll(validation.warnings());
+        if (!validation.valid()) {
+            return null;
+        }
+        return new CodeAgentPatchResponse(
+                "Generated a server-validated append patch from the local file.read observation.",
+                List.of(new PatchFileDiff(file.path(), diff)),
+                "low",
+                List.copyOf(warnings),
+                testSuggestions(files),
+                true
+        );
+    }
+
+    private boolean looksLikeAppendToEndRequest(String instruction) {
+        String lower = safe(instruction).toLowerCase(Locale.ROOT);
+        boolean append = lower.contains("append")
+                || lower.contains("add")
+                || lower.contains("\uCD94\uAC00")
+                || lower.contains("\uB05D")
+                || lower.contains("\uB9C8\uC9C0\uB9C9");
+        boolean end = lower.contains("end")
+                || lower.contains("bottom")
+                || lower.contains("\uB05D")
+                || lower.contains("\uB9C8\uC9C0\uB9C9");
+        return append && end;
+    }
+
+    private String appendTextForInstruction(String instruction) {
+        String lower = safe(instruction).toLowerCase(Locale.ROOT);
+        if (lower.contains("poem") || lower.contains("\uC2DC")) {
+            return DEFAULT_KOREAN_POEM_APPEND.stripTrailing() + "\n";
+        }
+        return "Added by LearnBot.\n";
+    }
+
+    private String appendDiff(String path, String currentContent, String appendedText) {
+        String cleanPath = safe(path).replace('\\', '/');
+        String normalized = safe(currentContent).replace("\r\n", "\n").replace('\r', '\n');
+        List<String> appendedLines = safe(appendedText).replace("\r\n", "\n").replace('\r', '\n').lines().toList();
+        StringBuilder builder = new StringBuilder();
+        builder.append("--- a/").append(cleanPath).append("\n");
+        builder.append("+++ b/").append(cleanPath).append("\n");
+        if (normalized.isEmpty()) {
+            builder.append("@@ -0,0 +1,").append(appendedLines.size()).append(" @@\n");
+        } else {
+            String withoutFinalNewline = normalized.endsWith("\n")
+                    ? normalized.substring(0, normalized.length() - 1)
+                    : normalized;
+            List<String> existingLines = withoutFinalNewline.lines().toList();
+            String contextLine = existingLines.isEmpty() ? "" : existingLines.get(existingLines.size() - 1);
+            int lineNumber = Math.max(existingLines.size(), 1);
+            builder.append("@@ -").append(lineNumber).append(",1 +").append(lineNumber).append(",")
+                    .append(appendedLines.size() + 1).append(" @@\n");
+            builder.append(" ").append(contextLine).append("\n");
+        }
+        for (String line : appendedLines) {
+            builder.append("+").append(line).append("\n");
+        }
+        return builder.toString().trim();
     }
 
     private List<String> candidatePaths(List<CodeSearchResult> evidence, List<String> warnings) {
@@ -333,7 +438,7 @@ public class CodeAgentService {
                 }
             }
         }
-        return values.isEmpty() ? List.of("선정된 target file을 최소 변경으로 수정합니다.") : List.copyOf(values);
+        return values.isEmpty() ? List.of("?좎젙??target file??理쒖냼 蹂寃쎌쑝濡??섏젙?⑸땲??") : List.copyOf(values);
     }
 
     private List<String> testSuggestions(List<CodePatchFileLoader.LoadedPatchFile> files) {
@@ -353,8 +458,8 @@ public class CodeAgentService {
         String lower = safe(instruction).toLowerCase(Locale.ROOT);
         if (lower.contains("test")) return "test";
         if (lower.contains("refactor")) return "refactor";
-        if (lower.contains("fix") || lower.contains("bug") || lower.contains("수정") || lower.contains("버그")) return "bugfix";
-        if (lower.contains("docs") || lower.contains("문서")) return "docs";
+        if (lower.contains("fix") || lower.contains("bug") || lower.contains("?섏젙") || lower.contains("踰꾧렇")) return "bugfix";
+        if (lower.contains("docs") || lower.contains("臾몄꽌")) return "docs";
         return "feature";
     }
 

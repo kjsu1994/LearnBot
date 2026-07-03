@@ -13,6 +13,18 @@ import static org.mockito.Mockito.verify;
 
 class AuthInterceptorTest {
     @Test
+    void cliLoginBypassesAuthenticationSoCliCanEstablishStoredSession() {
+        AuthService authService = mock(AuthService.class);
+        AuthInterceptor interceptor = new AuthInterceptor(authService);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-login");
+
+        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
+
+        assertThat(allowed).isTrue();
+        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     void cliDeviceSessionPlanBypassesAuthenticationAsReadOnlyPlan() {
         AuthService authService = mock(AuthService.class);
         AuthInterceptor interceptor = new AuthInterceptor(authService);

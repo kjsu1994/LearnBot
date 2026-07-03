@@ -111,6 +111,7 @@ function CodeWorkspace(props) {
     codeAgentValidatedDryRunIntentEligibility,
     codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
+    localAgentPendingApprovals = [],
     localAgentDeviceApprovalResult,
     codeConversations = [],
     codeConversationId = '',
@@ -313,6 +314,7 @@ function CodeWorkspace(props) {
           validatedDryRunIntentEligibility={codeAgentValidatedDryRunIntentEligibility}
           validatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
           localAgentStatus={localAgentStatus}
+          localAgentPendingApprovals={localAgentPendingApprovals}
           localAgentTokens={props.localAgentTokens}
           selectedRepositoryId={selectedRepositoryId}
           loading={loading}
@@ -341,6 +343,7 @@ function CodeWorkspace(props) {
           onInspectValidatedDryRunIntentEligibility={inspectCodeAgentValidatedDryRunIntentEligibility}
           onPreviewValidatedDryRunIntentTransition={previewCodeAgentValidatedDryRunIntentTransition}
           onRefreshLocalAgent={refreshLocalAgentStatus}
+          onRefreshLocalAgentPendingApprovals={props.refreshLocalAgentPendingApprovals}
           onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
           onRevokeLocalAgentToken={props.revokeLocalAgentToken}
           onApply={applyCodeAgentPatch}
@@ -972,6 +975,7 @@ function CodeAgentPanel({
   validatedDryRunIntentEligibility,
   validatedDryRunIntentTransitionPreview,
   localAgentStatus,
+  localAgentPendingApprovals = [],
   localAgentTokens = [],
   selectedRepositoryId = '',
   loading = () => false,
@@ -1000,6 +1004,7 @@ function CodeAgentPanel({
   onInspectValidatedDryRunIntentEligibility = () => {},
   onPreviewValidatedDryRunIntentTransition = () => {},
   onRefreshLocalAgent = () => {},
+  onRefreshLocalAgentPendingApprovals = () => {},
   onRefreshLocalAgentTokens = () => {},
   onRevokeLocalAgentToken = () => {},
   onApply = () => {},
@@ -1525,10 +1530,64 @@ function CodeAgentPanel({
           {mutationPolicy?.serverLocalMutationEnabled ? ', server-local prototype enabled' : ''}
         </small>
         {mutationPolicy?.message && <small>{mutationPolicy.message}</small>}
-        <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
+          <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
           <RefreshCw size={14} />
           refresh
         </button>
+        <div className="local-agent-token-list">
+          <div className="result-heading">
+            <strong>대기 중인 승인</strong>
+            <Badge variant={localAgentPendingApprovals.length ? 'destructive' : 'secondary'}>{localAgentPendingApprovals.length}건</Badge>
+          </div>
+          <button
+            type="button"
+            className="ghost-button compact-action"
+            disabled={loading('local-agent-pending-approvals')}
+            onClick={onRefreshLocalAgentPendingApprovals}
+          >
+            {loading('local-agent-pending-approvals') ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+            승인 목록 새로고침
+          </button>
+          {!localAgentPendingApprovals.length ? (
+            <small>승인이 필요한 로컬 파일 변경 요청이 없습니다.</small>
+          ) : (
+            localAgentPendingApprovals.map((approval) => {
+              const targetFiles = Array.isArray(approval.input?.targetFiles) ? approval.input.targetFiles : [];
+              const approveKey = `code-agent-local-patch-approval-${approval.requestId}-approve`;
+              const denyKey = `code-agent-local-patch-approval-${approval.requestId}-deny`;
+              return (
+                <div className="local-agent-token-row" key={approval.requestId}>
+                  <span>
+                    <strong>{approval.toolName || 'patch.apply'}</strong>
+                    <small>{targetFiles.length ? `대상 파일: ${targetFiles.join(', ')}` : `요청: ${approval.requestId}`}</small>
+                    <small>{approval.createdAt ? `생성: ${formatDate(approval.createdAt)}` : `상태: ${approval.status || 'APPROVAL_REQUIRED'}`}</small>
+                  </span>
+                  <Badge variant="secondary">{approval.status || 'APPROVAL_REQUIRED'}</Badge>
+                  <button
+                    type="button"
+                    className="ghost-button compact-action"
+                    disabled={loading(approveKey) || loading(denyKey)}
+                    onClick={() => onLocalPatchApproval('APPROVE', approval.requestId)}
+                    title="이 요청의 로컬 파일 변경을 승인하고 에이전트가 계속 진행하게 합니다."
+                  >
+                    {loading(approveKey) ? <Loader2 className="spin" size={14} /> : <ShieldCheck size={14} />}
+                    승인
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button compact-action"
+                    disabled={loading(approveKey) || loading(denyKey)}
+                    onClick={() => onLocalPatchApproval('DENY', approval.requestId)}
+                    title="이 요청을 거절합니다. 로컬 파일은 수정되지 않습니다."
+                  >
+                    {loading(denyKey) ? <Loader2 className="spin" size={14} /> : <X size={14} />}
+                    거절
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
         <div className="local-agent-token-list">
           <div className="result-heading">
             <strong>Tokens</strong>
@@ -1575,89 +1634,89 @@ function CodeAgentPanel({
         <div className="action-row">
           <button disabled={!canPlan}>
             {loading('code-agent-plan') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-            계획 생성
+            수정 계획 만들기
           </button>
           <button type="button" className="ghost-button" disabled={!canPreviewLoop} onClick={onLoopPreview}>
             {loading('code-agent-loop-preview') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            Preview agent loop
+            자동 작업 흐름 확인
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canPreviewRunner}
             onClick={() => onLoopRunnerPreview(loopPreview)}
-            title="Preview-only runner state. This does not enqueue, create, push, claim, or execute any Local Agent request."
+            title="서버가 다음에 어떤 단계로 진행할지 확인합니다. 파일 수정이나 작업 생성은 하지 않습니다."
           >
             {loading('code-agent-loop-runner-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
-            Preview runner state
+            다음 단계 상태 보기
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canCheckRunnerEnqueueRefusal}
             onClick={() => onLoopRunnerEnqueueReadOnly(loopPreview)}
-            title="Checks the disabled runner handoff boundary for creation-disabled or release-gate states. It does not create, push, claim, or execute a Local Agent request."
+            title="읽기 작업을 만들 수 없는 이유를 확인합니다. 파일 수정이나 에이전트 실행은 하지 않습니다."
           >
             {loading('code-agent-loop-runner-enqueue-read-only') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
-            Check enqueue refusal
+            읽기 작업 차단 사유 보기
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canReviewRunnerReleaseRefusal}
             onClick={() => onLoopRunnerReleaseReview(loopPreview)}
-            title="Reviews the refreshed release gate and records the disabled release boundary. It does not release, claim, mutate, publish, deliver, or acknowledge results."
+            title="승인 후 실제 적용 단계로 넘어갈 수 없는 이유를 확인합니다. 파일은 수정하지 않습니다."
           >
             {loading('code-agent-loop-runner-release-review') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
-            Review release refusal
+            적용 차단 사유 보기
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canPreviewFinalResultPublication}
             onClick={() => onLoopRunnerFinalResultPublicationPreview(loopPreview)}
-            title="Previews the completed-flow final-result report and final-answer publication handoff. It does not publish, deliver, save acknowledgement, update RAG freshness, or mutate."
+            title="작업 완료 보고서가 어떻게 만들어질지 미리 봅니다. 게시, 저장, 파일 수정은 하지 않습니다."
           >
             {loading('code-agent-loop-runner-final-result-publication-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
-            Preview final result handoff
+            완료 보고서 미리보기
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canPreviewM8EntryReadiness}
             onClick={() => onLoopRunnerM8EntryReadiness(loopPreview)}
-            title="Checks whether the current completed-flow handoff is sufficient to move from M7 into M8 planning. It does not enable CLI packaging, publication, acknowledgement save, RAG updates, or mutation."
+            title="다음 제품화 단계로 넘어갈 준비가 됐는지 확인합니다. 일반 사용 중에는 필요하지 않습니다."
           >
             {loading('code-agent-loop-runner-m8-entry-readiness') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
-            Check M8 entry
+            제품화 준비 확인
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canEnqueueSelectedReadOnlyRunner}
             onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
-            title="Queues only the prepared read-only Local Agent git.status or git.diff observation. It does not claim, mutate, publish, or acknowledge final results."
+            title="에이전트가 git 상태나 diff 같은 읽기 전용 정보를 수집하게 합니다. 파일은 수정하지 않습니다."
           >
             {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            Queue read-only step
+            다음 읽기 작업 실행
           </button>
           <button
             type="button"
             className="ghost-button"
             disabled={!canPreviewRunnerToolSelection}
             onClick={() => onLoopRunnerToolSelectionPreview(loopPreview)}
-            title="Asks the model to select the next allowed read-only Local Agent tool. This is preview-only and does not create, enqueue, push, claim, mutate, publish, deliver, or acknowledge results."
+            title="모델이 다음에 어떤 읽기 도구를 쓸지 선택하게 합니다. 실제 작업 생성이나 파일 수정은 하지 않습니다."
           >
             {loading('code-agent-loop-runner-tool-selection-preview') ? <Loader2 className="spin" size={16} /> : <Eye size={16} />}
-            Preview model tool
+            모델 도구 선택 보기
           </button>
           <button type="button" className="ghost-button" disabled={!selectedRepositoryId || loading('code-agent-loop-timelines')} onClick={() => onRefreshLoopTimelines(selectedRepositoryId)}>
             {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-            Refresh loop history
+            작업 기록 새로고침
           </button>
           <button type="button" className="ghost-button" disabled={!canPatch} onClick={onPatch}>
             {loading('code-agent-patch') ? <Loader2 className="spin" size={16} /> : <FileCode2 size={16} />}
-            diff 생성
+            수정안 만들기
           </button>
         </div>
       </form>
@@ -2234,10 +2293,10 @@ function CodeAgentPanel({
             className="ghost-button compact-action"
             disabled={!canEnqueueSelectedReadOnlyRunner}
             onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
-            title="Queues the next model-previewed read-only Local Agent git.status observation. It does not claim, mutate, publish, deliver, or acknowledge final results."
+            title="모델이 고른 다음 읽기 전용 git.status 관찰을 실행합니다. 파일 수정이나 결과 게시를 하지 않습니다."
           >
             {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={14} /> : <Play size={14} />}
-            Continue read-only step
+            읽기 단계 계속
           </button>
         </div>
       )}
@@ -2291,7 +2350,7 @@ function CodeAgentPanel({
           <div className="action-row">
             <button type="button" className="ghost-button" disabled={!canPrepareLocalPatchRequest} onClick={onPrepareLocalPatchRequest}>
               {loading('code-agent-local-patch-request') ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
-              Prepare Local Agent review
+              로컬 적용 승인 준비
             </button>
           </div>
           {localPatchRequest && (

@@ -18,10 +18,12 @@ try {
     if ($status.installed -ne $true) {
         throw "expected installed=true"
     }
-    if ($status.limitations.windowsService -ne $false -or $status.limitations.signedInstaller -ne $false -or $status.limitations.autoUpdate -ne $false) {
+    if ($status.limitations.windowsService -ne $true -or $status.limitations.signedInstaller -ne $false -or $status.limitations.autoUpdate -ne $false) {
         throw "pilot limitations must stay explicit"
     }
-    if ([string]::IsNullOrWhiteSpace($status.commands.status) -or [string]::IsNullOrWhiteSpace($status.commands.doctor)) {
+    if ([string]::IsNullOrWhiteSpace($status.commands.status) -or
+        [string]::IsNullOrWhiteSpace($status.commands.doctor) -or
+        [string]::IsNullOrWhiteSpace($status.commands.serviceRun)) {
         throw "expected recommended commands"
     }
 

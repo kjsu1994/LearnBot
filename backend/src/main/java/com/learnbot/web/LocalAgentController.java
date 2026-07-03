@@ -129,6 +129,12 @@ public class LocalAgentController {
         ));
     }
 
+    @GetMapping("/tools/pending-approvals")
+    List<LocalAgentToolExecutionResponse> pendingToolApprovals() {
+        var user = currentUserProvider.currentUser();
+        return toolGatewayService.findPendingApprovalsForUser(user.id(), 25);
+    }
+
     @GetMapping("/tools/{requestId}")
     ResponseEntity<LocalAgentToolExecutionResponse> toolExecution(@PathVariable UUID requestId) {
         var user = currentUserProvider.currentUser();

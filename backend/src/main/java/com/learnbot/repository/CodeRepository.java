@@ -96,6 +96,37 @@ public class CodeRepository {
         return findRepository(id).orElseThrow();
     }
 
+    public CodeRepositoryRecord createLocalRepository(
+            String name,
+            String localPath,
+            String branch,
+            String headCommit,
+            String gitRemote,
+            UUID spaceId,
+            UUID createdBy
+    ) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO code_repositories (
+                    id, name, source_type, source_label, git_url, branch, auth_type,
+                    local_path, status, last_indexed_commit, space_id, created_by
+                )
+                VALUES (
+                    :id, :name, 'LOCAL', :localPath, :gitRemote, :branch, 'NONE',
+                    :localPath, 'LOCAL_READY', :headCommit, :spaceId, :createdBy
+                )
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", name)
+                .addValue("localPath", localPath)
+                .addValue("branch", branch)
+                .addValue("headCommit", headCommit)
+                .addValue("gitRemote", gitRemote)
+                .addValue("spaceId", spaceId)
+                .addValue("createdBy", createdBy));
+        return findRepository(id).orElseThrow();
+    }
+
     public void storeCredential(UUID repositoryId, EncryptedGitCredential credential) {
         jdbc.update("""
                 UPDATE code_repositories
@@ -131,7 +162,7 @@ public class CodeRepository {
     public List<CodeRepositorySummary> listRepositories(List<UUID> spaceIds, UUID selectedSpaceId) {
         return jdbc.query("""
                 SELECT r.id, r.space_id, r.name, r.source_type, r.source_label, r.source_hash,
-                       r.git_url, r.branch, r.auth_type, r.status, r.last_indexed_commit,
+                       r.git_url, r.branch, r.auth_type, r.local_path, r.status, r.last_indexed_commit,
                        r.error_message, r.created_at, r.updated_at,
                        (r.credential_token_ciphertext IS NOT NULL) AS credential_stored,
                        COALESCE(f.active_file_count, 0) AS active_file_count,
@@ -1675,6 +1706,7 @@ public class CodeRepository {
                 rs.getString("git_url"),
                 rs.getString("branch"),
                 rs.getString("auth_type"),
+                rs.getString("local_path"),
                 rs.getString("status"),
                 rs.getString("last_indexed_commit"),
                 rs.getString("error_message"),

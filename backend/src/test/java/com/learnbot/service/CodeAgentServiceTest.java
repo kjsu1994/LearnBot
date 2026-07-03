@@ -136,6 +136,34 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesFallsBackToDeterministicAppendForSimpleEndAppendRequest() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "readme.txt";
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "README파일 끝에 짧은 시를 추가해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "text", ""))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).path()).isEqualTo(path);
+        assertThat(response.files().get(0).diff())
+                .contains("--- a/readme.txt")
+                .contains("+++ b/readme.txt")
+                .contains("@@ -0,0 +1,3 @@")
+                .contains("+작은 빛이 머문 자리");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Deterministic append fallback"));
+    }
+
+    @Test
     void fileLoaderRejectsUnsafePatchTargetsBeforeReadingContent() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeContentReader contentReader = mock(CodeContentReader.class);

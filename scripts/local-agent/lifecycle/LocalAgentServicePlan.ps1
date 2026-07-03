@@ -44,7 +44,7 @@ function Get-LearnBotLocalAgentServicePlan {
         $missingPrerequisites += "serviceAlreadyInstalled"
     }
 
-    $binPath = "`"$executableFullPath`" agent start --interval-seconds $IntervalSeconds --transport $Transport"
+    $binPath = "`"$executableFullPath`" service run --interval-seconds $IntervalSeconds --transport $Transport --config `"$configFullPath`""
 
     [pscustomobject]@{
         schema = "learnbot.local-agent.service-plan.v1"

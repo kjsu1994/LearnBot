@@ -5,6 +5,7 @@ import com.learnbot.dto.CliDeviceSessionCreatePlanRequest;
 import com.learnbot.dto.CliDeviceSessionClaimPlanRequest;
 import com.learnbot.dto.CliDeviceSessionClaimResultPlanRequest;
 import com.learnbot.dto.AuthResponse;
+import com.learnbot.dto.LoginRequest;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AppUser;
 import com.learnbot.service.AuthService;
@@ -16,9 +17,33 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AuthControllerTest {
+    @Test
+    void cliLoginReturnsTokensForEncryptedLocalStorage() {
+        AuthService authService = mock(AuthService.class);
+        AuthController controller = new AuthController(authService, mock(CurrentUserProvider.class));
+        AuthResponse response = new AuthResponse(
+                "access-token",
+                OffsetDateTime.now().plusHours(1),
+                "refresh-token",
+                OffsetDateTime.now().plusDays(30),
+                null,
+                null,
+                true
+        );
+        when(authService.login("jinsu.kim", "password", true)).thenReturn(response);
+
+        AuthResponse actual = controller.cliLogin(new LoginRequest("jinsu.kim", null, "password", true));
+
+        assertThat(actual.token()).isEqualTo("access-token");
+        assertThat(actual.refreshToken()).isEqualTo("refresh-token");
+        assertThat(actual.rememberLogin()).isTrue();
+        verify(authService).login("jinsu.kim", "password", true);
+    }
+
     @Test
     void cliDeviceSessionCreateClaimAndClaimResultIssueTokensOnlyAfterBrowserApproval() {
         UUID userId = UUID.randomUUID();

@@ -1160,6 +1160,8 @@ public class LearnBotProperties {
         private String credentialSecret = "learnbot-local-dev-secret-change-me";
 
         private boolean serverLocalMutationEnabled = false;
+        private boolean finalResultPublicationEnabled = true;
+        private boolean finalAnswerSaveEnabled = true;
 
         private Context context = new Context();
         private Graph graph = new Graph();
@@ -1234,6 +1236,22 @@ public class LearnBotProperties {
 
         public void setServerLocalMutationEnabled(boolean serverLocalMutationEnabled) {
             this.serverLocalMutationEnabled = serverLocalMutationEnabled;
+        }
+
+        public boolean isFinalResultPublicationEnabled() {
+            return finalResultPublicationEnabled;
+        }
+
+        public void setFinalResultPublicationEnabled(boolean finalResultPublicationEnabled) {
+            this.finalResultPublicationEnabled = finalResultPublicationEnabled;
+        }
+
+        public boolean isFinalAnswerSaveEnabled() {
+            return finalAnswerSaveEnabled;
+        }
+
+        public void setFinalAnswerSaveEnabled(boolean finalAnswerSaveEnabled) {
+            this.finalAnswerSaveEnabled = finalAnswerSaveEnabled;
         }
 
         public Context getContext() {

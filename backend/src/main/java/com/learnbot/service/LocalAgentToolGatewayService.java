@@ -479,32 +479,44 @@ public class LocalAgentToolGatewayService {
         Map<String, Object> releaseEnablementChecklist = latestAttempt.get("releaseEnablementChecklist") instanceof Map<?, ?> checklist
                 ? copyMap(checklist)
                 : Map.of();
+        boolean releaseEnabled = patchExecutionReleaseEnabled();
         boolean releaseAttemptReadyForClaim = releaseAttemptReadyForClaim(readiness);
-        List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed, releaseAttemptReadyForClaim);
+        boolean readyToRelease = preconditionsPassed && releaseEnabled && releaseAttemptReadyForClaim;
+        List<String> blockingReasons = releaseBoundaryBlockingReasons(readiness, releaseEnablementChecklist, preconditionsPassed, releaseAttemptReadyForClaim, releaseEnabled);
         LocalAgentPatchReleaseBoundaryResponse boundary = new LocalAgentPatchReleaseBoundaryResponse(
                 requestId,
-                preconditionsPassed ? "RELEASE_REFUSED_GATE_DISABLED" : "RELEASE_REFUSED_PRECONDITIONS_BLOCKED",
-                "REFUSAL_ONLY",
+                readyToRelease
+                        ? "RELEASE_READY_FOR_EXECUTION"
+                        : preconditionsPassed
+                        ? (releaseEnabled ? "RELEASE_WAITING_FOR_FRESH_EVIDENCE" : "RELEASE_REFUSED_GATE_DISABLED")
+                        : "RELEASE_REFUSED_PRECONDITIONS_BLOCKED",
+                readyToRelease ? "CALL_RELEASE_FOR_EXECUTION" : "REFUSAL_ONLY",
+                releaseEnabled,
+                readyToRelease,
+                readyToRelease,
+                readyToRelease,
                 false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
+                readyToRelease,
+                readyToRelease,
+                readyToRelease,
                 false,
                 false,
                 false,
                 blockingReasons,
-                preconditionsPassed
-                        ? "Release action is modeled, but the release gate is disabled so the held patch remains non-claimable."
-                        : "Release action is modeled, but readiness prerequisites are blocked and the release gate is disabled.",
+                readyToRelease
+                        ? "Fresh release-attempt evidence is complete and the release gate is enabled; call release-for-execution to make the approved patch claimable."
+                        : preconditionsPassed
+                        ? (releaseEnabled
+                        ? "Release action is waiting for fresh release-attempt-linked evidence before the held patch can become claimable."
+                        : "Release action is modeled, but the release gate is disabled so the held patch remains non-claimable.")
+                        : "Release action is modeled, but readiness prerequisites are blocked.",
                 readiness.patchExecutionGate(),
                 releaseEnablementChecklist,
                 readiness.releaseAttemptModel()
         );
-        appendLoopReleaseBoundaryRefusalEvent(userId, requestId, boundary);
+        if (!readyToRelease) {
+            appendLoopReleaseBoundaryRefusalEvent(userId, requestId, boundary);
+        }
         return boundary;
     }
 
@@ -512,7 +524,8 @@ public class LocalAgentToolGatewayService {
             LocalAgentPatchExecutionReadinessResponse readiness,
             Map<String, Object> releaseEnablementChecklist,
             boolean preconditionsPassed,
-            boolean releaseAttemptReadyForClaim
+            boolean releaseAttemptReadyForClaim,
+            boolean releaseEnabled
     ) {
         List<String> reasons = new ArrayList<>();
         if (!preconditionsPassed) {
@@ -529,9 +542,15 @@ public class LocalAgentToolGatewayService {
         if (readiness.releaseAttemptModel().latestAttempt().isEmpty()) {
             reasons.add("no disabled release attempt envelope exists yet");
         }
-        reasons.add("release gate is disabled");
-        reasons.add("held patch request remains non-claimable");
-        reasons.add("Local Agent request creation and push remain disabled");
+        if (!releaseEnabled) {
+            reasons.add("release gate is disabled");
+        }
+        if (!preconditionsPassed || !releaseAttemptReadyForClaim || !releaseEnabled) {
+            reasons.add("held patch request remains non-claimable");
+        }
+        if (!preconditionsPassed || !releaseAttemptReadyForClaim || !releaseEnabled) {
+            reasons.add("Local Agent request creation and push remain disabled");
+        }
         return reasons;
     }
 
@@ -624,13 +643,6 @@ public class LocalAgentToolGatewayService {
                         approvedSequenceCommonInput(releasedPatch, sourceRequestId, releaseAttemptId),
                         baseCreatedAt.plusNanos(2_000_000),
                         "Approved release follow-up git.status observation row. Local Agent polling must claim it after command.runAllowed."
-                ),
-                approvedSequenceRequest(
-                        releasedPatch,
-                        LocalAgentToolName.ROLLBACK_RESTORE,
-                        approvedRollbackInput(releasedPatch, sourceRequestId, releaseAttemptId, manifestId),
-                        baseCreatedAt.plusNanos(3_000_000),
-                        "Approved release follow-up rollback.restore verification row. Local Agent polling must claim it after git.status."
                 )
         );
         followUpRequests.forEach(request -> repository.create(UUID.randomUUID(), request));
@@ -843,6 +855,9 @@ public class LocalAgentToolGatewayService {
         if (source.input().get("sourceRepository") instanceof Map<?, ?> sourceRepository) {
             input.put("sourceRepository", copyMap(sourceRepository));
         }
+        if (source.input().get("localWorkspace") instanceof Map<?, ?> localWorkspace) {
+            input.put("localWorkspace", copyMap(localWorkspace));
+        }
         input.put("sourceRequestId", source.id().toString());
         input.put("releaseAttemptId", attemptId.toString());
         input.put("freshObservationOnly", true);
@@ -1018,6 +1033,12 @@ public class LocalAgentToolGatewayService {
                 .map(this::toResponse);
     }
 
+    public List<LocalAgentToolExecutionResponse> findPendingApprovalsForUser(UUID userId, int limit) {
+        return repository.findPendingApprovalsForUser(userId, limit).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     public Map<String, Object> inspectApprovedExecutionFlow(UUID userId, List<UUID> requestIds) {
         List<UUID> safeRequestIds = requestIds == null ? List.of() : requestIds;
         List<LocalAgentToolExecution> executions = safeRequestIds.stream()
@@ -1134,7 +1155,8 @@ public class LocalAgentToolGatewayService {
                 dryRunOutput != null
                         && Boolean.TRUE.equals(dryRunOutput.get("dryRun"))
                         && Boolean.TRUE.equals(dryRunOutput.get("preflightPassed"))
-                        && Boolean.FALSE.equals(dryRunOutput.get("mutationApplied")),
+                        && Boolean.FALSE.equals(dryRunOutput.get("mutationApplied"))
+                        && dryRunContextMatches(dryRunOutput),
                 "Latest Local Agent dry-run must pass hash/context preflight without mutation."
         ));
         prerequisites.add(releasePrerequisite(
@@ -1177,6 +1199,16 @@ public class LocalAgentToolGatewayService {
                 : "Patch execution prerequisites are incomplete.");
         result.put("prerequisites", prerequisites);
         return result;
+    }
+
+    private boolean dryRunContextMatches(Map<String, Object> dryRunOutput) {
+        if (dryRunOutput == null || !(dryRunOutput.get("files") instanceof List<?> files) || files.isEmpty()) {
+            return false;
+        }
+        return files.stream()
+                .filter(Map.class::isInstance)
+                .map(item -> copyMap((Map<?, ?>) item))
+                .allMatch(file -> Boolean.TRUE.equals(file.get("contextMatches")));
     }
 
     private Map<String, Object> patchExecutionGate(
@@ -4840,7 +4872,14 @@ public class LocalAgentToolGatewayService {
     }
 
     private boolean trustedRepositoryMatch(Map<String, Object> repositoryVerification) {
-        if (repositoryVerification == null || !"MATCH".equals(repositoryVerification.get("status"))) {
+        if (repositoryVerification == null) {
+            return false;
+        }
+        if ("LOCAL_PATH_ONLY_MATCH".equals(repositoryVerification.get("status"))
+                && repositoryVerification.get("pathCheck") instanceof Map<?, ?> pathCheck) {
+            return "MATCH".equals(pathCheck.get("status"));
+        }
+        if (!"MATCH".equals(repositoryVerification.get("status"))) {
             return false;
         }
         if (!(repositoryVerification.get("checks") instanceof List<?> checks)) {
@@ -4871,7 +4910,8 @@ public class LocalAgentToolGatewayService {
             return response;
         }
         Map<String, Object> output = new LinkedHashMap<>(response.output());
-        output.put("repositoryVerification", compareRepositoryIdentity(source, response.output().get("repositoryIdentity"), response.status()));
+        Map<?, ?> localWorkspace = execution.input().get("localWorkspace") instanceof Map<?, ?> workspace ? workspace : Map.of();
+        output.put("repositoryVerification", compareRepositoryIdentity(source, localWorkspace, response.output().get("repositoryIdentity"), response.status()));
         return new LocalAgentToolResponse(
                 response.sessionId(),
                 response.requestId(),
@@ -5132,7 +5172,7 @@ public class LocalAgentToolGatewayService {
                 response.userId(),
                 releaseAttemptId
         );
-        if (executions.size() != 4) {
+        if (executions.size() != 3 && executions.size() != 4) {
             return;
         }
         Map<String, Object> inspection = approvedExecutionFlowSummary(
@@ -5316,6 +5356,9 @@ public class LocalAgentToolGatewayService {
             UUID loopId,
             Map<String, Object> requestInput
     ) {
+        if (loopTimelineRepository.successfulPatchDryRunObservation(response)) {
+            return;
+        }
         switch (response.status()) {
             case SUCCEEDED -> {
             }
@@ -5388,12 +5431,13 @@ public class LocalAgentToolGatewayService {
         return null;
     }
 
-    private Map<String, Object> compareRepositoryIdentity(Map<?, ?> source, Object identityValue, LocalAgentToolStatus status) {
+    private Map<String, Object> compareRepositoryIdentity(Map<?, ?> source, Map<?, ?> localWorkspace, Object identityValue, LocalAgentToolStatus status) {
         List<Map<String, Object>> checks = new ArrayList<>();
         Map<?, ?> identity = identityValue instanceof Map<?, ?> map ? map : Map.of();
         addRepositoryCheck(checks, "branch", text(source.get("branch")), text(identity.get("branch")), true, false);
         addRepositoryCheck(checks, "head", text(source.get("lastIndexedCommit")), text(identity.get("headCommit")), false, false);
         addRepositoryCheck(checks, "remote", text(source.get("gitUrl")), text(identity.get("remoteUrl")), false, true);
+        Map<String, Object> pathCheck = localPathCheck(source, localWorkspace);
 
         List<Map<String, Object>> considered = checks.stream()
                 .filter(check -> !"SKIPPED".equals(check.get("status")))
@@ -5404,22 +5448,55 @@ public class LocalAgentToolGatewayService {
         if (status != LocalAgentToolStatus.SUCCEEDED) {
             resultStatus = "UNVERIFIED";
             message = "Local repository observation did not complete successfully.";
-        } else if (considered.isEmpty() || considered.stream().anyMatch(check -> "UNKNOWN".equals(check.get("status")))) {
-            resultStatus = "UNVERIFIED";
-            message = "Not enough local repository identity data to verify this workspace.";
         } else if (considered.stream().anyMatch(check -> "MISMATCH".equals(check.get("status")))) {
             resultStatus = "MISMATCH";
             message = "Local workspace identity does not match the indexed repository metadata.";
-        } else {
+        } else if (!considered.isEmpty() && considered.stream().noneMatch(check -> "UNKNOWN".equals(check.get("status")))) {
             resultStatus = "MATCH";
             message = "Observed local repository identity matches available indexed metadata.";
+        } else if ("MATCH".equals(pathCheck.get("status"))) {
+            resultStatus = "LOCAL_PATH_ONLY_MATCH";
+            message = "Local folder has no complete git identity, but the approved Local Agent workspace path matches the registered local repository path.";
+        } else {
+            resultStatus = "UNVERIFIED";
+            message = "Not enough local repository identity data to verify this workspace.";
         }
         return Map.of(
                 "status", resultStatus,
                 "blocking", blocking,
                 "message", message,
-                "checks", checks
+                "checks", checks,
+                "pathCheck", pathCheck
         );
+    }
+
+    private Map<String, Object> localPathCheck(Map<?, ?> source, Map<?, ?> localWorkspace) {
+        String sourceType = text(source.get("sourceType"));
+        String expected = text(source.get("localPath"));
+        String actual = text(localWorkspace.get("rootPath"));
+        if (!"LOCAL".equalsIgnoreCase(sourceType) || !hasText(expected) || !hasText(actual)) {
+            return Map.of(
+                    "key", "localPath",
+                    "status", "SKIPPED",
+                    "expected", expected,
+                    "actual", actual
+            );
+        }
+        boolean matched = normalizeLocalPath(expected).equalsIgnoreCase(normalizeLocalPath(actual));
+        return Map.of(
+                "key", "localPath",
+                "status", matched ? "MATCH" : "MISMATCH",
+                "expected", expected,
+                "actual", actual
+        );
+    }
+
+    private String normalizeLocalPath(String value) {
+        try {
+            return java.nio.file.Path.of(value).toAbsolutePath().normalize().toString();
+        } catch (RuntimeException ex) {
+            return value.trim().replace('\\', '/').replaceAll("/+$", "");
+        }
     }
 
     private void addRepositoryCheck(List<Map<String, Object>> checks, String key, String expected, String actual, boolean skipHead, boolean normalizeUrl) {

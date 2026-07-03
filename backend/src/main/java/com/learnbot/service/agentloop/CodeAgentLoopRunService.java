@@ -14,6 +14,7 @@ import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
+import com.learnbot.service.CodePatchFileLoader;
 import com.learnbot.service.CodeAgentService;
 import org.springframework.stereotype.Service;
 
@@ -300,14 +301,28 @@ public class CodeAgentLoopRunService {
         }
 
         List<String> targetFiles = fileReadTargets(timeline).stream().limit(3).toList();
+        List<CodePatchFileLoader.LoadedPatchFile> observedFiles = observedPatchFiles(timeline, targetFiles);
+        String patchSource = observedFiles.isEmpty() ? "indexed-loader" : "local-agent-file-read";
         try {
-            CodeAgentPatchResponse patch = codeAgentService.patch(
+            CodeAgentPatchResponse patch = observedFiles.isEmpty()
+                    ? codeAgentService.patch(
                     repositoryId,
                     timeline.spaceId(),
                     timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
                     timeline.instruction(),
                     targetFiles
-            );
+            )
+                    : codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+            if ((patch == null || !patch.valid()) && !observedFiles.isEmpty() && observedFiles.size() < targetFiles.size()) {
+                patch = codeAgentService.patch(
+                        repositoryId,
+                        timeline.spaceId(),
+                        timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
+                        timeline.instruction(),
+                        targetFiles
+                );
+                patchSource = "indexed-loader-fallback";
+            }
             if (patch == null || !patch.valid() || patch.files() == null || patch.files().isEmpty()) {
                 loopPreviewService.appendPatchProposalBlocked(
                         userId,
@@ -315,7 +330,7 @@ public class CodeAgentLoopRunService {
                         loopId,
                         "PATCH_PROPOSAL_BLOCKED",
                         "Patch proposal did not produce a valid unified diff.",
-                        patchBlockedDetails(targetFiles, patch, null)
+                        patchBlockedDetails(targetFiles, patchSource, patch, null)
                 );
                 return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal did not produce a valid unified diff.");
             }
@@ -331,7 +346,7 @@ public class CodeAgentLoopRunService {
                         loopId,
                         "PATCH_PROPOSAL_BLOCKED",
                         "Patch proposal returned no diff body.",
-                        patchBlockedDetails(targetFiles, patch, null)
+                        patchBlockedDetails(targetFiles, patchSource, patch, null)
                 );
                 return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal returned no diff body.");
             }
@@ -344,7 +359,8 @@ public class CodeAgentLoopRunService {
                     loopId,
                     timeline.instruction(),
                     diff,
-                    targetFiles
+                    targetFiles,
+                    observedFiles
             );
             return patchProposalResponse(
                     loopId,
@@ -360,7 +376,7 @@ public class CodeAgentLoopRunService {
                     loopId,
                     "PATCH_PROPOSAL_BLOCKED",
                     "Patch proposal or approval request creation failed.",
-                    patchBlockedDetails(targetFiles, null, ex)
+                    patchBlockedDetails(targetFiles, patchSource, null, ex)
             );
             return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal or approval request creation failed: " + ex.getMessage());
         }
@@ -391,6 +407,45 @@ public class CodeAgentLoopRunService {
         return List.copyOf(targets);
     }
 
+    private List<CodePatchFileLoader.LoadedPatchFile> observedPatchFiles(CodeAgentLoopTimelineSummary timeline, List<String> targetFiles) {
+        if (timeline == null || timeline.events() == null || targetFiles == null || targetFiles.isEmpty()) {
+            return List.of();
+        }
+        Set<String> allowed = new LinkedHashSet<>(targetFiles);
+        Map<String, CodePatchFileLoader.LoadedPatchFile> filesByPath = new LinkedHashMap<>();
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
+            if (!"LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    || event.toolName() != LocalAgentToolName.FILE_READ
+                    || !"SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                continue;
+            }
+            Object outputSummary = event.details().get("outputSummary");
+            if (!(outputSummary instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Object pathValue = map.get("relativePath");
+            Object contentValue = map.get("contentForPatch");
+            String path = pathValue == null ? "" : String.valueOf(pathValue);
+            if (!allowed.contains(path) || !safeRelativePath(path) || !(contentValue instanceof String content)) {
+                continue;
+            }
+            filesByPath.put(path, new CodePatchFileLoader.LoadedPatchFile(null, path, languageForPath(path), content));
+        }
+        return List.copyOf(filesByPath.values());
+    }
+
+    private String languageForPath(String path) {
+        String lower = path == null ? "" : path.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".java")) return "java";
+        if (lower.endsWith(".kt")) return "kotlin";
+        if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
+        if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
+        if (lower.endsWith(".json")) return "json";
+        if (lower.endsWith(".md") || lower.contains("readme")) return "markdown";
+        if (lower.endsWith(".txt")) return "text";
+        return "text";
+    }
+
     private boolean safeRelativePath(String path) {
         if (path == null || path.isBlank() || ".".equals(path)) {
             return false;
@@ -403,10 +458,11 @@ public class CodeAgentLoopRunService {
                 && !normalized.contains("\u0000");
     }
 
-    private Map<String, Object> patchBlockedDetails(List<String> targetFiles, CodeAgentPatchResponse patch, RuntimeException ex) {
+    private Map<String, Object> patchBlockedDetails(List<String> targetFiles, String patchSource, CodeAgentPatchResponse patch, RuntimeException ex) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("schema", "learnbot.server.code-agent.patch-proposal-result.v1");
         details.put("targetFiles", targetFiles == null ? List.of() : targetFiles);
+        details.put("patchSource", patchSource);
         details.put("valid", patch != null && patch.valid());
         details.put("summary", patch == null ? null : patch.summary());
         details.put("riskLevel", patch == null ? null : patch.riskLevel());

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("setup-plan", "setup-run-plan", "browser-pairing-plan", "pair-from-web-token-plan", "pair-from-web-token", "setup", "start", "background-start", "background-stop", "lifecycle-command", "lifecycle-status", "service-plan", "service-command-plan", "m8-status", "m8-doctor", "m8-lifecycle-run", "status", "token", "logs", "doctor", "open")]
+    [ValidateSet("setup-plan", "setup-run-plan", "browser-pairing-plan", "pair-from-web-token-plan", "pair-from-web-token", "setup", "start", "background-start", "background-stop", "lifecycle-command", "lifecycle-status", "service-plan", "service-command-plan", "service-command", "m8-status", "m8-doctor", "m8-lifecycle-run", "status", "token", "logs", "doctor", "open")]
     [string]$Action = "status",
     [string]$Server = "http://localhost:8083",
     [string]$LoginId = $env:LEARNBOT_AGENT_LOGIN_ID,
@@ -35,6 +35,7 @@ $defaultAgentExe = Join-Path $env:USERPROFILE ".learnbot\bin\learnbot.exe"
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentM8LifecycleRunResult.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServicePlan.ps1")
 . (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServiceCommandPlan.ps1")
+. (Join-Path $PSScriptRoot "local-agent\lifecycle\LocalAgentServiceCommandResult.ps1")
 
 function Resolve-AgentExecutable {
     if (-not [string]::IsNullOrWhiteSpace($AgentExe)) {
@@ -246,7 +247,7 @@ function Setup-Agent {
     Write-Host "Run foreground agent:"
     Write-Host "  .\scripts\local-agent.ps1 -Action start"
     Write-Host ""
-    Write-Host "This helper is for the internal foreground pilot. Windows Service/MSI packaging is still future work."
+    Write-Host "For Windows Service install/start/stop/uninstall, run this helper as administrator with -Action service-command."
 }
 
 function Pair-FromWebToken {
@@ -330,6 +331,64 @@ function Invoke-M8LifecycleRun {
         } | ConvertTo-Json -Depth 10
 }
 
+function Get-ServicePlanForCurrentAgent {
+    $agentStatus = Get-AgentStatus
+    $resolvedExe = Resolve-AgentExecutable
+    $installDir = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { Split-Path -Parent $defaultAgentExe } else { Split-Path -Parent $resolvedExe }
+    $executable = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { $defaultAgentExe } else { $resolvedExe }
+    Get-LearnBotLocalAgentServicePlan `
+        -InstallDir $installDir `
+        -Executable $executable `
+        -ConfigPath $agentStatus.configPath `
+        -Transport $Transport `
+        -IntervalSeconds $IntervalSeconds
+}
+
+function Invoke-ServiceCommand {
+    $plan = Get-ServicePlanForCurrentAgent
+    Invoke-LearnBotLocalAgentServiceCommandResult `
+        -ServiceAction $ServiceAction `
+        -ServicePlan $plan `
+        -InvokeServiceCommand {
+            param([string]$ActionName, [object]$ServicePlan)
+            $serviceName = [string]$ServicePlan.service.name
+            try {
+                $output = switch ($ActionName) {
+                    "install" {
+                        $binaryPath = "`"$($ServicePlan.executable)`" service run --interval-seconds $($ServicePlan.intervalSeconds) --transport $($ServicePlan.transport) --config `"$($ServicePlan.configPath)`""
+                        New-Service `
+                            -Name $serviceName `
+                            -BinaryPathName $binaryPath `
+                            -DisplayName "LearnBot Local Agent" `
+                            -StartupType Automatic | Out-String
+                    }
+                    "start" {
+                        Start-Service -Name $serviceName -ErrorAction Stop
+                        "started"
+                    }
+                    "stop" {
+                        Stop-Service -Name $serviceName -ErrorAction Stop
+                        "stopped"
+                    }
+                    "uninstall" {
+                        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+                        if ($null -ne $service -and $service.Status -ne "Stopped") {
+                            Stop-Service -Name $serviceName -Force -ErrorAction Stop
+                        }
+                        $deleteOutput = & sc.exe delete $serviceName 2>&1
+                        if ($LASTEXITCODE -ne 0) {
+                            throw (($deleteOutput | Out-String).Trim())
+                        }
+                        ($deleteOutput | Out-String).Trim()
+                    }
+                }
+                [pscustomobject]@{ exitCode = 0; output = ($output | Out-String).Trim() }
+            } catch {
+                [pscustomobject]@{ exitCode = 1; output = $_.Exception.Message }
+            }
+        } | ConvertTo-Json -Depth 12
+}
+
 switch ($Action) {
     "setup-plan" {
         Get-LearnBotLocalAgentSetupPlan `
@@ -401,29 +460,14 @@ switch ($Action) {
             -AgentExe (Resolve-AgentExecutable) | ConvertTo-Json -Depth 10
     }
     "service-plan" {
-        $agentStatus = Get-AgentStatus
-        $resolvedExe = Resolve-AgentExecutable
-        $installDir = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { Split-Path -Parent $defaultAgentExe } else { Split-Path -Parent $resolvedExe }
-        $executable = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { $defaultAgentExe } else { $resolvedExe }
-        Get-LearnBotLocalAgentServicePlan `
-            -InstallDir $installDir `
-            -Executable $executable `
-            -ConfigPath $agentStatus.configPath `
-            -Transport $Transport `
-            -IntervalSeconds $IntervalSeconds | ConvertTo-Json -Depth 10
+        Get-ServicePlanForCurrentAgent | ConvertTo-Json -Depth 10
     }
     "service-command-plan" {
-        $agentStatus = Get-AgentStatus
-        $resolvedExe = Resolve-AgentExecutable
-        $installDir = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { Split-Path -Parent $defaultAgentExe } else { Split-Path -Parent $resolvedExe }
-        $executable = if ([string]::IsNullOrWhiteSpace($resolvedExe)) { $defaultAgentExe } else { $resolvedExe }
-        $plan = Get-LearnBotLocalAgentServicePlan `
-            -InstallDir $installDir `
-            -Executable $executable `
-            -ConfigPath $agentStatus.configPath `
-            -Transport $Transport `
-            -IntervalSeconds $IntervalSeconds
+        $plan = Get-ServicePlanForCurrentAgent
         Get-LearnBotLocalAgentServiceCommandPlan -ServiceAction $ServiceAction -ServicePlan $plan | ConvertTo-Json -Depth 10
+    }
+    "service-command" {
+        Invoke-ServiceCommand
     }
     "m8-status" {
         Invoke-Agent -Arguments @("m8", "status")

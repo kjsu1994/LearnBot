@@ -93,6 +93,7 @@ Internal foreground helper from the repository root:
 .\scripts\local-agent.ps1 -Action lifecycle-status
 .\scripts\local-agent.ps1 -Action service-plan
 .\scripts\local-agent.ps1 -Action service-command-plan -ServiceAction install
+.\scripts\local-agent.ps1 -Action service-command -ServiceAction install
 .\scripts\local-agent.ps1 -Action m8-status
 .\scripts\local-agent.ps1 -Action m8-doctor
 .\scripts\local-agent.ps1 -Action m8-lifecycle-run -Transport auto
@@ -108,15 +109,17 @@ Internal foreground helper from the repository root:
 
 `learnbot pair` validates the initial heartbeat before saving local config. If the server is unreachable or the token is rejected during that first heartbeat, a new config file is not created and an existing config is preserved.
 
-`lifecycle-status` returns `learnbot.local-agent.lifecycle-status.v1`, a machine-readable internal-pilot view of config, run state, process liveness, log presence, recommended lifecycle commands, and explicit service limitations. It does not print pairing token secrets and does not enable Windows Service registration.
+`lifecycle-status` returns `learnbot.local-agent.lifecycle-status.v1`, a machine-readable internal-pilot view of config, run state, process liveness, log presence, recommended lifecycle commands, and service readiness. It does not print pairing token secrets.
 
-`lifecycle-command` returns `learnbot.local-agent.lifecycle-command-result.v1` for `status`, `logs`, `doctor`, `background-start`, or `background-stop`. It is an automation-friendly wrapper around the existing helper commands and reports success/failure, captured output, and safety flags while keeping service command execution disabled.
+`lifecycle-command` returns `learnbot.local-agent.lifecycle-command-result.v1` for `status`, `logs`, `doctor`, `background-start`, or `background-stop`. It is an automation-friendly wrapper around the existing helper commands and reports success/failure, captured output, and safety flags without invoking Windows Service commands.
 
-`service-plan` returns `learnbot.local-agent.service-plan.v1`, a preview-only Windows Service readiness plan. It checks for the installed executable, paired config, approved workspace, and existing service state, then prints planned service commands without executing them.
+`service-plan` returns `learnbot.local-agent.service-plan.v1`, a Windows Service readiness plan. It checks for the installed executable, paired config, approved workspace, and existing service state, then prints planned service commands without executing them.
 
-`service-command-plan` returns `learnbot.local-agent.service-command-plan.v1` for `install`, `start`, `stop`, or `uninstall`. It keeps service command execution disabled and reports the blocking reasons before any future privileged service action is enabled.
+`service-command-plan` returns `learnbot.local-agent.service-command-plan.v1` for `install`, `start`, `stop`, or `uninstall`. It remains preview-only and reports blockers without touching the OS.
 
-`learnbot m8 status` returns `learnbot.local-agent.m8-productization-status.v1`, a machine-readable productization readiness view for the Codex-like local experience. It consolidates guided setup, background lifecycle, doctor/log UX, Windows Service preview, Codex-like command availability, signed-installer readiness, and auto-update readiness while keeping M8 work execution, service command execution, installer signing, and auto-update disabled until those product paths are explicitly implemented. The report includes `nextCommands` so unpaired, paired-stopped, and paired-running states show the next safe commands without printing pairing-token secrets.
+`service-command` returns `learnbot.local-agent.service-command-result.v1` and can run `install`, `start`, `stop`, or `uninstall` through typed Windows Service commands. It blocks unless PowerShell is running as administrator, the executable is installed, pairing config exists, and at least one workspace is approved. It never prints pairing-token secrets.
+
+`learnbot m8 status` returns `learnbot.local-agent.m8-productization-status.v1`, a machine-readable productization readiness view for the Codex-like local experience. It consolidates guided setup, background lifecycle, doctor/log UX, Windows Service readiness, Codex-like command availability, signed-installer readiness, and auto-update readiness while keeping MSI signing and auto-update disabled until those product paths are explicitly implemented. The report includes `nextCommands` so unpaired, paired-stopped, and paired-running states show the next safe commands without printing pairing-token secrets.
 
 `learnbot m8 doctor` returns `learnbot.local-agent.m8-doctor.v1`, a read-only M8 diagnosis wrapper around productization status. It groups setup, lifecycle, runtime, logs, service preview, and distribution readiness into sections, repeats the safe next-command sequence, and keeps token printing, service execution, installer signing, and auto-update disabled.
 

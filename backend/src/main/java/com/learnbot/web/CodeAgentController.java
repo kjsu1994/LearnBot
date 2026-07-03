@@ -724,6 +724,22 @@ public class CodeAgentController {
         );
     }
 
+    @PostMapping("/loop/runner/final-result-publication")
+    com.learnbot.dto.loop.CodeAgentLoopFinalResultPublicationResponse loopRunnerFinalResultPublication(
+            @Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID repositorySpaceId = indexingService.repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        return loopRunnerService.publishFinalResult(
+                user,
+                request.repositoryId(),
+                request.loopId(),
+                request.agentId(),
+                request.workspaceId()
+        );
+    }
+
     @PostMapping("/loop/runner/m8-entry-readiness")
     CodeAgentLoopM8EntryReadinessResponse loopRunnerM8EntryReadiness(
             @Valid @RequestBody CodeAgentLoopRunnerPreviewRequest request

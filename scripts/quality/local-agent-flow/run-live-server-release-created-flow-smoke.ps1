@@ -530,13 +530,62 @@ LIMIT 1;
         throw "Runner preview unexpectedly enabled final result, publication, acknowledgement, or mutation"
     }
 
+    $publication = Invoke-Json -Session $session -Method POST -Uri "$Server/api/code-agent/loop/runner/final-result-publication" -Body @{
+        repositoryId = $repositoryId
+        loopId = $loopId
+        agentId = $agentId
+        workspaceId = $workspaceId
+    }
+    if ($publication.status -ne "FINAL_RESULT_PUBLISHED" -or [string]::IsNullOrWhiteSpace([string]$publication.savedAnswerId)) {
+        throw "Final result publication did not save a final answer; status=$($publication.status) savedAnswerId=$($publication.savedAnswerId)"
+    }
+    if ($publication.finalAnswer -notmatch "Code Agent work completed" -or $publication.finalAnswer -notmatch "Local files changed") {
+        throw "Final result publication did not include the deterministic completion text and stale-index disclosure: $($publication.finalAnswer)"
+    }
+    if ($publication.publicationEnabled -ne $true -or
+        $publication.acknowledgementSaveEnabled -ne $true -or
+        $publication.ragFreshnessUpdateEnabled -ne $false -or
+        $publication.mutationEnabled -ne $false) {
+        throw "Final result publication safety flags are unexpected"
+    }
+
+    $publicationEventText = Invoke-PsqlText -Sql @"
+SELECT jsonb_build_object(
+    'eventType', event_type,
+    'sequenceNumber', sequence_number,
+    'phase', phase,
+    'executionTarget', execution_target,
+    'toolName', tool_name,
+    'requiresApproval', requires_approval,
+    'mayMutate', may_mutate,
+    'enabled', enabled,
+    'details', details
+)::text
+FROM code_agent_loop_timeline_events
+WHERE user_id = '$userId'::uuid
+  AND timeline_id = '$loopId'::uuid
+  AND event_type = 'CODE_AGENT_FINAL_RESULT_PUBLISHED'
+ORDER BY sequence_number DESC
+LIMIT 1;
+"@
+    if ([string]::IsNullOrWhiteSpace($publicationEventText)) {
+        throw "Final result publication timeline event was not recorded"
+    }
+    $publicationEvent = $publicationEventText | ConvertFrom-Json
+    if ($publicationEvent.details.status -ne "FINAL_RESULT_PUBLISHED" -or
+        $publicationEvent.details.savedAnswerId -ne [string]$publication.savedAnswerId) {
+        throw "Final result publication event did not preserve saved answer evidence"
+    }
+
     $summary = [pscustomobject]@{
         schema = "learnbot.quality.local-agent-live-server-release-created-flow.v1"
         status = "passed"
         server = $Server
         requiredBackendFlags = @(
             "LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED=true",
-            "LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED=true"
+            "LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED=true",
+            "LEARNBOT_CODE_AGENT_FINAL_RESULT_PUBLICATION_ENABLED=true",
+            "LEARNBOT_CODE_AGENT_FINAL_ANSWER_SAVE_ENABLED=true"
         )
         userId = $userId
         agentId = $agentId
@@ -552,12 +601,14 @@ LIMIT 1;
         durableInspection = $inspection
         completionHandoff = $completionEvent
         runnerPreview = $runnerPreview
+        publication = $publication
+        publicationEvent = $publicationEvent
         workspacePath = (Resolve-Path $workspacePath).Path
         rowsKept = [bool]$KeepRows
         limitations = @(
             "The smoke creates only the held source patch and fresh evidence rows directly.",
             "The approved execution sequence rows must be created by /api/local-agents/tools/{requestId}/release-for-execution.",
-            "Final-answer publication and acknowledgement save remain disabled."
+            "Final-answer publication saves a deterministic Saved Answer; RAG freshness updates and follow-up mutation remain disabled."
         )
     }
     $summary | ConvertTo-Json -Depth 30 | Set-Content -Path $ReportPath -Encoding UTF8

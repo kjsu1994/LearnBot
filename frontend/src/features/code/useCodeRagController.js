@@ -78,6 +78,7 @@ export function useCodeRagController({
   const [codeAgentValidatedDryRunIntentTransitionPreview, setCodeAgentValidatedDryRunIntentTransitionPreview] = useState(null);
   const [localAgentStatus, setLocalAgentStatus] = useState(null);
   const [localAgentTokens, setLocalAgentTokens] = useState([]);
+  const [localAgentPendingApprovals, setLocalAgentPendingApprovals] = useState([]);
   const [localAgentDeviceApprovalResult, setLocalAgentDeviceApprovalResult] = useState(null);
   const [codeAnswerSavedId, setCodeAnswerSavedId] = useState('');
   const [codeConversations, setCodeConversations] = useState([]);
@@ -135,11 +136,21 @@ export function useCodeRagController({
     if (!activeSpaceId) {
       setLocalAgentStatus(null);
       setLocalAgentTokens([]);
+      setLocalAgentPendingApprovals([]);
       return;
     }
     refreshCodeAgentMutationPolicy();
     refreshLocalAgentStatus();
     refreshLocalAgentTokens();
+    refreshLocalAgentPendingApprovals();
+  }, [activeSpaceId]);
+
+  useEffect(() => {
+    if (!activeSpaceId) return undefined;
+    const timer = window.setInterval(() => {
+      refreshLocalAgentPendingApprovals();
+    }, 5000);
+    return () => window.clearInterval(timer);
   }, [activeSpaceId]);
 
   useEffect(() => {
@@ -178,6 +189,7 @@ export function useCodeRagController({
     setCodeAgentLoopRunnerM8EntryReadiness(null);
     setCodeAgentLoopRunnerQueuedObservationResult(null);
     setCodeAgentLoopRunnerObservationContinuation(null);
+    setLocalAgentPendingApprovals([]);
     setCodeAgentLocalPatchRequest(null);
     setCodeAgentLocalPatchReadiness(null);
     setCodeAgentLocalPatchDryRunRequest(null);
@@ -1012,6 +1024,18 @@ export function useCodeRagController({
     }
   }
 
+  async function refreshLocalAgentPendingApprovals() {
+    try {
+      const approvals = await request('/api/local-agents/tools/pending-approvals');
+      const safeApprovals = Array.isArray(approvals) ? approvals : [];
+      setLocalAgentPendingApprovals(safeApprovals);
+      return safeApprovals;
+    } catch {
+      setLocalAgentPendingApprovals([]);
+      return [];
+    }
+  }
+
   async function revokeLocalAgentToken(tokenId) {
     if (!tokenId) return;
     if (!window.confirm('Revoke this Local Agent token? The paired agent will need a new pairing token.')) return;
@@ -1109,20 +1133,24 @@ export function useCodeRagController({
     });
   }
 
-  async function decideCodeAgentLocalPatchApproval(decision) {
-    const requestId = codeAgentLocalPatchRequest?.requestId;
+  async function decideCodeAgentLocalPatchApproval(decision, requestId = codeAgentLocalPatchRequest?.requestId) {
     if (!requestId || !decision) return;
-    await run(`code-agent-local-patch-approval-${String(decision).toLowerCase()}`, async () => {
+    await run(`code-agent-local-patch-approval-${requestId}-${String(decision).toLowerCase()}`, async () => {
       const result = await request(`/api/local-agents/tools/${requestId}/approval`, {
         method: 'POST',
         json: { decision },
       });
-      setCodeAgentLocalPatchRequest(result);
-      if (result?.status === 'APPROVED_HELD') {
+      const currentPatchRequest = codeAgentLocalPatchRequest?.requestId === requestId;
+      if (!codeAgentLocalPatchRequest || currentPatchRequest) {
+        setCodeAgentLocalPatchRequest(result);
+      }
+      if (currentPatchRequest && result?.status === 'APPROVED_HELD') {
         await refreshCodeAgentLocalPatchReadiness(result.requestId);
-      } else {
+      } else if (currentPatchRequest) {
         setCodeAgentLocalPatchReadiness(null);
       }
+      setLocalAgentPendingApprovals((items) => items.filter((item) => item?.requestId !== requestId));
+      await refreshLocalAgentPendingApprovals();
       setCodeAgentLocalPatchDryRunRequest(null);
       setCodeAgentLocalPatchDryRunResult(null);
       setCodeAgentLocalRepositoryObservationRequest(null);
@@ -1441,6 +1469,7 @@ export function useCodeRagController({
     codeAgentValidatedDryRunIntentTransitionPreview,
     localAgentStatus,
     localAgentTokens,
+    localAgentPendingApprovals,
     localAgentDeviceApprovalResult,
     codeConversations,
     codeConversationId,
@@ -1498,6 +1527,7 @@ export function useCodeRagController({
     inspectCodeAgentValidatedDryRunIntentEligibility,
     previewCodeAgentValidatedDryRunIntentTransition,
     refreshLocalAgentStatus,
+    refreshLocalAgentPendingApprovals,
     refreshCodeAgentMutationPolicy,
     refreshLocalAgentTokens,
     revokeLocalAgentToken,

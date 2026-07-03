@@ -13,6 +13,7 @@ public record CodeRepositorySummary(
         String gitUrl,
         String branch,
         String authType,
+        String localPath,
         String status,
         String lastIndexedCommit,
         String errorMessage,

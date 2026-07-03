@@ -139,6 +139,93 @@ class CodeAgentLocalPatchRequestServiceTest {
     }
 
     @Test
+    void prepareUsesLocalAgentFileReadExpectedFilesWhenTargetIsNotIndexed() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        String path = "readme.txt";
+        String content = "리드미 나를 읽어";
+        String diff = """
+                --- a/readme.txt
+                +++ b/readme.txt
+                @@ -1,1 +1,4 @@
+                 리드미 나를 읽어
+                +작은 빛이 머문 자리
+                +한 줄의 바람이 쉬어 가고
+                +오늘의 마음이 조용히 빛난다
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(fileLoader.rejectionReason(path)).thenReturn(null);
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        when(codeRepository.findRepository(repositoryId)).thenReturn(java.util.Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "local-test",
+                "LOCAL",
+                "C:/Users/honeybadger/Desktop/test",
+                null,
+                null,
+                "NONE",
+                "NONE",
+                "C:/Users/honeybadger/Desktop/test",
+                "LOCAL",
+                null
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(java.util.Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "test", "C:/Users/honeybadger/Desktop/test", true)
+        ));
+        when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(0);
+            return new LocalAgentToolExecutionResponse(
+                    requestId,
+                    UUID.randomUUID(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    request.executionTarget(),
+                    request.toolName(),
+                    request.approvalState(),
+                    LocalAgentToolStatus.APPROVAL_REQUIRED,
+                    request.input(),
+                    Map.of(),
+                    null,
+                    null,
+                    request.warnings(),
+                    List.of(),
+                    null,
+                    null,
+                    null
+            );
+        });
+
+        LocalAgentToolExecutionResponse response = service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "README파일 끝에 짧은 시를 추가해줘",
+                diff,
+                List.of(path),
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "text", content))
+        );
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
+        ArgumentCaptor<LocalAgentToolRequest> captor = ArgumentCaptor.forClass(LocalAgentToolRequest.class);
+        verify(toolGatewayService).createApprovalRequest(captor.capture());
+        LocalAgentToolRequest request = captor.getValue();
+        assertThat(request.input()).containsEntry("expectedFileSource", "local-agent-file-read");
+        assertThat(request.input().get("expectedFiles").toString()).contains(path, sha256(content));
+        assertThat(request.warnings()).contains("Expected file hashes came from completed Local Agent file.read observations.");
+        verify(fileLoader, never()).load(repositoryId, List.of(path));
+    }
+
+    @Test
     void previewValidatedDryRunRequestModelsWouldBeQueueRowWithoutPersistingIt() {
         UUID repositoryId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();

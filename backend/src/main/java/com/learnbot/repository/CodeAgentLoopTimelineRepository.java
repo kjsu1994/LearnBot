@@ -12,9 +12,11 @@ import com.learnbot.dto.LocalAgentPatchExecutionReadinessCheck;
 import com.learnbot.dto.LocalAgentPatchExecutionReadinessResponse;
 import com.learnbot.dto.LocalAgentPatchReleaseBoundaryResponse;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
+import com.learnbot.dto.LocalAgentFailureCode;
 import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
+import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.loop.CodeAgentLoopRecommendedActionFactory;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -29,6 +31,8 @@ import java.util.UUID;
 
 @Repository
 public class CodeAgentLoopTimelineRepository {
+    private static final int MAX_PATCH_OBSERVATION_CONTENT_CHARS = 40_000;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -79,6 +83,24 @@ public class CodeAgentLoopTimelineRepository {
                 .addValue("userId", userId)
                 .addValue("repositoryId", repositoryId)
                 .addValue("limit", limit), (rs, rowNum) -> mapTimeline(userId, rs));
+    }
+
+    public UUID findSpaceId(UUID userId, UUID repositoryId, UUID loopId) {
+        List<UUID> rows = jdbc.query("""
+                SELECT space_id
+                FROM code_agent_loop_timelines
+                WHERE user_id = :userId
+                  AND repository_id = :repositoryId
+                  AND id = :loopId
+                ORDER BY created_at DESC
+                LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("repositoryId", repositoryId)
+                .addValue("loopId", loopId), (rs, rowNum) -> rs.getObject("space_id", UUID.class));
+        return rows.stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Code Agent loop timeline was not found."));
     }
 
     public int appendRunStarted(
@@ -452,6 +474,44 @@ public class CodeAgentLoopTimelineRepository {
         );
     }
 
+    public int appendFinalResultPublished(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID savedAnswerId,
+            Map<String, Object> finalResult
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("status", "FINAL_RESULT_PUBLISHED");
+        details.put("savedAnswerId", savedAnswerId == null ? null : savedAnswerId.toString());
+        details.put("finalResult", finalResult == null ? Map.of() : finalResult);
+        details.put("sourceRequestId", finalResult == null ? null : finalResult.get("sourceRequestId"));
+        details.put("releaseAttemptId", finalResult == null ? null : finalResult.get("releaseAttemptId"));
+        details.put("staleIndexDisclosure", finalResult == null ? null : finalResult.get("staleIndexDisclosure"));
+        details.put("finalResultEnabled", true);
+        details.put("publicationEnabled", true);
+        details.put("finalAnswerGenerationEnabled", true);
+        details.put("finalAnswerDeliveryEnabled", true);
+        details.put("acknowledgementEnabled", true);
+        details.put("acknowledgementSaveEnabled", true);
+        details.put("ragFreshnessUpdateEnabled", false);
+        details.put("partialReindexEnabled", false);
+        details.put("followUpMutationEnabled", false);
+        details.put("mutationEnabled", false);
+        details.put("nextAction", "Final result was published and saved. RAG freshness still requires partial reindex or explicit stale-index disclosure.");
+        return appendLatestEvent(
+                userId,
+                repositoryId,
+                loopId,
+                "CODE_AGENT_FINAL_RESULT_PUBLISHED",
+                "COMPLETE",
+                AgentExecutionTarget.SERVER_LOCAL,
+                null,
+                false,
+                details
+        );
+    }
+
     public int appendStopOutcome(
             UUID userId,
             UUID repositoryId,
@@ -491,7 +551,7 @@ public class CodeAgentLoopTimelineRepository {
             LocalAgentToolResponse response,
             Map<String, Object> requestInput
     ) {
-        boolean succeeded = response.status() != null && "SUCCEEDED".equals(response.status().name());
+        boolean succeeded = response.status() == LocalAgentToolStatus.SUCCEEDED || successfulPatchDryRunObservation(response);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("status", "RECORDED");
         details.put("decisionKey", succeeded ? "OBSERVATION_ACCEPTED" : "STOP_AFTER_OBSERVATION");
@@ -946,6 +1006,28 @@ public class CodeAgentLoopTimelineRepository {
         return details;
     }
 
+    public boolean successfulPatchDryRunObservation(LocalAgentToolResponse response) {
+        Map<String, Object> output = response.output() == null ? Map.of() : response.output();
+        return response.toolName() == LocalAgentToolName.PATCH_APPLY
+                && response.status() == LocalAgentToolStatus.REJECTED
+                && response.failureCode() == LocalAgentFailureCode.UNSAFE_TOOL
+                && Boolean.TRUE.equals(output.get("dryRun"))
+                && Boolean.TRUE.equals(output.get("preflightPassed"))
+                && Boolean.TRUE.equals(output.get("snapshotCreated"))
+                && Boolean.FALSE.equals(output.get("mutationApplied"))
+                && dryRunContextMatches(output);
+    }
+
+    private boolean dryRunContextMatches(Map<String, Object> output) {
+        if (!(output.get("files") instanceof List<?> files) || files.isEmpty()) {
+            return false;
+        }
+        return files.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .allMatch(file -> Boolean.TRUE.equals(file.get("contextMatches")));
+    }
+
     private Map<String, Object> outputSummary(LocalAgentToolResponse response) {
         Map<String, Object> output = response.output() == null ? Map.of() : response.output();
         Map<String, Object> summary = new LinkedHashMap<>();
@@ -963,6 +1045,11 @@ public class CodeAgentLoopTimelineRepository {
             summary.put("returnedBytes", output.get("returnedBytes"));
             summary.put("truncated", output.get("truncated"));
             summary.put("contentPreview", preview(output.get("content"), 1200));
+            String contentForPatch = patchObservationContent(output.get("content"), output.get("truncated"));
+            summary.put("contentForPatchAvailable", contentForPatch != null);
+            if (contentForPatch != null) {
+                summary.put("contentForPatch", contentForPatch);
+            }
         } else if (response.toolName() == LocalAgentToolName.GIT_STATUS || response.toolName() == LocalAgentToolName.GIT_DIFF) {
             summary.put("clean", output.get("clean"));
             summary.put("branch", output.get("branch"));
@@ -970,6 +1057,13 @@ public class CodeAgentLoopTimelineRepository {
             summary.put("diffPreview", preview(output.get("diff"), 1200));
         }
         return java.util.Collections.unmodifiableMap(summary);
+    }
+
+    private String patchObservationContent(Object value, Object truncated) {
+        if (!(value instanceof String content) || Boolean.TRUE.equals(truncated)) {
+            return null;
+        }
+        return content.length() <= MAX_PATCH_OBSERVATION_CONTENT_CHARS ? content : null;
     }
 
     private List<Map<String, Object>> limitedPathMaps(Object value, int limit, boolean includeSnippet) {

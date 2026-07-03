@@ -122,6 +122,23 @@ public class LocalAgentToolExecutionRepository {
         return executions.stream().findFirst();
     }
 
+    public List<LocalAgentToolExecution> findPendingApprovalsForUser(UUID userId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 50));
+        return jdbc.query("""
+                SELECT id, session_id, user_id, agent_id, workspace_id, execution_target, tool_name,
+                       approval_state, status, input::text, output::text, failure_code, error,
+                       request_warnings::text, response_warnings::text, created_at, started_at, finished_at
+                FROM local_agent_tool_executions
+                WHERE user_id = :userId
+                  AND approval_state = 'REQUIRED'
+                  AND status = 'APPROVAL_REQUIRED'
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("limit", safeLimit), this::mapExecution);
+    }
+
     public List<LocalAgentToolExecution> findCompletedApprovedExecutionFlowRowsForReleaseAttempt(
             UUID userId,
             UUID releaseAttemptId

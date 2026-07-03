@@ -66,7 +66,7 @@ switch ($Action) {
             Write-Host "Or reinstall with -AddToUserPath to run 'learnbot' from a new PowerShell window."
         }
         Write-Host ""
-        Write-Host "This is a lightweight internal pilot install, not a Windows Service, MSI, updater, or background process manager."
+        Write-Host "This installs the Local Agent executable. Use scripts\local-agent.ps1 -Action service-command from administrator PowerShell to register the Windows Service."
         Show-Status -IncludeExecutableStatus
     }
     "status" {

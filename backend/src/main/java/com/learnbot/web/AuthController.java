@@ -74,6 +74,11 @@ public class AuthController {
         return withoutTokens(authResponse);
     }
 
+    @PostMapping("/cli-login")
+    AuthResponse cliLogin(@Valid @RequestBody LoginRequest request) {
+        return authService.login(request.identifier(), request.password(), request.rememberLogin());
+    }
+
     @PostMapping("/cli-device-session/plan")
     CliDeviceSessionPlanResponse cliDeviceSessionPlan(@RequestBody(required = false) CliDeviceSessionPlanRequest request) {
         return new CliDeviceSessionPlanResponse(

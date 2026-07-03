@@ -1,5 +1,7 @@
 package com.learnbot.service.agentloop;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.AgentExecutionTarget;
 import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
@@ -11,15 +13,18 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolRequest;
 import com.learnbot.dto.LocalAgentToolResponse;
 import com.learnbot.dto.LocalAgentToolStatus;
+import com.learnbot.dto.SavedAnswerDetail;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
 import com.learnbot.repository.LocalAgentMutationObservationIntakeRepository;
 import com.learnbot.repository.LocalAgentPatchReleaseAttemptRepository;
 import com.learnbot.repository.LocalAgentToolExecutionRepository;
+import com.learnbot.service.AppUser;
 import com.learnbot.service.LocalAgentToolGatewayService;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.LocalAgentGatewayService;
 import com.learnbot.service.LocalAgentToolExecution;
 import com.learnbot.service.LocalAgentToolPusher;
+import com.learnbot.service.SavedAnswerService;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
@@ -128,7 +133,11 @@ class CodeAgentLoopRunnerServiceTest {
         when(loopPreviewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(timeline(
                 repositoryId,
                 loopId,
-                List.of(observationEvent(LocalAgentToolName.GIT_STATUS))
+                List.of(
+                        observationEvent(LocalAgentToolName.WORKSPACE_TREE),
+                        observationEvent(LocalAgentToolName.WORKSPACE_SEARCH),
+                        observationEvent(LocalAgentToolName.GIT_STATUS)
+                )
         )));
 
         var result = service.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
@@ -143,11 +152,124 @@ class CodeAgentLoopRunnerServiceTest {
                 .containsEntry("mutationAllowed", false)
                 .containsEntry("maxBytes", 6000);
         assertThat(result.guardrails())
-                .containsEntry("allowedCandidateTools", List.of("git.status", "git.diff"))
+                .containsEntry("allowedCandidateTools", List.of("workspace.tree", "workspace.search", "file.read", "git.status", "git.diff"))
                 .containsEntry("mutationAllowed", false);
         assertThat(result.requestCreationEnabled()).isFalse();
         assertThat(result.enqueueEnabled()).isFalse();
         assertThat(result.mutationEnabled()).isFalse();
+    }
+
+    @Test
+    void previewNextStepSelectsReadmeTxtFromTreeFallbackWhenSearchHasNoMatches() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId)).thenReturn(new CodeAgentLoopNextActionResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "Read the README file before patching.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                UUID.randomUUID(),
+                12,
+                "LOOP_NEXT_DECISION_RECORDED",
+                Map.of("decisionKey", "OBSERVATION_ACCEPTED")
+        ));
+        var timeline = timeline(
+                repositoryId,
+                loopId,
+                List.of(
+                        observationEvent(LocalAgentToolName.WORKSPACE_TREE, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("entries", List.of(
+                                        Map.of("type", "file", "path", "readme.txt"),
+                                        Map.of("type", "file", "path", "image.png")
+                                ))
+                        )),
+                        observationEvent(LocalAgentToolName.WORKSPACE_SEARCH, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("matches", List.of())
+                        ))
+                )
+        );
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(timeline));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+
+        var result = service.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.runnerDecision()).isEqualTo("PREPARED_READ_ONLY_CANDIDATE");
+        assertThat(result.candidate()).isNotNull();
+        assertThat(result.candidate().toolName()).isEqualTo(LocalAgentToolName.FILE_READ);
+        assertThat(result.candidate().input())
+                .containsEntry("path", "readme.txt")
+                .containsEntry("maxBytes", 80_000)
+                .containsEntry("mutationAllowed", false);
+        assertThat(result.candidate().approvalState()).isEqualTo(LocalAgentApprovalState.NOT_REQUIRED);
+        assertThat(result.mutationEnabled()).isFalse();
+    }
+
+    @Test
+    void previewNextStepRanksTreeFallbackByFilenameMentionedInGoal() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId)).thenReturn(new CodeAgentLoopNextActionResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "Read the requested text file before patching.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                UUID.randomUUID(),
+                12,
+                "LOOP_NEXT_DECISION_RECORDED",
+                Map.of("decisionKey", "OBSERVATION_ACCEPTED", "instruction", "notes.txt 파일 끝에 문장을 추가해줘")
+        ));
+        var timeline = timeline(
+                repositoryId,
+                loopId,
+                List.of(
+                        observationEvent(LocalAgentToolName.WORKSPACE_TREE, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("entries", List.of(
+                                        Map.of("type", "file", "path", "readme.txt"),
+                                        Map.of("type", "file", "path", "notes.txt"),
+                                        Map.of("type", "file", "path", "config.json")
+                                ))
+                        )),
+                        observationEvent(LocalAgentToolName.WORKSPACE_SEARCH, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("matches", List.of())
+                        ))
+                )
+        );
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(timeline));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+
+        var result = service.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.runnerDecision()).isEqualTo("PREPARED_READ_ONLY_CANDIDATE");
+        assertThat(result.candidate()).isNotNull();
+        assertThat(result.candidate().toolName()).isEqualTo(LocalAgentToolName.FILE_READ);
+        assertThat(result.candidate().input()).containsEntry("path", "notes.txt");
+        assertThat(result.candidate().mutationAllowed()).isFalse();
     }
 
     @Test
@@ -1156,6 +1278,109 @@ class CodeAgentLoopRunnerServiceTest {
     }
 
     @Test
+    void publishFinalResultSavesAnswerAndTimelineWhenReady() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID savedAnswerId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID releaseAttemptId = UUID.randomUUID();
+        AppUser user = new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE");
+        CodeAgentLoopPreviewService previewService = mock(CodeAgentLoopPreviewService.class);
+        SavedAnswerService savedAnswerService = mock(SavedAnswerService.class);
+        CodeAgentLoopTimelineRepository timelineRepository = mock(CodeAgentLoopTimelineRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeAgentLoopRunnerService runner = new CodeAgentLoopRunnerService(
+                previewService,
+                toolGatewayService,
+                savedAnswerService,
+                timelineRepository,
+                properties,
+                new ObjectMapper()
+        );
+        Map<String, Object> approvedFlowInspection = Map.of(
+                "sourceRequestId", sourceRequestId.toString(),
+                "releaseAttemptId", releaseAttemptId.toString(),
+                "stepCount", 4,
+                "ordered", true,
+                "allTerminal", true,
+                "steps", List.of(Map.of("toolName", "rollback.restore", "status", "SUCCEEDED"))
+        );
+        Map<String, Object> finalResultHandoff = Map.ofEntries(
+                Map.entry("schema", "learnbot.code-agent.approved-execution-flow-final-result-handoff.v1"),
+                Map.entry("status", "READY_FINAL_RESULT_AUDIT_ONLY_PUBLICATION_DISABLED"),
+                Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                Map.entry("sourceRequestId", sourceRequestId.toString()),
+                Map.entry("targetFiles", List.of("src/App.java")),
+                Map.entry("postRetryVerificationPassed", true),
+                Map.entry("ragFreshnessMarkerStatus", "STALE_INDEX_WARNING_REQUIRED"),
+                Map.entry("staleIndexDisclosureText", "Local files changed and code RAG may be stale until partial reindex completes.")
+        );
+        Map<String, Object> handoffSummary = Map.ofEntries(
+                Map.entry("schema", "learnbot.code-agent.approved-execution-flow-completed-handoff.v1"),
+                Map.entry("status", "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED"),
+                Map.entry("runnerDecision", "READY_FINAL_RESULT_DISABLED"),
+                Map.entry("sourceRequestId", sourceRequestId.toString()),
+                Map.entry("releaseAttemptId", releaseAttemptId.toString()),
+                Map.entry("approvedFlowInspection", approvedFlowInspection),
+                Map.entry("finalResultHandoff", finalResultHandoff)
+        );
+        when(previewService.nextAction(userId, repositoryId, loopId)).thenReturn(new CodeAgentLoopNextActionResponse(
+                loopId,
+                repositoryId,
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "APPROVED_EXECUTION_FLOW_COMPLETED_FINAL_RESULT_DISABLED",
+                "Report the completed approved Local Agent execution flow while final result publication remains disabled.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                UUID.randomUUID(),
+                31,
+                "LOCAL_AGENT_APPROVED_EXECUTION_FLOW_COMPLETED",
+                handoffSummary,
+                Map.of("sourceRequestId", sourceRequestId.toString(), "releaseAttemptId", releaseAttemptId.toString())
+        ));
+        when(timelineRepository.findSpaceId(userId, repositoryId, loopId)).thenReturn(spaceId);
+        when(savedAnswerService.create(any(), any())).thenReturn(new SavedAnswerDetail(
+                savedAnswerId,
+                spaceId,
+                "CODE",
+                "question",
+                "LOCAL_AGENT_CODE_AGENT_LOOP",
+                "answer",
+                new ObjectMapper().createArrayNode(),
+                new ObjectMapper().createArrayNode(),
+                "HIGH",
+                new ObjectMapper().createArrayNode(),
+                repositoryId,
+                "Code Agent final result",
+                OffsetDateTime.now(),
+                OffsetDateTime.now()
+        ));
+
+        var result = runner.publishFinalResult(user, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.status()).isEqualTo("FINAL_RESULT_PUBLISHED");
+        assertThat(result.savedAnswerId()).isEqualTo(savedAnswerId);
+        assertThat(result.finalAnswer()).contains("Code Agent work completed.")
+                .contains("Verification: passed")
+                .contains("Rollback verification: completed")
+                .contains("Local files changed");
+        assertThat(result.publicationEnabled()).isTrue();
+        assertThat(result.acknowledgementSaveEnabled()).isTrue();
+        assertThat(result.ragFreshnessUpdateEnabled()).isFalse();
+        verify(savedAnswerService).create(any(), any());
+        verify(timelineRepository).appendFinalResultPublished(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void previewM8EntryReadinessMarksM7ClosedWithoutEnablingM8Work() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -1285,6 +1510,10 @@ class CodeAgentLoopRunnerServiceTest {
     }
 
     private CodeAgentLoopTimelineEventSummary observationEvent(LocalAgentToolName toolName) {
+        return observationEvent(toolName, Map.of("status", "SUCCEEDED"));
+    }
+
+    private CodeAgentLoopTimelineEventSummary observationEvent(LocalAgentToolName toolName, Map<String, Object> details) {
         return new CodeAgentLoopTimelineEventSummary(
                 UUID.randomUUID(),
                 1,
@@ -1295,7 +1524,7 @@ class CodeAgentLoopRunnerServiceTest {
                 false,
                 false,
                 true,
-                Map.of("status", "SUCCEEDED"),
+                details,
                 OffsetDateTime.now()
         );
     }

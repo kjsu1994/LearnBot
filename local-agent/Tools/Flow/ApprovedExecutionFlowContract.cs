@@ -2844,8 +2844,14 @@ internal sealed partial class LearnBotLocalAgent
 
     private static bool LooksLikeSourceFile(string path)
     {
-        var extension = Path.GetExtension(path);
-        return extension is ".cs" or ".java" or ".js" or ".jsx" or ".ts" or ".tsx" or ".py" or ".go" or ".rs" or ".kt" or ".md";
+        var fileName = Path.GetFileName(path);
+        if (string.Equals(fileName, "readme", StringComparison.OrdinalIgnoreCase)
+            || fileName.StartsWith("readme.", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        return extension is ".cs" or ".java" or ".js" or ".jsx" or ".ts" or ".tsx" or ".py" or ".go" or ".rs" or ".kt" or ".md" or ".txt";
     }
 
     private static Dictionary<string, object?> StepEvidence(

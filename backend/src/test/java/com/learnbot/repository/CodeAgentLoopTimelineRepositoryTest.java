@@ -208,6 +208,47 @@ class CodeAgentLoopTimelineRepositoryTest {
     }
 
     @Test
+    void appendObservationResultKeepsBoundedFileReadContentForPatchProposal() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        LocalAgentToolResponse response = new LocalAgentToolResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.FILE_READ,
+                LocalAgentToolStatus.SUCCEEDED,
+                Map.of(
+                        "relativePath", "notes.txt",
+                        "bytes", 12,
+                        "returnedBytes", 12,
+                        "truncated", false,
+                        "content", "hello world\n"
+                ),
+                null,
+                null,
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                List.of()
+        );
+
+        repository.appendObservationResult(userId, repositoryId, loopId, response, Map.of());
+
+        ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).update(anyString(), params.capture());
+        String details = (String) params.getValue().getValue("details");
+        assertThat(details)
+                .contains("\"relativePath\":\"notes.txt\"")
+                .contains("\"contentForPatchAvailable\":true")
+                .contains("\"contentForPatch\":\"hello world\\n\"");
+    }
+
+    @Test
     void appendApprovalDecisionPersistsAuditOnlyDecisionEventForLatestTimeline() {
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         CodeAgentLoopTimelineRepository repository = new CodeAgentLoopTimelineRepository(jdbc, new ObjectMapper());

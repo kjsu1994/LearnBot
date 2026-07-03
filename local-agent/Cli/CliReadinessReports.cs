@@ -64,7 +64,7 @@ internal sealed partial class LearnBotLocalAgent
             new("backgroundLifecycle", lifecycleReady, lifecycleReady ? "status/log/state paths are available" : "local lifecycle paths are not ready"),
             new("doctorUx", doctor.Checks.Count > 0, "learnbot doctor returns structured checks without token secrets"),
             new("logsUx", status.LogExists, status.LogExists ? status.LogPath : "log file will appear after agent start"),
-            new("windowsServicePreview", serviceReady, serviceReady ? "service-plan can preview install/start/stop commands" : "install executable, pair, and approve a workspace before service-plan"),
+            new("windowsServicePreview", serviceReady, serviceReady ? "service-plan can preview commands and service-command can run typed install/start/stop/uninstall from administrator PowerShell" : "install executable, pair, and approve a workspace before service-plan or service-command"),
             new("codexLikeCommands", true, "status, doctor, login/session preview, agent start/status/logs, workspace, file, git, fix/review preview, and open are available"),
             new("signedInstaller", false, "signed MSI/EXE and auto-update remain future work"),
             new("autoUpdate", false, "auto-update remains future work")
@@ -76,7 +76,7 @@ internal sealed partial class LearnBotLocalAgent
             ReadyForInternalPilot: setupReady && doctor.Ready && lifecycleReady,
             ReadyForMatureDistribution: false,
             M8WorkEnabled: false,
-            ServiceCommandExecutionEnabled: false,
+            ServiceCommandExecutionEnabled: serviceReady,
             InstallerSigningEnabled: false,
             AutoUpdateEnabled: false,
             Status: status,
@@ -101,7 +101,7 @@ internal sealed partial class LearnBotLocalAgent
             new("lifecycle", lifecycleReady ? "READY" : "NEEDS_ACTION", lifecycleReady, lifecycleReady ? "config, state, and log paths are known" : "run status or setup before starting the background helper"),
             new("runtime", status.Running ? "RUNNING" : "STOPPED", status.Running, status.Running ? "Local Agent process appears active" : "Local Agent is not running"),
             new("logs", status.LogExists ? "READY" : "PENDING", status.LogExists, status.LogExists ? status.LogPath : "log file will appear after the agent starts"),
-            new("servicePreview", servicePreviewReady ? "READY" : "NEEDS_ACTION", servicePreviewReady, servicePreviewReady ? "service-plan can preview commands without executing them" : "install executable, pair, and approve a workspace before service preview is ready"),
+            new("servicePreview", servicePreviewReady ? "READY" : "NEEDS_ACTION", servicePreviewReady, servicePreviewReady ? "service-plan can preview commands and service-command can run typed service commands from administrator PowerShell" : "install executable, pair, and approve a workspace before service command execution is ready"),
             new("distribution", "NOT_READY", false, "signed installer and auto-update are disabled")
         };
         return new CliM8DoctorReport(
@@ -111,7 +111,7 @@ internal sealed partial class LearnBotLocalAgent
             ReadyForInternalPilot: productization.ReadyForInternalPilot,
             ReadyForMatureDistribution: false,
             M8WorkEnabled: false,
-            ServiceCommandExecutionEnabled: false,
+            ServiceCommandExecutionEnabled: productization.ServiceCommandExecutionEnabled,
             InstallerSigningEnabled: false,
             AutoUpdateEnabled: false,
             TokenSecretPrinted: false,
@@ -180,33 +180,36 @@ internal sealed partial class LearnBotLocalAgent
         var artifact = BuildCliWebSessionArtifactValidationReport();
         var secretProvider = BuildCliWebSessionSecretProviderPlanReport();
         var storedSessionAuth = BuildCliWebSessionStoredSessionAuthReadinessReport();
+        var serverUrl = (LoadConfigOrDefault().ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        var storedToken = TryReadStoredWebAccessToken(serverUrl);
+        var storedTokenPresent = !string.IsNullOrWhiteSpace(storedToken);
         return new CliWebSessionStatusReport(
             Schema: "learnbot.local-agent.web-session-status.v1",
             CommandName: "learnbot",
             Version: Version,
-            Status: tokenPresent ? "ENV_TOKEN_AVAILABLE" : "NO_WEB_SESSION",
-            ServerUrl: (LoadConfigOrDefault().ServerUrl ?? "http://localhost:8083").TrimEnd('/'),
+            Status: storedTokenPresent ? "STORED_SESSION_READY" : tokenPresent ? "ENV_TOKEN_AVAILABLE" : "NO_WEB_SESSION",
+            ServerUrl: serverUrl,
             SessionPath: WebSessionPath(),
             ArtifactValidation: artifact,
             SecretProviderPlan: secretProvider,
             StoredSessionAuthReadiness: storedSessionAuth,
             ClaimPlanEndpoint: "/api/auth/cli-device-session/claim/plan",
-            AbsoluteClaimPlanEndpointPreview: (LoadConfigOrDefault().ServerUrl ?? "http://localhost:8083").TrimEnd('/') + "/api/auth/cli-device-session/claim/plan",
+            AbsoluteClaimPlanEndpointPreview: serverUrl + "/api/auth/cli-device-session/claim/plan",
             StoredSessionExists: artifact.FileExists,
-            StoredSessionReadable: false,
-            StoredSessionTokenLoaded: false,
+            StoredSessionReadable: storedTokenPresent,
+            StoredSessionTokenLoaded: storedTokenPresent,
             ClaimPollingEnabled: false,
             EnvironmentWebTokenPresent: tokenPresent,
             EnvironmentWebTokenFingerprint: tokenPresent ? TokenFingerprint(webToken) : null,
-            UsableForServerPlanFetch: tokenPresent,
-            LocalSessionArtifactWriteEnabled: false,
+            UsableForServerPlanFetch: storedTokenPresent || tokenPresent,
+            LocalSessionArtifactWriteEnabled: true,
             LocalSessionArtifactEncryptedRequired: true,
             LocalAgentTokenUsed: false,
             TokenSecretPrinted: false,
-            LoginExecutionEnabled: false,
-            SessionStorageEnabled: false,
-            NextCommand: tokenPresent
-                ? "learnbot fix --goal \"<goal>\" --workspace <workspace> --repository-id <repository-id> --server-plan"
+            LoginExecutionEnabled: true,
+            SessionStorageEnabled: true,
+            NextCommand: storedTokenPresent || tokenPresent
+                ? "learnbot fix \"<goal>\""
                 : "learnbot login --login-id <login-id>");
     }
 
@@ -294,38 +297,44 @@ internal sealed partial class LearnBotLocalAgent
     {
         var session = BuildCliWebSessionStatusReport();
         var tokenPresent = session.EnvironmentWebTokenPresent;
+        var storedToken = TryReadStoredWebAccessToken(session.ServerUrl);
+        var storedTokenPresent = !string.IsNullOrWhiteSpace(storedToken);
         return new CliWebSessionServerPlanReadinessReport(
             Schema: "learnbot.local-agent.web-session-server-plan-readiness.v1",
             CommandName: "learnbot",
             Version: Version,
-            Status: tokenPresent ? "ENV_TOKEN_FALLBACK_READY" : "BLOCKED_NO_WEB_SESSION",
+            Status: storedTokenPresent ? "STORED_SESSION_READY" : tokenPresent ? "ENV_TOKEN_FALLBACK_READY" : "BLOCKED_NO_WEB_SESSION",
             ServerUrl: session.ServerUrl,
             SessionPath: session.SessionPath,
             ArtifactValidation: session.ArtifactValidation,
             SecretProviderPlan: session.SecretProviderPlan,
             StoredSessionAuthReadiness: session.StoredSessionAuthReadiness,
             StoredSessionExists: session.StoredSessionExists,
-            StoredSessionReadable: false,
-            StoredSessionTokenLoaded: false,
-            StoredSessionTokenFingerprint: null,
+            StoredSessionReadable: storedTokenPresent,
+            StoredSessionTokenLoaded: storedTokenPresent,
+            StoredSessionTokenFingerprint: storedTokenPresent ? TokenFingerprint(storedToken) : null,
             EnvironmentWebTokenPresent: tokenPresent,
             EnvironmentWebTokenFingerprint: session.EnvironmentWebTokenFingerprint,
             EnvironmentWebTokenUsableForServerPlanFetch: tokenPresent,
-            StoredSessionUsableForServerPlanFetch: false,
-            ServerPlanFetchFromStoredSessionEnabled: false,
-            LocalSessionArtifactWriteEnabled: false,
+            StoredSessionUsableForServerPlanFetch: storedTokenPresent,
+            ServerPlanFetchFromStoredSessionEnabled: storedTokenPresent,
+            LocalSessionArtifactWriteEnabled: true,
             LocalSessionArtifactEncryptedRequired: true,
             LocalAgentTokenUsed: false,
             TokenSecretPrinted: false,
             RequestCreated: false,
             MutationAllowed: false,
-            FollowUpCommand: tokenPresent
-                ? "learnbot fix --goal \"<goal>\" --workspace <workspace> --repository-id <repository-id> --server-plan"
+            FollowUpCommand: storedTokenPresent || tokenPresent
+                ? "learnbot fix \"<goal>\""
                 : "learnbot session create-plan",
-            Blockers: tokenPresent
-                ? ["stored web-session artifact loading is disabled; using LEARNBOT_WEB_TOKEN fallback only"]
+            Blockers: storedTokenPresent
+                ? []
+                : tokenPresent
+                ? ["stored web-session artifact is unavailable; using LEARNBOT_WEB_TOKEN fallback"]
                 : ["no LEARNBOT_WEB_TOKEN is present and stored web-session artifact loading is disabled"],
-            Reason: "This readiness bridge keeps authenticated server-plan fetch separate from Local Agent pairing. Stored session loading stays disabled until device-code claim, encrypted artifact storage, and refresh handling are implemented.");
+            Reason: storedTokenPresent
+                ? "Stored encrypted web-session auth is available for server-plan fetch. Token material is not printed."
+                : "This readiness bridge keeps authenticated server-plan fetch separate from Local Agent pairing and falls back to LEARNBOT_WEB_TOKEN when no stored session is available.");
     }
 
     private CliCodexCommandPreviewReport BuildCliCodexCommandPreviewReport(
@@ -1006,6 +1015,8 @@ internal sealed record CliCodexServerAutoLoopResult(
     object? ReleaseReadiness,
     object? ReleaseBoundary,
     object? ReleaseForExecution,
+    bool FinalPublicationAttempted,
+    object? FinalPublication,
     IReadOnlyList<string> Blockers,
     string? Error,
     string Reason);

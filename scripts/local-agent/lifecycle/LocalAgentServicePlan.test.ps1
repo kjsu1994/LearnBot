@@ -36,6 +36,12 @@ try {
     if ($ready.schema -ne "learnbot.local-agent.service-plan.v1") {
         throw "unexpected schema"
     }
+    if ($ready.plannedCommands.install -notmatch "service run") {
+        throw "service plan must install the Windows Service host entrypoint"
+    }
+    if ($ready.plannedCommands.install -notmatch "--config") {
+        throw "service plan must pass the paired config path to the service host"
+    }
     if ($ready.previewOnly -ne $true -or $ready.readyToInstall -ne $true) {
         throw "expected ready preview-only service plan"
     }

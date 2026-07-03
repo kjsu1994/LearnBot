@@ -22,7 +22,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI();
-        if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)
+        if ("/api/auth/login".equals(path) || "/api/auth/cli-login".equals(path) || "/api/auth/refresh".equals(path)
                 || "/api/auth/cli-device-session/plan".equals(path)
                 || "/api/auth/cli-device-session/create/plan".equals(path)
                 || "/api/auth/cli-device-session/create".equals(path)

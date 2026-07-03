@@ -52,12 +52,13 @@ function Get-LearnBotInstallStatus {
             status = if ($onUserPath) { "learnbot status" } else { "& `"$Executable`" status" }
             doctor = if ($onUserPath) { "learnbot doctor" } else { "& `"$Executable`" doctor" }
             start = if ($onUserPath) { "learnbot agent start" } else { "& `"$Executable`" agent start" }
+            serviceRun = if ($onUserPath) { "learnbot service run" } else { "& `"$Executable`" service run" }
         }
         limitations = [pscustomobject]@{
-            windowsService = $false
+            windowsService = $true
             signedInstaller = $false
             autoUpdate = $false
-            backgroundProcessManager = $false
+            backgroundProcessManager = $true
         }
     }
 }

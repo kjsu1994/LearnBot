@@ -5,6 +5,7 @@ import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeFileDetail;
 import com.learnbot.dto.CodeFileSummary;
+import com.learnbot.dto.CodeLocalRepositoryCreateRequest;
 import com.learnbot.dto.CodeReferenceRequest;
 import com.learnbot.dto.CodeReferenceResponse;
 import com.learnbot.dto.CodeRepositoryCreatedResponse;
@@ -119,6 +120,20 @@ public class CodeController {
                 name
         );
         return createdResponse(result.repository(), false);
+    }
+
+    @PostMapping("/repositories/local")
+    CodeRepositoryCreatedResponse createLocalRepository(@Valid @RequestBody CodeLocalRepositoryCreateRequest request) {
+        CodeRepositoryRecord repository = indexingService.createLocalRepository(
+                currentUserProvider.currentUser(),
+                request.spaceId(),
+                request.localPath(),
+                request.name(),
+                request.branch(),
+                request.headCommit(),
+                request.gitRemote()
+        );
+        return createdResponse(repository, false);
     }
 
     @GetMapping("/repositories")

@@ -53,6 +53,32 @@ public class CodeAgentLocalPatchRequestService {
             String diff,
             List<String> targetFiles
     ) {
+        return prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                instruction,
+                diff,
+                targetFiles,
+                List.of()
+        );
+    }
+
+    public LocalAgentToolExecutionResponse prepare(
+            UUID repositoryId,
+            UUID spaceId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            UUID loopId,
+            String instruction,
+            String diff,
+            List<String> targetFiles,
+            List<CodePatchFileLoader.LoadedPatchFile> observedFiles
+    ) {
         List<String> warnings = new ArrayList<>();
         List<String> normalizedTargets = fileLoader.normalizeRequestedPaths(targetFiles, warnings);
         PatchValidationResult validation = validationService.validate(diff, normalizedTargets);
@@ -60,9 +86,8 @@ public class CodeAgentLocalPatchRequestService {
         if (!validation.valid()) {
             throw new IllegalArgumentException("Patch did not pass server validation.");
         }
-        CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, normalizedTargets);
-        warnings.addAll(loaded.warnings());
-        if (loaded.files().isEmpty()) {
+        ExpectedFiles expectedFiles = expectedFiles(repositoryId, normalizedTargets, observedFiles, warnings);
+        if (expectedFiles.rows().isEmpty()) {
             throw new IllegalArgumentException("No safe indexed target files were available for patch.apply.");
         }
         CodeRepositoryRecord repository = codeRepository.findRepository(repositoryId)
@@ -92,13 +117,8 @@ public class CodeAgentLocalPatchRequestService {
         input.put("approvalRequestId", approvalRequestId(repositoryId, loopId, safe(diff), normalizedTargets));
         input.put("approvalPersistenceRequired", true);
         input.put("approvalPersisted", true);
-        input.put("expectedFiles", loaded.files().stream()
-                .map(file -> Map.of(
-                        "path", file.path(),
-                        "sha256", sha256(file.content()),
-                        "bytes", file.content().getBytes(StandardCharsets.UTF_8).length
-                ))
-                .toList());
+        input.put("expectedFiles", expectedFiles.rows());
+        input.put("expectedFileSource", expectedFiles.source());
         input.put("requiresSnapshot", true);
         input.put("snapshotPolicy", Map.of(
                 "required", true,
@@ -127,6 +147,61 @@ public class CodeAgentLocalPatchRequestService {
                 null,
                 List.copyOf(warnings)
         ));
+    }
+
+    private ExpectedFiles expectedFiles(
+            UUID repositoryId,
+            List<String> normalizedTargets,
+            List<CodePatchFileLoader.LoadedPatchFile> observedFiles,
+            List<String> warnings
+    ) {
+        List<Map<String, Object>> observedRows = expectedFilesFromObservedReads(normalizedTargets, observedFiles);
+        if (!observedRows.isEmpty() && observedRows.size() == normalizedTargets.size()) {
+            warnings.add("Expected file hashes came from completed Local Agent file.read observations.");
+            return new ExpectedFiles(observedRows, "local-agent-file-read");
+        }
+        CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, normalizedTargets);
+        warnings.addAll(loaded.warnings());
+        List<Map<String, Object>> indexedRows = loaded.files().stream()
+                .map(file -> expectedFileRow(file.path(), file.content()))
+                .toList();
+        return new ExpectedFiles(indexedRows, "indexed-loader");
+    }
+
+    private List<Map<String, Object>> expectedFilesFromObservedReads(
+            List<String> normalizedTargets,
+            List<CodePatchFileLoader.LoadedPatchFile> observedFiles
+    ) {
+        if (normalizedTargets == null || normalizedTargets.isEmpty() || observedFiles == null || observedFiles.isEmpty()) {
+            return List.of();
+        }
+        Map<String, CodePatchFileLoader.LoadedPatchFile> byPath = new LinkedHashMap<>();
+        for (CodePatchFileLoader.LoadedPatchFile file : observedFiles) {
+            if (file == null || file.path() == null || file.content() == null) {
+                continue;
+            }
+            String path = file.path().trim().replace('\\', '/').replaceAll("^/+", "");
+            if (normalizedTargets.contains(path) && fileLoader.rejectionReason(path) == null) {
+                byPath.put(path, file);
+            }
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String target : normalizedTargets) {
+            CodePatchFileLoader.LoadedPatchFile file = byPath.get(target);
+            if (file == null) {
+                return List.of();
+            }
+            rows.add(expectedFileRow(target, file.content()));
+        }
+        return List.copyOf(rows);
+    }
+
+    private Map<String, Object> expectedFileRow(String path, String content) {
+        return Map.of(
+                "path", path,
+                "sha256", sha256(content),
+                "bytes", content.getBytes(StandardCharsets.UTF_8).length
+        );
     }
 
     public Map<String, Object> previewValidatedDryRunRequest(
@@ -607,6 +682,7 @@ public class CodeAgentLocalPatchRequestService {
         putIfText(identity, "gitUrl", repository.gitUrl());
         putIfText(identity, "branch", repository.branch());
         putIfText(identity, "lastIndexedCommit", repository.lastIndexedCommit());
+        putIfText(identity, "localPath", repository.localPath());
         return identity;
     }
 
@@ -670,5 +746,8 @@ public class CodeAgentLocalPatchRequestService {
         check.put("blocking", !passed);
         check.put("message", message);
         return check;
+    }
+
+    private record ExpectedFiles(List<Map<String, Object>> rows, String source) {
     }
 }
