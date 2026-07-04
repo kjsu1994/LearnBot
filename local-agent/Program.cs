@@ -3363,6 +3363,10 @@ internal sealed partial class LearnBotLocalAgent
         {
             return ToolResult.Fail("FAILED", "TOOL_FAILED", "Patch did not contain file changes.");
         }
+        if (parsed.Files.Any(file => file.IsDelete))
+        {
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "Deleting files is not supported by patch.apply.");
+        }
 
         var root = workspace.Root!;
         var fileResults = new List<Dictionary<string, object?>>();
@@ -3378,22 +3382,33 @@ internal sealed partial class LearnBotLocalAgent
             {
                 return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch path escapes the approved workspace: " + file.Path);
             }
-            if (!File.Exists(target))
+            expectedFiles.TryGetValue(file.Path, out var expected);
+            var existedBefore = File.Exists(target);
+            var createFile = file.IsCreate || expected?.ExistedBefore == false;
+            if (createFile && existedBefore)
+            {
+                return ToolResult.Fail("REJECTED", "CONTEXT_MISMATCH", "Patch create target already exists: " + file.Path);
+            }
+            if (!createFile && !existedBefore)
             {
                 return ToolResult.Fail("FAILED", "TOOL_FAILED", "Patch target file was not found: " + file.Path);
             }
 
-            var bytes = File.ReadAllBytes(target);
+            var bytes = existedBefore ? File.ReadAllBytes(target) : [];
             if (bytes.Any(value => value == 0))
             {
                 return ToolResult.Fail("FAILED", "TOOL_FAILED", "Binary files are not supported by patch.apply dry-run: " + file.Path);
             }
             var content = Encoding.UTF8.GetString(bytes);
             var actualSha = Sha256Hex(bytes);
-            expectedFiles.TryGetValue(file.Path, out var expected);
             var hashMatches = expected?.Sha256 is not null
-                && string.Equals(expected.Sha256, actualSha, StringComparison.OrdinalIgnoreCase);
+                && (string.Equals(expected.Sha256, actualSha, StringComparison.OrdinalIgnoreCase)
+                    || (createFile && expected.ExistedBefore == false && string.IsNullOrWhiteSpace(expected.Sha256)));
             var lines = SplitLines(content);
+            if (createFile)
+            {
+                lines = [];
+            }
             var hunkResults = file.Hunks.Select(hunk => DryRunHunk(lines, hunk)).ToList();
             var contextMatches = hunkResults.All(item => item.ContextMatches);
 
@@ -3401,6 +3416,8 @@ internal sealed partial class LearnBotLocalAgent
             {
                 ["path"] = file.Path,
                 ["absolutePath"] = target,
+                ["operation"] = createFile ? "create" : "update",
+                ["existedBefore"] = existedBefore,
                 ["expectedSha256"] = expected?.Sha256,
                 ["actualSha256"] = actualSha,
                 ["bytes"] = bytes.LongLength,
@@ -5979,6 +5996,7 @@ internal sealed partial class LearnBotLocalAgent
         {
             ["path"] = path,
             ["snapshotRelativePath"] = snapshotFile?.SnapshotRelativePath ?? (path is null ? null : "files/" + path.ToString()!.Replace('\\', '/')),
+            ["existedBefore"] = file.TryGetValue("existedBefore", out var existedBefore) ? existedBefore : true,
             ["expectedSha256"] = file.TryGetValue("expectedSha256", out var expected) ? expected : null,
             ["actualSha256"] = file.TryGetValue("actualSha256", out var actual) ? actual : null,
             ["hashMatches"] = file.TryGetValue("hashMatches", out var hashMatches) ? hashMatches : null,
@@ -6073,6 +6091,9 @@ internal sealed partial class LearnBotLocalAgent
                     return SnapshotCreationResult.Failed("Snapshot target file was not present in the validated layout: " + path);
                 }
 
+                var existedBefore = !file.TryGetValue("existedBefore", out var existedBeforeValue)
+                    || existedBeforeValue is not bool boolValue
+                    || boolValue;
                 var sourcePath = file.TryGetValue("absolutePath", out var absolutePath) ? absolutePath?.ToString() : null;
                 if (string.IsNullOrWhiteSpace(sourcePath))
                 {
@@ -6083,12 +6104,12 @@ internal sealed partial class LearnBotLocalAgent
                 {
                     return SnapshotCreationResult.Failed("Snapshot source file escapes the approved workspace: " + path);
                 }
-                if (!File.Exists(sourcePath))
+                if (existedBefore && !File.Exists(sourcePath))
                 {
                     return SnapshotCreationResult.Failed("Snapshot source file was not found: " + path);
                 }
 
-                var bytes = File.ReadAllBytes(sourcePath);
+                var bytes = existedBefore ? File.ReadAllBytes(sourcePath) : [];
                 if (bytes.Any(value => value == 0))
                 {
                     return SnapshotCreationResult.Failed("Binary files are not supported by patch.apply snapshot: " + path);
@@ -6106,12 +6127,20 @@ internal sealed partial class LearnBotLocalAgent
                     return SnapshotCreationResult.Failed("Snapshot staging file path escapes staging root: " + path);
                 }
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-                File.Copy(sourcePath, destinationPath, overwrite: false);
+                if (existedBefore)
+                {
+                    File.Copy(sourcePath, destinationPath, overwrite: false);
+                }
+                else
+                {
+                    File.WriteAllBytes(destinationPath, bytes);
+                }
 
                 manifestFiles.Add(new Dictionary<string, object?>
                 {
                     ["path"] = path,
                     ["snapshotRelativePath"] = layoutFile.SnapshotRelativePath,
+                    ["existedBefore"] = existedBefore,
                     ["expectedSha256"] = file.TryGetValue("expectedSha256", out var expected) ? expected : null,
                     ["actualSha256"] = actualSha,
                     ["bytes"] = bytes.LongLength,
@@ -6311,7 +6340,7 @@ internal sealed partial class LearnBotLocalAgent
                 {
                     return PatchParseResult.Fail("Patch target path is missing.");
                 }
-                currentFile = new PatchFile(path);
+                currentFile = new PatchFile(path, oldPath == "/dev/null", newPath == "/dev/null");
                 files.Add(currentFile);
                 currentHunk = null;
                 continue;
@@ -6492,7 +6521,8 @@ internal sealed partial class LearnBotLocalAgent
         string workspaceRoot,
         string targetPath,
         PatchFile patchFile,
-        string? expectedSha256)
+        string? expectedSha256,
+        bool existedBefore = true)
     {
         var root = Path.GetFullPath(workspaceRoot);
         var target = Path.GetFullPath(targetPath);
@@ -6500,12 +6530,16 @@ internal sealed partial class LearnBotLocalAgent
         {
             return PatchWriteSequenceResult.Failed("Patch target escapes the approved workspace.");
         }
-        if (!File.Exists(target))
+        if (!existedBefore && File.Exists(target))
+        {
+            return PatchWriteSequenceResult.Failed("Patch create target already exists.");
+        }
+        if (existedBefore && !File.Exists(target))
         {
             return PatchWriteSequenceResult.Failed("Patch target file was not found.");
         }
 
-        var beforeBytes = File.ReadAllBytes(target);
+        var beforeBytes = existedBefore ? File.ReadAllBytes(target) : [];
         if (beforeBytes.Any(value => value == 0))
         {
             return PatchWriteSequenceResult.Failed("Binary files are not supported by patch write.");
@@ -6517,10 +6551,11 @@ internal sealed partial class LearnBotLocalAgent
             return PatchWriteSequenceResult.Failed("Patch target changed after snapshot creation.");
         }
 
-        var text = DecodeUtf8PreservingBom(beforeBytes, out var hasUtf8Bom);
+        var hasUtf8Bom = false;
+        var text = existedBefore ? DecodeUtf8PreservingBom(beforeBytes, out hasUtf8Bom) : "";
         var newline = DetectLineEnding(text);
         var hadFinalNewline = text.EndsWith("\n", StringComparison.Ordinal);
-        var lines = SplitLines(text);
+        var lines = existedBefore ? SplitLines(text) : [];
         if (hadFinalNewline && lines.Length > 0 && lines[^1].Length == 0)
         {
             lines = lines[..^1];
@@ -6540,6 +6575,7 @@ internal sealed partial class LearnBotLocalAgent
         var tempPath = target + ".learnbot-patch-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.WriteAllBytes(tempPath, updatedBytes);
             File.Move(tempPath, target, overwrite: true);
             var afterBytes = File.ReadAllBytes(target);
@@ -6656,7 +6692,10 @@ internal sealed partial class LearnBotLocalAgent
             .Where(item => item.ValueKind == JsonValueKind.Object)
             .Select(item => new ExpectedFile(
                 item.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String ? path.GetString()?.Replace('\\', '/') ?? "" : "",
-                item.TryGetProperty("sha256", out var sha) && sha.ValueKind == JsonValueKind.String ? sha.GetString() ?? "" : ""))
+                item.TryGetProperty("sha256", out var sha) && sha.ValueKind == JsonValueKind.String ? sha.GetString() ?? "" : "",
+                item.TryGetProperty("existedBefore", out var existedBefore) && existedBefore.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? existedBefore.GetBoolean()
+                    : true))
             .Where(item => !string.IsNullOrWhiteSpace(item.Path))
             .GroupBy(item => item.Path, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
@@ -10221,6 +10260,38 @@ internal sealed partial class LearnBotLocalAgent
                 }
             }, JsonOptions));
             var mismatchResult = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, mismatchRequestJson.RootElement);
+            var createDiff = """
+            --- /dev/null
+            +++ b/src/NewPage.html
+            @@ -0,0 +1,3 @@
+            +<!doctype html>
+            +<title>New</title>
+            +<main>Hello</main>
+            """;
+            var newTargetPath = Path.Combine(workspaceRoot, "src", "NewPage.html");
+            using var createRequestJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["workspaceId"] = workspaceId,
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["workspaceId"] = workspaceId,
+                    ["sourceRequestId"] = "33333333-3333-3333-3333-333333333333",
+                    ["dryRunOnly"] = true,
+                    ["mutationAllowed"] = false,
+                    ["diff"] = createDiff,
+                    ["targetFiles"] = new[] { "src/NewPage.html" },
+                    ["expectedFiles"] = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["path"] = "src/NewPage.html",
+                            ["existedBefore"] = false,
+                            ["sha256"] = ""
+                        }
+                    }
+                }
+            }, JsonOptions));
+            var createResult = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, createRequestJson.RootElement);
             var ok = result.Success
                 && result.Status == "SUCCEEDED"
                 && result.FailureCode is null
@@ -10252,6 +10323,11 @@ internal sealed partial class LearnBotLocalAgent
                 && mismatchResult.FailureCode == "CONTEXT_MISMATCH"
                 && mismatchResult.Output.TryGetValue("preflightPassed", out var mismatchPreflightPassed)
                 && mismatchPreflightPassed is false
+                && createResult.Success
+                && createResult.Status == "SUCCEEDED"
+                && createResult.Output.TryGetValue("snapshotCreated", out var createSnapshotCreated)
+                && createSnapshotCreated is true
+                && !File.Exists(newTargetPath)
                 && File.ReadAllText(targetPath, Encoding.UTF8) == original;
             if (!ok)
             {
@@ -10592,7 +10668,7 @@ internal sealed record ToolResult(
     public static ToolResult Fail(string status, string failureCode, string error, Dictionary<string, object?> output) => new(false, status, failureCode, error, output);
 }
 
-internal sealed record ExpectedFile(string Path, string Sha256);
+internal sealed record ExpectedFile(string Path, string Sha256, bool ExistedBefore);
 
 internal sealed record GitIdentityValue(string? Value, string? Warning);
 
@@ -10661,12 +10737,16 @@ internal sealed class PatchHunk
 
 internal sealed class PatchFile
 {
-    public PatchFile(string path)
+    public PatchFile(string path, bool isCreate = false, bool isDelete = false)
     {
         Path = path;
+        IsCreate = isCreate;
+        IsDelete = isDelete;
     }
 
     public string Path { get; }
+    public bool IsCreate { get; }
+    public bool IsDelete { get; }
     public List<PatchHunk> Hunks { get; } = [];
 }
 

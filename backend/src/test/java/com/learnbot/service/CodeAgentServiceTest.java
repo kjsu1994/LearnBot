@@ -148,6 +148,49 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesMaterializesCreateFileOperationIntoUnifiedDiff() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String proposal = """
+                {
+                  "action": "propose_patch",
+                  "targetFiles": ["index.html"],
+                  "diagnosis": "The workspace has no existing page, so a new safe HTML file is required.",
+                  "changeIntent": "Create the requested homepage from the model-authored content.",
+                  "edits": [
+                    {
+                      "path": "index.html",
+                      "operation": "create_file",
+                      "content": "<!doctype html>\\n<html lang=\\"ko\\">\\n<head><meta charset=\\"utf-8\\"><title>LearnBot</title></head>\\n<body><main><h1>LearnBot</h1></main></body>\\n</html>\\n"
+                    }
+                  ]
+                }
+                """;
+
+        when(fileLoader.rejectionReason("index.html")).thenReturn(null);
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(proposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "홈페이지를 만들어줘",
+                List.of()
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).path()).isEqualTo("index.html");
+        assertThat(response.files().get(0).diff())
+                .contains("--- /dev/null")
+                .contains("+++ b/index.html")
+                .contains("+<!doctype html>")
+                .contains("+<html lang=\"ko\">");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("No existing files were selected"));
+    }
+
+    @Test
     void patchRejectsDiffOutsideTargetFiles() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);

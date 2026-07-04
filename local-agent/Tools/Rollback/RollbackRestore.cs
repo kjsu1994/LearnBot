@@ -106,6 +106,7 @@ internal sealed partial class LearnBotLocalAgent
                 {
                     return RollbackRestoreResult.Failed("Snapshot file was not found: " + path, RollbackRestoreOutput(workspaceId, manifestId, restored: false));
                 }
+                var existedBefore = TryInputBool(file, "existedBefore") ?? true;
 
                 var targetPath = Path.GetFullPath(Path.Combine(workspaceRoot, path.Replace('/', Path.DirectorySeparatorChar)));
                 if (!IsWithin(workspaceRoot, targetPath))
@@ -116,14 +117,22 @@ internal sealed partial class LearnBotLocalAgent
                 var hadTarget = File.Exists(targetPath);
                 var beforeBytes = hadTarget ? File.ReadAllBytes(targetPath) : [];
                 var snapshotBytes = File.ReadAllBytes(snapshotPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-                File.Copy(snapshotPath, targetPath, overwrite: true);
+                if (existedBefore)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                    File.Copy(snapshotPath, targetPath, overwrite: true);
+                }
+                else if (hadTarget)
+                {
+                    File.Delete(targetPath);
+                }
                 restoredFiles.Add(new Dictionary<string, object?>
                 {
                     ["path"] = path,
+                    ["operation"] = existedBefore ? "restore" : "delete-created-file",
                     ["beforeSha256"] = hadTarget ? Sha256Hex(beforeBytes) : null,
-                    ["restoredSha256"] = Sha256Hex(snapshotBytes),
-                    ["bytes"] = snapshotBytes.LongLength
+                    ["restoredSha256"] = existedBefore ? Sha256Hex(snapshotBytes) : null,
+                    ["bytes"] = existedBefore ? snapshotBytes.LongLength : 0
                 });
             }
 

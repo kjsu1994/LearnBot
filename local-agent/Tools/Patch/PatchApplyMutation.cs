@@ -58,16 +58,26 @@ internal sealed partial class LearnBotLocalAgent
         {
             return ToolResult.Fail("FAILED", "TOOL_FAILED", parsed.Error ?? "Invalid unified diff.");
         }
-        if (parsed.Files.Count != 1)
+        if (parsed.Files.Count == 0 || parsed.Files.Count > 5)
         {
-            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply mutation is limited to one file in this release slice.");
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply mutation requires between one and five files.");
+        }
+        if (parsed.Files.Any(file => file.IsDelete))
+        {
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "Deleting files is not supported by patch.apply.");
+        }
+        if (parsed.Files.Select(file => file.Path).Distinct(StringComparer.Ordinal).Count() != parsed.Files.Count)
+        {
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply mutation refuses duplicate file entries.");
         }
 
-        var patchFile = parsed.Files[0];
         var targetFiles = TryInputStringList(input, "targetFiles");
-        if (targetFiles.Count > 0 && !targetFiles.Contains(patchFile.Path, StringComparer.Ordinal))
+        var outsideTarget = targetFiles.Count == 0
+            ? null
+            : parsed.Files.FirstOrDefault(file => !targetFiles.Contains(file.Path, StringComparer.Ordinal));
+        if (outsideTarget is not null)
         {
-            return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch modifies a file outside targetFiles: " + patchFile.Path);
+            return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch modifies a file outside targetFiles: " + outsideTarget.Path);
         }
 
         var manifest = LoadManagedSnapshotManifest(workspace.Workspace!.WorkspaceId, workspace.Root!, manifestId);
@@ -75,35 +85,38 @@ internal sealed partial class LearnBotLocalAgent
         {
             return ToolResult.Fail("REJECTED", "ROLLBACK_REFUSED", manifest.Error ?? "Managed rollback snapshot is not valid.", PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, false, []));
         }
-        if (!manifest.Files.TryGetValue(patchFile.Path, out var snapshotFile))
-        {
-            return ToolResult.Fail("REJECTED", "ROLLBACK_REFUSED", "Managed rollback snapshot does not cover patch target: " + patchFile.Path, PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, false, []));
-        }
 
-        var targetPath = Path.GetFullPath(Path.Combine(workspace.Root!, patchFile.Path.Replace('/', Path.DirectorySeparatorChar)));
-        if (!IsWithin(workspace.Root!, targetPath))
+        var fileOutput = new List<Dictionary<string, object?>>();
+        foreach (var patchFile in parsed.Files)
         {
-            return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch target escapes the approved workspace: " + patchFile.Path);
-        }
-
-        var write = TryWritePatchedFileWithRecheck(workspace.Root!, targetPath, patchFile, snapshotFile.ActualSha256);
-        var fileOutput = new List<Dictionary<string, object?>>
-        {
-            new()
+            if (!manifest.Files.TryGetValue(patchFile.Path, out var snapshotFile))
             {
-                ["path"] = patchFile.Path,
-                ["beforeSha256"] = write.BeforeSha256,
-                ["afterSha256"] = write.AfterSha256,
-                ["beforeBytes"] = write.BeforeBytes,
-                ["afterBytes"] = write.AfterBytes,
-                ["lineEnding"] = write.LineEnding,
-                ["applied"] = write.Success,
-                ["error"] = write.Error
+                return ToolResult.Fail("REJECTED", "ROLLBACK_REFUSED", "Managed rollback snapshot does not cover patch target: " + patchFile.Path, PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, false, fileOutput));
             }
-        };
-        if (!write.Success)
-        {
-            return ToolResult.Fail("REJECTED", "CONTEXT_MISMATCH", write.Error ?? "Patch write failed.", PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, false, fileOutput));
+
+            var targetPath = Path.GetFullPath(Path.Combine(workspace.Root!, patchFile.Path.Replace('/', Path.DirectorySeparatorChar)));
+            if (!IsWithin(workspace.Root!, targetPath))
+            {
+                return ToolResult.Fail("REJECTED", "PATH_ESCAPE", "Patch target escapes the approved workspace: " + patchFile.Path);
+            }
+
+            var write = TryWritePatchedFileWithRecheck(workspace.Root!, targetPath, patchFile, snapshotFile.ActualSha256, snapshotFile.ExistedBefore);
+            fileOutput.Add(new Dictionary<string, object?>
+            {
+                    ["path"] = patchFile.Path,
+                    ["operation"] = snapshotFile.ExistedBefore ? "update" : "create",
+                    ["beforeSha256"] = write.BeforeSha256,
+                    ["afterSha256"] = write.AfterSha256,
+                    ["beforeBytes"] = write.BeforeBytes,
+                    ["afterBytes"] = write.AfterBytes,
+                    ["lineEnding"] = write.LineEnding,
+                    ["applied"] = write.Success,
+                    ["error"] = write.Error
+            });
+            if (!write.Success)
+            {
+                return ToolResult.Fail("REJECTED", "CONTEXT_MISMATCH", write.Error ?? "Patch write failed.", PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, false, fileOutput));
+            }
         }
 
         return ToolResult.Ok(PatchMutationOutput(workspace.Workspace!.WorkspaceId, manifestId, true, fileOutput));
@@ -182,6 +195,7 @@ internal sealed partial class LearnBotLocalAgent
                 {
                     return ManagedSnapshotManifestResult.Failed("Snapshot file hash is missing: " + path);
                 }
+                var existedBefore = TryInputBool(file, "existedBefore") ?? true;
                 var snapshotSha256 = Sha256Hex(File.ReadAllBytes(layoutFile.DestinationPath));
                 if (!string.Equals(actualSha256, snapshotSha256, StringComparison.OrdinalIgnoreCase))
                 {
@@ -190,7 +204,8 @@ internal sealed partial class LearnBotLocalAgent
                 files[path] = new ManagedSnapshotFile(
                     path,
                     actualSha256,
-                    layoutFile.DestinationPath);
+                    layoutFile.DestinationPath,
+                    existedBefore);
             }
             return ManagedSnapshotManifestResult.Ok(files);
         }
@@ -298,6 +313,64 @@ internal sealed partial class LearnBotLocalAgent
             }, JsonOptions));
             var rollback = new LearnBotLocalAgent().HandleTool(config, requestId, rollbackJson.RootElement, "rollback.restore");
 
+            var newTargetPath = Path.Combine(workspaceRoot, "src", "NewPage.html");
+            var emptyHash = Sha256Hex([]);
+            var createSnapshot = CreateSnapshot(workspaceId, workspaceRoot, inputJson.RootElement, [
+                new Dictionary<string, object?>
+                {
+                    ["path"] = "src/NewPage.html",
+                    ["absolutePath"] = newTargetPath,
+                    ["operation"] = "create",
+                    ["existedBefore"] = false,
+                    ["actualSha256"] = emptyHash,
+                    ["hashMatches"] = true,
+                    ["contextMatches"] = true
+                }
+            ]);
+            var createManifestId = createSnapshot.Manifest is not null && createSnapshot.Manifest.TryGetValue("id", out var createId)
+                ? createId!.ToString()!
+                : "";
+            var createDiff = """
+            --- /dev/null
+            +++ b/src/NewPage.html
+            @@ -0,0 +1,3 @@
+            +<!doctype html>
+            +<title>New</title>
+            +<main>Hello</main>
+            """;
+            using var createRequestJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId,
+                ["userId"] = userId,
+                ["agentId"] = agentId,
+                ["workspaceId"] = workspaceId,
+                ["executionTarget"] = "USER_LOCAL_AGENT",
+                ["toolName"] = "patch.apply",
+                ["approvalState"] = "APPROVED",
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["mutationAllowed"] = true,
+                    ["dryRunOnly"] = false,
+                    ["manifestId"] = createManifestId,
+                    ["diff"] = createDiff,
+                    ["targetFiles"] = new[] { "src/NewPage.html" }
+                }
+            }, JsonOptions));
+            var createResponse = new LearnBotLocalAgent().HandleTool(config, requestId, createRequestJson.RootElement, "patch.apply");
+            var createdContent = File.Exists(newTargetPath) ? File.ReadAllText(newTargetPath, Encoding.UTF8) : "";
+            using var createRollbackJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId,
+                ["userId"] = userId,
+                ["agentId"] = agentId,
+                ["workspaceId"] = workspaceId,
+                ["executionTarget"] = "USER_LOCAL_AGENT",
+                ["toolName"] = "rollback.restore",
+                ["approvalState"] = "APPROVED",
+                ["input"] = new Dictionary<string, object?> { ["manifestId"] = createManifestId }
+            }, JsonOptions));
+            var createRollback = new LearnBotLocalAgent().HandleTool(config, requestId, createRollbackJson.RootElement, "rollback.restore");
+
             using var unapprovedJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
             {
                 ["sessionId"] = sessionId,
@@ -323,6 +396,10 @@ internal sealed partial class LearnBotLocalAgent
                 && afterApply == "class App {\n    string Name = \"new\";\n    string Mode = \"safe\";\n}\n"
                 && rollback.Status == "SUCCEEDED"
                 && File.ReadAllText(targetPath, Encoding.UTF8) == original
+                && createResponse.Status == "SUCCEEDED"
+                && createdContent.Contains("<main>Hello</main>", StringComparison.Ordinal)
+                && createRollback.Status == "SUCCEEDED"
+                && !File.Exists(newTargetPath)
                 && unapproved.Status == "REJECTED"
                 && unapproved.FailureCode == "APPROVAL_REQUIRED";
             if (!ok)
@@ -353,7 +430,7 @@ internal sealed partial class LearnBotLocalAgent
     }
 }
 
-internal sealed record ManagedSnapshotFile(string Path, string? ActualSha256, string SnapshotPath);
+internal sealed record ManagedSnapshotFile(string Path, string? ActualSha256, string SnapshotPath, bool ExistedBefore);
 
 internal sealed record ManagedSnapshotManifestResult(bool Success, string? Error, Dictionary<string, ManagedSnapshotFile> Files)
 {

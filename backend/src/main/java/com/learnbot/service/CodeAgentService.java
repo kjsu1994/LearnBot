@@ -113,14 +113,7 @@ public class CodeAgentService {
     ) {
         List<CodePatchFileLoader.LoadedPatchFile> filesToPatch = loadedFiles == null ? List.of() : loadedFiles;
         if (filesToPatch.isEmpty()) {
-            return new CodeAgentPatchResponse(
-                    "No safe target files were available for patch generation.",
-                    List.of(),
-                    "high",
-                    List.copyOf(warnings),
-                    List.of(),
-                    false
-            );
+            warnings.add("No existing files were selected; LLM patch generation may create new safe workspace files if the user request requires it.");
         }
         OllamaClient.ChatResult modelResult;
         String modelOutput;
@@ -226,7 +219,8 @@ public class CodeAgentService {
                     false
             );
         }
-        PatchValidationResult validation = validationService.validate(diff, filesToPatch.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
+        List<String> validationTargets = validationTargetsForPatch(diff, filesToPatch);
+        PatchValidationResult validation = validationService.validate(diff, validationTargets, safeInstruction);
         warnings.addAll(validation.warnings());
         if (!validation.valid()) {
             warnings.add("LLM patch generation produced an invalid diff; LLM repair will be attempted before any deterministic fallback.");
@@ -297,7 +291,7 @@ public class CodeAgentService {
                 files,
                 files.size() > 1 ? "medium" : "low",
                 List.copyOf(warnings),
-                testSuggestions(filesToPatch),
+                testSuggestions(filesToPatch, changedPaths(validatedDiff)),
                 true
         );
     }
@@ -394,7 +388,8 @@ public class CodeAgentService {
                 }
                 PatchValidationResult repairedValidation = validationService.validate(
                         repairedDiff,
-                        files.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList()
+                        validationTargetsForPatch(repairedDiff, files),
+                        instruction
                 );
                 warnings.add(attempt == 1
                         ? "LLM patch repair attempted after invalid initial diff."
@@ -670,6 +665,7 @@ public class CodeAgentService {
             contentByPath.put(normalizePatchPath(file.path()), safe(file.content()));
         }
         Map<String, List<PatchHunk>> hunksByPath = parsePatchHunks(diff);
+        Set<String> createdPaths = createdPaths(diff);
         List<String> warnings = new ArrayList<>();
         if (hunksByPath.isEmpty()) {
             warnings.add("Patch context validation found no applicable hunks.");
@@ -679,6 +675,9 @@ public class CodeAgentService {
             String path = normalizePatchPath(entry.getKey());
             String content = contentByPath.get(path);
             if (content == null) {
+                if (createdPaths.contains(path)) {
+                    continue;
+                }
                 warnings.add("Patch context validation could not find loaded current content for: " + path);
                 continue;
             }
@@ -696,7 +695,16 @@ public class CodeAgentService {
             List<CodePatchFileLoader.LoadedPatchFile> files
     ) {
         Map<String, List<PatchHunk>> hunksByPath = parsePatchHunks(diff);
+        Set<String> createdPaths = createdPaths(diff);
         List<String> warnings = new ArrayList<>();
+        for (String path : createdPaths) {
+            if (isHtmlLikePath(path)) {
+                String htmlWarning = validateHtmlPatchResult(path, createdFileContentFromDiff(diff, path));
+                if (htmlWarning != null) {
+                    warnings.add(htmlWarning);
+                }
+            }
+        }
         for (CodePatchFileLoader.LoadedPatchFile file : files == null ? List.<CodePatchFileLoader.LoadedPatchFile>of() : files) {
             String path = normalizePatchPath(file.path());
             List<PatchHunk> hunks = hunksByPath.get(path);
@@ -1021,6 +1029,23 @@ public class CodeAgentService {
         return builder.toString().trim();
     }
 
+    private String newFileDiff(String path, String content) {
+        String cleanPath = normalizePatchPath(path);
+        List<String> newLines = contentLines(content);
+        StringBuilder builder = new StringBuilder();
+        builder.append("--- /dev/null\n");
+        builder.append("+++ b/").append(cleanPath).append("\n");
+        builder.append("@@ -0,0 +")
+                .append(newLines.isEmpty() ? 0 : 1)
+                .append(",")
+                .append(newLines.size())
+                .append(" @@\n");
+        for (String line : newLines) {
+            builder.append("+").append(line).append("\n");
+        }
+        return builder.toString().trim();
+    }
+
     private List<String> contentLines(String content) {
         String normalized = safe(content).replace("\r\n", "\n").replace('\r', '\n');
         if (normalized.endsWith("\n")) {
@@ -1122,23 +1147,27 @@ public class CodeAgentService {
                 Return JSON only.
                 Do not output <think> blocks, reasoning, analysis, or explanations.
                 Do not use markdown fences.
-                Modify only the provided target files.
-                Do not create, delete, rename, or chmod files.
+                Modify only provided target files unless the user request requires creating new safe workspace files.
+                You may create new files with operation=create_file when needed.
+                Do not delete, rename, or chmod files.
                 Preserve the existing style.
                 Preserve the user's requested language and content constraints.
                 If the user asks for Korean/Hangul text, added prose must be Korean.
                 Do not invent generic placeholders such as "Added by LearnBot" unless the user explicitly asked for that text.
+                If the user explicitly asks to add/create a JS, CSS, HTML, or other file, include a create_file operation for that file type unless an existing file of that type is clearly the intended target.
+                If you add a new local <script src>, stylesheet href, import, or module reference, create or update the referenced local file in the same patch.
                 Prefer editFormat=operation_edit.
                 Keep output compact: omit diagnosis, changeIntent, verificationPlan, and riskNotes unless essential.
                 Use small operations with exact anchors copied from EXACT_CONTENT.
-                Prefer insert_before_anchor, insert_after_anchor, replace_exact, or replace_between_anchors.
+                Prefer insert_before_anchor, insert_after_anchor, replace_exact, replace_between_anchors, or create_file.
                 Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
                 Use search_replace only when the search block appears exactly once in the current file.
                 Use legacy unifiedDiff only when you are certain every hunk context line is copied exactly from the current file.
                 The server may reject unsafe or malformed output and may materialize your edits into a unified diff, but it must not author replacement content for you.
                 Compact JSON shape:
-                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text"}]}
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file|create_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text","content":"LLM-authored new file content for create_file"}]}
                 For operation_edit, every anchorBefore, anchorAfter, and oldText value must be copied exactly from EXACT_CONTENT and must match uniquely.
+                For create_file, path must be a safe relative workspace path and content/newText/fullFileContent must contain the complete new file content.
                 For search_replace, edits items must be {"path":"path","search":"exact current text block","replace":"LLM-authored replacement block"}.
                 For full_file, edits items must be {"path":"path","fullFileContent":"complete updated file content"}.
                 For legacy unified_diff, set unifiedDiff to the complete diff.
@@ -1155,10 +1184,15 @@ public class CodeAgentService {
                 .append("- The server only provides observations and validates safety.\n")
                 .append("- You must decide the target lines and patch content.\n")
                 .append("- Keep JSON compact so it is not truncated.\n")
-                .append("- If the supplied file content is insufficient, choose action=observe_more instead of guessing.\n\n")
+                .append("- If the supplied file content is insufficient for modifying existing files, choose action=observe_more instead of guessing.\n")
+                .append("- If no existing files are provided and the user asks to create something, choose create_file operations with safe relative paths.\n\n")
                 .append("TARGET_FILES:\n");
-        for (CodePatchFileLoader.LoadedPatchFile file : files) {
-            appendFileContext(builder, file, false);
+        if (files == null || files.isEmpty()) {
+            builder.append("- none; creation mode is allowed for safe relative workspace files.\n");
+        } else {
+            for (CodePatchFileLoader.LoadedPatchFile file : files) {
+                appendFileContext(builder, file, false);
+            }
         }
         return builder.toString();
     }
@@ -1169,8 +1203,9 @@ public class CodeAgentService {
                 Return JSON only.
                 Do not output <think> blocks, reasoning, analysis, or explanations.
                 Do not use markdown fences.
-                Modify only the provided target files.
-                Do not create, delete, rename, or chmod files.
+                Modify only provided target files unless the user request requires creating new safe workspace files.
+                You may create new files with operation=create_file when needed.
+                Do not delete, rename, or chmod files.
                 Prefer editFormat=operation_edit. Use small operations with exact anchors copied from EXACT_CONTENT.
                 Keep output compact: no diagnosis/changeIntent/verificationPlan/riskNotes unless essential.
                 Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
@@ -1178,11 +1213,14 @@ public class CodeAgentService {
                 Use legacy unifiedDiff only when every hunk context line is copied exactly from the provided file contents, including indentation.
                 Keep the patch small and targeted.
                 Preserve the user's requested language and content constraints.
+                If the user explicitly asks to add/create a JS, CSS, HTML, or other file, include a create_file operation for that file type unless an existing file of that type is clearly the intended target.
+                If you add a new local <script src>, stylesheet href, import, or module reference, create or update the referenced local file in the same patch.
                 The provided file contents are the actual current workspace state.
                 If the previous output declined because a file looked incomplete or truncated, treat that incomplete file state as the bug and produce a minimal repair diff when it satisfies the user request.
                 Compact JSON shape:
-                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text"}]}
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file|create_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text","content":"LLM-authored new file content for create_file"}]}
                 For operation_edit, every anchorBefore, anchorAfter, and oldText value must be copied exactly from EXACT_CONTENT and must match uniquely.
+                For create_file, path must be a safe relative workspace path and content/newText/fullFileContent must contain the complete new file content.
                 For search_replace, edits items must be {"path":"path","search":"exact current text block","replace":"LLM-authored replacement block"}.
                 For full_file, edits items must be {"path":"path","fullFileContent":"complete updated file content"}.
                 For legacy unified_diff, set unifiedDiff to the complete diff.
@@ -1403,8 +1441,24 @@ public class CodeAgentService {
             return "";
         }
         Map<String, String> updatedByPath = new LinkedHashMap<>();
+        Map<String, String> createdByPath = new LinkedHashMap<>();
         for (StructuredEdit operation : operations) {
             CodePatchFileLoader.LoadedPatchFile file = loadedFileByPath(files, operation.path());
+            String operationName = normalizeOperationName(operation.operation());
+            if ("create_file".equals(operationName)) {
+                OperationApplyResult created = createFileOperation(operation, file, phase);
+                if (!created.success()) {
+                    warnings.add(created.warning());
+                    return "NO_PATCH\nreason: " + created.reason();
+                }
+                String path = normalizePatchPath(operation.path());
+                if (createdByPath.containsKey(path)) {
+                    warnings.add("LLM patch " + phase + " create_file operation repeated a new file path: " + path);
+                    return "NO_PATCH\nreason: create_file path was repeated";
+                }
+                createdByPath.put(path, created.content());
+                continue;
+            }
             if (file == null) {
                 warnings.add("LLM patch " + phase + " operation_edit targeted an unloaded file: " + operation.path());
                 return "NO_PATCH\nreason: operation_edit targeted an unloaded file";
@@ -1419,6 +1473,9 @@ public class CodeAgentService {
             updatedByPath.put(path, applied.content());
         }
         List<String> diffs = new ArrayList<>();
+        for (Map.Entry<String, String> entry : createdByPath.entrySet()) {
+            diffs.add(newFileDiff(entry.getKey(), entry.getValue()));
+        }
         for (CodePatchFileLoader.LoadedPatchFile file : files == null ? List.<CodePatchFileLoader.LoadedPatchFile>of() : files) {
             String path = normalizePatchPath(file.path());
             String updated = updatedByPath.get(path);
@@ -1649,8 +1706,50 @@ public class CodeAgentService {
             case "insert_before", "insert_before_anchor", "insert_before_anchors" -> "insert_before_anchor";
             case "insertbefore", "insertbeforeanchor", "insert_beforeanchor" -> "insert_before_anchor";
             case "append", "append_file", "append_to_file" -> "append_to_file";
+            case "create", "new_file", "add_file", "create_file", "write_file" -> "create_file";
             default -> normalized;
         };
+    }
+
+    private OperationApplyResult createFileOperation(
+            StructuredEdit edit,
+            CodePatchFileLoader.LoadedPatchFile existingFile,
+            String phase
+    ) {
+        String path = normalizePatchPath(edit.path());
+        if (path.isBlank()) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " create_file operation had a blank path.",
+                    "create_file path was blank"
+            );
+        }
+        String rejection = fileLoader.rejectionReason(path);
+        if (rejection != null) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " create_file operation targeted an unsafe path: " + path + " (" + rejection + ")",
+                    "create_file path was unsafe"
+            );
+        }
+        if (existingFile != null) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " create_file operation targeted an already loaded existing file: " + path,
+                    "create_file targeted an existing file"
+            );
+        }
+        String content = firstNonBlank(edit.content(), edit.fullFileContent(), edit.newText());
+        if (content.isBlank()) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " create_file operation for " + path + " had blank content.",
+                    "create_file content was blank"
+            );
+        }
+        if (!looksLikeFullFileForPath(path, content)) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " create_file operation failed file-shape safety checks for: " + path,
+                    "create_file content failed safety checks"
+            );
+        }
+        return OperationApplyResult.success(content.replace("\r\n", "\n").replace('\r', '\n'));
     }
 
     private AnchorRange uniqueAnchorRange(String current, String anchorBefore, String anchorAfter) {
@@ -1819,8 +1918,8 @@ public class CodeAgentService {
                         "operation_edit",
                         normalizePatchPath(path),
                         textField(edit, "operation", "type"),
-                        null,
-                        null,
+                        textField(edit, "fullFileContent", "full_file_content", "fullFile", "fileContent"),
+                        textField(edit, "content", "fileContent"),
                         null,
                         null,
                         textField(edit, "oldText", "old_text", "search"),
@@ -2182,6 +2281,55 @@ public class CodeAgentService {
         return List.copyOf(paths);
     }
 
+    private List<String> validationTargetsForPatch(String diff, List<CodePatchFileLoader.LoadedPatchFile> files) {
+        Set<String> paths = new LinkedHashSet<>();
+        for (CodePatchFileLoader.LoadedPatchFile file : files == null ? List.<CodePatchFileLoader.LoadedPatchFile>of() : files) {
+            if (file != null && file.path() != null && !file.path().isBlank()) {
+                paths.add(normalizePatchPath(file.path()));
+            }
+        }
+        paths.addAll(createdPaths(diff));
+        return List.copyOf(paths);
+    }
+
+    private Set<String> createdPaths(String diff) {
+        Set<String> paths = new LinkedHashSet<>();
+        String oldPath = null;
+        for (String line : safe(diff).replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+            if (line.startsWith("--- ")) {
+                oldPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+            } else if (line.startsWith("+++ ")) {
+                String newPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                if ("/dev/null".equals(oldPath) && !newPath.isBlank() && !"/dev/null".equals(newPath)) {
+                    paths.add(newPath);
+                }
+                oldPath = null;
+            }
+        }
+        return paths;
+    }
+
+    private String createdFileContentFromDiff(String diff, String path) {
+        String normalizedPath = normalizePatchPath(path);
+        StringBuilder builder = new StringBuilder();
+        boolean inTarget = false;
+        String oldPath = null;
+        for (String line : safe(diff).replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+            if (line.startsWith("--- ")) {
+                oldPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                inTarget = false;
+            } else if (line.startsWith("+++ ")) {
+                String newPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                inTarget = "/dev/null".equals(oldPath) && normalizedPath.equals(newPath);
+            } else if (inTarget && line.startsWith("+") && !line.startsWith("+++")) {
+                builder.append(line.substring(1)).append('\n');
+            } else if (line.startsWith("--- ")) {
+                inTarget = false;
+            }
+        }
+        return builder.toString();
+    }
+
     private List<String> textArray(JsonNode node) {
         List<String> values = new ArrayList<>();
         if (node != null && node.isArray()) {
@@ -2196,8 +2344,15 @@ public class CodeAgentService {
     }
 
     private List<String> testSuggestions(List<CodePatchFileLoader.LoadedPatchFile> files) {
-        boolean frontend = files.stream().anyMatch(file -> file.path().startsWith("frontend/") || file.path().endsWith(".jsx") || file.path().endsWith(".tsx"));
-        boolean backend = files.stream().anyMatch(file -> file.path().startsWith("backend/") || file.path().endsWith(".java"));
+        return testSuggestions(files, files == null ? List.of() : files.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
+    }
+
+    private List<String> testSuggestions(List<CodePatchFileLoader.LoadedPatchFile> files, List<String> changedPaths) {
+        List<String> paths = changedPaths == null || changedPaths.isEmpty()
+                ? (files == null ? List.of() : files.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList())
+                : changedPaths;
+        boolean frontend = paths.stream().anyMatch(path -> path.startsWith("frontend/") || path.endsWith(".jsx") || path.endsWith(".tsx") || path.endsWith(".js") || path.endsWith(".html") || path.endsWith(".css"));
+        boolean backend = paths.stream().anyMatch(path -> path.startsWith("backend/") || path.endsWith(".java"));
         List<String> suggestions = new ArrayList<>();
         if (backend) {
             suggestions.add("mvn test");
@@ -2229,6 +2384,16 @@ public class CodeAgentService {
 
     private String firstNonBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String firstNonBlank(String first, String second, String third) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return third == null ? "" : third;
     }
 
     private String safe(String value) {

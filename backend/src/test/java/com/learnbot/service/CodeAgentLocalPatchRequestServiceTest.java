@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -39,6 +40,133 @@ class CodeAgentLocalPatchRequestServiceTest {
             codeRepository,
             localAgentGatewayService
     );
+
+    @Test
+    void prepareBlocksExplicitNewJsRequestWhenPatchOnlyReferencesMissingScript() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        String path = "index.html";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                 <body>Hello</body>
+                +<script src="script.js"></script>
+                 </html>
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        when(fileLoader.load(repositoryId, List.of("script.js"))).thenReturn(new CodePatchFileLoader.LoadResult(List.of(), List.of("missing")));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "js파일을 하나 추가하고 소개 페이지를 수정해줘",
+                diff,
+                List.of(path),
+                List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), path, "html", "<html>\n<body>Hello</body>\n</html>\n"))
+        ));
+
+        assertThat(ex.getMessage())
+                .contains("requested file creation/reference integrity")
+                .contains("new .js file");
+        verify(toolGatewayService, never()).createApprovalRequest(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void prepareAllowsHtmlReferenceWhenReferencedLocalFileAlreadyExists() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        String path = "index.html";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                +<link rel="stylesheet" href="style.css">
+                 <body>Hello</body>
+                 </html>
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        when(fileLoader.load(repositoryId, List.of("style.css"))).thenReturn(new CodePatchFileLoader.LoadResult(
+                List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), "style.css", "css", "body {}\n")),
+                List.of("loaded")
+        ));
+        when(codeRepository.findRepository(repositoryId)).thenReturn(Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "site",
+                "LOCAL",
+                null,
+                null,
+                "C:/site",
+                null,
+                "NONE",
+                "C:/site",
+                "LOCAL",
+                null
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "site", "C:/site", true)
+        ));
+        when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(0);
+            return new LocalAgentToolExecutionResponse(
+                    requestId,
+                    UUID.randomUUID(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    request.executionTarget(),
+                    request.toolName(),
+                    request.approvalState(),
+                    LocalAgentToolStatus.APPROVAL_REQUIRED,
+                    request.input(),
+                    Map.of(),
+                    null,
+                    null,
+                    request.warnings(),
+                    List.of(),
+                    null,
+                    null,
+                    null
+            );
+        });
+        when(fileLoader.load(repositoryId, List.of(path))).thenReturn(new CodePatchFileLoader.LoadResult(
+                List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), path, "html", "<html>\n<body>Hello</body>\n</html>\n")),
+                List.of("loaded")
+        ));
+
+        LocalAgentToolExecutionResponse response = service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "기존 stylesheet를 연결해줘",
+                diff,
+                List.of(path),
+                List.of()
+        );
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
+    }
 
     @Test
     void prepareBuildsApprovalRequiredPatchApplyEnvelopeWithoutExecutingIt() {
@@ -222,6 +350,91 @@ class CodeAgentLocalPatchRequestServiceTest {
         assertThat(request.input()).containsEntry("expectedFileSource", "local-agent-file-read");
         assertThat(request.input().get("expectedFiles").toString()).contains(path, sha256(content));
         assertThat(request.warnings()).contains("Expected file hashes came from completed Local Agent file.read observations.");
+        verify(fileLoader, never()).load(repositoryId, List.of(path));
+    }
+
+    @Test
+    void prepareAllowsCreateFileDiffWithNewFileExpectedRow() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        String path = "index.html";
+        String diff = """
+                --- /dev/null
+                +++ b/index.html
+                @@ -0,0 +1,3 @@
+                +<!doctype html>
+                +<title>LearnBot</title>
+                +<main>Hello</main>
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        when(codeRepository.findRepository(repositoryId)).thenReturn(java.util.Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "local-empty",
+                "LOCAL",
+                "C:/Users/honeybadger/Desktop/empty",
+                null,
+                null,
+                "NONE",
+                "NONE",
+                "C:/Users/honeybadger/Desktop/empty",
+                "LOCAL",
+                null
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(java.util.Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "empty", "C:/Users/honeybadger/Desktop/empty", true)
+        ));
+        when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(0);
+            return new LocalAgentToolExecutionResponse(
+                    requestId,
+                    UUID.randomUUID(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    request.executionTarget(),
+                    request.toolName(),
+                    request.approvalState(),
+                    LocalAgentToolStatus.APPROVAL_REQUIRED,
+                    request.input(),
+                    Map.of(),
+                    null,
+                    null,
+                    request.warnings(),
+                    List.of(),
+                    null,
+                    null,
+                    null
+            );
+        });
+
+        LocalAgentToolExecutionResponse response = service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "홈페이지를 만들어줘",
+                diff,
+                List.of(path),
+                List.of()
+        );
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
+        ArgumentCaptor<LocalAgentToolRequest> captor = ArgumentCaptor.forClass(LocalAgentToolRequest.class);
+        verify(toolGatewayService).createApprovalRequest(captor.capture());
+        LocalAgentToolRequest request = captor.getValue();
+        assertThat(request.input()).containsEntry("createdFiles", List.of(path));
+        assertThat(request.input()).containsEntry("updatedFiles", List.of());
+        assertThat(request.input().get("expectedFiles").toString())
+                .contains("path=index.html", "existedBefore=false", "sha256=", "bytes=0");
         verify(fileLoader, never()).load(repositoryId, List.of(path));
     }
 

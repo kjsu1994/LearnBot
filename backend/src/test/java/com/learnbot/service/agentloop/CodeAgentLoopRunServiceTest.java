@@ -138,6 +138,110 @@ class CodeAgentLoopRunServiceTest {
     }
 
     @Test
+    void advanceCanCreatePatchApprovalWithoutExistingFileReadTargets() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "홈페이지를 만들어줘";
+        String path = "index.html";
+        String diff = """
+                --- /dev/null
+                +++ b/index.html
+                @@ -0,0 +1,2 @@
+                +<!doctype html>
+                +<main>Hello</main>
+                """;
+        CodeAgentLoopTimelineSummary timeline = timeline(repositoryId, spaceId, loopId, instruction, List.of());
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", diff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), eq(List.of()))).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff(path, diff)),
+                "low",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(diff), eq(List.of(path)), eq(List.of()), anyMap()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), eq(List.of()));
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(diff),
+                eq(List.of(path)),
+                eq(List.of()),
+                anyMap()
+        );
+    }
+
+    @Test
     void advanceSelectsOnlyClearReadmeTargetWhenSeveralFilesWereRead() {
         CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
         CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
@@ -484,6 +588,147 @@ class CodeAgentLoopRunServiceTest {
                 eq(instruction),
                 eq(diff),
                 eq(List.of("home.html")),
+                anyList(),
+                anyMap()
+        );
+    }
+
+    @Test
+    void advanceRetriesCompactTargetSelectionWhenInitialSelectionStopsByLength() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "방금 만든 홈페이지에 소개, 프로젝트, 연락처 탭을 추가하고 각 탭이 버튼 클릭으로 전환되게 해줘";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1 +1,2 @@
+                 <main></main>
+                +<nav class="tab-nav"></nav>
+                --- a/style.css
+                +++ b/style.css
+                @@ -1 +1,2 @@
+                 body {}
+                +.tab-nav { display: flex; }
+                """;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("index.html", "<!doctype html>\n<main></main>\n"),
+                        fileReadEvent("style.css", "body {}\n"),
+                        fileReadEvent("새 텍스트 문서.txt", "learnbot fix \"개인 포트폴리오 홈페이지를 만들어줘\"\n")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", diff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("thinking without final json", "length"));
+        when(ollamaClient.chatResult(any(), any(), eq(300))).thenReturn(chat("""
+                {"targetFiles":["index.html","style.css"],"reason":"The request modifies homepage markup and styling; the txt file is only notes.","confidence":"high","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
+                """));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff("index.html", diff), new PatchFileDiff("style.css", diff)),
+                "medium",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(diff), eq(List.of("index.html", "style.css")), anyList(), anyMap()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        ArgumentCaptor<String> initialPromptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> compactPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(any(), initialPromptCaptor.capture(), eq(500));
+        verify(ollamaClient).chatResult(any(), compactPromptCaptor.capture(), eq(300));
+        assertThat(initialPromptCaptor.getValue()).contains("CONTENT_FOR_TARGET_DECISION");
+        assertThat(compactPromptCaptor.getValue())
+                .contains("Candidate file map")
+                .contains("initial-target-selection-stopped-by-length")
+                .contains("index.html")
+                .contains("style.css")
+                .contains("새 텍스트 문서.txt")
+                .contains("roleHint: markup/main-page-candidate")
+                .doesNotContain("CONTENT_FOR_TARGET_DECISION");
+        ArgumentCaptor<List<CodePatchFileLoader.LoadedPatchFile>> filesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), filesCaptor.capture());
+        assertThat(filesCaptor.getValue()).extracting(CodePatchFileLoader.LoadedPatchFile::path)
+                .containsExactly("index.html", "style.css");
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(diff),
+                eq(List.of("index.html", "style.css")),
                 anyList(),
                 anyMap()
         );
@@ -1287,5 +1532,9 @@ class CodeAgentLoopRunServiceTest {
 
     private OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://localhost:11434", "test", "PRIMARY", false);
+    }
+
+    private OllamaClient.ChatResult chat(String content, String doneReason) {
+        return new OllamaClient.ChatResult(content, doneReason, true, 0, 0, "http://localhost:11434", "test", "PRIMARY", false);
     }
 }

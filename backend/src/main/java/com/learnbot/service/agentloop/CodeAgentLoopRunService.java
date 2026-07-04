@@ -329,7 +329,7 @@ public class CodeAgentLoopRunService {
         if (timeline == null || timeline.events() == null || agentId == null || workspaceId == null) {
             return null;
         }
-        if (hasApprovalRequest(timeline) || fileReadTargets(timeline).isEmpty()) {
+        if (hasApprovalRequest(timeline)) {
             return null;
         }
         var nextPreview = runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
@@ -353,15 +353,21 @@ public class CodeAgentLoopRunService {
         List<CodePatchFileLoader.LoadedPatchFile> observedFiles = observedPatchFiles(timeline, targetFiles);
         String patchSource = observedFiles.isEmpty() ? "indexed-loader" : "local-agent-file-read";
         try {
-            CodeAgentPatchResponse patch = observedFiles.isEmpty()
-                    ? codeAgentService.patch(
-                    repositoryId,
-                    timeline.spaceId(),
-                    timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
-                    timeline.instruction(),
-                    targetFiles
-            )
-                    : codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+            CodeAgentPatchResponse patch;
+            if (targetFiles.isEmpty()) {
+                patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), List.of());
+                patchSource = "local-agent-creation-mode";
+            } else {
+                patch = observedFiles.isEmpty()
+                        ? codeAgentService.patch(
+                        repositoryId,
+                        timeline.spaceId(),
+                        timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
+                        timeline.instruction(),
+                        targetFiles
+                )
+                        : codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+            }
             if ((patch == null || !patch.valid()) && !observedFiles.isEmpty() && observedFiles.size() < targetFiles.size()) {
                 patch = codeAgentService.patch(
                         repositoryId,
@@ -386,6 +392,7 @@ public class CodeAgentLoopRunService {
             String diff = patch.files().stream()
                     .map(PatchFileDiff::diff)
                     .filter(value -> value != null && !value.isBlank())
+                    .distinct()
                     .collect(java.util.stream.Collectors.joining("\n"));
             if (diff.isBlank()) {
                 loopPreviewService.appendPatchProposalBlocked(
@@ -398,6 +405,22 @@ public class CodeAgentLoopRunService {
                 );
                 return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal returned no diff body.");
             }
+            List<String> approvalTargetFiles = patch.files().stream()
+                    .map(PatchFileDiff::path)
+                    .filter(path -> path != null && !path.isBlank())
+                    .distinct()
+                    .toList();
+            if (approvalTargetFiles.isEmpty()) {
+                loopPreviewService.appendPatchProposalBlocked(
+                        userId,
+                        repositoryId,
+                        loopId,
+                        "PATCH_PROPOSAL_BLOCKED",
+                        "Patch proposal returned no target files.",
+                        patchBlockedDetails(targetFiles, patchSource, patch, null)
+                );
+                return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal returned no target files.");
+            }
             LocalAgentToolExecutionResponse approvalRequest = localPatchRequestService.prepare(
                     repositoryId,
                     timeline.spaceId(),
@@ -407,8 +430,8 @@ public class CodeAgentLoopRunService {
                     loopId,
                     timeline.instruction(),
                     diff,
-                    targetFiles,
-                    observedFiles,
+                    approvalTargetFiles,
+                    observedPatchFiles(timeline, approvalTargetFiles),
                     targetSelection.details()
             );
             return patchProposalResponse(
@@ -477,7 +500,12 @@ public class CodeAgentLoopRunService {
                 .distinct()
                 .toList();
         if (safeCandidates.isEmpty()) {
-            return TargetFileSelection.blocked("PATCH_PROPOSAL_BLOCKED", "No readable candidate file was selected for patching.", safeCandidates);
+            return TargetFileSelection.ready(List.of(), Map.of(
+                    "source", "creation-mode",
+                    "reason", "No existing file was selected after read-only observations; LLM may create safe workspace-relative files when the instruction requires it.",
+                    "confidence", "medium",
+                    "creationMode", true
+            ));
         }
         if (safeCandidates.size() == 1) {
             return TargetFileSelection.ready(safeCandidates);
@@ -512,28 +540,42 @@ public class CodeAgentLoopRunService {
             return null;
         }
         try {
-            JsonNode root = objectMapper.readTree(cleanJson(ollamaClient.chatResult(
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
                     targetSelectionSystemPrompt(),
                     targetSelectionUserPrompt(timeline, safeCandidates, recentContexts),
                     500
-            ).content()));
-            if (root.path("needsClarification").asBoolean(false)) {
-                return null;
+            );
+            if (result.stoppedByLength()) {
+                return selectPatchTargetsWithCompactModel(timeline, safeCandidates, recentContexts, "initial-target-selection-stopped-by-length");
             }
-            String confidence = root.path("confidence").asText("");
-            if ("low".equalsIgnoreCase(confidence)) {
-                return null;
+            TargetFileSelection selection = parseTargetSelection(result.content(), safeCandidates, recentContexts);
+            if (selection != null && selection.ready()) {
+                return selection;
             }
-            List<String> selected = new ArrayList<>();
-            Set<String> allowed = new LinkedHashSet<>(safeCandidates);
-            for (JsonNode node : root.path("targetFiles")) {
-                String path = node.asText("");
-                if (allowed.contains(path)) {
-                    selected.add(path);
-                }
-            }
-            if (!selected.isEmpty() && selected.size() <= MAX_MODEL_SELECTED_TARGET_FILES) {
-                return TargetFileSelection.ready(selected, targetSelectionDetails(root, recentContexts));
+            return null;
+        } catch (Exception ex) {
+            return selectPatchTargetsWithCompactModel(timeline, safeCandidates, recentContexts, "initial-target-selection-parse-failed");
+        }
+    }
+
+    private TargetFileSelection selectPatchTargetsWithCompactModel(
+            CodeAgentLoopTimelineSummary timeline,
+            List<String> safeCandidates,
+            List<RecentPatchContext> recentContexts,
+            String retryReason
+    ) {
+        try {
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
+                    targetSelectionCompactSystemPrompt(),
+                    targetSelectionCompactUserPrompt(timeline, safeCandidates, recentContexts, retryReason),
+                    300
+            );
+            TargetFileSelection selection = parseTargetSelection(result.content(), safeCandidates, recentContexts);
+            if (selection != null && selection.ready()) {
+                Map<String, Object> details = new LinkedHashMap<>(selection.details());
+                details.put("retryReason", retryReason);
+                details.put("compactRetry", true);
+                return TargetFileSelection.ready(selection.targetFiles(), details);
             }
             return null;
         } catch (Exception ex) {
@@ -541,19 +583,60 @@ public class CodeAgentLoopRunService {
         }
     }
 
+    private TargetFileSelection parseTargetSelection(
+            String modelOutput,
+            List<String> safeCandidates,
+            List<RecentPatchContext> recentContexts
+    ) throws com.fasterxml.jackson.core.JsonProcessingException {
+        JsonNode root = objectMapper.readTree(cleanJson(modelOutput));
+        if (root.path("needsClarification").asBoolean(false)) {
+            return null;
+        }
+        String confidence = root.path("confidence").asText("");
+        if ("low".equalsIgnoreCase(confidence)) {
+            return null;
+        }
+        List<String> selected = new ArrayList<>();
+        Set<String> allowed = new LinkedHashSet<>(safeCandidates);
+        for (JsonNode node : root.path("targetFiles")) {
+            String path = node.asText("");
+            if (allowed.contains(path)) {
+                selected.add(path);
+            }
+        }
+        if (!selected.isEmpty() && selected.size() <= MAX_MODEL_SELECTED_TARGET_FILES) {
+            return TargetFileSelection.ready(selected, targetSelectionDetails(root, recentContexts));
+        }
+        return null;
+    }
+
     private String targetSelectionSystemPrompt() {
         return """
                 You select the exact target file or files for a LearnBot local code edit.
-                Return JSON only.
+                Return one minified JSON object only. Do not include markdown or explanation outside JSON.
                 Select targetFiles only from the provided candidate list.
                 If the user asks for one file and it is clear, return exactly one target file.
                 If the requested change clearly spans multiple listed files, return every required target file, up to five files.
+                If the user asks to create a new file, do not invent that new path here; select only existing candidate files that must be modified or linked to the new file.
                 Use the current file observations and recent successful edit context as evidence.
                 You may use recent successful edit context only as evidence for what the user means now.
                 Never select a file only because it appeared in recent context; it must also be in the provided candidate list.
                 Do not rely on server extension or README heuristics; you are responsible for judging the target from the instruction and observations.
                 If unclear, set needsClarification=true and return no target files.
                 Do not invent paths.
+                """;
+    }
+
+    private String targetSelectionCompactSystemPrompt() {
+        return """
+                You select target files for a local code edit.
+                Return one minified JSON object only.
+                No markdown. No prose. No analysis.
+                Select targetFiles only from the provided candidate list.
+                You may select multiple related files, up to five, when the user request spans markup, style, or script.
+                If the user asks to create a new file, select only existing candidate files that must be modified; patch generation will create the new path.
+                If unclear, set needsClarification=true and targetFiles=[].
+                JSON shape: {"targetFiles":["path"],"reason":"short","confidence":"medium|high|low","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
                 """;
     }
 
@@ -610,6 +693,82 @@ public class CodeAgentLoopRunService {
                 {"targetFiles":["path/from/candidates"],"reason":"...","confidence":"low|medium|high","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
                 """);
         return builder.toString();
+    }
+
+    private String targetSelectionCompactUserPrompt(
+            CodeAgentLoopTimelineSummary timeline,
+            List<String> safeCandidates,
+            List<RecentPatchContext> recentContexts,
+            String retryReason
+    ) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Retry reason: ").append(retryReason).append("\n");
+        builder.append("Instruction: ").append(timeline == null ? "" : timeline.instruction()).append("\n\n");
+        builder.append("Candidate file map:\n");
+        Map<String, Map<?, ?>> summariesByPath = readObservationSummariesByPath(timeline);
+        for (String path : safeCandidates == null ? List.<String>of() : safeCandidates) {
+            Map<?, ?> summary = summariesByPath.getOrDefault(path, Map.of());
+            Object previewValue = summary.get("contentPreview");
+            Object bytesValue = summary.get("bytes");
+            Object contentValue = summary.get("contentForPatch");
+            String preview = previewValue == null ? "" : String.valueOf(previewValue);
+            builder.append("- path: ").append(path).append("\n");
+            builder.append("  extension: ").append(extensionForPath(path)).append("\n");
+            builder.append("  roleHint: ").append(roleHintForPath(path)).append("\n");
+            builder.append("  bytes: ").append(bytesValue == null ? "" : bytesValue).append("\n");
+            builder.append("  lineCount: ").append(lineCount(contentValue == null ? "" : String.valueOf(contentValue))).append("\n");
+            builder.append("  preview: ").append(compactOneLine(preview, 180)).append("\n");
+        }
+        builder.append("\nRecent successful edits:\n");
+        if (recentContexts == null || recentContexts.isEmpty()) {
+            builder.append("- none\n");
+        } else {
+            for (RecentPatchContext context : recentContexts) {
+                builder.append("- loopId: ").append(context.loopId()).append(", targetFiles: ").append(context.targetFiles())
+                        .append(", instruction: ").append(compactOneLine(context.instruction(), 160)).append("\n");
+            }
+        }
+        builder.append("\nReturn JSON only.");
+        return builder.toString();
+    }
+
+    private Map<String, Map<?, ?>> readObservationSummariesByPath(CodeAgentLoopTimelineSummary timeline) {
+        Map<String, Map<?, ?>> summaries = new LinkedHashMap<>();
+        for (CodeAgentLoopTimelineEventSummary event : timeline == null || timeline.events() == null ? List.<CodeAgentLoopTimelineEventSummary>of() : timeline.events()) {
+            if (!"LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    || event.toolName() != LocalAgentToolName.FILE_READ
+                    || !"SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                continue;
+            }
+            Object outputSummary = event.details().get("outputSummary");
+            if (outputSummary instanceof Map<?, ?> map) {
+                Object path = map.get("relativePath");
+                if (path != null) {
+                    summaries.put(String.valueOf(path), map);
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableMap(summaries);
+    }
+
+    private String roleHintForPath(String path) {
+        String ext = extensionForPath(path);
+        return switch (ext) {
+            case "html", "htm" -> "markup/main-page-candidate";
+            case "css", "scss", "sass" -> "style";
+            case "js", "jsx", "ts", "tsx" -> "script-or-ui-logic";
+            case "md", "markdown", "txt" -> "documentation-or-notes";
+            case "java", "kt", "cs", "py", "go", "rs", "c", "cpp", "h", "hpp" -> "source-code";
+            default -> ext.isBlank() ? "unknown" : "file";
+        };
+    }
+
+    private String compactOneLine(String value, int maxChars) {
+        String clean = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n').replaceAll("\\s+", " ").trim();
+        if (clean.length() <= maxChars) {
+            return clean;
+        }
+        return clean.substring(0, Math.max(0, maxChars)) + "...";
     }
 
     private int lineCount(String value) {

@@ -15,13 +15,21 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class CodeAgentLocalPatchRequestService {
+    private static final Pattern LOCAL_SCRIPT_SRC = Pattern.compile("<script\\b[^>]*\\bsrc\\s*=\\s*['\"]([^'\"]+)['\"]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOCAL_STYLESHEET_HREF = Pattern.compile("<link\\b[^>]*\\bhref\\s*=\\s*['\"]([^'\"]+)['\"]", Pattern.CASE_INSENSITIVE);
+
     private final CodePatchFileLoader fileLoader;
     private final PatchValidationService validationService;
     private final LocalAgentToolGatewayService toolGatewayService;
@@ -110,12 +118,21 @@ public class CodeAgentLocalPatchRequestService {
     ) {
         List<String> warnings = new ArrayList<>();
         List<String> normalizedTargets = fileLoader.normalizeRequestedPaths(targetFiles, warnings);
-        PatchValidationResult validation = validationService.validate(diff, normalizedTargets);
+        PatchValidationResult validation = validatePatch(diff, normalizedTargets, instruction);
         warnings.addAll(validation.warnings());
         if (!validation.valid()) {
             throw new IllegalArgumentException("Patch did not pass server validation.");
         }
-        ExpectedFiles expectedFiles = expectedFiles(repositoryId, normalizedTargets, observedFiles, warnings);
+        List<String> createdFiles = createdFiles(diff);
+        List<String> updatedFiles = normalizedTargets.stream()
+                .filter(path -> !createdFiles.contains(path))
+                .toList();
+        List<String> integrityWarnings = patchIntentIntegrityWarnings(repositoryId, instruction, diff, normalizedTargets, createdFiles);
+        warnings.addAll(integrityWarnings);
+        if (!integrityWarnings.isEmpty()) {
+            throw new IllegalArgumentException("Patch did not satisfy requested file creation/reference integrity: " + integrityWarnings.get(0));
+        }
+        ExpectedFiles expectedFiles = expectedFiles(repositoryId, normalizedTargets, observedFiles, createdFiles, warnings);
         if (expectedFiles.rows().isEmpty()) {
             throw new IllegalArgumentException("No safe indexed target files were available for patch.apply.");
         }
@@ -143,6 +160,8 @@ public class CodeAgentLocalPatchRequestService {
         input.put("instruction", safe(instruction));
         input.put("diff", safe(diff));
         input.put("targetFiles", List.copyOf(normalizedTargets));
+        input.put("createdFiles", List.copyOf(createdFiles));
+        input.put("updatedFiles", List.copyOf(updatedFiles));
         if (targetSelection != null && !targetSelection.isEmpty()) {
             input.put("targetSelection", new LinkedHashMap<>(targetSelection));
         }
@@ -185,27 +204,48 @@ public class CodeAgentLocalPatchRequestService {
             UUID repositoryId,
             List<String> normalizedTargets,
             List<CodePatchFileLoader.LoadedPatchFile> observedFiles,
+            List<String> createdFiles,
             List<String> warnings
     ) {
-        List<Map<String, Object>> observedRows = expectedFilesFromObservedReads(normalizedTargets, observedFiles);
+        List<Map<String, Object>> observedRows = expectedFilesFromObservedReads(normalizedTargets, observedFiles, createdFiles);
         if (!observedRows.isEmpty() && observedRows.size() == normalizedTargets.size()) {
             warnings.add("Expected file hashes came from completed Local Agent file.read observations.");
             return new ExpectedFiles(observedRows, "local-agent-file-read");
         }
-        CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, normalizedTargets);
-        warnings.addAll(loaded.warnings());
-        List<Map<String, Object>> indexedRows = loaded.files().stream()
-                .map(file -> expectedFileRow(file.path(), file.content()))
+        List<String> existingTargets = normalizedTargets.stream()
+                .filter(path -> createdFiles == null || !createdFiles.contains(path))
                 .toList();
+        CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, existingTargets);
+        warnings.addAll(loaded.warnings());
+        List<Map<String, Object>> indexedRows = new ArrayList<>(loaded.files().stream()
+                .map(file -> expectedFileRow(file.path(), file.content()))
+                .toList());
+        for (String created : createdFiles == null ? List.<String>of() : createdFiles) {
+            indexedRows.add(expectedNewFileRow(created));
+        }
         return new ExpectedFiles(indexedRows, "indexed-loader");
+    }
+
+    private PatchValidationResult validatePatch(String diff, List<String> normalizedTargets, String instruction) {
+        PatchValidationResult validation = validationService.validate(diff, normalizedTargets, instruction);
+        if (validation != null) {
+            return validation;
+        }
+        return validationService.validate(diff, normalizedTargets);
     }
 
     private List<Map<String, Object>> expectedFilesFromObservedReads(
             List<String> normalizedTargets,
-            List<CodePatchFileLoader.LoadedPatchFile> observedFiles
+            List<CodePatchFileLoader.LoadedPatchFile> observedFiles,
+            List<String> createdFiles
     ) {
         if (normalizedTargets == null || normalizedTargets.isEmpty() || observedFiles == null || observedFiles.isEmpty()) {
-            return List.of();
+            return normalizedTargets == null || normalizedTargets.isEmpty()
+                    ? List.of()
+                    : normalizedTargets.stream()
+                    .filter(path -> createdFiles != null && createdFiles.contains(path))
+                    .map(this::expectedNewFileRow)
+                    .toList();
         }
         Map<String, CodePatchFileLoader.LoadedPatchFile> byPath = new LinkedHashMap<>();
         for (CodePatchFileLoader.LoadedPatchFile file : observedFiles) {
@@ -219,6 +259,10 @@ public class CodeAgentLocalPatchRequestService {
         }
         List<Map<String, Object>> rows = new ArrayList<>();
         for (String target : normalizedTargets) {
+            if (createdFiles != null && createdFiles.contains(target)) {
+                rows.add(expectedNewFileRow(target));
+                continue;
+            }
             CodePatchFileLoader.LoadedPatchFile file = byPath.get(target);
             if (file == null) {
                 return List.of();
@@ -231,8 +275,18 @@ public class CodeAgentLocalPatchRequestService {
     private Map<String, Object> expectedFileRow(String path, String content) {
         return Map.of(
                 "path", path,
+                "existedBefore", true,
                 "sha256", sha256(content),
                 "bytes", content.getBytes(StandardCharsets.UTF_8).length
+        );
+    }
+
+    private Map<String, Object> expectedNewFileRow(String path) {
+        return Map.of(
+                "path", path,
+                "existedBefore", false,
+                "sha256", "",
+                "bytes", 0
         );
     }
 
@@ -291,17 +345,29 @@ public class CodeAgentLocalPatchRequestService {
 
         List<Map<String, Object>> expectedFiles = List.of();
         if (!normalizedTargets.isEmpty()) {
-            CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, normalizedTargets);
-            warnings.addAll(loaded.warnings());
-            expectedFiles = loaded.files().stream()
-                    .map(file -> {
-                        Map<String, Object> row = new LinkedHashMap<>();
-                        row.put("path", file.path());
-                        row.put("sha256", sha256(file.content()));
-                        row.put("bytes", file.content().getBytes(StandardCharsets.UTF_8).length);
-                        return row;
-                    })
+            List<String> createdFiles = createdFiles(diff);
+            List<String> existingTargets = normalizedTargets.stream()
+                    .filter(path -> !createdFiles.contains(path))
                     .toList();
+            List<Map<String, Object>> rows = new ArrayList<>();
+            if (!existingTargets.isEmpty()) {
+                CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, existingTargets);
+                warnings.addAll(loaded.warnings());
+                rows.addAll(loaded.files().stream()
+                        .map(file -> {
+                            Map<String, Object> row = new LinkedHashMap<>();
+                            row.put("path", file.path());
+                            row.put("existedBefore", true);
+                            row.put("sha256", sha256(file.content()));
+                            row.put("bytes", file.content().getBytes(StandardCharsets.UTF_8).length);
+                            return row;
+                        })
+                        .toList());
+            }
+            for (String created : createdFiles) {
+                rows.add(expectedNewFileRow(created));
+            }
+            expectedFiles = List.copyOf(rows);
             if (expectedFiles.isEmpty()) {
                 blockers.add("no safe indexed target files were available for patch.apply dry-run");
             }
@@ -690,6 +756,139 @@ public class CodeAgentLocalPatchRequestService {
         } catch (Exception ex) {
             throw new IllegalStateException("SHA-256 is not available.", ex);
         }
+    }
+
+    private List<String> createdFiles(String diff) {
+        List<String> files = new ArrayList<>();
+        String oldPath = null;
+        for (String line : safe(diff).replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+            if (line.startsWith("--- ")) {
+                oldPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+            } else if (line.startsWith("+++ ")) {
+                String newPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                if ("/dev/null".equals(oldPath) && !newPath.isBlank() && !"/dev/null".equals(newPath)) {
+                    files.add(newPath);
+                }
+                oldPath = null;
+            }
+        }
+        return files.stream().distinct().toList();
+    }
+
+    private List<String> patchIntentIntegrityWarnings(
+            UUID repositoryId,
+            String instruction,
+            String diff,
+            List<String> normalizedTargets,
+            List<String> createdFiles
+    ) {
+        List<String> warnings = new ArrayList<>();
+        List<String> targets = normalizedTargets == null ? List.of() : normalizedTargets;
+        List<String> created = createdFiles == null ? List.of() : createdFiles;
+        for (String extension : List.of("js", "css", "html", "htm")) {
+            if (requiresNewTypedFile(instruction, extension)
+                    && created.stream().noneMatch(path -> hasExtension(path, extension))) {
+                warnings.add("Instruction explicitly requested a new ." + extension + " file, but the patch did not create one.");
+            }
+        }
+        Set<String> changed = new LinkedHashSet<>(targets);
+        changed.addAll(created);
+        for (String reference : addedLocalHtmlReferences(diff)) {
+            String normalized = normalizeDiffPath(reference);
+            if (normalized.isBlank()
+                    || changed.contains(normalized)
+                    || existingFileKnown(repositoryId, normalized)) {
+                continue;
+            }
+            warnings.add("Patch adds a local file reference that is neither existing nor changed in the patch: " + normalized);
+        }
+        return List.copyOf(warnings);
+    }
+
+    private boolean requiresNewTypedFile(String instruction, String extension) {
+        String lower = instruction == null ? "" : instruction.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        if (lower.isBlank()) {
+            return false;
+        }
+        boolean mentionsType = lower.contains(extension + "파일")
+                || lower.contains(extension + "file")
+                || lower.contains("." + extension);
+        boolean asksCreate = lower.contains("추가")
+                || lower.contains("생성")
+                || lower.contains("만들")
+                || lower.contains("새")
+                || lower.contains("add")
+                || lower.contains("create")
+                || lower.contains("new");
+        return mentionsType && asksCreate;
+    }
+
+    private boolean hasExtension(String path, String extension) {
+        String lower = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        return lower.endsWith("." + extension);
+    }
+
+    private Set<String> addedLocalHtmlReferences(String diff) {
+        Set<String> references = new LinkedHashSet<>();
+        for (String line : safe(diff).replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+            if (!line.startsWith("+") || line.startsWith("+++")) {
+                continue;
+            }
+            collectLocalHtmlReferences(line.substring(1), LOCAL_SCRIPT_SRC, references);
+            collectLocalHtmlReferences(line.substring(1), LOCAL_STYLESHEET_HREF, references);
+        }
+        return references;
+    }
+
+    private void collectLocalHtmlReferences(String line, Pattern pattern, Set<String> references) {
+        Matcher matcher = pattern.matcher(line == null ? "" : line);
+        while (matcher.find()) {
+            String reference = matcher.group(1);
+            if (isLocalFileReference(reference)) {
+                references.add(reference);
+            }
+        }
+    }
+
+    private boolean isLocalFileReference(String reference) {
+        String value = reference == null ? "" : reference.trim();
+        if (value.isBlank()
+                || value.startsWith("#")
+                || value.startsWith("/")
+                || value.startsWith("//")
+                || value.matches("^[A-Za-z][A-Za-z0-9+.-]*:.*")) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".js") || lower.endsWith(".css");
+    }
+
+    private boolean existingFileKnown(UUID repositoryId, String path) {
+        if (repositoryId == null || path == null || path.isBlank()) {
+            return false;
+        }
+        try {
+            CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, List.of(path));
+            return loaded != null
+                    && loaded.files() != null
+                    && loaded.files().stream().anyMatch(file -> path.equals(file.path()));
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private String normalizeDiffPath(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String value = raw.trim().replace('\\', '/');
+        if (value.equals("/dev/null")) {
+            return value;
+        }
+        if (value.startsWith("a/") || value.startsWith("b/")) {
+            value = value.substring(2);
+        }
+        return value.replaceAll("^/+", "");
     }
 
     private String approvalRequestId(UUID repositoryId, UUID loopId, String diff, List<String> targetFiles) {
