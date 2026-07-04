@@ -273,6 +273,62 @@ class CodeAgentLoopRunnerServiceTest {
     }
 
     @Test
+    void previewNextStepRanksTreeFallbackByLanguageMentionedInGoal() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId)).thenReturn(new CodeAgentLoopNextActionResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "Read the requested source file before patching.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                UUID.randomUUID(),
+                12,
+                "LOOP_NEXT_DECISION_RECORDED",
+                Map.of("decisionKey", "OBSERVATION_ACCEPTED", "instruction", "html에서 버튼클릭했는데 메인페이지로 안들어가지니 복구해줘")
+        ));
+        var timeline = timeline(
+                repositoryId,
+                loopId,
+                List.of(
+                        observationEvent(LocalAgentToolName.WORKSPACE_TREE, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("entries", List.of(
+                                        Map.of("type", "file", "path", "cold.txt"),
+                                        Map.of("type", "file", "path", "home.html"),
+                                        Map.of("type", "file", "path", "readme.txt"),
+                                        Map.of("type", "file", "path", "testfile.md")
+                                ))
+                        )),
+                        observationEvent(LocalAgentToolName.WORKSPACE_SEARCH, Map.of(
+                                "status", "SUCCEEDED",
+                                "outputSummary", Map.of("matches", List.of())
+                        ))
+                )
+        );
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 10)).thenReturn(List.of(timeline));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+
+        var result = service.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.runnerDecision()).isEqualTo("PREPARED_READ_ONLY_CANDIDATE");
+        assertThat(result.candidate()).isNotNull();
+        assertThat(result.candidate().toolName()).isEqualTo(LocalAgentToolName.FILE_READ);
+        assertThat(result.candidate().input()).containsEntry("path", "home.html");
+        assertThat(result.candidate().mutationAllowed()).isFalse();
+    }
+
+    @Test
     void previewNextStepWaitsWhenAgentWorkspaceIdentityIsMissing() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();

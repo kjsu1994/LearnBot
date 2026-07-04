@@ -367,18 +367,21 @@ class CodeAgentLoopRunServiceTest {
     }
 
     @Test
-    void advanceSelectsSingleExtensionMatchWhenInstructionNamesFileType() {
+    void advanceUsesModelTargetSelectionWhenInstructionNamesFileType() {
         CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
         CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
         CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
         CodeAgentService codeAgentService = mock(CodeAgentService.class);
         CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
         CodeAgentLoopRunService service = new CodeAgentLoopRunService(
                 loopPreviewService,
                 toolSelectionService,
                 runnerService,
                 codeAgentService,
-                localPatchRequestService
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
         );
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -448,6 +451,9 @@ class CodeAgentLoopRunServiceTest {
                 null,
                 Map.of()
         ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("""
+                {"targetFiles":["home.html"],"reason":"The instruction asks to edit the HTML file and home.html is the observed HTML candidate.","confidence":"high","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
+                """));
         when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
                 "ok",
                 List.of(new PatchFileDiff("home.html", diff)),

@@ -2071,6 +2071,8 @@ class CodeAgentLoopPreviewServiceTest {
 
         assertThat(result.loopId()).isEqualTo(loopId);
         assertThat(result.actionKey()).isEqualTo("QUEUE_READ_ONLY_OBSERVATION");
+        assertThat(result.loopState()).isEqualTo("OBSERVATION_RECEIVED");
+        assertThat(result.stateSnapshot()).containsEntry("state", "OBSERVATION_RECEIVED");
         assertThat(result.requestCreationEnabled()).isFalse();
         assertThat(result.pushEnabled()).isFalse();
         assertThat(result.claimEnabled()).isFalse();
@@ -2132,6 +2134,8 @@ class CodeAgentLoopPreviewServiceTest {
         var result = service.nextAction(userId, repositoryId, loopId);
 
         assertThat(result.actionKey()).isEqualTo("WAIT_FOR_APPROVAL");
+        assertThat(result.loopState()).isEqualTo("WAITING_FOR_APPROVAL");
+        assertThat(result.stateSnapshot()).containsEntry("state", "WAITING_FOR_APPROVAL");
         assertThat(result.reason()).isEqualTo("Wait for explicit user approval before release, claim, or mutation.");
         assertThat(result.requestCreationEnabled()).isFalse();
         assertThat(result.pushEnabled()).isFalse();
@@ -2254,6 +2258,8 @@ class CodeAgentLoopPreviewServiceTest {
         var result = service.nextAction(userId, repositoryId, loopId);
 
         assertThat(result.actionKey()).isEqualTo("WAIT_FOR_RELEASE_GATE");
+        assertThat(result.loopState()).isEqualTo("APPROVED_HELD");
+        assertThat(result.stateSnapshot()).containsEntry("state", "APPROVED_HELD");
         assertThat(result.reason()).isEqualTo("Inspect release readiness and queue fresh release-attempt observations before any claimable mutation transition.");
         assertThat(result.requestCreationEnabled()).isFalse();
         assertThat(result.pushEnabled()).isFalse();
@@ -2857,6 +2863,8 @@ class CodeAgentLoopPreviewServiceTest {
         assertThat(result.loopId()).isEqualTo(loopId);
         assertThat(result.status()).isEqualTo("NO_TIMELINE");
         assertThat(result.actionKey()).isEqualTo("ASK_USER");
+        assertThat(result.loopState()).isEqualTo("CREATED");
+        assertThat(result.stateSnapshot()).containsEntry("state", "CREATED");
         assertThat(result.sourceDetails()).isEmpty();
         assertThat(result.mutationEnabled()).isFalse();
     }

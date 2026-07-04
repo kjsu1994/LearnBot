@@ -11,6 +11,9 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.loop.CodeAgentLoopRecommendedActionFactory;
 import com.learnbot.dto.loop.CodeAgentLoopSubmissionPlanResponse;
 import com.learnbot.repository.CodeAgentLoopTimelineRepository;
+import com.learnbot.service.agentloop.CodeAgentLoopStateMachine;
+import com.learnbot.service.agentloop.CodeAgentLoopStateSnapshot;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -30,9 +33,19 @@ public class CodeAgentLoopPreviewService {
     private static final int HARD_MAX_RECENT_TIMELINES = 20;
 
     private final CodeAgentLoopTimelineRepository timelineRepository;
+    private final CodeAgentLoopStateMachine stateMachine;
 
     public CodeAgentLoopPreviewService(CodeAgentLoopTimelineRepository timelineRepository) {
+        this(timelineRepository, new CodeAgentLoopStateMachine());
+    }
+
+    @Autowired
+    public CodeAgentLoopPreviewService(
+            CodeAgentLoopTimelineRepository timelineRepository,
+            CodeAgentLoopStateMachine stateMachine
+    ) {
         this.timelineRepository = timelineRepository;
+        this.stateMachine = stateMachine == null ? new CodeAgentLoopStateMachine() : stateMachine;
     }
 
     public CodeAgentLoopPreviewResponse startRun(
@@ -2049,17 +2062,18 @@ public class CodeAgentLoopPreviewService {
                 .filter(candidate -> loopId == null || candidate.id().equals(loopId))
                 .findFirst();
         if (timeline.isEmpty()) {
-            return nextAction(
+            return attachState(stateMachine.snapshot(null), nextAction(
                     loopId,
                     repositoryId,
                     "NO_TIMELINE",
                     "ASK_USER",
                     "No loop timeline is available yet. Ask the user for the next bounded code-agent goal.",
                     null
-            );
+            ));
         }
 
         CodeAgentLoopTimelineSummary selected = timeline.get();
+        CodeAgentLoopStateSnapshot stateSnapshot = stateMachine.snapshot(selected);
         Optional<CodeAgentLoopTimelineEventSummary> latestStop = latestEvent(selected, "STOP_OUTCOME_RECORDED");
         Optional<CodeAgentLoopTimelineEventSummary> latestReleaseBoundary = latestEvent(selected, "LOCAL_AGENT_RELEASE_BOUNDARY_REFUSED");
         Optional<CodeAgentLoopTimelineEventSummary> latestReleaseReadinessRefresh = latestEvent(selected, "LOCAL_AGENT_RELEASE_READINESS_REFRESHED");
@@ -2079,7 +2093,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestStop.get(), latestApprovedExecutionFlowCompleted.orElse(null))
                 && isSameOrAfter(latestStop.get(), latestFreshObservationEnqueue.orElse(null))
                 && isSameOrAfter(latestStop.get(), latestFreshObservationComplete.orElse(null))) {
-            return fromStopOutcome(selected, latestStop.get());
+            return attachState(stateSnapshot, fromStopOutcome(selected, latestStop.get()));
         }
         if (latestApprovedExecutionFlowCompleted.isPresent()
                 && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestDecision.orElse(null))
@@ -2091,7 +2105,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestApprovedExecutionFlowCompleted.get(), latestStop.orElse(null))) {
-            return fromApprovedExecutionFlowCompleted(selected, latestApprovedExecutionFlowCompleted.get());
+            return attachState(stateSnapshot, fromApprovedExecutionFlowCompleted(selected, latestApprovedExecutionFlowCompleted.get()));
         }
         if (latestReleaseBoundary.isPresent()
                 && isSameOrAfter(latestReleaseBoundary.get(), latestDecision.orElse(null))
@@ -2100,7 +2114,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestReleaseBoundary.get(), latestFreshObservationEnqueue.orElse(null))
                 && isSameOrAfter(latestReleaseBoundary.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestReleaseBoundary.get(), latestStop.orElse(null))) {
-            return fromReleaseBoundary(selected, latestReleaseBoundary.get());
+            return attachState(stateSnapshot, fromReleaseBoundary(selected, latestReleaseBoundary.get()));
         }
         if (latestReleaseReadinessRefresh.isPresent()
                 && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestDecision.orElse(null))
@@ -2112,7 +2126,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestReleaseReadinessRefresh.get(), latestStop.orElse(null))) {
-            return fromReleaseReadinessRefresh(selected, latestReleaseReadinessRefresh.get());
+            return attachState(stateSnapshot, fromReleaseReadinessRefresh(selected, latestReleaseReadinessRefresh.get()));
         }
         if (latestFreshObservationComplete.isPresent()
                 && isSameOrAfter(latestFreshObservationComplete.get(), latestDecision.orElse(null))
@@ -2123,7 +2137,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestFreshObservationComplete.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestFreshObservationComplete.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestFreshObservationComplete.get(), latestStop.orElse(null))) {
-            return fromFreshObservationComplete(selected, latestFreshObservationComplete.get());
+            return attachState(stateSnapshot, fromFreshObservationComplete(selected, latestFreshObservationComplete.get()));
         }
         if (latestFreshObservationEnqueue.isPresent()
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestDecision.orElse(null))
@@ -2134,7 +2148,7 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestFreshObservationEnqueue.get(), latestStop.orElse(null))) {
-            return fromFreshObservationEnqueue(selected, latestFreshObservationEnqueue.get());
+            return attachState(stateSnapshot, fromFreshObservationEnqueue(selected, latestFreshObservationEnqueue.get()));
         }
         if (latestReadOnlyQueued.isPresent()
                 && isSameOrAfter(latestReadOnlyQueued.get(), latestDecision.orElse(null))
@@ -2142,14 +2156,14 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestReadOnlyQueued.get(), latestApprovalRequest.orElse(null))
                 && isSameOrAfter(latestReadOnlyQueued.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestReadOnlyQueued.get(), latestStop.orElse(null))) {
-            return nextAction(
+            return attachState(stateSnapshot, nextAction(
                     selected.id(),
                     selected.repositoryId(),
                     stringDetail(latestReadOnlyQueued.get(), "status", "QUEUED"),
                     "WAIT_FOR_LOCAL_AGENT_OBSERVATION",
                     stringDetail(latestReadOnlyQueued.get(), "nextAction", "Wait for the Local Agent to complete the queued read-only observation before advancing again."),
                     latestReadOnlyQueued.get()
-            );
+            ));
         }
         if (latestApprovalRequest.isPresent()
                 && isSameOrAfter(latestApprovalRequest.get(), latestDecision.orElse(null))
@@ -2164,7 +2178,7 @@ public class CodeAgentLoopPreviewService {
             Map<String, Object> dryRunIntentHandoff = Boolean.TRUE.equals(event.details().get("validatedDryRunIntent"))
                     ? validatedDryRunIntentHandoffSummary(event)
                     : Map.of();
-            return nextAction(
+            return attachState(stateSnapshot, nextAction(
                     selected.id(),
                     selected.repositoryId(),
                     stringDetail(event, "status", "RECORDED"),
@@ -2172,7 +2186,7 @@ public class CodeAgentLoopPreviewService {
                     stringDetail(event, "nextAction", "Wait for explicit user approval before release, claim, or mutation."),
                     event,
                     dryRunIntentHandoff
-            );
+            ));
         }
         if (latestApproval.isPresent()
                 && isSameOrAfter(latestApproval.get(), latestDecision.orElse(null))
@@ -2182,29 +2196,29 @@ public class CodeAgentLoopPreviewService {
                 && isSameOrAfter(latestApproval.get(), latestFreshObservationComplete.orElse(null))
                 && isSameOrAfter(latestApproval.get(), latestObservation.orElse(null))
                 && isSameOrAfter(latestApproval.get(), latestStop.orElse(null))) {
-            return fromApprovalDecision(selected, latestApproval.get());
+            return attachState(stateSnapshot, fromApprovalDecision(selected, latestApproval.get()));
         }
         if (latestDecision.isPresent()) {
-            return fromNextDecision(selected, latestDecision.get());
+            return attachState(stateSnapshot, fromNextDecision(selected, latestDecision.get()));
         }
         if (latestObservation.isPresent()) {
-            return nextAction(
+            return attachState(stateSnapshot, nextAction(
                     selected.id(),
                     selected.repositoryId(),
                     "RECORDED",
                     "WAIT_FOR_APPROVAL",
                     "A Local Agent observation exists, but no server next-decision event has been recorded yet.",
                     latestObservation.get()
-            );
+            ));
         }
-        return nextAction(
+        return attachState(stateSnapshot, nextAction(
                 selected.id(),
                 selected.repositoryId(),
                 "PREVIEW_ONLY",
                 "ASK_USER",
                 "Only the read-only loop preview is available. Ask for confirmation before selecting a Local Agent tool.",
                 selected.events().stream().max(Comparator.comparingInt(CodeAgentLoopTimelineEventSummary::sequenceNumber)).orElse(null)
-        );
+        ));
     }
 
     public void appendPatchProposalBlocked(
@@ -2696,6 +2710,16 @@ public class CodeAgentLoopPreviewService {
                 sourceEvent == null ? Map.of() : sourceEvent.details(),
                 CodeAgentLoopRecommendedActionFactory.create(recommendedActionKey(actionKey))
         );
+    }
+
+    private CodeAgentLoopNextActionResponse attachState(
+            CodeAgentLoopStateSnapshot stateSnapshot,
+            CodeAgentLoopNextActionResponse response
+    ) {
+        if (response == null || stateSnapshot == null) {
+            return response;
+        }
+        return response.withLoopState(stateSnapshot.state().name(), stateSnapshot.toMap());
     }
 
     private String recommendedActionKey(String actionKey) {

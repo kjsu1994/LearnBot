@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -45,6 +47,8 @@ internal sealed partial class LearnBotLocalAgent
             "session" => await Session(args[1..]),
             "fix" => await CodexCommandPreview("fix", args[1..]),
             "review" => await CodexCommandPreview("review", args[1..]),
+            "bootstrap" => Bootstrap(args[1..]),
+            "restart" => Restart(args[1..]),
             "open" => Open(),
             "self-test" => await SelfTest(args[1..]),
             "help" or "--help" or "-h" => Help(),
@@ -965,6 +969,10 @@ internal sealed partial class LearnBotLocalAgent
         if (result.AutoLoop is not null)
         {
             Console.WriteLine("loop: " + result.AutoLoop.Status);
+            if (!string.IsNullOrWhiteSpace(result.AutoLoop.Reason))
+            {
+                Console.WriteLine("reason: " + result.AutoLoop.Reason);
+            }
             if (result.AutoLoop.ApprovalRequestId is not null)
             {
                 Console.WriteLine("approval: " + result.AutoLoop.ApprovalState);
@@ -3322,7 +3330,7 @@ internal sealed partial class LearnBotLocalAgent
         }
         if (TryInputBool(input, "dryRunOnly") != true)
         {
-            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply requires dryRunOnly=true until patch mutation release gates are implemented.");
+            return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "patch.apply dry-run requires dryRunOnly=true.");
         }
         if (TryInputBool(input, "mutationAllowed") == true)
         {
@@ -3426,11 +3434,7 @@ internal sealed partial class LearnBotLocalAgent
         }
 
         var output = PatchDryRunOutput(workspace.Workspace!.WorkspaceId, input, fileResults, preflightPassed: true, snapshot);
-        return ToolResult.Fail(
-            "REJECTED",
-            "UNSAFE_TOOL",
-            "Patch dry-run passed and a local snapshot was created, but file mutation is disabled until release gates and rollback safety are implemented.",
-            output);
+        return ToolResult.Ok(output);
     }
 
     private async Task<ToolResult> RunGitDiff(string root, bool cached, string? relativePath)
@@ -3722,10 +3726,39 @@ internal sealed partial class LearnBotLocalAgent
             {
                 return null;
             }
-            var encryptedAccessToken = root.TryGetProperty("encryptedAccessToken", out var tokenElement) ? tokenElement.GetString() : null;
-            var encryptedRefreshToken = root.TryGetProperty("encryptedRefreshToken", out var refreshElement) ? refreshElement.GetString() : null;
-            var accessToken = string.IsNullOrWhiteSpace(encryptedAccessToken) ? null : TryUnprotectForCurrentUser(encryptedAccessToken);
-            var refreshToken = string.IsNullOrWhiteSpace(encryptedRefreshToken) ? null : TryUnprotectForCurrentUser(encryptedRefreshToken);
+            var provider = root.TryGetProperty("encryption", out var encryptionElement)
+                && encryptionElement.TryGetProperty("provider", out var providerElement)
+                    ? providerElement.GetString()
+                    : WindowsDpapiWebSessionProvider;
+            string? accessToken;
+            string? refreshToken;
+            if (string.Equals(provider, WindowsDpapiWebSessionProvider, StringComparison.Ordinal))
+            {
+                var encryptedAccessToken = root.TryGetProperty("encryptedAccessToken", out var tokenElement) ? tokenElement.GetString() : null;
+                var encryptedRefreshToken = root.TryGetProperty("encryptedRefreshToken", out var refreshElement) ? refreshElement.GetString() : null;
+                accessToken = string.IsNullOrWhiteSpace(encryptedAccessToken) ? null : TryUnprotectForCurrentUser(encryptedAccessToken);
+                refreshToken = string.IsNullOrWhiteSpace(encryptedRefreshToken) ? null : TryUnprotectForCurrentUser(encryptedRefreshToken);
+            }
+            else if (string.Equals(provider, MacOsKeychainWebSessionProvider, StringComparison.Ordinal)
+                || string.Equals(provider, LinuxSecretServiceWebSessionProvider, StringComparison.Ordinal))
+            {
+                var accessAccount = root.TryGetProperty("accessTokenSecretName", out var accessAccountElement)
+                    ? accessAccountElement.GetString()
+                    : null;
+                var refreshAccount = root.TryGetProperty("refreshTokenSecretName", out var refreshAccountElement)
+                    ? refreshAccountElement.GetString()
+                    : null;
+                accessToken = string.IsNullOrWhiteSpace(accessAccount)
+                    ? null
+                    : TryReadWebSessionSecret(provider!, accessAccount);
+                refreshToken = string.IsNullOrWhiteSpace(refreshAccount)
+                    ? null
+                    : TryReadWebSessionSecret(provider!, refreshAccount);
+            }
+            else
+            {
+                return null;
+            }
             var expiresAt = root.TryGetProperty("expiresAt", out var expiresElement)
                 && DateTimeOffset.TryParse(expiresElement.GetString(), out var parsedExpiresAt)
                     ? parsedExpiresAt
@@ -3885,6 +3918,16 @@ internal sealed partial class LearnBotLocalAgent
             error = "server did not return both access and refresh tokens";
             return false;
         }
+        if (!OperatingSystem.IsWindows())
+        {
+            return TryWriteStoredWebSessionWithOsSecretStore(
+                serverUrl,
+                accessToken,
+                refreshToken,
+                expiresAt,
+                refreshExpiresAt,
+                out error);
+        }
         var protectedAccess = TryProtectForCurrentUser(accessToken, out error);
         if (protectedAccess is null)
         {
@@ -3911,7 +3954,64 @@ internal sealed partial class LearnBotLocalAgent
                 createdAt = DateTimeOffset.UtcNow,
                 encryption = new
                 {
-                    provider = "WINDOWS_DPAPI_CURRENT_USER",
+                    provider = WindowsDpapiWebSessionProvider,
+                    plaintextTokenSerializationAllowed = false
+                }
+            };
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(body, JsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(tempPath, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool TryWriteStoredWebSessionWithOsSecretStore(
+        string serverUrl,
+        string accessToken,
+        string refreshToken,
+        string? expiresAt,
+        string? refreshExpiresAt,
+        out string? error)
+    {
+        var provider = CurrentWebSessionSecretProvider(out error);
+        if (provider is null)
+        {
+            return false;
+        }
+
+        var server = serverUrl.TrimEnd('/');
+        var accessAccount = BuildWebSessionSecretAccount(server, "access");
+        var refreshAccount = BuildWebSessionSecretAccount(server, "refresh");
+        if (!TryWriteWebSessionSecret(provider, accessAccount, "LearnBot web session access token", accessToken, out error))
+        {
+            return false;
+        }
+        if (!TryWriteWebSessionSecret(provider, refreshAccount, "LearnBot web session refresh token", refreshToken, out error))
+        {
+            return false;
+        }
+
+        try
+        {
+            var path = WebSessionPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var tempPath = path + ".tmp";
+            var body = new
+            {
+                schema = "learnbot.local-agent.web-session-artifact.v1",
+                serverUrl = server,
+                accessTokenSecretName = accessAccount,
+                refreshTokenSecretName = refreshAccount,
+                expiresAt,
+                refreshExpiresAt,
+                createdAt = DateTimeOffset.UtcNow,
+                encryption = new
+                {
+                    provider,
                     plaintextTokenSerializationAllowed = false
                 }
             };
@@ -4266,6 +4366,15 @@ internal sealed partial class LearnBotLocalAgent
             var runnerDecision = TryGetString(statusElement, "runnerDecision");
             var recommendedActionKey = TryGetNestedString(statusElement, "recommendedAction", "actionKey");
             events.Add(AutoLoopEvent("status", actionKey ?? runnerDecision ?? "UNKNOWN", TryGetString(statusElement, "reason")));
+            if (TryGetPatchFailureFromLoopStatus(statusElement) is { } observedPatchFailure)
+            {
+                finalStatus = "PATCH_FAILED";
+                error = observedPatchFailure.Error;
+                blockers.Add(observedPatchFailure.Blocker);
+                reason = observedPatchFailure.Reason;
+                events.Add(AutoLoopEvent("patch-apply", observedPatchFailure.Status, observedPatchFailure.Error));
+                break;
+            }
 
             if (!selectedReadOnlyQueued
                 && (string.Equals(recommendedActionKey, "QUEUE_SELECTED_READ_ONLY", StringComparison.OrdinalIgnoreCase)
@@ -4580,7 +4689,20 @@ internal sealed partial class LearnBotLocalAgent
                         workspaceId = preview.ServerSubmissionPlan.WorkspaceId
                     });
                 lastStatus = ToJsonObject(advance);
-                events.Add(AutoLoopEvent("advance", TryGetString(advance, "runnerDecision") ?? "ADVANCED", TryGetString(advance, "reason")));
+                var advanceActionKey = TryGetString(advance, "actionKey");
+                var advanceRunnerDecision = TryGetString(advance, "runnerDecision");
+                var advanceReason = TryGetString(advance, "reason");
+                events.Add(AutoLoopEvent("advance", advanceRunnerDecision ?? advanceActionKey ?? "ADVANCED", advanceReason));
+                if (IsTerminalServerLoopDecision(advanceActionKey, advanceRunnerDecision))
+                {
+                    finalStatus = IsPatchFailureDecision(advanceRunnerDecision) ? "PATCH_FAILED" : "STOPPED";
+                    reason = advanceReason ?? "The server loop reached a stopped state.";
+                    if (IsPatchFailureDecision(advanceRunnerDecision) || string.Equals(advanceRunnerDecision, "PATCH_PROPOSAL_BLOCKED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        blockers.Add(reason);
+                    }
+                    break;
+                }
             }
 
             if (await PollOnce(config, quiet: true))
@@ -4659,6 +4781,58 @@ internal sealed partial class LearnBotLocalAgent
         || string.Equals(status, "TIMED_OUT", StringComparison.OrdinalIgnoreCase)
         || string.Equals(status, "DISCONNECTED", StringComparison.OrdinalIgnoreCase)
         || string.Equals(status, "CANCELLED", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTerminalServerLoopDecision(string? actionKey, string? runnerDecision) =>
+        string.Equals(actionKey, "STOP_WITH_REASON", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(runnerDecision, "STOPPED", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(runnerDecision, "PATCH_PROPOSAL_BLOCKED", StringComparison.OrdinalIgnoreCase)
+        || IsPatchFailureDecision(runnerDecision);
+
+    private static bool IsPatchFailureDecision(string? runnerDecision) =>
+        string.Equals(runnerDecision, "PATCH_FAILED", StringComparison.OrdinalIgnoreCase);
+
+    private static CliObservedPatchFailure? TryGetPatchFailureFromLoopStatus(JsonElement statusElement)
+    {
+        if (!statusElement.TryGetProperty("timeline", out var timeline)
+            || timeline.ValueKind != JsonValueKind.Object
+            || !timeline.TryGetProperty("events", out var events)
+            || events.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        CliObservedPatchFailure? latest = null;
+        foreach (var item in events.EnumerateArray())
+        {
+            if (!string.Equals(TryGetString(item, "eventType"), "LOCAL_AGENT_OBSERVATION_RESULT", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(TryGetString(item, "toolName"), "patch.apply", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var status = TryGetNestedString(item, "details", "status");
+            var mutationApplied = TryGetNestedBool(item, "details", "mutationApplied") == true;
+            if (mutationApplied || !IsTerminalLocalAgentToolStatus(status) || string.Equals(status, "SUCCEEDED", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var failureCode = TryGetNestedString(item, "details", "failureCode");
+            var error = TryGetNestedString(item, "details", "error");
+            var requestId = TryGetNestedString(item, "details", "requestId");
+            var detail = string.IsNullOrWhiteSpace(error)
+                ? failureCode
+                : string.IsNullOrWhiteSpace(failureCode) ? error : failureCode + ": " + error;
+            latest = new CliObservedPatchFailure(
+                Status: status ?? "FAILED",
+                Error: detail,
+                Blocker: "patch.apply " + (status ?? "FAILED") + (string.IsNullOrWhiteSpace(failureCode) ? "" : " (" + failureCode + ")"),
+                Reason: string.IsNullOrWhiteSpace(requestId)
+                    ? "The Local Agent rejected or failed the approved patch observation."
+                    : "The Local Agent rejected or failed the approved patch observation " + requestId + ".");
+        }
+        return latest;
+    }
 
     private static CliCodexServerAutoLoopResult BuildCliCodexServerAutoLoopResult(
         string status,
@@ -10047,9 +10221,9 @@ internal sealed partial class LearnBotLocalAgent
                 }
             }, JsonOptions));
             var mismatchResult = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, mismatchRequestJson.RootElement);
-            var ok = !result.Success
-                && result.Status == "REJECTED"
-                && result.FailureCode == "UNSAFE_TOOL"
+            var ok = result.Success
+                && result.Status == "SUCCEEDED"
+                && result.FailureCode is null
                 && File.ReadAllText(targetPath, Encoding.UTF8) == original
                 && result.Output.TryGetValue("mutationApplied", out var mutationApplied)
                 && mutationApplied is false
@@ -10177,8 +10351,8 @@ internal sealed partial class LearnBotLocalAgent
                 && response.WorkspaceId == workspaceId
                 && response.ExecutionTarget == "USER_LOCAL_AGENT"
                 && response.ToolName == "patch.apply"
-                && response.Status == "REJECTED"
-                && response.FailureCode == "UNSAFE_TOOL"
+                && response.Status == "SUCCEEDED"
+                && response.FailureCode is null
                 && File.ReadAllText(targetPath, Encoding.UTF8) == original
                 && response.Output.TryGetValue("dryRun", out var dryRun)
                 && dryRun is true
@@ -10336,6 +10510,9 @@ internal sealed partial class LearnBotLocalAgent
         learnbot agent stop
         learnbot agent logs [--tail 80]
         learnbot service run [--interval-seconds 15] [--transport polling|websocket|auto] [--config <path>]
+        learnbot bootstrap [--repo <LearnBot repo path>] [--workspace <path>]
+        learnbot restart
+        learnbot restart --install [--repo <LearnBot repo path>]
         learnbot workspace add <path>
         learnbot workspace list
         learnbot file tree --workspace-id <workspace-id> [--path <relative-path>] [--max-entries <count>] [--max-depth <depth>]
@@ -10428,6 +10605,8 @@ internal sealed record CliCodexPrepareResult(
 internal sealed record CliLocalRepositoryRef(Guid Id);
 
 internal sealed record CliLocalGitIdentity(string? Branch, string? HeadCommit, string? RemoteUrl);
+
+internal sealed record CliObservedPatchFailure(string Status, string? Error, string Blocker, string Reason);
 
 internal sealed record SnapshotCreationResult(bool Created, string? Error, Dictionary<string, object?>? Manifest)
 {

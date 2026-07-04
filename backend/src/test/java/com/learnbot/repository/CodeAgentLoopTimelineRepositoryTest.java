@@ -691,6 +691,8 @@ class CodeAgentLoopTimelineRepositoryTest {
         UUID loopId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
 
+        when(jdbc.update(anyString(), ArgumentMatchers.any(MapSqlParameterSource.class))).thenReturn(1);
+
         repository.appendStopOutcome(
                 userId,
                 repositoryId,
@@ -701,17 +703,19 @@ class CodeAgentLoopTimelineRepositoryTest {
                 Map.of("requestId", requestId.toString(), "status", "REJECTED")
         );
 
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<MapSqlParameterSource> params = ArgumentCaptor.forClass(MapSqlParameterSource.class);
-        verify(jdbc).update(anyString(), params.capture());
-        assertThat(params.getValue().getValue("userId")).isEqualTo(userId);
-        assertThat(params.getValue().getValue("repositoryId")).isEqualTo(repositoryId);
-        assertThat(params.getValue().getValue("loopId")).isEqualTo(loopId);
-        assertThat(params.getValue().getValue("eventType")).isEqualTo("STOP_OUTCOME_RECORDED");
-        assertThat(params.getValue().getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
-        assertThat(params.getValue().getValue("executionTarget")).isNull();
-        assertThat(params.getValue().getValue("toolName")).isNull();
-        assertThat(params.getValue().getValue("requiresApproval")).isEqualTo(false);
-        String details = (String) params.getValue().getValue("details");
+        verify(jdbc, times(2)).update(sql.capture(), params.capture());
+        MapSqlParameterSource eventParams = params.getAllValues().get(0);
+        assertThat(eventParams.getValue("userId")).isEqualTo(userId);
+        assertThat(eventParams.getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(eventParams.getValue("loopId")).isEqualTo(loopId);
+        assertThat(eventParams.getValue("eventType")).isEqualTo("STOP_OUTCOME_RECORDED");
+        assertThat(eventParams.getValue("phase")).isEqualTo("COMPLETE_OR_PAUSE");
+        assertThat(eventParams.getValue("executionTarget")).isNull();
+        assertThat(eventParams.getValue("toolName")).isNull();
+        assertThat(eventParams.getValue("requiresApproval")).isEqualTo(false);
+        String details = (String) eventParams.getValue("details");
         assertThat(details)
                 .contains("\"status\":\"RECORDED\"")
                 .contains("\"stopKey\":\"APPROVAL_DENIED\"")
@@ -721,6 +725,12 @@ class CodeAgentLoopTimelineRepositoryTest {
                 .contains("\"acknowledgementEnabled\":false")
                 .contains("\"mutationEnabled\":false")
                 .contains(requestId.toString());
+        MapSqlParameterSource statusParams = params.getAllValues().get(1);
+        assertThat(sql.getAllValues().get(1)).contains("UPDATE code_agent_loop_timelines");
+        assertThat(statusParams.getValue("userId")).isEqualTo(userId);
+        assertThat(statusParams.getValue("repositoryId")).isEqualTo(repositoryId);
+        assertThat(statusParams.getValue("loopId")).isEqualTo(loopId);
+        assertThat(statusParams.getValue("status")).isEqualTo("STOPPED");
     }
 
     @Test

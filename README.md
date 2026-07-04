@@ -10,14 +10,12 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  : 
 1. 최초 1회 설치
 관리자 PowerShell에서:
 cd C:\Users\honeybadger\Desktop\LearnBot
-.\scripts\local-agent-install.ps1 -Action install -AddToUserPath
-.\scripts\local-agent.ps1 -Action setup
-.\scripts\local-agent.ps1 -Action service-command -ServiceAction install
-.\scripts\local-agent.ps1 -Action service-command -ServiceAction start
-설치 확인: Get-Service LearnBotLocalAgent
-.\scripts\local-agent.ps1 -Action status  // Running이면 정상입니다.
+.\scripts\learnbot-bootstrap.ps1 [window]  ./scripts/learnbot-bootstrap.sh  [mac/linux]
 
-2. learnbot login 아이디/비밀번호 입력
+설치 확인: learnbot status  // Running이면 정상입니다.
+
+2. learnbot restart --install  // 재시작(중지-설치-재시작)
+
 3. 명령어 
 - 코드 수정: learnbot fix "README의 오타를 찾아 고쳐줘"
 -  learnbot review "최근 변경사항 리뷰해줘"
@@ -36,7 +34,7 @@ Uploaded source files are stored in MinIO. Git repositories are cloned into a Do
 - Backend: Spring Boot
 - Database: PostgreSQL + pgvector
 - Local LLM runtime: Ollama
-- Default chat model: `qwen3:8b-q4_K_M`
+- Default chat & agent model: `ornith:9b`
 - Default embedding model: `bge-m3`
 
 ## Run

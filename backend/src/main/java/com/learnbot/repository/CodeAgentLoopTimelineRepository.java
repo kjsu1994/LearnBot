@@ -531,7 +531,7 @@ public class CodeAgentLoopTimelineRepository {
         details.put("acknowledgementEnabled", false);
         details.put("mutationEnabled", false);
         details.put("source", sourceDetails == null ? Map.of() : sourceDetails);
-        return appendLatestEvent(
+        int inserted = appendLatestEvent(
                 userId,
                 repositoryId,
                 loopId,
@@ -542,6 +542,10 @@ public class CodeAgentLoopTimelineRepository {
                 false,
                 details
         );
+        if (inserted > 0) {
+            updateLatestTimelineStatus(userId, repositoryId, loopId, terminalStatusForStopKey(stopKey));
+        }
+        return inserted;
     }
 
     public int appendNextDecision(
@@ -746,6 +750,34 @@ public class CodeAgentLoopTimelineRepository {
                 .addValue("toolName", toolName == null ? null : toolName.wireName())
                 .addValue("requiresApproval", requiresApproval)
                 .addValue("details", toJson(details == null ? Map.of() : details)));
+    }
+
+    private int updateLatestTimelineStatus(UUID userId, UUID repositoryId, UUID loopId, String status) {
+        return jdbc.update("""
+                WITH latest AS (
+                    SELECT id
+                    FROM code_agent_loop_timelines
+                    WHERE user_id = :userId
+                      AND (
+                        (CAST(:loopId AS uuid) IS NOT NULL AND id = CAST(:loopId AS uuid))
+                        OR (CAST(:loopId AS uuid) IS NULL AND repository_id = :repositoryId)
+                      )
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+                UPDATE code_agent_loop_timelines
+                SET status = :status
+                WHERE id IN (SELECT id FROM latest)
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("repositoryId", repositoryId)
+                .addValue("loopId", loopId)
+                .addValue("status", status));
+    }
+
+    private String terminalStatusForStopKey(String stopKey) {
+        String normalized = stopKey == null ? "" : stopKey;
+        return normalized.contains("FAILED") || normalized.contains("FAILURE") ? "FAILED" : "STOPPED";
     }
 
     private boolean allSucceeded(Map<String, Object> approvedFlowInspection) {

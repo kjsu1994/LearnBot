@@ -724,7 +724,47 @@ public class CodeAgentLoopRunnerService {
                 }
             }
         }
+        String normalized = instruction.toLowerCase(java.util.Locale.ROOT).replace('\\', '/');
+        addNaturalLanguageFileHints(normalized, hints);
         return List.copyOf(hints);
+    }
+
+    private void addNaturalLanguageFileHints(String normalizedInstruction, LinkedHashSet<String> hints) {
+        if (normalizedInstruction == null || normalizedInstruction.isBlank()) {
+            return;
+        }
+        Map<String, List<String>> aliases = Map.ofEntries(
+                Map.entry("html", List.of("html", "htm")),
+                Map.entry("htm", List.of("html", "htm")),
+                Map.entry("javascript", List.of("js", "jsx", "mjs", "cjs")),
+                Map.entry("js", List.of("js", "jsx", "mjs", "cjs")),
+                Map.entry("typescript", List.of("ts", "tsx")),
+                Map.entry("ts", List.of("ts", "tsx")),
+                Map.entry("java", List.of("java")),
+                Map.entry("c#", List.of("cs")),
+                Map.entry("csharp", List.of("cs")),
+                Map.entry("cs", List.of("cs")),
+                Map.entry("c++", List.of("cpp", "cc", "cxx", "hpp", "hh", "hxx")),
+                Map.entry("cpp", List.of("cpp", "cc", "cxx", "hpp", "hh", "hxx")),
+                Map.entry("python", List.of("py")),
+                Map.entry("py", List.of("py")),
+                Map.entry("markdown", List.of("md", "markdown")),
+                Map.entry("readme", List.of("readme", "md", "markdown")),
+                Map.entry("json", List.of("json")),
+                Map.entry("yaml", List.of("yaml", "yml")),
+                Map.entry("yml", List.of("yaml", "yml")),
+                Map.entry("css", List.of("css", "scss", "sass", "less")),
+                Map.entry("txt", List.of("txt")),
+                Map.entry("text", List.of("txt", "text"))
+        );
+        aliases.forEach((alias, values) -> {
+            if (normalizedInstruction.contains(alias)) {
+                hints.addAll(values);
+            }
+        });
+        if (normalizedInstruction.contains("파일")) {
+            hints.add("file");
+        }
     }
 
     private String trimFilenameToken(String token) {
@@ -748,6 +788,7 @@ public class CodeAgentLoopRunnerService {
         String normalized = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
         String fileName = normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
         String stem = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+        String extension = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf('.') + 1) : "";
         int score = 0;
         for (String hint : hints) {
             if (hint.isBlank()) {
@@ -757,6 +798,8 @@ public class CodeAgentLoopRunnerService {
                 score = Math.max(score, 100);
             } else if (fileName.startsWith(hint + ".")) {
                 score = Math.max(score, 90);
+            } else if (extension.equals(hint)) {
+                score = Math.max(score, 85);
             } else if (fileName.contains(hint)) {
                 score = Math.max(score, 60);
             } else if (normalized.contains("/" + hint) || normalized.contains(hint)) {
@@ -820,6 +863,14 @@ public class CodeAgentLoopRunnerService {
         }
         return lower.endsWith(".java")
                 || lower.endsWith(".cs")
+                || lower.endsWith(".c")
+                || lower.endsWith(".h")
+                || lower.endsWith(".cpp")
+                || lower.endsWith(".cc")
+                || lower.endsWith(".cxx")
+                || lower.endsWith(".hpp")
+                || lower.endsWith(".hh")
+                || lower.endsWith(".hxx")
                 || lower.endsWith(".js")
                 || lower.endsWith(".jsx")
                 || lower.endsWith(".ts")

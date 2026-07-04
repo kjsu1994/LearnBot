@@ -47,6 +47,17 @@ public class CodeAgentLoopRunService {
             CodeAgentLoopToolSelectionService toolSelectionService,
             CodeAgentLoopRunnerService runnerService,
             CodeAgentService codeAgentService,
+            CodeAgentLocalPatchRequestService localPatchRequestService,
+            OllamaClient ollamaClient
+    ) {
+        this(loopPreviewService, toolSelectionService, runnerService, codeAgentService, localPatchRequestService, ollamaClient, new ObjectMapper());
+    }
+
+    public CodeAgentLoopRunService(
+            CodeAgentLoopPreviewService loopPreviewService,
+            CodeAgentLoopToolSelectionService toolSelectionService,
+            CodeAgentLoopRunnerService runnerService,
+            CodeAgentService codeAgentService,
             CodeAgentLocalPatchRequestService localPatchRequestService
     ) {
         this(loopPreviewService, toolSelectionService, runnerService, codeAgentService, localPatchRequestService, null, new ObjectMapper());
@@ -265,6 +276,8 @@ public class CodeAgentLoopRunService {
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schema", "learnbot.server.code-agent.loop-final-report.v1");
         report.put("status", nextAction.actionKey());
+        report.put("loopState", nextAction.loopState());
+        report.put("stateSnapshot", nextAction.stateSnapshot());
         report.put("reason", nextAction.reason());
         report.put("mutationApplied", false);
         report.put("rollbackRequired", false);
@@ -476,24 +489,9 @@ public class CodeAgentLoopRunService {
             return modelSelection;
         }
 
-        if (mentionsReadme(instruction)) {
-            List<String> readmeMatches = safeCandidates.stream()
-                    .filter(this::isReadmePath)
-                    .sorted((left, right) -> Integer.compare(readmePriority(left), readmePriority(right)))
-                    .toList();
-            if (readmeMatches.size() == 1 || (readmeMatches.size() > 1 && readmePriority(readmeMatches.get(0)) < readmePriority(readmeMatches.get(1)))) {
-                return TargetFileSelection.ready(List.of(readmeMatches.get(0)));
-            }
-        }
-
-        List<String> extensionMatches = extensionMatchesForInstruction(instruction, safeCandidates);
-        if (extensionMatches.size() == 1) {
-            return TargetFileSelection.ready(extensionMatches);
-        }
-
         return TargetFileSelection.blocked(
                 "AMBIGUOUS_TARGET_FILES",
-                "Multiple candidate files were read, but the instruction did not identify one target file clearly.",
+                "Multiple candidate files were read, and the LLM did not select one target file with sufficient confidence.",
                 safeCandidates
         );
     }
@@ -542,8 +540,10 @@ public class CodeAgentLoopRunService {
                 Return JSON only.
                 Select targetFiles only from the provided candidate list.
                 If the user asks for one file and it is clear, return exactly one target file.
+                Use the current file observations and recent successful edit context as evidence.
                 You may use recent successful edit context only as evidence for what the user means now.
                 Never select a file only because it appeared in recent context; it must also be in the provided candidate list.
+                Do not rely on server extension or README heuristics; you are responsible for judging the target from the instruction and observations.
                 If unclear, set needsClarification=true and return no target files.
                 Do not invent paths.
                 """;
@@ -581,9 +581,15 @@ public class CodeAgentLoopRunService {
             if (outputSummary instanceof Map<?, ?> map) {
                 Object path = map.get("relativePath");
                 Object preview = map.get("contentPreview");
+                Object content = map.get("contentForPatch");
                 builder.append("FILE: ").append(path == null ? "" : path).append("\n");
                 builder.append("EXTENSION: ").append(path == null ? "" : extensionForPath(String.valueOf(path))).append("\n");
                 builder.append("PREVIEW: ").append(preview == null ? "" : preview).append("\n");
+                if (content instanceof String text && !text.isBlank()) {
+                    builder.append("CONTENT_FOR_TARGET_DECISION:\n")
+                            .append(targetSelectionContentPreview(text))
+                            .append("\n");
+                }
             }
         }
         builder.append("""
@@ -775,57 +781,6 @@ public class CodeAgentLoopRunService {
         return false;
     }
 
-    private List<String> extensionMatchesForInstruction(String instruction, List<String> safeCandidates) {
-        Set<String> requestedExtensions = requestedExtensions(instruction);
-        if (requestedExtensions.isEmpty()) {
-            return List.of();
-        }
-        return safeCandidates.stream()
-                .filter(path -> requestedExtensions.contains(extensionForPath(path)))
-                .toList();
-    }
-
-    private Set<String> requestedExtensions(String instruction) {
-        String normalized = normalizeForMention(instruction);
-        if (normalized.isBlank()) {
-            return Set.of();
-        }
-        Set<String> extensions = new LinkedHashSet<>();
-        addExtensionAliases(extensions, normalized, List.of("html", "htm"), "html", "htm");
-        addExtensionAliases(extensions, normalized, List.of("markdown", "md", "\uB9C8\uD06C\uB2E4\uC6B4"), "md", "markdown");
-        addExtensionAliases(extensions, normalized, List.of("text", "txt", "\uD14D\uC2A4\uD2B8"), "txt");
-        addExtensionAliases(extensions, normalized, List.of("json"), "json");
-        addExtensionAliases(extensions, normalized, List.of("css"), "css");
-        addExtensionAliases(extensions, normalized, List.of("javascript", "js", "\uC790\uBC14\uC2A4\uD06C\uB9BD\uD2B8"), "js", "jsx");
-        addExtensionAliases(extensions, normalized, List.of("typescript", "ts"), "ts", "tsx");
-        addExtensionAliases(extensions, normalized, List.of("java"), "java");
-        addExtensionAliases(extensions, normalized, List.of("python", "py"), "py");
-        addExtensionAliases(extensions, normalized, List.of("xml"), "xml");
-        addExtensionAliases(extensions, normalized, List.of("yaml", "yml"), "yaml", "yml");
-        return extensions;
-    }
-
-    private void addExtensionAliases(Set<String> extensions, String normalizedInstruction, List<String> tokens, String... aliases) {
-        for (String token : tokens) {
-            if (instructionMentionsExtensionToken(normalizedInstruction, token)) {
-                extensions.addAll(List.of(aliases));
-                return;
-            }
-        }
-    }
-
-    private boolean instructionMentionsExtensionToken(String normalizedInstruction, String token) {
-        if (normalizedInstruction == null || normalizedInstruction.isBlank() || token == null || token.isBlank()) {
-            return false;
-        }
-        return normalizedInstruction.contains("." + token)
-                || normalizedInstruction.contains(token + "\uD30C\uC77C")
-                || normalizedInstruction.contains(token + " file")
-                || normalizedInstruction.contains(token + "-file")
-                || normalizedInstruction.contains(token + "_file")
-                || (token.length() >= 4 && normalizedInstruction.contains(token));
-    }
-
     private String extensionForPath(String path) {
         String basename = normalizeForMention(path);
         if (basename.contains("/")) {
@@ -838,36 +793,18 @@ public class CodeAgentLoopRunService {
         return basename.substring(index + 1);
     }
 
+    private String targetSelectionContentPreview(String value) {
+        String normalized = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+        if (normalized.length() <= 4000) {
+            return normalized;
+        }
+        return normalized.substring(0, 4000) + "\n...<content truncated for target selection>";
+    }
+
     private String normalizeForMention(String value) {
         return value == null
                 ? ""
                 : value.replace('\\', '/').trim().toLowerCase(java.util.Locale.ROOT);
-    }
-
-    private boolean mentionsReadme(String instruction) {
-        return normalizeForMention(instruction).contains("readme");
-    }
-
-    private boolean isReadmePath(String path) {
-        String basename = normalizeForMention(path);
-        if (basename.contains("/")) {
-            basename = basename.substring(basename.lastIndexOf('/') + 1);
-        }
-        return basename.equals("readme")
-                || basename.equals("readme.md")
-                || basename.equals("readme.txt")
-                || basename.startsWith("readme.");
-    }
-
-    private int readmePriority(String path) {
-        String basename = normalizeForMention(path);
-        if (basename.contains("/")) {
-            basename = basename.substring(basename.lastIndexOf('/') + 1);
-        }
-        if (basename.equals("readme.md")) return 0;
-        if (basename.equals("readme.txt")) return 1;
-        if (basename.equals("readme")) return 2;
-        return 10;
     }
 
     private List<CodePatchFileLoader.LoadedPatchFile> observedPatchFiles(CodeAgentLoopTimelineSummary timeline, List<String> targetFiles) {

@@ -21,8 +21,54 @@ public record CodeAgentLoopNextActionResponse(
         String sourceEventType,
         Map<String, Object> handoffSummary,
         Map<String, Object> sourceDetails,
-        Map<String, Object> recommendedAction
+        Map<String, Object> recommendedAction,
+        String loopState,
+        Map<String, Object> stateSnapshot
 ) {
+    public CodeAgentLoopNextActionResponse(
+            UUID loopId,
+            UUID repositoryId,
+            String status,
+            String actionKey,
+            String reason,
+            boolean requestCreationEnabled,
+            boolean pushEnabled,
+            boolean claimEnabled,
+            boolean mutationEnabled,
+            boolean finalResultEnabled,
+            boolean publicationEnabled,
+            boolean acknowledgementEnabled,
+            UUID sourceEventId,
+            Integer sourceSequenceNumber,
+            String sourceEventType,
+            Map<String, Object> handoffSummary,
+            Map<String, Object> sourceDetails,
+            Map<String, Object> recommendedAction
+    ) {
+        this(
+                loopId,
+                repositoryId,
+                status,
+                actionKey,
+                reason,
+                requestCreationEnabled,
+                pushEnabled,
+                claimEnabled,
+                mutationEnabled,
+                finalResultEnabled,
+                publicationEnabled,
+                acknowledgementEnabled,
+                sourceEventId,
+                sourceSequenceNumber,
+                sourceEventType,
+                handoffSummary,
+                sourceDetails,
+                recommendedAction,
+                null,
+                Map.of()
+        );
+    }
+
     public CodeAgentLoopNextActionResponse(
             UUID loopId,
             UUID repositoryId,
@@ -59,6 +105,8 @@ public record CodeAgentLoopNextActionResponse(
                 sourceEventType,
                 Map.of(),
                 sourceDetails,
+                Map.of(),
+                null,
                 Map.of()
         );
     }
@@ -100,7 +148,34 @@ public record CodeAgentLoopNextActionResponse(
                 sourceEventType,
                 copyObjectMap(handoffSummary),
                 copyObjectMap(sourceDetails),
+                Map.of(),
+                null,
                 Map.of()
+        );
+    }
+
+    public CodeAgentLoopNextActionResponse withLoopState(String loopState, Map<String, ?> stateSnapshot) {
+        return new CodeAgentLoopNextActionResponse(
+                loopId,
+                repositoryId,
+                status,
+                actionKey,
+                reason,
+                requestCreationEnabled,
+                pushEnabled,
+                claimEnabled,
+                mutationEnabled,
+                finalResultEnabled,
+                publicationEnabled,
+                acknowledgementEnabled,
+                sourceEventId,
+                sourceSequenceNumber,
+                sourceEventType,
+                handoffSummary,
+                sourceDetails,
+                recommendedAction,
+                loopState,
+                copyObjectMap(stateSnapshot)
         );
     }
 
