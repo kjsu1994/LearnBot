@@ -421,19 +421,61 @@ public class CodeAgentLoopRunService {
                 );
                 return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal returned no target files.");
             }
-            LocalAgentToolExecutionResponse approvalRequest = localPatchRequestService.prepare(
-                    repositoryId,
-                    timeline.spaceId(),
-                    userId,
-                    agentId,
-                    workspaceId,
-                    loopId,
-                    timeline.instruction(),
-                    diff,
-                    approvalTargetFiles,
-                    observedPatchFiles(timeline, approvalTargetFiles),
-                    targetSelection.details()
-            );
+            LocalAgentToolExecutionResponse approvalRequest;
+            try {
+                approvalRequest = localPatchRequestService.prepare(
+                        repositoryId,
+                        timeline.spaceId(),
+                        userId,
+                        agentId,
+                        workspaceId,
+                        loopId,
+                        timeline.instruction(),
+                        diff,
+                        approvalTargetFiles,
+                        observedPatchFiles(timeline, approvalTargetFiles),
+                        targetSelection.details()
+                );
+            } catch (IllegalArgumentException ex) {
+                if (!repairableApprovalPreflightFailure(ex)) {
+                    throw ex;
+                }
+                CodeAgentPatchResponse repairedPatch = codeAgentService.repairPatchFromLoadedFiles(
+                        timeline.instruction(),
+                        observedPatchFiles(timeline, approvalTargetFiles),
+                        diff,
+                        List.of(ex.getMessage())
+                );
+                if (repairedPatch == null || !repairedPatch.valid() || repairedPatch.files() == null || repairedPatch.files().isEmpty()) {
+                    throw new IllegalArgumentException("Patch integrity repair failed after approval preflight rejection: " + ex.getMessage());
+                }
+                String repairedDiff = repairedPatch.files().stream()
+                        .map(PatchFileDiff::diff)
+                        .filter(value -> value != null && !value.isBlank())
+                        .distinct()
+                        .collect(java.util.stream.Collectors.joining("\n"));
+                List<String> repairedTargetFiles = repairedPatch.files().stream()
+                        .map(PatchFileDiff::path)
+                        .filter(path -> path != null && !path.isBlank())
+                        .distinct()
+                        .toList();
+                if (repairedDiff.isBlank() || repairedTargetFiles.isEmpty()) {
+                    throw new IllegalArgumentException("Patch integrity repair returned no usable diff or target files after approval preflight rejection: " + ex.getMessage());
+                }
+                approvalRequest = localPatchRequestService.prepare(
+                        repositoryId,
+                        timeline.spaceId(),
+                        userId,
+                        agentId,
+                        workspaceId,
+                        loopId,
+                        timeline.instruction(),
+                        repairedDiff,
+                        repairedTargetFiles,
+                        observedPatchFiles(timeline, repairedTargetFiles),
+                        targetSelection.details()
+                );
+            }
             return patchProposalResponse(
                     loopId,
                     repositoryId,
@@ -452,6 +494,13 @@ public class CodeAgentLoopRunService {
             );
             return patchProposalResponse(loopId, repositoryId, "PATCH_PROPOSAL_BLOCKED", "Patch proposal or approval request creation failed: " + ex.getMessage());
         }
+    }
+
+    private boolean repairableApprovalPreflightFailure(IllegalArgumentException ex) {
+        String message = ex == null || ex.getMessage() == null ? "" : ex.getMessage();
+        return message.contains("requested file creation/reference integrity")
+                || message.contains("Patch adds a local file reference")
+                || message.contains("explicitly requested a new");
     }
 
     private boolean hasApprovalRequest(CodeAgentLoopTimelineSummary timeline) {

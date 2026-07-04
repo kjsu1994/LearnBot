@@ -787,8 +787,9 @@ public class CodeAgentLocalPatchRequestService {
         List<String> created = createdFiles == null ? List.of() : createdFiles;
         for (String extension : List.of("js", "css", "html", "htm")) {
             if (requiresNewTypedFile(instruction, extension)
-                    && created.stream().noneMatch(path -> hasExtension(path, extension))) {
-                warnings.add("Instruction explicitly requested a new ." + extension + " file, but the patch did not create one.");
+                    && created.stream().noneMatch(path -> hasExtension(path, extension))
+                    && targets.stream().noneMatch(path -> hasExtension(path, extension))) {
+                warnings.add("Instruction explicitly requested a ." + extension + " file addition, but the patch neither created nor updated one.");
             }
         }
         Set<String> changed = new LinkedHashSet<>(targets);

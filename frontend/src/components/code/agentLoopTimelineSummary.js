@@ -4,7 +4,8 @@ export function buildAgentLoopTimelineHistoryView(timelines = []) {
     return null;
   }
   return {
-    headerText: `recent agent loop timelines: ${items.length}`,
+    headerText: `에이전트 루프 실행 이력: ${items.length}`,
+    helperText: '문제 원인 추적용 상세 로그입니다. 평소에는 접어두어도 됩니다.',
     timelines: items.map(timelineView),
   };
 }

@@ -173,6 +173,61 @@
   max-width: 100%;
 }
 
+.code-workspace-product .code-agent-timeline-details {
+  background: rgba(15, 23, 42, 0.48);
+  border-color: rgba(148, 163, 184, 0.18);
+  padding: 0;
+}
+
+.code-workspace-product .code-agent-timeline-details > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 11px 12px;
+}
+
+.code-workspace-product .code-agent-timeline-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.code-workspace-product .code-agent-timeline-details > summary::after {
+  color: rgba(226, 232, 240, 0.86);
+  content: "펼치기";
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.code-workspace-product .code-agent-timeline-details[open] > summary::after {
+  content: "접기";
+}
+
+.code-workspace-product .code-agent-timeline-details > summary > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.code-workspace-product .code-agent-timeline-details > summary strong {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.code-workspace-product .code-agent-timeline-details > summary small {
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.code-workspace-product .code-agent-timeline-details .code-agent-timeline-badge {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(147, 197, 253, 0.34);
+  color: rgba(219, 234, 254, 0.96);
+}
+
+.code-workspace-product .code-agent-timeline-content {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
 .file-list {
   display: grid;
   gap: 7px;

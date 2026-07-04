@@ -266,7 +266,8 @@ const view = buildAgentLoopTimelineHistoryView([
   },
 ]);
 
-assert.equal(view.headerText, 'recent agent loop timelines: 1');
+assert.equal(view.headerText, '에이전트 루프 실행 이력: 1');
+assert.equal(view.helperText, '문제 원인 추적용 상세 로그입니다. 평소에는 접어두어도 됩니다.');
 assert.equal(view.timelines[0].headerText, 'loop timeline: PREVIEW_ONLY / max steps 6 / timeout 120s');
 assert.equal(view.timelines[0].stateText, 'timeline state: mutation false / persistence true / cancellation false');
 assert.equal(view.timelines[0].instructionText, 'instruction: fix parser bug');

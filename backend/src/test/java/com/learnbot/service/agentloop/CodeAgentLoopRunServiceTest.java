@@ -138,6 +138,146 @@ class CodeAgentLoopRunServiceTest {
     }
 
     @Test
+    void advanceRepairsPatchWhenApprovalPreflightRequiresExplicitNewJsFile() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "js파일을 하나 추가해서 홈페이지 소개부분을 직접 수정하고 로컬스토리지에 저장해줘";
+        String htmlPath = "index.html";
+        String jsPath = "script.js";
+        String initialDiff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                 <body><section id="intro">Hello</section></body>
+                +<script src="script.js"></script>
+                 </html>
+                """;
+        String repairedHtmlDiff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                 <body><section id="intro">Hello</section></body>
+                +<script src="script.js"></script>
+                 </html>
+                """;
+        String repairedJsDiff = """
+                --- /dev/null
+                +++ b/script.js
+                @@ -0,0 +1,2 @@
+                +const intro = document.getElementById('intro');
+                +localStorage.setItem('introText', intro ? intro.textContent : '');
+                """;
+        String repairedDiff = repairedHtmlDiff + "\n" + repairedJsDiff;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                fileReadEvent(htmlPath, "<html>\n<body><section id=\"intro\">Hello</section></body>\n</html>\n")
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", repairedDiff, "targetFiles", List.of(htmlPath, jsPath), "createdFiles", List.of(jsPath)),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "initial",
+                List.of(new PatchFileDiff(htmlPath, initialDiff)),
+                "low",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(initialDiff), eq(List.of(htmlPath)), anyList(), anyMap()))
+                .thenThrow(new IllegalArgumentException("Patch did not satisfy requested file creation/reference integrity: Instruction explicitly requested a new .js file, but the patch did not create one."));
+        when(codeAgentService.repairPatchFromLoadedFiles(eq(instruction), anyList(), eq(initialDiff), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "repaired",
+                List.of(new PatchFileDiff(htmlPath, repairedHtmlDiff), new PatchFileDiff(jsPath, repairedJsDiff)),
+                "medium",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(repairedDiff), eq(List.of(htmlPath, jsPath)), anyList(), anyMap()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        verify(codeAgentService).repairPatchFromLoadedFiles(eq(instruction), anyList(), eq(initialDiff), anyList());
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(repairedDiff),
+                eq(List.of(htmlPath, jsPath)),
+                anyList(),
+                anyMap()
+        );
+    }
+
+    @Test
     void advanceCanCreatePatchApprovalWithoutExistingFileReadTargets() {
         CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
         CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);

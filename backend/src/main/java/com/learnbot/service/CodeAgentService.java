@@ -106,6 +106,34 @@ public class CodeAgentService {
         return patchLoadedFiles(safe(instruction), loadedFiles, warnings);
     }
 
+    public CodeAgentPatchResponse repairPatchFromLoadedFiles(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
+            String previousPatchOutput,
+            List<String> validationWarnings
+    ) {
+        List<String> warnings = new ArrayList<>();
+        warnings.add("LLM patch integrity repair requested after approval preflight rejected the previous patch.");
+        CodeAgentPatchResponse repaired = tryRepairLlmPatch(
+                safe(instruction),
+                loadedFiles == null ? List.of() : loadedFiles,
+                previousPatchOutput,
+                validationWarnings == null ? List.of() : validationWarnings,
+                warnings
+        );
+        if (repaired != null) {
+            return repaired;
+        }
+        return new CodeAgentPatchResponse(
+                "Patch integrity repair did not produce a valid unified diff.",
+                List.of(),
+                "high",
+                List.copyOf(warnings),
+                List.of(),
+                false
+        );
+    }
+
     private CodeAgentPatchResponse patchLoadedFiles(
             String safeInstruction,
             List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,

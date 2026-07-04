@@ -78,8 +78,97 @@ class CodeAgentLocalPatchRequestServiceTest {
 
         assertThat(ex.getMessage())
                 .contains("requested file creation/reference integrity")
-                .contains("new .js file");
+                .contains("neither created nor updated");
         verify(toolGatewayService, never()).createApprovalRequest(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void prepareAllowsExplicitNewJsRequestWhenExistingJsTargetIsUpdated() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        String htmlPath = "index.html";
+        String jsPath = "script.js";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                 <body>Hello</body>
+                +<script src="script.js"></script>
+                 </html>
+                --- a/script.js
+                +++ b/script.js
+                @@ -1 +1,2 @@
+                 console.log('ready');
+                +localStorage.setItem('introText', 'Hello');
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(htmlPath, jsPath)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(htmlPath, jsPath));
+        when(validationService.validate(diff, List.of(htmlPath, jsPath))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        when(codeRepository.findRepository(repositoryId)).thenReturn(Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "site",
+                "LOCAL",
+                null,
+                null,
+                "C:/site",
+                null,
+                "NONE",
+                "C:/site",
+                "LOCAL",
+                null
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "site", "C:/site", true)
+        ));
+        when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(0);
+            return new LocalAgentToolExecutionResponse(
+                    requestId,
+                    UUID.randomUUID(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    request.executionTarget(),
+                    request.toolName(),
+                    request.approvalState(),
+                    LocalAgentToolStatus.APPROVAL_REQUIRED,
+                    request.input(),
+                    Map.of(),
+                    null,
+                    null,
+                    request.warnings(),
+                    List.of(),
+                    null,
+                    null,
+                    null
+            );
+        });
+
+        LocalAgentToolExecutionResponse response = service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "js파일을 하나 추가해서 소개 페이지를 수정해줘",
+                diff,
+                List.of(htmlPath, jsPath),
+                List.of(
+                        new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), htmlPath, "html", "<html>\n<body>Hello</body>\n</html>\n"),
+                        new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), jsPath, "javascript", "console.log('ready');\n")
+                )
+        );
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
+        assertThat(response.input()).containsEntry("createdFiles", List.of());
+        assertThat(response.input()).containsEntry("updatedFiles", List.of(htmlPath, jsPath));
     }
 
     @Test

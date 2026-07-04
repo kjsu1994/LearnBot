@@ -1961,25 +1961,30 @@ function CodeAgentPanel({
         </div>
       )}
       {agentLoopTimelineHistoryView && (
-        <div className="code-agent-result compact-result">
-          <div className="result-heading">
-            <strong>{agentLoopTimelineHistoryView.headerText}</strong>
-            <Badge variant="outline">read only</Badge>
+        <details className="code-agent-result compact-result code-agent-timeline-details">
+          <summary className="result-heading">
+            <span>
+              <strong>{agentLoopTimelineHistoryView.headerText}</strong>
+              {agentLoopTimelineHistoryView.helperText && <small>{agentLoopTimelineHistoryView.helperText}</small>}
+            </span>
+            <Badge className="code-agent-timeline-badge" variant="outline">진단 로그</Badge>
+          </summary>
+          <div className="code-agent-timeline-content">
+            {agentLoopTimelineHistoryView.timelines.map((timeline) => (
+              <div className="detail-box compact-box" key={timeline.id || timeline.headerText}>
+                <strong>{timeline.headerText}</strong>
+                <small>{timeline.stateText}</small>
+                {timeline.instructionText && <small>{timeline.instructionText}</small>}
+                {timeline.createdText && <small>{timeline.createdText}</small>}
+                {!!timeline.eventLines.length && (
+                  <ol className="code-agent-list">
+                    {timeline.eventLines.map((line) => <li key={line}>{line}</li>)}
+                  </ol>
+                )}
+              </div>
+            ))}
           </div>
-          {agentLoopTimelineHistoryView.timelines.map((timeline) => (
-            <div className="detail-box compact-box" key={timeline.id || timeline.headerText}>
-              <strong>{timeline.headerText}</strong>
-              <small>{timeline.stateText}</small>
-              {timeline.instructionText && <small>{timeline.instructionText}</small>}
-              {timeline.createdText && <small>{timeline.createdText}</small>}
-              {!!timeline.eventLines.length && (
-                <ol className="code-agent-list">
-                  {timeline.eventLines.map((line) => <li key={line}>{line}</li>)}
-                </ol>
-              )}
-            </div>
-          ))}
-        </div>
+        </details>
       )}
       {agentLoopOneCycleView && (
         <div className="code-agent-result compact-result">
@@ -4269,7 +4274,5 @@ function RepositorySelect({ repositories, selectedRepository, selectedRepository
 }
 
 export { CodeSourceManagementPanel, CodeWorkspace };
-
-
 
 
