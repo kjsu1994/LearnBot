@@ -153,6 +153,7 @@ public class LocalAgentToolGatewayService {
 
     @Transactional
     public LocalAgentQueuedToolRequest enqueueReadOnly(LocalAgentToolRequest request) {
+        request = enrichReadOnlySourceRequestInput(request);
         if (request.toolName() != LocalAgentToolName.FILE_READ
                 && request.toolName() != LocalAgentToolName.WORKSPACE_TREE
                 && request.toolName() != LocalAgentToolName.WORKSPACE_SEARCH
@@ -172,6 +173,41 @@ public class LocalAgentToolGatewayService {
             );
         }
         return queued;
+    }
+
+    private LocalAgentToolRequest enrichReadOnlySourceRequestInput(LocalAgentToolRequest request) {
+        UUID sourceRequestId = sourceRequestId(request.input());
+        if (sourceRequestId == null) {
+            return request;
+        }
+        LocalAgentToolExecution source = repository.find(sourceRequestId).orElse(null);
+        if (source == null || !source.userId().equals(request.userId())) {
+            return request;
+        }
+        Map<String, Object> enriched = new LinkedHashMap<>(request.input());
+        if (!enriched.containsKey("sourceRepository")
+                && source.input().get("sourceRepository") instanceof Map<?, ?> sourceRepository) {
+            enriched.put("sourceRepository", copyMap(sourceRepository));
+        }
+        if (!enriched.containsKey("localWorkspace")
+                && source.input().get("localWorkspace") instanceof Map<?, ?> localWorkspace) {
+            enriched.put("localWorkspace", copyMap(localWorkspace));
+        }
+        if (enriched.equals(request.input())) {
+            return request;
+        }
+        return new LocalAgentToolRequest(
+                request.sessionId(),
+                request.userId(),
+                request.agentId(),
+                request.workspaceId(),
+                request.executionTarget(),
+                request.toolName(),
+                enriched,
+                request.approvalState(),
+                request.createdAt(),
+                request.warnings()
+        );
     }
 
     @Transactional

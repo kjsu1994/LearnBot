@@ -158,18 +158,28 @@ public class CodeAgentLoopToolSelectionService {
             );
         }
 
-        LocalAgentQueuedToolRequest queued = toolGatewayService.enqueueReadOnly(new LocalAgentToolRequest(
-                candidate.sessionId(),
-                candidate.userId(),
-                candidate.agentId(),
-                candidate.workspaceId(),
-                candidate.executionTarget(),
-                candidate.toolName(),
-                candidate.input(),
-                candidate.approvalState(),
-                null,
-                candidate.warnings()
-        ));
+        LocalAgentQueuedToolRequest queued;
+        try {
+            queued = toolGatewayService.enqueueReadOnly(new LocalAgentToolRequest(
+                    candidate.sessionId(),
+                    candidate.userId(),
+                    candidate.agentId(),
+                    candidate.workspaceId(),
+                    candidate.executionTarget(),
+                    candidate.toolName(),
+                    candidate.input(),
+                    candidate.approvalState(),
+                    null,
+                    candidate.warnings()
+            ));
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            return enqueueResponse(
+                    selection,
+                    "REFUSED_LOCAL_AGENT_NOT_READY",
+                    ex.getMessage(),
+                    null
+            );
+        }
         return enqueueResponse(
                 selection,
                 selection.selectedByModel()

@@ -154,6 +154,68 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void enqueueReadOnlyCopiesSourceRepositoryAndLocalWorkspaceFromSourceRequest() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        Map<String, Object> sourceRepository = Map.of(
+                "name", "test",
+                "branch", "main"
+        );
+        Map<String, Object> localWorkspace = Map.of(
+                "path", "C:/Users/honeybadger/Desktop/test",
+                "gitRepository", false
+        );
+        LocalAgentToolRequest sourceRequest = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                Map.of(
+                        "sourceRepository", sourceRepository,
+                        "localWorkspace", localWorkspace
+                ),
+                LocalAgentApprovalState.REQUIRED,
+                OffsetDateTime.now(),
+                List.of()
+        );
+        LocalAgentToolRequest readOnlyRequest = new LocalAgentToolRequest(
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.GIT_STATUS,
+                Map.of("sourceRequestId", sourceRequestId.toString()),
+                LocalAgentApprovalState.NOT_REQUIRED,
+                OffsetDateTime.now(),
+                List.of()
+        );
+        AtomicReference<LocalAgentToolRequest> persistedRequest = new AtomicReference<>();
+        when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
+        when(gatewayService.hasApprovedWorkspace(userId, workspaceId)).thenReturn(true);
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(execution(sourceRequestId, sourceRequest)));
+        when(repository.create(any(UUID.class), any(LocalAgentToolRequest.class))).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(1);
+            persistedRequest.set(request);
+            return execution(invocation.getArgument(0), request);
+        });
+
+        var queued = service.enqueueReadOnly(readOnlyRequest);
+
+        assertThat(queued.request().input())
+                .containsEntry("sourceRequestId", sourceRequestId.toString())
+                .containsEntry("sourceRepository", sourceRepository)
+                .containsEntry("localWorkspace", localWorkspace);
+        assertThat(persistedRequest.get().input())
+                .containsEntry("sourceRepository", sourceRepository)
+                .containsEntry("localWorkspace", localWorkspace);
+    }
+
+    @Test
     void createApprovalRequestPersistsSideEffectfulRequestWithoutPushingIt() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();

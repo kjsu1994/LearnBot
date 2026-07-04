@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -53,6 +54,7 @@ public class LocalAgentGatewayService {
         OffsetDateTime connectedAt = current != null && current.agentId().equals(agentId)
                 ? current.connectedAt()
                 : now;
+        List<LocalAgentWorkspaceSummary> mergedWorkspaces = mergeWorkspaces(current, agentId, workspaces);
         agentsByUser.put(userId, new LocalAgentStatusSnapshot(
                 agentId,
                 userId,
@@ -60,12 +62,33 @@ public class LocalAgentGatewayService {
                 connectedAt,
                 now,
                 capabilities,
-                workspaces,
+                mergedWorkspaces,
                 normalizeTransport(configuredTransport),
                 normalizeTransport(activeTransport),
                 webSocketFailureCount == null ? 0 : Math.max(0, webSocketFailureCount),
                 nextWebSocketRetryAt
         ));
+    }
+
+    private List<LocalAgentWorkspaceSummary> mergeWorkspaces(
+            LocalAgentStatusSnapshot current,
+            UUID agentId,
+            List<LocalAgentWorkspaceSummary> incoming
+    ) {
+        Map<UUID, LocalAgentWorkspaceSummary> merged = new LinkedHashMap<>();
+        if (current != null && current.agentId().equals(agentId)) {
+            for (LocalAgentWorkspaceSummary workspace : current.workspaces()) {
+                if (workspace.workspaceId() != null && workspace.approved()) {
+                    merged.put(workspace.workspaceId(), workspace);
+                }
+            }
+        }
+        for (LocalAgentWorkspaceSummary workspace : incoming == null ? List.<LocalAgentWorkspaceSummary>of() : incoming) {
+            if (workspace.workspaceId() != null) {
+                merged.put(workspace.workspaceId(), workspace);
+            }
+        }
+        return List.copyOf(merged.values());
     }
 
     public void disconnect(UUID userId, UUID agentId) {

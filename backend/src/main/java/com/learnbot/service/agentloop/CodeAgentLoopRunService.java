@@ -300,7 +300,19 @@ public class CodeAgentLoopRunService {
             return null;
         }
 
-        List<String> targetFiles = fileReadTargets(timeline).stream().limit(3).toList();
+        TargetFileSelection targetSelection = selectPatchTargets(timeline.instruction(), fileReadTargets(timeline));
+        List<String> targetFiles = targetSelection.targetFiles();
+        if (!targetSelection.ready()) {
+            loopPreviewService.appendPatchProposalBlocked(
+                    userId,
+                    repositoryId,
+                    loopId,
+                    targetSelection.stopKey(),
+                    targetSelection.message(),
+                    patchBlockedDetails(targetFiles, "target-selection", null, null)
+            );
+            return patchProposalResponse(loopId, repositoryId, targetSelection.stopKey(), targetSelection.message());
+        }
         List<CodePatchFileLoader.LoadedPatchFile> observedFiles = observedPatchFiles(timeline, targetFiles);
         String patchSource = observedFiles.isEmpty() ? "indexed-loader" : "local-agent-file-read";
         try {
@@ -407,6 +419,88 @@ public class CodeAgentLoopRunService {
         return List.copyOf(targets);
     }
 
+    private TargetFileSelection selectPatchTargets(String instruction, List<String> candidates) {
+        List<String> safeCandidates = candidates == null
+                ? List.of()
+                : candidates.stream()
+                .filter(this::safeRelativePath)
+                .distinct()
+                .toList();
+        if (safeCandidates.isEmpty()) {
+            return TargetFileSelection.blocked("PATCH_PROPOSAL_BLOCKED", "No readable candidate file was selected for patching.", safeCandidates);
+        }
+        if (safeCandidates.size() == 1) {
+            return TargetFileSelection.ready(safeCandidates);
+        }
+
+        List<String> explicitMatches = safeCandidates.stream()
+                .filter(path -> instructionMentionsPath(instruction, path))
+                .toList();
+        if (explicitMatches.size() == 1) {
+            return TargetFileSelection.ready(explicitMatches);
+        }
+
+        if (mentionsReadme(instruction)) {
+            List<String> readmeMatches = safeCandidates.stream()
+                    .filter(this::isReadmePath)
+                    .sorted((left, right) -> Integer.compare(readmePriority(left), readmePriority(right)))
+                    .toList();
+            if (readmeMatches.size() == 1 || (readmeMatches.size() > 1 && readmePriority(readmeMatches.get(0)) < readmePriority(readmeMatches.get(1)))) {
+                return TargetFileSelection.ready(List.of(readmeMatches.get(0)));
+            }
+        }
+
+        return TargetFileSelection.blocked(
+                "AMBIGUOUS_TARGET_FILES",
+                "Multiple candidate files were read, but the instruction did not identify one target file clearly.",
+                safeCandidates
+        );
+    }
+
+    private boolean instructionMentionsPath(String instruction, String path) {
+        String normalizedInstruction = normalizeForMention(instruction);
+        String normalizedPath = normalizeForMention(path);
+        String basename = normalizedPath.contains("/")
+                ? normalizedPath.substring(normalizedPath.lastIndexOf('/') + 1)
+                : normalizedPath;
+        String stem = basename.contains(".") ? basename.substring(0, basename.lastIndexOf('.')) : basename;
+        return (!normalizedPath.isBlank() && normalizedInstruction.contains(normalizedPath))
+                || (!basename.isBlank() && normalizedInstruction.contains(basename))
+                || (stem.length() >= 4 && normalizedInstruction.contains(stem));
+    }
+
+    private String normalizeForMention(String value) {
+        return value == null
+                ? ""
+                : value.replace('\\', '/').trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private boolean mentionsReadme(String instruction) {
+        return normalizeForMention(instruction).contains("readme");
+    }
+
+    private boolean isReadmePath(String path) {
+        String basename = normalizeForMention(path);
+        if (basename.contains("/")) {
+            basename = basename.substring(basename.lastIndexOf('/') + 1);
+        }
+        return basename.equals("readme")
+                || basename.equals("readme.md")
+                || basename.equals("readme.txt")
+                || basename.startsWith("readme.");
+    }
+
+    private int readmePriority(String path) {
+        String basename = normalizeForMention(path);
+        if (basename.contains("/")) {
+            basename = basename.substring(basename.lastIndexOf('/') + 1);
+        }
+        if (basename.equals("readme.md")) return 0;
+        if (basename.equals("readme.txt")) return 1;
+        if (basename.equals("readme")) return 2;
+        return 10;
+    }
+
     private List<CodePatchFileLoader.LoadedPatchFile> observedPatchFiles(CodeAgentLoopTimelineSummary timeline, List<String> targetFiles) {
         if (timeline == null || timeline.events() == null || targetFiles == null || targetFiles.isEmpty()) {
             return List.of();
@@ -472,6 +566,21 @@ public class CodeAgentLoopRunService {
         details.put("mutationAllowed", false);
         details.put("approvalRequestCreated", false);
         return java.util.Collections.unmodifiableMap(details);
+    }
+
+    private record TargetFileSelection(
+            boolean ready,
+            List<String> targetFiles,
+            String stopKey,
+            String message
+    ) {
+        private static TargetFileSelection ready(List<String> targetFiles) {
+            return new TargetFileSelection(true, List.copyOf(targetFiles), "READY", "Target file selection is clear.");
+        }
+
+        private static TargetFileSelection blocked(String stopKey, String message, List<String> candidates) {
+            return new TargetFileSelection(false, List.copyOf(candidates), stopKey, message);
+        }
     }
 
     private CodeAgentLoopRunnerEnqueueResponse patchProposalResponse(

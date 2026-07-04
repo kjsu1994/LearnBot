@@ -132,12 +132,208 @@ class CodeAgentLoopRunServiceTest {
         verify(codeAgentService, never()).patch(any(), any(), anyList(), any(), anyList());
     }
 
+    @Test
+    void advanceSelectsOnlyClearReadmeTargetWhenSeveralFilesWereRead() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "README file end append short poem";
+        String diff = """
+                --- a/readme.txt
+                +++ b/readme.txt
+                @@ -1 +1,2 @@
+                 hello
+                +poem
+                """;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("readme.txt", "hello\n"),
+                        fileReadEvent("verify-readme.txt", "not the target\n"),
+                        fileReadEvent("lbverify-20260704.txt", "not the target\n")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", diff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff("readme.txt", diff)),
+                "low",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(diff), eq(List.of("readme.txt")), anyList()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        ArgumentCaptor<List<CodePatchFileLoader.LoadedPatchFile>> filesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), filesCaptor.capture());
+        assertThat(filesCaptor.getValue()).extracting(CodePatchFileLoader.LoadedPatchFile::path)
+                .containsExactly("readme.txt");
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(diff),
+                eq(List.of("readme.txt")),
+                anyList()
+        );
+    }
+
+    @Test
+    void advanceBlocksPatchProposalWhenSeveralReadFilesDoNotIdentifySingleTarget() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                "append a short poem",
+                List.of(
+                        fileReadEvent("notes.txt", "hello\n"),
+                        fileReadEvent("journal.txt", "world\n")
+                )
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "STOP_WITH_REASON"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("AMBIGUOUS_TARGET_FILES");
+        assertThat(response.reason()).contains("Multiple candidate files");
+        verify(codeAgentService, never()).patchFromLoadedFiles(any(), anyList());
+        verify(localPatchRequestService, never()).prepare(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyList());
+        verify(loopPreviewService).appendPatchProposalBlocked(
+                eq(userId),
+                eq(repositoryId),
+                eq(loopId),
+                eq("AMBIGUOUS_TARGET_FILES"),
+                any(),
+                any()
+        );
+    }
+
     private CodeAgentLoopTimelineSummary timeline(
             UUID repositoryId,
             UUID spaceId,
             UUID loopId,
             String instruction,
             CodeAgentLoopTimelineEventSummary event
+    ) {
+        return timeline(repositoryId, spaceId, loopId, instruction, List.of(event));
+    }
+
+    private CodeAgentLoopTimelineSummary timeline(
+            UUID repositoryId,
+            UUID spaceId,
+            UUID loopId,
+            String instruction,
+            List<CodeAgentLoopTimelineEventSummary> events
     ) {
         return new CodeAgentLoopTimelineSummary(
                 loopId,
@@ -151,7 +347,7 @@ class CodeAgentLoopRunServiceTest {
                 true,
                 false,
                 OffsetDateTime.now(),
-                List.of(event)
+                events
         );
     }
 

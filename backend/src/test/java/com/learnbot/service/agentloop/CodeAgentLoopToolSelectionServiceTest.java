@@ -110,6 +110,32 @@ class CodeAgentLoopToolSelectionServiceTest {
     }
 
     @Test
+    void enqueueSelectedReadOnlyReturnsRefusalWhenLocalAgentIsNotReady() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        CodeAgentLoopToolCandidate candidate = candidate(userId, repositoryId, loopId, agentId, workspaceId, LocalAgentToolName.GIT_DIFF);
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId))
+                .thenReturn(preview(repositoryId, loopId, "PREPARED_READ_ONLY_CANDIDATE", candidate));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(400))).thenReturn(chat("""
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"git.diff","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Inspect bounded workspace diff."}
+                """));
+        when(toolGatewayService.enqueueReadOnly(any(LocalAgentToolRequest.class)))
+                .thenThrow(new IllegalStateException("Local Agent is not connected"));
+
+        var result = service.enqueueSelectedReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.runnerDecision()).isEqualTo("REFUSED_LOCAL_AGENT_NOT_READY");
+        assertThat(result.reason()).contains("not connected");
+        assertThat(result.queuedRequest()).isNull();
+        assertThat(result.requestCreationEnabled()).isFalse();
+        assertThat(result.enqueueEnabled()).isFalse();
+        assertThat(result.mutationEnabled()).isFalse();
+    }
+
+    @Test
     void gitDiffCandidateFallsBackWhenModelSelectsDifferentReadOnlyTool() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();

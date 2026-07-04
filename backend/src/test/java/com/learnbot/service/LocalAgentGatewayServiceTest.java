@@ -55,6 +55,36 @@ class LocalAgentGatewayServiceTest {
     }
 
     @Test
+    void heartbeatPreservesPreviouslyApprovedWorkspaceForSameAgentWhenIncomingListIsStale() {
+        LocalAgentGatewayService service = new LocalAgentGatewayService();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+
+        service.registerHeartbeat(
+                userId,
+                agentId,
+                "0.1.0",
+                List.of("file.read"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "test", "C:/Users/honeybadger/Desktop/test", true))
+        );
+        service.registerHeartbeat(
+                userId,
+                agentId,
+                "0.1.0",
+                List.of("file.read"),
+                List.of()
+        );
+
+        var status = service.status(userId);
+
+        assertThat(status.state()).isEqualTo(LocalAgentConnectionState.CONNECTED);
+        assertThat(status.workspaces()).extracting(LocalAgentWorkspaceSummary::workspaceId)
+                .containsExactly(workspaceId);
+        assertThat(service.hasApprovedWorkspace(userId, workspaceId)).isTrue();
+    }
+
+    @Test
     void disconnectRemovesOnlyMatchingAgent() {
         LocalAgentGatewayService service = new LocalAgentGatewayService();
         UUID userId = UUID.randomUUID();

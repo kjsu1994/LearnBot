@@ -4204,6 +4204,13 @@ internal sealed partial class LearnBotLocalAgent
                     "runner-enqueue",
                     TryGetString(enqueue, "status") ?? "ENQUEUE_ATTEMPTED",
                     TryGetString(enqueue, "reason")));
+                if (!HasQueuedRequest(enqueue))
+                {
+                    finalStatus = "LOCAL_AGENT_NOT_READY";
+                    reason = TryGetString(enqueue, "reason") ?? "The server refused to enqueue the selected read-only Local Agent request.";
+                    blockers.Add(reason);
+                    break;
+                }
                 if (await PollOnce(config, quiet: true))
                 {
                     localAgentPolls++;
@@ -4457,6 +4464,13 @@ internal sealed partial class LearnBotLocalAgent
                         "runner-enqueue",
                         TryGetString(enqueue, "status") ?? "ENQUEUE_ATTEMPTED",
                         TryGetString(enqueue, "reason")));
+                    if (!HasQueuedRequest(enqueue))
+                    {
+                        finalStatus = "LOCAL_AGENT_NOT_READY";
+                        reason = TryGetString(enqueue, "reason") ?? "The server refused to enqueue the selected read-only Local Agent request.";
+                        blockers.Add(reason);
+                        break;
+                    }
                     if (await PollOnce(config, quiet: true))
                     {
                         localAgentPolls++;
@@ -4744,6 +4758,12 @@ internal sealed partial class LearnBotLocalAgent
             && value.ValueKind is JsonValueKind.True or JsonValueKind.False
                 ? value.GetBoolean()
                 : null;
+
+    private static bool HasQueuedRequest(JsonElement element) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty("queuedRequest", out var value)
+        && value.ValueKind != JsonValueKind.Null
+        && value.ValueKind != JsonValueKind.Undefined;
 
     private static bool? TryGetNestedBool(JsonElement element, params string[] path)
     {
