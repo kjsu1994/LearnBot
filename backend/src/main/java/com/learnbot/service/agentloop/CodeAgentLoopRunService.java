@@ -12,10 +12,14 @@ import com.learnbot.dto.loop.CodeAgentLoopRunResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunStatusResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopSelectedToolEnqueueResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.CodePatchFileLoader;
 import com.learnbot.service.CodeAgentService;
+import com.learnbot.service.OllamaClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -33,7 +37,10 @@ public class CodeAgentLoopRunService {
     private final CodeAgentLoopRunnerService runnerService;
     private final CodeAgentService codeAgentService;
     private final CodeAgentLocalPatchRequestService localPatchRequestService;
+    private final OllamaClient ollamaClient;
+    private final ObjectMapper objectMapper;
 
+    @Autowired
     public CodeAgentLoopRunService(
             CodeAgentLoopPreviewService loopPreviewService,
             CodeAgentLoopToolSelectionService toolSelectionService,
@@ -41,11 +48,25 @@ public class CodeAgentLoopRunService {
             CodeAgentService codeAgentService,
             CodeAgentLocalPatchRequestService localPatchRequestService
     ) {
+        this(loopPreviewService, toolSelectionService, runnerService, codeAgentService, localPatchRequestService, null, new ObjectMapper());
+    }
+
+    public CodeAgentLoopRunService(
+            CodeAgentLoopPreviewService loopPreviewService,
+            CodeAgentLoopToolSelectionService toolSelectionService,
+            CodeAgentLoopRunnerService runnerService,
+            CodeAgentService codeAgentService,
+            CodeAgentLocalPatchRequestService localPatchRequestService,
+            OllamaClient ollamaClient,
+            ObjectMapper objectMapper
+    ) {
         this.loopPreviewService = loopPreviewService;
         this.toolSelectionService = toolSelectionService;
         this.runnerService = runnerService;
         this.codeAgentService = codeAgentService;
         this.localPatchRequestService = localPatchRequestService;
+        this.ollamaClient = ollamaClient;
+        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
     public CodeAgentLoopRunResponse start(
@@ -300,7 +321,7 @@ public class CodeAgentLoopRunService {
             return null;
         }
 
-        TargetFileSelection targetSelection = selectPatchTargets(timeline.instruction(), fileReadTargets(timeline));
+        TargetFileSelection targetSelection = selectPatchTargets(timeline);
         List<String> targetFiles = targetSelection.targetFiles();
         if (!targetSelection.ready()) {
             loopPreviewService.appendPatchProposalBlocked(
@@ -419,7 +440,9 @@ public class CodeAgentLoopRunService {
         return List.copyOf(targets);
     }
 
-    private TargetFileSelection selectPatchTargets(String instruction, List<String> candidates) {
+    private TargetFileSelection selectPatchTargets(CodeAgentLoopTimelineSummary timeline) {
+        String instruction = timeline == null ? "" : timeline.instruction();
+        List<String> candidates = fileReadTargets(timeline);
         List<String> safeCandidates = candidates == null
                 ? List.of()
                 : candidates.stream()
@@ -431,6 +454,11 @@ public class CodeAgentLoopRunService {
         }
         if (safeCandidates.size() == 1) {
             return TargetFileSelection.ready(safeCandidates);
+        }
+
+        TargetFileSelection modelSelection = selectPatchTargetsWithModel(timeline, safeCandidates);
+        if (modelSelection != null && modelSelection.ready()) {
+            return modelSelection;
         }
 
         List<String> explicitMatches = safeCandidates.stream()
@@ -457,6 +485,87 @@ public class CodeAgentLoopRunService {
         );
     }
 
+    private TargetFileSelection selectPatchTargetsWithModel(CodeAgentLoopTimelineSummary timeline, List<String> safeCandidates) {
+        if (ollamaClient == null || timeline == null || safeCandidates == null || safeCandidates.isEmpty()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(cleanJson(ollamaClient.chatResult(
+                    targetSelectionSystemPrompt(),
+                    targetSelectionUserPrompt(timeline, safeCandidates),
+                    500
+            ).content()));
+            if (root.path("needsClarification").asBoolean(false)) {
+                return null;
+            }
+            List<String> selected = new ArrayList<>();
+            Set<String> allowed = new LinkedHashSet<>(safeCandidates);
+            for (JsonNode node : root.path("targetFiles")) {
+                String path = node.asText("");
+                if (allowed.contains(path)) {
+                    selected.add(path);
+                }
+            }
+            if (selected.size() == 1) {
+                return TargetFileSelection.ready(selected);
+            }
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String targetSelectionSystemPrompt() {
+        return """
+                You select the exact target file for a LearnBot local code edit.
+                Return JSON only.
+                Select targetFiles only from the provided candidate list.
+                If the user asks for one file and it is clear, return exactly one target file.
+                If unclear, set needsClarification=true and return no target files.
+                Do not invent paths.
+                """;
+    }
+
+    private String targetSelectionUserPrompt(CodeAgentLoopTimelineSummary timeline, List<String> safeCandidates) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Instruction:\n").append(timeline.instruction()).append("\n\nCandidate files:\n");
+        for (String path : safeCandidates) {
+            builder.append("- ").append(path).append("\n");
+        }
+        builder.append("\nRead observations:\n");
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events() == null ? List.<CodeAgentLoopTimelineEventSummary>of() : timeline.events()) {
+            if (!"LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    || event.toolName() != LocalAgentToolName.FILE_READ
+                    || !"SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                continue;
+            }
+            Object outputSummary = event.details().get("outputSummary");
+            if (outputSummary instanceof Map<?, ?> map) {
+                Object path = map.get("relativePath");
+                Object preview = map.get("contentPreview");
+                builder.append("FILE: ").append(path == null ? "" : path).append("\n");
+                builder.append("PREVIEW: ").append(preview == null ? "" : preview).append("\n");
+            }
+        }
+        builder.append("""
+
+                JSON shape:
+                {"targetFiles":["path/from/candidates"],"reason":"...","confidence":"low|medium|high","needsClarification":false}
+                """);
+        return builder.toString();
+    }
+
+    private String cleanJson(String value) {
+        String clean = value == null ? "" : value.trim();
+        if (clean.startsWith("```")) {
+            clean = clean.replaceFirst("^```[A-Za-z]*\\s*", "");
+            clean = clean.replaceFirst("\\s*```$", "");
+        }
+        int start = clean.indexOf('{');
+        int end = clean.lastIndexOf('}');
+        return start >= 0 && end > start ? clean.substring(start, end + 1) : clean;
+    }
+
     private boolean instructionMentionsPath(String instruction, String path) {
         String normalizedInstruction = normalizeForMention(instruction);
         String normalizedPath = normalizeForMention(path);
@@ -466,7 +575,23 @@ public class CodeAgentLoopRunService {
         String stem = basename.contains(".") ? basename.substring(0, basename.lastIndexOf('.')) : basename;
         return (!normalizedPath.isBlank() && normalizedInstruction.contains(normalizedPath))
                 || (!basename.isBlank() && normalizedInstruction.contains(basename))
-                || (stem.length() >= 4 && normalizedInstruction.contains(stem));
+                || (stem.length() >= 4 && normalizedInstruction.contains(stem))
+                || instructionMentionsStemAlias(normalizedInstruction, stem);
+    }
+
+    private boolean instructionMentionsStemAlias(String normalizedInstruction, String stem) {
+        if (normalizedInstruction == null || normalizedInstruction.isBlank() || stem == null || stem.isBlank()) {
+            return false;
+        }
+        if (stem.endsWith("file") && stem.length() > "file".length()) {
+            String prefix = stem.substring(0, stem.length() - "file".length());
+            return prefix.length() >= 4
+                    && (normalizedInstruction.contains(prefix + "파일")
+                    || normalizedInstruction.contains(prefix + " file")
+                    || normalizedInstruction.contains(prefix + "-file")
+                    || normalizedInstruction.contains(prefix + "_file"));
+        }
+        return false;
     }
 
     private String normalizeForMention(String value) {

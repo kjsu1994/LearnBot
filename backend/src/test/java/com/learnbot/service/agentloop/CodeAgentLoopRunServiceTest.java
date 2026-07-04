@@ -12,10 +12,12 @@ import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.PatchFileDiff;
 import com.learnbot.dto.loop.CodeAgentLoopRunStatusResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.CodePatchFileLoader;
+import com.learnbot.service.OllamaClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -248,6 +250,229 @@ class CodeAgentLoopRunServiceTest {
     }
 
     @Test
+    void advanceSelectsFileStemAliasWhenInstructionUsesKoreanFileSuffix() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "test파일 끝에 한글로 아무거나 한마디를 추가해줘";
+        String diff = """
+                --- a/testfile.md
+                +++ b/testfile.md
+                @@ -0,0 +1,1 @@
+                +한마디
+                """;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("cold.txt", "cold\n"),
+                        fileReadEvent("readme.txt", "readme\n"),
+                        fileReadEvent("testfile.md", "")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", diff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff("testfile.md", diff)),
+                "low",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(diff), eq(List.of("testfile.md")), anyList()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        ArgumentCaptor<List<CodePatchFileLoader.LoadedPatchFile>> filesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), filesCaptor.capture());
+        assertThat(filesCaptor.getValue()).extracting(CodePatchFileLoader.LoadedPatchFile::path)
+                .containsExactly("testfile.md");
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(diff),
+                eq(List.of("testfile.md")),
+                anyList()
+        );
+    }
+
+    @Test
+    void advanceUsesModelTargetSelectionBeforeDeterministicFallback() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "맨 마지막 파일 끝에 한글로 아무거나 한마디를 추가해줘";
+        String diff = """
+                --- a/testfile.md
+                +++ b/testfile.md
+                @@ -0,0 +1,1 @@
+                +한마디
+                """;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("cold.txt", "cold\n"),
+                        fileReadEvent("readme.txt", "readme\n"),
+                        fileReadEvent("testfile.md", "")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", diff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("""
+                {"targetFiles":["testfile.md"],"reason":"The user referred to the last file from observations.","confidence":"medium","needsClarification":false}
+                """));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff("testfile.md", diff)),
+                "low",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(diff), eq(List.of("testfile.md")), anyList()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        ArgumentCaptor<List<CodePatchFileLoader.LoadedPatchFile>> filesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), filesCaptor.capture());
+        assertThat(filesCaptor.getValue()).extracting(CodePatchFileLoader.LoadedPatchFile::path)
+                .containsExactly("testfile.md");
+        verify(ollamaClient).chatResult(any(), any(), eq(500));
+    }
+
+    @Test
     void advanceBlocksPatchProposalWhenSeveralReadFilesDoNotIdentifySingleTarget() {
         CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
         CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
@@ -394,5 +619,9 @@ class CodeAgentLoopRunServiceTest {
                 "LOOP_NEXT_DECISION_RECORDED",
                 Map.of()
         );
+    }
+
+    private OllamaClient.ChatResult chat(String content) {
+        return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://localhost:11434", "test", "PRIMARY", false);
     }
 }

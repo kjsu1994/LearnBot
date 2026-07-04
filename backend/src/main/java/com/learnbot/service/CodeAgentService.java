@@ -128,17 +128,29 @@ public class CodeAgentService {
                     false
             );
         }
-        CodeAgentPatchResponse deterministicAppend = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
-        if (deterministicAppend != null) {
-            return deterministicAppend;
-        }
         String diff;
         try {
+            warnings.add("LLM patch generation attempted before deterministic fallback.");
             diff = cleanDiff(ollamaClient.chatResult(
                     patchSystemPrompt(),
                     patchUserPrompt(safeInstruction, filesToPatch),
                     1800
             ).content());
+            if (diff.isBlank() || diff.startsWith("NO_PATCH")) {
+                warnings.add("LLM patch generation returned no patch.");
+                CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+                if (fallback != null) {
+                    return fallback;
+                }
+                return new CodeAgentPatchResponse(
+                        "Patch generation model returned no patch.",
+                        List.of(),
+                        "high",
+                        List.copyOf(warnings),
+                        List.of(),
+                        false
+                );
+            }
         } catch (RuntimeException ex) {
             warnings.add("LLM patch generation failed: " + ex.getMessage());
             CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
@@ -157,6 +169,7 @@ public class CodeAgentService {
         PatchValidationResult validation = validationService.validate(diff, filesToPatch.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
         warnings.addAll(validation.warnings());
         if (!validation.valid()) {
+            warnings.add("LLM patch generation produced an invalid diff; deterministic fallback may be used if safe.");
             CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
             if (fallback != null) {
                 return fallback;
@@ -260,7 +273,23 @@ public class CodeAgentService {
         if (lower.contains("poem") || lower.contains("\uC2DC")) {
             return DEFAULT_KOREAN_POEM_APPEND.stripTrailing() + "\n";
         }
+        if (requestsKoreanText(instruction)) {
+            return "\uC624\uB298\uB3C4 \uD55C \uAC78\uC74C \uB098\uC544\uAC11\uB2C8\uB2E4.\n";
+        }
         return "Added by LearnBot.\n";
+    }
+
+    private boolean requestsKoreanText(String instruction) {
+        String text = safe(instruction);
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("korean")
+                || text.contains("\uD55C\uAE00")
+                || text.contains("\uD55C\uAD6D\uC5B4")
+                || text.contains("\uD55C\uB9C8\uB514")
+                || text.codePoints().anyMatch(codePoint ->
+                (codePoint >= 0xAC00 && codePoint <= 0xD7A3)
+                        || (codePoint >= 0x1100 && codePoint <= 0x11FF)
+                        || (codePoint >= 0x3130 && codePoint <= 0x318F));
     }
 
     private String appendDiff(String path, String currentContent, String appendedText) {
@@ -381,6 +410,9 @@ public class CodeAgentService {
                 Modify only the provided target files.
                 Do not create, delete, rename, or chmod files.
                 Preserve the existing style.
+                Preserve the user's requested language and content constraints.
+                If the user asks for Korean/Hangul text, added prose must be Korean.
+                Do not invent generic placeholders such as "Added by LearnBot" unless the user explicitly asked for that text.
                 If a safe patch cannot be produced, output:
                 NO_PATCH
                 reason: ...

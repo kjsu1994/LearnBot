@@ -1502,8 +1502,7 @@ function CodeAgentPanel({
       <div className="panel-title">
         <FileCode2 size={18} />
         <div>
-          <h2>Patch Agent v2</h2>
-          <p>수정 계획과 검증된 unified diff를 제안합니다. 파일 자동 적용은 하지 않습니다.</p>
+          <h2>Local Agent</h2>
         </div>
       </div>
       <div className="code-agent-result compact-result">

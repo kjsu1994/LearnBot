@@ -105,6 +105,32 @@ public class CodeAgentController {
             CodeAgentLocalPatchRequestService localPatchRequestService,
             CodeAgentLoopPreviewService loopPreviewService,
             CodeAgentLoopRunnerService loopRunnerService,
+            CodeAgentLoopRunService loopRunService,
+            CodeAgentLoopToolSelectionService loopToolSelectionService,
+            CodeIndexingService indexingService,
+            AuthService authService,
+            CurrentUserProvider currentUserProvider,
+            LearnBotProperties properties
+    ) {
+        this.codeAgentService = codeAgentService;
+        this.codeAgentApplyService = codeAgentApplyService;
+        this.localPatchRequestService = localPatchRequestService;
+        this.loopPreviewService = loopPreviewService;
+        this.loopRunnerService = loopRunnerService;
+        this.loopRunService = loopRunService;
+        this.loopToolSelectionService = loopToolSelectionService;
+        this.indexingService = indexingService;
+        this.authService = authService;
+        this.currentUserProvider = currentUserProvider;
+        this.properties = properties;
+    }
+
+    public CodeAgentController(
+            CodeAgentService codeAgentService,
+            CodeAgentApplyService codeAgentApplyService,
+            CodeAgentLocalPatchRequestService localPatchRequestService,
+            CodeAgentLoopPreviewService loopPreviewService,
+            CodeAgentLoopRunnerService loopRunnerService,
             CodeAgentLoopToolSelectionService loopToolSelectionService,
             CodeIndexingService indexingService,
             AuthService authService,
@@ -124,32 +150,6 @@ public class CodeAgentController {
                 currentUserProvider,
                 properties
         );
-    }
-
-    public CodeAgentController(
-            CodeAgentService codeAgentService,
-            CodeAgentApplyService codeAgentApplyService,
-            CodeAgentLocalPatchRequestService localPatchRequestService,
-            CodeAgentLoopPreviewService loopPreviewService,
-            CodeAgentLoopRunnerService loopRunnerService,
-            CodeAgentLoopRunService loopRunService,
-            CodeAgentLoopToolSelectionService loopToolSelectionService,
-            CodeIndexingService indexingService,
-            AuthService authService,
-            CurrentUserProvider currentUserProvider,
-            LearnBotProperties properties
-    ) {
-        this.codeAgentService = codeAgentService;
-        this.codeAgentApplyService = codeAgentApplyService;
-        this.localPatchRequestService = localPatchRequestService;
-        this.loopPreviewService = loopPreviewService;
-        this.loopRunnerService = loopRunnerService;
-        this.loopRunService = loopRunService;
-        this.loopToolSelectionService = loopToolSelectionService;
-        this.indexingService = indexingService;
-        this.authService = authService;
-        this.currentUserProvider = currentUserProvider;
-        this.properties = properties;
     }
 
     @PostMapping("/plan")

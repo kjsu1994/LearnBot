@@ -164,6 +164,63 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesUsesLlmBeforeAppendFallback() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "testfile.md";
+        String diff = """
+                --- a/testfile.md
+                +++ b/testfile.md
+                @@ -0,0 +1,1 @@
+                +오늘도 좋은 하루입니다.
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat(diff));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "test파일 끝에 한글로 아무거나 한마디를 추가해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "markdown", ""))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).diff())
+                .contains("+오늘도 좋은 하루입니다.")
+                .doesNotContain("Added by LearnBot");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM patch generation attempted"));
+        verify(ollamaClient).chatResult(anyString(), anyString(), eq(1800));
+    }
+
+    @Test
+    void patchFromLoadedFilesKoreanFallbackDoesNotUseEnglishPlaceholder() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "testfile.md";
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "test파일 끝에 한글로 아무거나 한마디를 추가해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "markdown", ""))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files().get(0).diff())
+                .contains("+오늘도 한 걸음 나아갑니다.")
+                .doesNotContain("Added by LearnBot");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM patch generation failed"));
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Deterministic append fallback"));
+    }
+
+    @Test
     void fileLoaderRejectsUnsafePatchTargetsBeforeReadingContent() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeContentReader contentReader = mock(CodeContentReader.class);
