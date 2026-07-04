@@ -1137,6 +1137,7 @@ public class CodeAgentLoopTimelineRepository {
         details.put("mutationAllowed", booleanValue(requestInput.get("mutationAllowed"), null));
         details.put("approvalRequestId", stringValue(requestInput.get("approvalRequestId"), null));
         details.put("targetFiles", requestInput.getOrDefault("targetFiles", List.of()));
+        details.put("targetSelection", requestInput.getOrDefault("targetSelection", Map.of()));
         return details;
     }
 

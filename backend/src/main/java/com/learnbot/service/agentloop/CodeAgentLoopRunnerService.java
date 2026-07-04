@@ -144,7 +144,102 @@ public class CodeAgentLoopRunnerService {
             );
         }
 
+        List<CodeAgentLoopToolCandidate> candidates = readOnlyToolCandidates(userId, repositoryId, nextAction, agentId, workspaceId);
+        if (candidates.isEmpty()) {
+            CodeAgentLoopTimelineEventSummary latestTreeOrSearch = latestDiscoveryObservation(userId, repositoryId, nextAction.loopId());
+            return response(
+                    nextAction,
+                    "WAIT_FOR_NARROWER_GOAL",
+                    "Workspace discovery completed, but no safe bounded read-only candidate was found. Ask the user for a narrower file or symbol target.",
+                    null,
+                    fileSelectionHandoff(latestTreeOrSearch, List.of())
+            );
+        }
+        CodeAgentLoopToolCandidate candidate = deterministicReadOnlyCandidate(userId, repositoryId, nextAction, candidates);
+        return response(
+                nextAction,
+                "PREPARED_READ_ONLY_CANDIDATE",
+                "Prepared the next read-only Local Agent observation candidate. Enqueue remains disabled in this runner slice.",
+                candidate,
+                Map.of("readOnlyCandidateCount", candidates.size())
+        );
+    }
+
+    public List<CodeAgentLoopToolCandidate> readOnlyToolCandidates(
+            UUID userId,
+            UUID repositoryId,
+            CodeAgentLoopNextActionResponse nextAction,
+            UUID agentId,
+            UUID workspaceId
+    ) {
+        if (nextAction == null || agentId == null || workspaceId == null || !"QUEUE_READ_ONLY_OBSERVATION".equals(nextAction.actionKey())) {
+            return List.of();
+        }
         UUID sessionId = nextAction.loopId() == null ? UUID.randomUUID() : nextAction.loopId();
+        List<CodeAgentLoopToolCandidate> candidates = new ArrayList<>();
+        Set<String> candidateKeys = new LinkedHashSet<>();
+
+        addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.WORKSPACE_TREE,
+                baseReadOnlyInput(repositoryId, nextAction, Map.of(
+                        "path", ".",
+                        "maxEntries", 240,
+                        "maxDepth", 4
+                )));
+
+        addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.WORKSPACE_SEARCH,
+                baseReadOnlyInput(repositoryId, nextAction, Map.of(
+                        "path", ".",
+                        "query", searchQuery(nextAction),
+                        "maxMatches", 30,
+                        "maxFiles", 20,
+                        "maxBytesPerFile", 200_000
+                )));
+
+        CodeAgentLoopTimelineSummary timeline = timeline(userId, repositoryId, nextAction.loopId());
+        Set<String> alreadyRead = alreadyReadPaths(timeline);
+        for (String path : fileReadCandidates(timeline, instructionText(nextAction))) {
+            if (alreadyRead.contains(path)) {
+                continue;
+            }
+            addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.FILE_READ,
+                    baseReadOnlyInput(repositoryId, nextAction, Map.of(
+                            "path", path,
+                            "maxBytes", 80_000,
+                            "selectionSchema", "learnbot.server.code-agent.file-read-selection.v1",
+                            "selectionReason", "Selected from completed workspace.search/workspace.tree observations."
+                    )));
+        }
+
+        addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS,
+                baseReadOnlyInput(repositoryId, nextAction, Map.of()));
+        addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.GIT_DIFF,
+                baseReadOnlyInput(repositoryId, nextAction, Map.of("maxBytes", 6000)));
+
+        return List.copyOf(candidates);
+    }
+
+    private CodeAgentLoopToolCandidate deterministicReadOnlyCandidate(
+            UUID userId,
+            UUID repositoryId,
+            CodeAgentLoopNextActionResponse nextAction,
+            List<CodeAgentLoopToolCandidate> candidates
+    ) {
+        LocalAgentToolName selectedTool = selectReadOnlyTool(userId, repositoryId, nextAction);
+        String selectedPath = selectedTool == LocalAgentToolName.FILE_READ
+                ? selectFileReadPath(userId, repositoryId, nextAction)
+                : null;
+        return candidates.stream()
+                .filter(candidate -> candidate.toolName() == selectedTool)
+                .filter(candidate -> selectedPath == null || selectedPath.equals(String.valueOf(candidate.input().get("path"))))
+                .findFirst()
+                .orElse(candidates.get(0));
+    }
+
+    private Map<String, Object> baseReadOnlyInput(
+            UUID repositoryId,
+            CodeAgentLoopNextActionResponse nextAction,
+            Map<String, Object> toolInput
+    ) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("schemaVersion", 1);
         input.put("repositoryId", repositoryId.toString());
@@ -156,41 +251,26 @@ public class CodeAgentLoopRunnerService {
         input.put("sourceSequenceNumber", nextAction.sourceSequenceNumber());
         input.put("freshObservationOnly", true);
         input.put("mutationAllowed", false);
+        if (toolInput != null) {
+            input.putAll(toolInput);
+        }
+        return input;
+    }
 
-        CodeAgentLoopTimelineEventSummary latestTreeOrSearch = latestDiscoveryObservation(userId, repositoryId, nextAction.loopId());
-        LocalAgentToolName selectedTool = selectReadOnlyTool(userId, repositoryId, nextAction);
-        if (selectedTool == LocalAgentToolName.WORKSPACE_TREE) {
-            input.put("path", ".");
-            input.put("maxEntries", 240);
-            input.put("maxDepth", 4);
+    private void addReadOnlyCandidate(
+            List<CodeAgentLoopToolCandidate> candidates,
+            Set<String> candidateKeys,
+            UUID sessionId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName selectedTool,
+            Map<String, Object> input
+    ) {
+        String key = selectedTool.wireName() + ":" + String.valueOf(input.getOrDefault("path", "")) + ":" + String.valueOf(input.getOrDefault("query", ""));
+        if (!candidateKeys.add(key)) {
+            return;
         }
-        if (selectedTool == LocalAgentToolName.WORKSPACE_SEARCH) {
-            input.put("path", ".");
-            input.put("query", searchQuery(nextAction));
-            input.put("maxMatches", 30);
-            input.put("maxFiles", 20);
-            input.put("maxBytesPerFile", 200_000);
-        }
-        if (selectedTool == LocalAgentToolName.GIT_DIFF) {
-            input.put("maxBytes", 6000);
-        }
-        if (selectedTool == LocalAgentToolName.FILE_READ) {
-            String path = selectFileReadPath(userId, repositoryId, nextAction);
-            if (path == null) {
-                return response(
-                        nextAction,
-                        "WAIT_FOR_NARROWER_GOAL",
-                        "Workspace discovery completed, but no safe bounded file.read candidate was found. Ask the user for a narrower file or symbol target.",
-                        null,
-                        fileSelectionHandoff(latestTreeOrSearch, List.of())
-                );
-            }
-            input.put("path", path);
-            input.put("maxBytes", 80_000);
-            input.put("selectionSchema", "learnbot.server.code-agent.file-read-selection.v1");
-            input.put("selectionReason", "Selected from completed workspace.search/workspace.tree observations.");
-        }
-
         CodeAgentLoopToolCandidate candidate = new CodeAgentLoopToolCandidate(
                 sessionId,
                 userId,
@@ -203,15 +283,12 @@ public class CodeAgentLoopRunnerService {
                 false,
                 false,
                 false,
-                safeRequestInput(input),
+                safeRequestInput(input == null ? Map.of() : input),
                 List.of("Runner preview prepared a read-only " + selectedTool.wireName() + " candidate. Enqueue and mutation remain disabled.")
         );
-        return response(
-                nextAction,
-                "PREPARED_READ_ONLY_CANDIDATE",
-                "Prepared the next read-only Local Agent observation candidate. Enqueue remains disabled in this runner slice.",
-                candidate
-        );
+        if (safeReadOnlyCandidate(candidate)) {
+            candidates.add(candidate);
+        }
     }
 
     public CodeAgentLoopRunnerEnqueueResponse enqueueReadOnlyNextStep(
@@ -577,7 +654,18 @@ public class CodeAgentLoopRunnerService {
         if (timeline == null) {
             return null;
         }
+        Set<String> alreadyRead = alreadyReadPaths(timeline);
+        return fileReadCandidates(timeline, instructionText(nextAction)).stream()
+                .filter(path -> !alreadyRead.contains(path))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Set<String> alreadyReadPaths(CodeAgentLoopTimelineSummary timeline) {
         Set<String> alreadyRead = new LinkedHashSet<>();
+        if (timeline == null || timeline.events() == null) {
+            return alreadyRead;
+        }
         for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
             if ("LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
                     && event.toolName() == LocalAgentToolName.FILE_READ
@@ -588,10 +676,7 @@ public class CodeAgentLoopRunnerService {
                 }
             }
         }
-        return fileReadCandidates(timeline, instructionText(nextAction)).stream()
-                .filter(path -> !alreadyRead.contains(path))
-                .findFirst()
-                .orElse(null);
+        return alreadyRead;
     }
 
     private List<String> fileReadCandidates(CodeAgentLoopTimelineSummary timeline, String instruction) {

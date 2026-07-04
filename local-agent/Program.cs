@@ -739,6 +739,15 @@ internal sealed partial class LearnBotLocalAgent
                 return 2;
             }
             var prepared = await PrepareCodexServerRun(command, goal, workspace, repositoryId, spaceId, maxSteps, webToken);
+            if (!prepared.Success && IsUnauthorizedFailure(prepared.Message))
+            {
+                var refreshedToken = await ForceRefreshStoredWebAccessToken(LoadConfigOrDefault().ServerUrl);
+                if (!string.IsNullOrWhiteSpace(refreshedToken) && !string.Equals(refreshedToken, webToken, StringComparison.Ordinal))
+                {
+                    webToken = refreshedToken;
+                    prepared = await PrepareCodexServerRun(command, goal, workspace, repositoryId, spaceId, maxSteps, webToken);
+                }
+            }
             if (!prepared.Success)
             {
                 if (jsonOutput && prepared.Result is not null)
@@ -776,6 +785,23 @@ internal sealed partial class LearnBotLocalAgent
                 noApply,
                 TimeSpan.FromSeconds(pollTimeoutSeconds),
                 TimeSpan.FromSeconds(approvalTimeoutSeconds));
+            if (string.Equals(result.Status, "FAILED", StringComparison.OrdinalIgnoreCase)
+                && IsUnauthorizedFailure(result.Error))
+            {
+                var refreshedToken = await ForceRefreshStoredWebAccessToken(LoadConfigOrDefault().ServerUrl);
+                if (!string.IsNullOrWhiteSpace(refreshedToken) && !string.Equals(refreshedToken, webToken, StringComparison.Ordinal))
+                {
+                    webToken = refreshedToken;
+                    result = await FetchCliCodexServerPlan(
+                        preview,
+                        webToken,
+                        approvalHandoffPreview?.PatchDryRunApprovalHandoffPreview,
+                        autoLoop,
+                        noApply,
+                        TimeSpan.FromSeconds(pollTimeoutSeconds),
+                        TimeSpan.FromSeconds(approvalTimeoutSeconds));
+                }
+            }
             if (jsonOutput)
             {
                 Console.WriteLine(JsonSerializer.Serialize(result, JsonOptions));
@@ -3763,6 +3789,57 @@ internal sealed partial class LearnBotLocalAgent
         }
     }
 
+    private static async Task<string?> ForceRefreshStoredWebAccessToken(string? expectedServerUrl = null)
+    {
+        var session = TryReadStoredWebSession(expectedServerUrl);
+        if (session is null || string.IsNullOrWhiteSpace(session.RefreshToken))
+        {
+            return null;
+        }
+        var now = DateTimeOffset.UtcNow;
+        if (session.RefreshExpiresAt is not null && session.RefreshExpiresAt <= now.AddMinutes(2))
+        {
+            return null;
+        }
+        var server = (expectedServerUrl ?? session.ServerUrl ?? "http://localhost:8083").TrimEnd('/');
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(server) };
+            client.DefaultRequestHeaders.Add("X-Refresh-Token", session.RefreshToken);
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
+            using var response = await client.PostAsync("/api/auth/refresh", Json(new { }));
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            var accessToken = root.GetProperty("token").GetString();
+            var refreshToken = root.GetProperty("refreshToken").GetString();
+            var expiresAt = root.GetProperty("expiresAt").GetString();
+            var refreshExpiresAt = root.GetProperty("refreshExpiresAt").GetString();
+            return TryWriteStoredWebSession(server, accessToken, refreshToken, expiresAt, refreshExpiresAt, out _)
+                ? accessToken
+                : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsUnauthorizedFailure(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+        return message.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Session is invalid or expired", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadSecret(string prompt)
     {
         Console.Error.Write(prompt);
@@ -4666,24 +4743,52 @@ internal sealed partial class LearnBotLocalAgent
     {
         using var response = await client.GetAsync(path);
         var text = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
+        if ((int)response.StatusCode == 401 && await TryRefreshHttpClientAuthorization(client))
         {
-            throw new HttpRequestException($"GET {path} failed with HTTP {(int)response.StatusCode}: {text}");
+            using var retryResponse = await client.GetAsync(path);
+            var retryText = await retryResponse.Content.ReadAsStringAsync();
+            return JsonElementOrThrow("GET", path, (int)retryResponse.StatusCode, retryResponse.IsSuccessStatusCode, retryText);
         }
-        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
-        return document.RootElement.Clone();
+        return JsonElementOrThrow("GET", path, (int)response.StatusCode, response.IsSuccessStatusCode, text);
     }
 
     private static async Task<JsonElement> PostJsonElement(HttpClient client, string path, object body)
     {
         using var response = await client.PostAsync(path, Json(body));
         var text = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
+        if ((int)response.StatusCode == 401 && await TryRefreshHttpClientAuthorization(client))
         {
-            throw new HttpRequestException($"POST {path} failed with HTTP {(int)response.StatusCode}: {text}");
+            using var retryResponse = await client.PostAsync(path, Json(body));
+            var retryText = await retryResponse.Content.ReadAsStringAsync();
+            return JsonElementOrThrow("POST", path, (int)retryResponse.StatusCode, retryResponse.IsSuccessStatusCode, retryText);
+        }
+        return JsonElementOrThrow("POST", path, (int)response.StatusCode, response.IsSuccessStatusCode, text);
+    }
+
+    private static JsonElement JsonElementOrThrow(string method, string path, int statusCode, bool success, string text)
+    {
+        if (!success)
+        {
+            throw new HttpRequestException($"{method} {path} failed with HTTP {statusCode}: {text}");
         }
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
         return document.RootElement.Clone();
+    }
+
+    private static async Task<bool> TryRefreshHttpClientAuthorization(HttpClient client)
+    {
+        if (client.BaseAddress is null || client.DefaultRequestHeaders.Authorization is null)
+        {
+            return false;
+        }
+        var server = client.BaseAddress.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        var refreshedToken = await ForceRefreshStoredWebAccessToken(server);
+        if (string.IsNullOrWhiteSpace(refreshedToken))
+        {
+            return false;
+        }
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", refreshedToken);
+        return true;
     }
 
     private static bool? PromptCliApprovalDecision(Guid requestId, string? approvalUrl, JsonElement approvalElement)
@@ -6120,13 +6225,45 @@ internal sealed partial class LearnBotLocalAgent
             var startIndex = Math.Max(0, hunk.OldStart - 1 + lineOffset);
             if (!TryApplyHunkToLines(updatedLines, hunk, startIndex, out var delta, out error))
             {
-                error = "Patch hunk could not be applied to " + patchFile.Path + ": " + error;
-                return false;
+                var shiftedIndex = FindHunkApplyIndex(updatedLines, hunk, startIndex);
+                if (shiftedIndex is null || !TryApplyHunkToLines(updatedLines, hunk, shiftedIndex.Value, out delta, out error))
+                {
+                    error = "Patch hunk could not be applied to " + patchFile.Path + ": " + error;
+                    return false;
+                }
             }
             lineOffset += delta;
         }
 
         return true;
+    }
+
+    private static int? FindHunkApplyIndex(IReadOnlyList<string> lines, PatchHunk hunk, int preferredIndex)
+    {
+        var expected = hunk.Lines
+            .Where(line => line.Marker is ' ' or '-')
+            .Select(line => line.Text)
+            .ToArray();
+        if (expected.Length == 0)
+        {
+            return preferredIndex >= 0 && preferredIndex <= lines.Count ? preferredIndex : null;
+        }
+        var bestIndex = (int?)null;
+        var bestDistance = int.MaxValue;
+        for (var index = 0; index <= lines.Count - expected.Length; index++)
+        {
+            if (!MatchesAt(lines, expected, index))
+            {
+                continue;
+            }
+            var distance = Math.Abs(index - preferredIndex);
+            if (distance < bestDistance)
+            {
+                bestIndex = index;
+                bestDistance = distance;
+            }
+        }
+        return bestIndex;
     }
 
     private static bool TryApplyHunkToLines(
@@ -6281,10 +6418,10 @@ internal sealed partial class LearnBotLocalAgent
         return output;
     }
 
-    private static bool MatchesAt(string[] fileLines, string[] expected, int startIndex)
+    private static bool MatchesAt(IReadOnlyList<string> fileLines, IReadOnlyList<string> expected, int startIndex)
     {
-        if (startIndex < 0 || startIndex + expected.Length > fileLines.Length) return false;
-        for (var offset = 0; offset < expected.Length; offset++)
+        if (startIndex < 0 || startIndex + expected.Count > fileLines.Count) return false;
+        for (var offset = 0; offset < expected.Count; offset++)
         {
             if (!string.Equals(fileLines[startIndex + offset], expected[offset], StringComparison.Ordinal))
             {
@@ -9772,6 +9909,17 @@ internal sealed partial class LearnBotLocalAgent
         -    string Name = "missing";
         +    string Name = "new";
         """);
+        var shifted = ParseUnifiedDiff("""
+        --- a/src/App.cs
+        +++ b/src/App.cs
+        @@ -1,2 +1,3 @@
+        -    string Name = "old";
+        +    string Name = "new";
+        +    string Mode = "safe";
+        @@ -3,1 +4,1 @@
+        -    string Footer = "old";
+        +    string Footer = "new";
+        """);
         var ok = parsed.Success
             && parsed.Files.Count == 1
             && TryApplyPatchToLines(
@@ -9788,7 +9936,23 @@ internal sealed partial class LearnBotLocalAgent
                 mismatch.Files[0],
                 out _,
                 out var mismatchError)
-            && !string.IsNullOrWhiteSpace(mismatchError);
+            && !string.IsNullOrWhiteSpace(mismatchError)
+            && shifted.Success
+            && shifted.Files.Count == 1
+            && TryApplyPatchToLines(
+                ["class App {", "    string Name = \"old\";", "    string Body = \"same\";", "    string Footer = \"old\";", "}"],
+                shifted.Files[0],
+                out var shiftedUpdated,
+                out var shiftedError)
+            && shiftedError is null
+            && shiftedUpdated.SequenceEqual([
+                "class App {",
+                "    string Name = \"new\";",
+                "    string Mode = \"safe\";",
+                "    string Body = \"same\";",
+                "    string Footer = \"new\";",
+                "}"
+            ]);
         if (!ok)
         {
             Console.Error.WriteLine("patch apply memory self-test failed");

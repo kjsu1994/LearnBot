@@ -221,6 +221,211 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesFallsBackToSimpleHtmlPageForEmptyHtmlFile() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "home.html";
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat("NO_PATCH\nreason: model was unsure"));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "html\uD30C\uC77C\uC5D0 \uAC04\uB2E8\uD55C \uC6F9\uD398\uC774\uC9C0 \uB9CC\uB4E4\uC5B4\uC918",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", ""))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).path()).isEqualTo(path);
+        assertThat(response.files().get(0).diff())
+                .contains("--- a/home.html")
+                .contains("+++ b/home.html")
+                .contains("@@ -0,0 +1,")
+                .contains("+<!doctype html>")
+                .contains("+<html lang=\"ko\">")
+                .contains("+  <title>\uAC04\uB2E8\uD55C \uC6F9\uD398\uC774\uC9C0</title>");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM patch generation returned no patch"));
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Deterministic empty HTML page fallback"));
+    }
+
+    @Test
+    void patchFromLoadedFilesDoesNotUseHtmlFallbackForNonEmptyHtmlFile() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat("NO_PATCH\nreason: model was unsure"));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "html\uD30C\uC77C\uC5D0 \uAC04\uB2E8\uD55C \uC6F9\uD398\uC774\uC9C0 \uB9CC\uB4E4\uC5B4\uC918",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, "home.html", "html", "<main>existing</main>\n"))
+        );
+
+        assertThat(response.valid()).isFalse();
+        assertThat(response.files()).isEmpty();
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM patch generation returned no patch"));
+        assertThat(response.warnings()).noneSatisfy(warning -> assertThat(warning).contains("Deterministic empty HTML page fallback"));
+    }
+
+    @Test
+    void patchFromLoadedFilesConvertsFullHtmlModelOutputToUnifiedDiff() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "home.html";
+        String current = """
+                <!doctype html>
+                <html lang="ko">
+                <body>
+                  <h1>안녕하세요</h1>
+                </body>
+                </html>
+                """;
+        String upgraded = """
+                ```html
+                <!doctype html>
+                <html lang="ko">
+                <head>
+                  <meta charset="UTF-8">
+                  <title>업그레이드된 웹페이지</title>
+                </head>
+                <body>
+                  <main>
+                    <h1>더 멋진 웹페이지</h1>
+                    <p>보기 좋게 개선했습니다.</p>
+                  </main>
+                </body>
+                </html>
+                ```
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat(upgraded));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "html파일에 내 웹페이지를 좀더 업그레이드 해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).diff())
+                .contains("--- a/home.html")
+                .contains("+++ b/home.html")
+                .contains("-  <h1>안녕하세요</h1>")
+                .contains("+  <title>업그레이드된 웹페이지</title>")
+                .contains("+    <h1>더 멋진 웹페이지</h1>");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Model returned full-file content"));
+    }
+
+    @Test
+    void patchFromLoadedFilesConvertsFullJavaModelOutputToUnifiedDiff() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "src/App.java";
+        String current = """
+                package demo;
+
+                class App {
+                  String title() {
+                    return "old";
+                  }
+                }
+                """;
+        String upgraded = """
+                ```java
+                package demo;
+
+                class App {
+                  String title() {
+                    return "upgraded";
+                  }
+                }
+                ```
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat(upgraded));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "App.java를 업그레이드해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "java", current))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).diff())
+                .contains("--- a/src/App.java")
+                .contains("+++ b/src/App.java")
+                .contains("-    return \"old\";")
+                .contains("+    return \"upgraded\";");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Model returned full-file content"));
+    }
+
+    @Test
+    void patchFromLoadedFilesConvertsFullJsonModelOutputToUnifiedDiff() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "config.json";
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat("""
+                {
+                  "name": "learnbot",
+                  "enabled": true
+                }
+                """));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "config.json 설정을 업그레이드해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "json", "{\"name\":\"learnbot\"}\n"))
+        );
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.files().get(0).diff())
+                .contains("--- a/config.json")
+                .contains("+++ b/config.json")
+                .contains("-{\"name\":\"learnbot\"}")
+                .contains("+  \"enabled\": true");
+    }
+
+    @Test
+    void patchFromLoadedFilesDoesNotConvertChattyModelExplanationToPatch() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1800))).thenReturn(chat("Here is the upgraded file. I changed the title."));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "README를 업그레이드해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, "README.md", "markdown", "# Old\n"))
+        );
+
+        assertThat(response.valid()).isFalse();
+        assertThat(response.files()).isEmpty();
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("Patch output is not a unified diff"));
+        assertThat(response.warnings()).noneSatisfy(warning -> assertThat(warning).contains("Model returned full-file content"));
+    }
+
+    @Test
     void fileLoaderRejectsUnsafePatchTargetsBeforeReadingContent() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeContentReader contentReader = mock(CodeContentReader.class);

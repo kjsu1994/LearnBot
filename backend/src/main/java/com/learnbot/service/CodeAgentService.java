@@ -128,17 +128,19 @@ public class CodeAgentService {
                     false
             );
         }
+        String modelOutput;
         String diff;
         try {
             warnings.add("LLM patch generation attempted before deterministic fallback.");
-            diff = cleanDiff(ollamaClient.chatResult(
+            modelOutput = ollamaClient.chatResult(
                     patchSystemPrompt(),
                     patchUserPrompt(safeInstruction, filesToPatch),
                     1800
-            ).content());
+            ).content();
+            diff = cleanDiff(modelOutput);
             if (diff.isBlank() || diff.startsWith("NO_PATCH")) {
                 warnings.add("LLM patch generation returned no patch.");
-                CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+                CodeAgentPatchResponse fallback = deterministicSafeFallbackPatch(safeInstruction, filesToPatch, warnings);
                 if (fallback != null) {
                     return fallback;
                 }
@@ -153,7 +155,7 @@ public class CodeAgentService {
             }
         } catch (RuntimeException ex) {
             warnings.add("LLM patch generation failed: " + ex.getMessage());
-            CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+            CodeAgentPatchResponse fallback = deterministicSafeFallbackPatch(safeInstruction, filesToPatch, warnings);
             if (fallback != null) {
                 return fallback;
             }
@@ -170,7 +172,11 @@ public class CodeAgentService {
         warnings.addAll(validation.warnings());
         if (!validation.valid()) {
             warnings.add("LLM patch generation produced an invalid diff; deterministic fallback may be used if safe.");
-            CodeAgentPatchResponse fallback = deterministicAppendPatch(safeInstruction, filesToPatch, warnings);
+            CodeAgentPatchResponse fallback = modelFullFileReplacementPatch(modelOutput, filesToPatch, warnings);
+            if (fallback != null) {
+                return fallback;
+            }
+            fallback = deterministicSafeFallbackPatch(safeInstruction, filesToPatch, warnings);
             if (fallback != null) {
                 return fallback;
             }
@@ -194,6 +200,147 @@ public class CodeAgentService {
                 testSuggestions(filesToPatch),
                 true
         );
+    }
+
+    private CodeAgentPatchResponse modelFullFileReplacementPatch(
+            String modelOutput,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            List<String> warnings
+    ) {
+        if (files == null || files.size() != 1) {
+            return null;
+        }
+        CodePatchFileLoader.LoadedPatchFile file = files.get(0);
+        String replacement = cleanFullFileModelOutput(modelOutput);
+        if (!looksLikeSafeFullFileReplacement(file, replacement)) {
+            return null;
+        }
+        if (safe(file.content()).replace("\r\n", "\n").replace('\r', '\n').trim()
+                .equals(replacement.replace("\r\n", "\n").replace('\r', '\n').trim())) {
+            return null;
+        }
+        String diff = fullFileReplacementDiff(file.path(), file.content(), replacement);
+        PatchValidationResult validation = validationService.validate(diff, List.of(file.path()));
+        warnings.add("Model returned full-file content instead of a diff; converted it to a validated unified diff.");
+        warnings.addAll(validation.warnings());
+        if (!validation.valid()) {
+            return null;
+        }
+        return new CodeAgentPatchResponse(
+                "Converted model full-file output into a server-validated unified diff.",
+                List.of(new PatchFileDiff(file.path(), diff)),
+                "medium",
+                List.copyOf(warnings),
+                testSuggestions(files),
+                true
+        );
+    }
+
+    private String cleanFullFileModelOutput(String value) {
+        String clean = safe(value).replace("\r\n", "\n").trim();
+        if (clean.startsWith("```")) {
+            clean = clean.replaceFirst("^```[A-Za-z0-9_-]*\\s*", "");
+            clean = clean.replaceFirst("\\s*```$", "");
+        }
+        return clean.trim();
+    }
+
+    private boolean looksLikeSafeFullFileReplacement(CodePatchFileLoader.LoadedPatchFile file, String replacement) {
+        if (file == null || replacement == null || replacement.isBlank() || replacement.startsWith("NO_PATCH")) {
+            return false;
+        }
+        if (looksLikeUnifiedDiff(replacement)) {
+            return false;
+        }
+        if (replacement.length() > 25_000) {
+            return false;
+        }
+        if (fileLoader.isSensitiveOrUnsafe(file.path())) {
+            return false;
+        }
+        return looksLikeFullFileForPath(file.path(), replacement);
+    }
+
+    private boolean looksLikeFullFileForPath(String path, String replacement) {
+        String extension = extensionForPath(path);
+        String lower = safe(replacement).toLowerCase(Locale.ROOT);
+        return switch (extension) {
+            case "html", "htm" -> lower.contains("<!doctype html") || lower.contains("<html");
+            case "java" -> containsAny(lower, "class ", "interface ", "enum ", "record ", "package ", "import ");
+            case "cs" -> containsAny(lower, "namespace ", "class ", "interface ", "record ", "struct ", "using ");
+            case "c", "h" -> containsAny(lower, "#include", "int main(", "typedef ", "struct ", "enum ")
+                    || (lower.contains("{") && lower.contains("}") && lower.contains(";"));
+            case "cpp", "cc", "cxx", "hpp", "hh", "hxx" -> containsAny(lower, "#include", "namespace ", "std::", "template<", "template <", "class ", "struct ")
+                    || (lower.contains("{") && lower.contains("}") && lower.contains(";"));
+            case "js", "jsx", "mjs", "cjs" -> containsAny(lower, "import ", "export ", "function ", "const ", "let ", "var ", "=>")
+                    || (extension.equals("jsx") && lower.contains("<") && lower.contains(">"));
+            case "ts", "tsx" -> containsAny(lower, "import ", "export ", "interface ", "type ", "function ", "const ", "let ", "=>")
+                    || (extension.equals("tsx") && lower.contains("<") && lower.contains(">"));
+            case "json" -> parsesAsJson(replacement);
+            case "yaml", "yml" -> lower.contains(":") && !lower.contains("\u0000");
+            case "xml", "svg" -> lower.trim().startsWith("<") && lower.contains(">");
+            case "css", "scss", "sass", "less" -> lower.contains("{") && lower.contains("}") && lower.contains(":");
+            case "md", "markdown", "txt" -> !looksLikeChattyPatchExplanation(lower);
+            case "py" -> containsAny(lower, "def ", "class ", "import ", "from ", "if __name__");
+            case "kt", "kts" -> containsAny(lower, "package ", "import ", "class ", "fun ", "val ", "var ");
+            case "go" -> containsAny(lower, "package ", "import ", "func ", "type ");
+            case "rs" -> containsAny(lower, "fn ", "use ", "mod ", "struct ", "enum ", "impl ");
+            case "php" -> lower.contains("<?php") || containsAny(lower, "namespace ", "class ", "function ");
+            case "rb" -> containsAny(lower, "def ", "class ", "module ", "require ");
+            case "swift" -> containsAny(lower, "import ", "class ", "struct ", "func ", "let ", "var ");
+            case "sh", "bash", "ps1" -> containsAny(lower, "#!", "function ", "param(", "$", "echo ");
+            case "sql" -> containsAny(lower, "select ", "insert ", "update ", "delete ", "create ", "alter ");
+            case "properties", "ini", "toml", "gradle", "dockerfile" -> !looksLikeChattyPatchExplanation(lower);
+            default -> false;
+        };
+    }
+
+    private String extensionForPath(String path) {
+        String normalized = safe(path).replace('\\', '/').toLowerCase(Locale.ROOT);
+        String basename = normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
+        if (basename.equals("dockerfile")) {
+            return "dockerfile";
+        }
+        int dot = basename.lastIndexOf('.');
+        return dot >= 0 && dot < basename.length() - 1 ? basename.substring(dot + 1) : "";
+    }
+
+    private boolean parsesAsJson(String value) {
+        try {
+            objectMapper.readTree(value);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private boolean looksLikeChattyPatchExplanation(String lower) {
+        String trimmed = safe(lower).trim();
+        return trimmed.startsWith("here is")
+                || trimmed.startsWith("here's")
+                || trimmed.startsWith("sure")
+                || trimmed.startsWith("i ")
+                || trimmed.startsWith("the updated")
+                || trimmed.contains("```")
+                || trimmed.contains("unified diff");
+    }
+
+    private boolean looksLikeUnifiedDiff(String value) {
+        String normalized = safe(value).replace("\r\n", "\n");
+        return normalized.startsWith("--- a/")
+                || normalized.contains("\n--- a/")
+                || normalized.contains("\n+++ b/")
+                || normalized.contains("\n@@");
+    }
+
+    private boolean containsAny(String value, String... needles) {
+        String text = safe(value);
+        for (String needle : needles) {
+            if (text.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
     private CodeAgentPlanResponse tryLlmPlan(String instruction, List<String> candidatePaths, List<CodeSearchResult> evidence, List<String> warnings) {
         try {
@@ -228,6 +375,18 @@ public class CodeAgentService {
         }
     }
 
+    private CodeAgentPatchResponse deterministicSafeFallbackPatch(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            List<String> warnings
+    ) {
+        CodeAgentPatchResponse append = deterministicAppendPatch(instruction, files, warnings);
+        if (append != null) {
+            return append;
+        }
+        return deterministicHtmlPagePatch(instruction, files, warnings);
+    }
+
     private CodeAgentPatchResponse deterministicAppendPatch(
             String instruction,
             List<CodePatchFileLoader.LoadedPatchFile> files,
@@ -252,6 +411,173 @@ public class CodeAgentService {
                 testSuggestions(files),
                 true
         );
+    }
+
+    private CodeAgentPatchResponse deterministicHtmlPagePatch(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            List<String> warnings
+    ) {
+        if (!looksLikeSimpleHtmlPageRequest(instruction) || files == null || files.size() != 1) {
+            return null;
+        }
+        CodePatchFileLoader.LoadedPatchFile file = files.get(0);
+        if (!isHtmlPath(file.path()) || !safe(file.content()).trim().isEmpty()) {
+            return null;
+        }
+        String diff = appendDiff(file.path(), file.content(), simpleHtmlPageContent(instruction));
+        PatchValidationResult validation = validationService.validate(diff, List.of(file.path()));
+        warnings.add("Deterministic empty HTML page fallback was used after model patch generation returned no usable diff.");
+        warnings.addAll(validation.warnings());
+        if (!validation.valid()) {
+            return null;
+        }
+        return new CodeAgentPatchResponse(
+                "Generated a server-validated HTML page patch from the local file.read observation.",
+                List.of(new PatchFileDiff(file.path(), diff)),
+                "low",
+                List.copyOf(warnings),
+                testSuggestions(files),
+                true
+        );
+    }
+
+    private boolean looksLikeSimpleHtmlPageRequest(String instruction) {
+        String lower = safe(instruction).toLowerCase(Locale.ROOT);
+        boolean htmlOrPage = lower.contains("html")
+                || lower.contains("web page")
+                || lower.contains("webpage")
+                || lower.contains("homepage")
+                || lower.contains("\uC6F9\uD398\uC774\uC9C0")
+                || lower.contains("\uD648\uD398\uC774\uC9C0");
+        boolean createOrBuild = lower.contains("create")
+                || lower.contains("make")
+                || lower.contains("build")
+                || lower.contains("write")
+                || lower.contains("\uB9CC\uB4E4")
+                || lower.contains("\uC0DD\uC131")
+                || lower.contains("\uC791\uC131");
+        return htmlOrPage && createOrBuild;
+    }
+
+    private boolean isHtmlPath(String path) {
+        String lower = safe(path).toLowerCase(Locale.ROOT);
+        return lower.endsWith(".html") || lower.endsWith(".htm");
+    }
+
+    private String simpleHtmlPageContent(String instruction) {
+        if (requestsKoreanText(instruction)) {
+            return """
+                    <!doctype html>
+                    <html lang="ko">
+                    <head>
+                      <meta charset="UTF-8">
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                      <title>\uAC04\uB2E8\uD55C \uC6F9\uD398\uC774\uC9C0</title>
+                      <style>
+                        body {
+                          margin: 0;
+                          font-family: Arial, sans-serif;
+                          background: #f4f7fb;
+                          color: #1f2937;
+                        }
+                        main {
+                          min-height: 100vh;
+                          display: grid;
+                          place-items: center;
+                          padding: 32px;
+                          text-align: center;
+                        }
+                        section {
+                          max-width: 640px;
+                        }
+                        h1 {
+                          margin: 0 0 16px;
+                          font-size: 40px;
+                        }
+                        p {
+                          margin: 0 0 24px;
+                          font-size: 18px;
+                          line-height: 1.6;
+                        }
+                        button {
+                          border: 0;
+                          border-radius: 8px;
+                          padding: 12px 18px;
+                          background: #2563eb;
+                          color: white;
+                          font-weight: 700;
+                          cursor: pointer;
+                        }
+                      </style>
+                    </head>
+                    <body>
+                      <main>
+                        <section>
+                          <h1>\uC548\uB155\uD558\uC138\uC694</h1>
+                          <p>\uAC04\uB2E8\uD558\uACE0 \uAE54\uB054\uD55C \uCCAB \uC6F9\uD398\uC774\uC9C0\uC785\uB2C8\uB2E4.</p>
+                          <button type="button">\uC2DC\uC791\uD558\uAE30</button>
+                        </section>
+                      </main>
+                    </body>
+                    </html>
+                    """;
+        }
+        return """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Simple Web Page</title>
+                  <style>
+                    body {
+                      margin: 0;
+                      font-family: Arial, sans-serif;
+                      background: #f4f7fb;
+                      color: #1f2937;
+                    }
+                    main {
+                      min-height: 100vh;
+                      display: grid;
+                      place-items: center;
+                      padding: 32px;
+                      text-align: center;
+                    }
+                    section {
+                      max-width: 640px;
+                    }
+                    h1 {
+                      margin: 0 0 16px;
+                      font-size: 40px;
+                    }
+                    p {
+                      margin: 0 0 24px;
+                      font-size: 18px;
+                      line-height: 1.6;
+                    }
+                    button {
+                      border: 0;
+                      border-radius: 8px;
+                      padding: 12px 18px;
+                      background: #2563eb;
+                      color: white;
+                      font-weight: 700;
+                      cursor: pointer;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <main>
+                    <section>
+                      <h1>Hello</h1>
+                      <p>A simple, clean starter web page.</p>
+                      <button type="button">Get Started</button>
+                    </section>
+                  </main>
+                </body>
+                </html>
+                """;
     }
 
     private boolean looksLikeAppendToEndRequest(String instruction) {
@@ -316,6 +642,44 @@ public class CodeAgentService {
             builder.append("+").append(line).append("\n");
         }
         return builder.toString().trim();
+    }
+
+    private String fullFileReplacementDiff(String path, String currentContent, String replacementContent) {
+        String cleanPath = safe(path).replace('\\', '/');
+        List<String> oldLines = contentLines(currentContent);
+        List<String> newLines = contentLines(replacementContent);
+        StringBuilder builder = new StringBuilder();
+        builder.append("--- a/").append(cleanPath).append("\n");
+        builder.append("+++ b/").append(cleanPath).append("\n");
+        int oldCount = oldLines.size();
+        int newCount = newLines.size();
+        builder.append("@@ -")
+                .append(oldCount == 0 ? 0 : 1)
+                .append(",")
+                .append(oldCount)
+                .append(" +")
+                .append(newCount == 0 ? 0 : 1)
+                .append(",")
+                .append(newCount)
+                .append(" @@\n");
+        for (String line : oldLines) {
+            builder.append("-").append(line).append("\n");
+        }
+        for (String line : newLines) {
+            builder.append("+").append(line).append("\n");
+        }
+        return builder.toString().trim();
+    }
+
+    private List<String> contentLines(String content) {
+        String normalized = safe(content).replace("\r\n", "\n").replace('\r', '\n');
+        if (normalized.endsWith("\n")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        return normalized.lines().toList();
     }
 
     private List<String> candidatePaths(List<CodeSearchResult> evidence, List<String> warnings) {

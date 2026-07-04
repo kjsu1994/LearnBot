@@ -84,21 +84,33 @@ public class CodeAgentLoopToolSelectionService {
             );
         }
 
+        List<CodeAgentLoopToolCandidate> candidates = runnerService.readOnlyToolCandidates(
+                userId,
+                repositoryId,
+                preview.nextAction(),
+                agentId,
+                workspaceId
+        );
+        if (candidates.isEmpty()) {
+            candidates = List.of(candidate);
+        }
+
         try {
             JsonNode modelDecision = objectMapper.readTree(cleanJson(ollamaClient.chatResult(
                     systemPrompt(),
-                    userPrompt(preview, candidate),
+                    userPrompt(preview, candidate, candidates),
                     MAX_TOOL_SELECTION_TOKENS
             ).content()));
-            if (acceptsReadOnlyCandidate(modelDecision, candidate)) {
+            CodeAgentLoopToolCandidate selectedCandidate = selectedReadOnlyCandidate(modelDecision, candidates);
+            if (selectedCandidate != null) {
                 return response(
                         preview,
                         "MODEL_SELECTED_READ_ONLY_CANDIDATE",
-                        "Model selected the allowed read-only " + candidate.toolName().wireName() + " candidate. Execution and mutation remain disabled in this preview.",
+                        "Model selected the allowed read-only " + selectedCandidate.toolName().wireName() + " candidate. Execution and mutation remain disabled in this preview.",
                         true,
                         true,
                         true,
-                        candidate,
+                        selectedCandidate,
                         modelMap(modelDecision)
                 );
             }
@@ -519,6 +531,29 @@ public class CodeAgentLoopToolSelectionService {
                 && !requiresApproval;
     }
 
+    private CodeAgentLoopToolCandidate selectedReadOnlyCandidate(JsonNode root, List<CodeAgentLoopToolCandidate> candidates) {
+        String actionKey = text(root, "actionKey");
+        boolean readOnly = root.path("readOnly").asBoolean(false);
+        boolean mutationAllowed = root.path("mutationAllowed").asBoolean(true);
+        boolean requiresApproval = root.path("requiresApproval").asBoolean(true);
+        if (!"QUEUE_READ_ONLY_OBSERVATION".equals(actionKey) || !readOnly || mutationAllowed || requiresApproval
+                || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        String candidateId = text(root, "candidateId");
+        String toolName = text(root, "toolName");
+        String path = text(root, "path");
+        String query = text(root, "query");
+        return candidates.stream()
+                .filter(this::safeReadOnlyCandidate)
+                .filter(candidate -> candidateId.isBlank() || candidateId(candidate).equals(candidateId))
+                .filter(candidate -> toolName.isBlank() || candidate.toolName().wireName().equals(toolName))
+                .filter(candidate -> path.isBlank() || path.equals(String.valueOf(candidate.input().getOrDefault("path", ""))))
+                .filter(candidate -> query.isBlank() || query.equals(String.valueOf(candidate.input().getOrDefault("query", ""))))
+                .findFirst()
+                .orElse(null);
+    }
+
     private boolean safeReadOnlyCandidate(CodeAgentLoopToolCandidate candidate) {
         return (candidate.toolName() == LocalAgentToolName.WORKSPACE_TREE
                     || candidate.toolName() == LocalAgentToolName.WORKSPACE_SEARCH
@@ -866,6 +901,9 @@ public class CodeAgentLoopToolSelectionService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("actionKey", text(root, "actionKey"));
         result.put("toolName", text(root, "toolName"));
+        result.put("candidateId", text(root, "candidateId"));
+        result.put("path", text(root, "path"));
+        result.put("query", text(root, "query"));
         result.put("reason", text(root, "reason"));
         result.put("readOnly", root.path("readOnly").asBoolean(false));
         result.put("requiresApproval", root.path("requiresApproval").asBoolean(true));
@@ -884,26 +922,45 @@ public class CodeAgentLoopToolSelectionService {
                 """;
     }
 
-    private String userPrompt(CodeAgentLoopRunnerPreviewResponse preview, CodeAgentLoopToolCandidate candidate) {
+    private String userPrompt(
+            CodeAgentLoopRunnerPreviewResponse preview,
+            CodeAgentLoopToolCandidate deterministicCandidate,
+            List<CodeAgentLoopToolCandidate> candidates
+    ) {
+        StringBuilder candidateText = new StringBuilder();
+        for (CodeAgentLoopToolCandidate candidate : candidates == null ? List.<CodeAgentLoopToolCandidate>of() : candidates) {
+            candidateText.append("- candidateId: ").append(candidateId(candidate)).append("\n");
+            candidateText.append("  toolName: ").append(candidate.toolName().wireName()).append("\n");
+            candidateText.append("  path: ").append(candidate.input().getOrDefault("path", "")).append("\n");
+            candidateText.append("  query: ").append(candidate.input().getOrDefault("query", "")).append("\n");
+            candidateText.append("  readOnly: ").append(!candidate.sideEffectful()).append("\n");
+        }
         return """
                 Next action: %s
                 Runner decision: %s
-                Candidate tool: %s
-                Candidate is read-only: %s
-                Candidate requires approval: %s
-                Candidate mutationAllowed: %s
+                Deterministic fallback candidateId: %s
+
+                Available read-only candidates:
+                %s
 
                 Return this JSON shape:
-                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","toolName":"%s","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","candidateId":"...","toolName":"...","path":"...","query":"...","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
                 """.formatted(
                 preview.actionKey(),
                 preview.runnerDecision(),
-                candidate.toolName().wireName(),
-                !candidate.sideEffectful(),
-                candidate.requiresApproval(),
-                candidate.mutationAllowed(),
-                candidate.toolName().wireName()
+                deterministicCandidate == null ? "" : candidateId(deterministicCandidate),
+                candidateText
         );
+    }
+
+    private String candidateId(CodeAgentLoopToolCandidate candidate) {
+        if (candidate == null) {
+            return "";
+        }
+        String path = String.valueOf(candidate.input().getOrDefault("path", ""));
+        String query = String.valueOf(candidate.input().getOrDefault("query", ""));
+        String suffix = !path.isBlank() ? path : query;
+        return suffix.isBlank() ? candidate.toolName().wireName() : candidate.toolName().wireName() + ":" + suffix;
     }
 
     private String sideEffectBoundarySystemPrompt() {

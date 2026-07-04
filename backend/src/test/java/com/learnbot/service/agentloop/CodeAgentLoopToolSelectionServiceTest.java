@@ -79,6 +79,76 @@ class CodeAgentLoopToolSelectionServiceTest {
     }
 
     @Test
+    void modelCanChooseDifferentSafeCandidateFromCandidateList() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        CodeAgentLoopToolCandidate fallback = candidate(userId, repositoryId, loopId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS);
+        CodeAgentLoopToolCandidate fileRead = candidateWithInput(
+                userId,
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.FILE_READ,
+                Map.of("path", "home.html", "maxBytes", 80_000)
+        );
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId))
+                .thenReturn(preview(repositoryId, loopId, "PREPARED_READ_ONLY_CANDIDATE", fallback));
+        when(runnerService.readOnlyToolCandidates(eq(userId), eq(repositoryId), any(), eq(agentId), eq(workspaceId)))
+                .thenReturn(List.of(fallback, fileRead));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(400))).thenReturn(chat("""
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","candidateId":"file.read:home.html","toolName":"file.read","path":"home.html","query":"","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Read the page file before patching."}
+                """));
+
+        var result = service.selectNextToolPreview(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.selectionDecision()).isEqualTo("MODEL_SELECTED_READ_ONLY_CANDIDATE");
+        assertThat(result.modelToolSelectionAccepted()).isTrue();
+        assertThat(result.selectedByModel()).isTrue();
+        assertThat(result.candidate()).isSameAs(fileRead);
+        assertThat(result.modelDecision()).containsEntry("candidateId", "file.read:home.html")
+                .containsEntry("path", "home.html")
+                .containsEntry("toolName", "file.read");
+    }
+
+    @Test
+    void modelCandidateListSelectionFallsBackWhenPathIsNotOffered() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        CodeAgentLoopToolCandidate fallback = candidate(userId, repositoryId, loopId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS);
+        CodeAgentLoopToolCandidate fileRead = candidateWithInput(
+                userId,
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.FILE_READ,
+                Map.of("path", "home.html", "maxBytes", 80_000)
+        );
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId))
+                .thenReturn(preview(repositoryId, loopId, "PREPARED_READ_ONLY_CANDIDATE", fallback));
+        when(runnerService.readOnlyToolCandidates(eq(userId), eq(repositoryId), any(), eq(agentId), eq(workspaceId)))
+                .thenReturn(List.of(fallback, fileRead));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(400))).thenReturn(chat("""
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","candidateId":"file.read:missing.html","toolName":"file.read","path":"missing.html","query":"","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Try an unsafe invented path."}
+                """));
+
+        var result = service.selectNextToolPreview(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.selectionDecision()).isEqualTo("MODEL_SELECTION_REJECTED_FALLBACK_READ_ONLY");
+        assertThat(result.modelToolSelectionAccepted()).isFalse();
+        assertThat(result.selectedByModel()).isFalse();
+        assertThat(result.candidate()).isSameAs(fallback);
+        assertThat(result.modelDecision()).containsEntry("path", "missing.html");
+    }
+
+    @Test
     void modelCanSelectAllowedReadOnlyGitDiffCandidateAndQueueIt() {
         UUID userId = UUID.randomUUID();
         UUID repositoryId = UUID.randomUUID();
@@ -818,6 +888,38 @@ class CodeAgentLoopToolSelectionServiceTest {
                         "freshObservationOnly", true,
                         "mutationAllowed", false
                 ),
+                List.of()
+        );
+    }
+
+    private CodeAgentLoopToolCandidate candidateWithInput(
+            UUID userId,
+            UUID repositoryId,
+            UUID loopId,
+            UUID agentId,
+            UUID workspaceId,
+            LocalAgentToolName toolName,
+            Map<String, Object> extraInput
+    ) {
+        Map<String, Object> input = new java.util.LinkedHashMap<>();
+        input.put("repositoryId", repositoryId.toString());
+        input.put("loopId", loopId.toString());
+        input.put("freshObservationOnly", true);
+        input.put("mutationAllowed", false);
+        input.putAll(extraInput);
+        return new CodeAgentLoopToolCandidate(
+                loopId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                toolName,
+                LocalAgentApprovalState.NOT_REQUIRED,
+                false,
+                false,
+                false,
+                false,
+                input,
                 List.of()
         );
     }

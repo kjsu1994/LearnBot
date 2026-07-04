@@ -22,6 +22,7 @@ import com.learnbot.service.OllamaClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
@@ -321,7 +322,7 @@ public class CodeAgentLoopRunService {
             return null;
         }
 
-        TargetFileSelection targetSelection = selectPatchTargets(timeline);
+        TargetFileSelection targetSelection = selectPatchTargets(userId, repositoryId, workspaceId, timeline);
         List<String> targetFiles = targetSelection.targetFiles();
         if (!targetSelection.ready()) {
             loopPreviewService.appendPatchProposalBlocked(
@@ -330,7 +331,7 @@ public class CodeAgentLoopRunService {
                     loopId,
                     targetSelection.stopKey(),
                     targetSelection.message(),
-                    patchBlockedDetails(targetFiles, "target-selection", null, null)
+                    patchBlockedDetails(targetFiles, "target-selection", null, null, targetSelection.details())
             );
             return patchProposalResponse(loopId, repositoryId, targetSelection.stopKey(), targetSelection.message());
         }
@@ -393,7 +394,8 @@ public class CodeAgentLoopRunService {
                     timeline.instruction(),
                     diff,
                     targetFiles,
-                    observedFiles
+                    observedFiles,
+                    targetSelection.details()
             );
             return patchProposalResponse(
                     loopId,
@@ -440,7 +442,12 @@ public class CodeAgentLoopRunService {
         return List.copyOf(targets);
     }
 
-    private TargetFileSelection selectPatchTargets(CodeAgentLoopTimelineSummary timeline) {
+    private TargetFileSelection selectPatchTargets(
+            UUID userId,
+            UUID repositoryId,
+            UUID workspaceId,
+            CodeAgentLoopTimelineSummary timeline
+    ) {
         String instruction = timeline == null ? "" : timeline.instruction();
         List<String> candidates = fileReadTargets(timeline);
         List<String> safeCandidates = candidates == null
@@ -456,16 +463,17 @@ public class CodeAgentLoopRunService {
             return TargetFileSelection.ready(safeCandidates);
         }
 
-        TargetFileSelection modelSelection = selectPatchTargetsWithModel(timeline, safeCandidates);
-        if (modelSelection != null && modelSelection.ready()) {
-            return modelSelection;
-        }
-
         List<String> explicitMatches = safeCandidates.stream()
                 .filter(path -> instructionMentionsPath(instruction, path))
                 .toList();
         if (explicitMatches.size() == 1) {
             return TargetFileSelection.ready(explicitMatches);
+        }
+
+        List<RecentPatchContext> recentContexts = recentPatchContexts(userId, repositoryId, workspaceId, timeline, safeCandidates);
+        TargetFileSelection modelSelection = selectPatchTargetsWithModel(timeline, safeCandidates, recentContexts);
+        if (modelSelection != null && modelSelection.ready()) {
+            return modelSelection;
         }
 
         if (mentionsReadme(instruction)) {
@@ -478,6 +486,11 @@ public class CodeAgentLoopRunService {
             }
         }
 
+        List<String> extensionMatches = extensionMatchesForInstruction(instruction, safeCandidates);
+        if (extensionMatches.size() == 1) {
+            return TargetFileSelection.ready(extensionMatches);
+        }
+
         return TargetFileSelection.blocked(
                 "AMBIGUOUS_TARGET_FILES",
                 "Multiple candidate files were read, but the instruction did not identify one target file clearly.",
@@ -485,17 +498,25 @@ public class CodeAgentLoopRunService {
         );
     }
 
-    private TargetFileSelection selectPatchTargetsWithModel(CodeAgentLoopTimelineSummary timeline, List<String> safeCandidates) {
+    private TargetFileSelection selectPatchTargetsWithModel(
+            CodeAgentLoopTimelineSummary timeline,
+            List<String> safeCandidates,
+            List<RecentPatchContext> recentContexts
+    ) {
         if (ollamaClient == null || timeline == null || safeCandidates == null || safeCandidates.isEmpty()) {
             return null;
         }
         try {
             JsonNode root = objectMapper.readTree(cleanJson(ollamaClient.chatResult(
                     targetSelectionSystemPrompt(),
-                    targetSelectionUserPrompt(timeline, safeCandidates),
+                    targetSelectionUserPrompt(timeline, safeCandidates, recentContexts),
                     500
             ).content()));
             if (root.path("needsClarification").asBoolean(false)) {
+                return null;
+            }
+            String confidence = root.path("confidence").asText("");
+            if ("low".equalsIgnoreCase(confidence)) {
                 return null;
             }
             List<String> selected = new ArrayList<>();
@@ -507,7 +528,7 @@ public class CodeAgentLoopRunService {
                 }
             }
             if (selected.size() == 1) {
-                return TargetFileSelection.ready(selected);
+                return TargetFileSelection.ready(selected, targetSelectionDetails(root, recentContexts));
             }
             return null;
         } catch (Exception ex) {
@@ -521,16 +542,33 @@ public class CodeAgentLoopRunService {
                 Return JSON only.
                 Select targetFiles only from the provided candidate list.
                 If the user asks for one file and it is clear, return exactly one target file.
+                You may use recent successful edit context only as evidence for what the user means now.
+                Never select a file only because it appeared in recent context; it must also be in the provided candidate list.
                 If unclear, set needsClarification=true and return no target files.
                 Do not invent paths.
                 """;
     }
 
-    private String targetSelectionUserPrompt(CodeAgentLoopTimelineSummary timeline, List<String> safeCandidates) {
+    private String targetSelectionUserPrompt(
+            CodeAgentLoopTimelineSummary timeline,
+            List<String> safeCandidates,
+            List<RecentPatchContext> recentContexts
+    ) {
         StringBuilder builder = new StringBuilder();
         builder.append("Instruction:\n").append(timeline.instruction()).append("\n\nCandidate files:\n");
         for (String path : safeCandidates) {
             builder.append("- ").append(path).append("\n");
+        }
+        builder.append("\nRecent successful edits for this same repository/workspace:\n");
+        if (recentContexts == null || recentContexts.isEmpty()) {
+            builder.append("- none\n");
+        } else {
+            for (RecentPatchContext context : recentContexts) {
+                builder.append("- loopId: ").append(context.loopId()).append("\n");
+                builder.append("  instruction: ").append(context.instruction()).append("\n");
+                builder.append("  targetFiles: ").append(context.targetFiles()).append("\n");
+                builder.append("  completedAt: ").append(context.completedAt()).append("\n");
+            }
         }
         builder.append("\nRead observations:\n");
         for (CodeAgentLoopTimelineEventSummary event : timeline.events() == null ? List.<CodeAgentLoopTimelineEventSummary>of() : timeline.events()) {
@@ -544,15 +582,158 @@ public class CodeAgentLoopRunService {
                 Object path = map.get("relativePath");
                 Object preview = map.get("contentPreview");
                 builder.append("FILE: ").append(path == null ? "" : path).append("\n");
+                builder.append("EXTENSION: ").append(path == null ? "" : extensionForPath(String.valueOf(path))).append("\n");
                 builder.append("PREVIEW: ").append(preview == null ? "" : preview).append("\n");
             }
         }
         builder.append("""
 
                 JSON shape:
-                {"targetFiles":["path/from/candidates"],"reason":"...","confidence":"low|medium|high","needsClarification":false}
+                {"targetFiles":["path/from/candidates"],"reason":"...","confidence":"low|medium|high","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
                 """);
         return builder.toString();
+    }
+
+    private Map<String, Object> targetSelectionDetails(JsonNode root, List<RecentPatchContext> recentContexts) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("source", "model");
+        details.put("reason", root.path("reason").asText(""));
+        details.put("confidence", root.path("confidence").asText(""));
+        details.put("usedRecentContext", root.path("usedRecentContext").asBoolean(false));
+        String contextSourceLoopId = root.path("contextSourceLoopId").isNull() ? null : root.path("contextSourceLoopId").asText(null);
+        details.put("contextSourceLoopId", contextSourceLoopId);
+        if (contextSourceLoopId != null && recentContexts != null) {
+            recentContexts.stream()
+                    .filter(context -> context.loopId().toString().equals(contextSourceLoopId))
+                    .findFirst()
+                    .ifPresent(context -> details.put("contextTargetFiles", context.targetFiles()));
+        }
+        return java.util.Collections.unmodifiableMap(details);
+    }
+
+    private List<RecentPatchContext> recentPatchContexts(
+            UUID userId,
+            UUID repositoryId,
+            UUID workspaceId,
+            CodeAgentLoopTimelineSummary currentTimeline,
+            List<String> safeCandidates
+    ) {
+        if (userId == null || repositoryId == null || safeCandidates == null || safeCandidates.isEmpty()) {
+            return List.of();
+        }
+        Set<String> allowed = new LinkedHashSet<>(safeCandidates);
+        List<CodeAgentLoopTimelineSummary> timelines;
+        try {
+            timelines = loopPreviewService.recentTimelines(userId, repositoryId, 20);
+        } catch (RuntimeException ex) {
+            return List.of();
+        }
+        if (timelines == null || timelines.isEmpty()) {
+            return List.of();
+        }
+        List<RecentPatchContext> contexts = new ArrayList<>();
+        UUID currentLoopId = currentTimeline == null ? null : currentTimeline.id();
+        for (CodeAgentLoopTimelineSummary candidateTimeline : timelines) {
+            if (candidateTimeline == null || candidateTimeline.events() == null || candidateTimeline.id() == null) {
+                continue;
+            }
+            if (candidateTimeline.id().equals(currentLoopId)) {
+                continue;
+            }
+            RecentPatchContext context = successfulPatchContext(candidateTimeline, workspaceId, allowed);
+            if (context != null) {
+                contexts.add(context);
+            }
+            if (contexts.size() >= 5) {
+                break;
+            }
+        }
+        return List.copyOf(contexts);
+    }
+
+    private RecentPatchContext successfulPatchContext(
+            CodeAgentLoopTimelineSummary timeline,
+            UUID workspaceId,
+            Set<String> allowedCandidates
+    ) {
+        for (int index = timeline.events().size() - 1; index >= 0; index--) {
+            CodeAgentLoopTimelineEventSummary event = timeline.events().get(index);
+            if (!successfulPatchObservation(event) || !workspaceMatches(event, workspaceId)) {
+                continue;
+            }
+            String requestId = stringDetail(event, "requestId");
+            if (requestId == null || requestId.isBlank()) {
+                continue;
+            }
+            List<String> targetFiles = targetFilesForApprovalRequest(timeline, requestId, workspaceId, allowedCandidates);
+            if (!targetFiles.isEmpty()) {
+                return new RecentPatchContext(
+                        timeline.id(),
+                        timeline.instruction(),
+                        targetFiles,
+                        event.createdAt(),
+                        workspaceId
+                );
+            }
+        }
+        return null;
+    }
+
+    private boolean successfulPatchObservation(CodeAgentLoopTimelineEventSummary event) {
+        return event != null
+                && "LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                && event.toolName() == LocalAgentToolName.PATCH_APPLY
+                && "SUCCEEDED".equals(String.valueOf(event.details().get("status")))
+                && Boolean.TRUE.equals(event.details().get("mutationApplied"));
+    }
+
+    private List<String> targetFilesForApprovalRequest(
+            CodeAgentLoopTimelineSummary timeline,
+            String requestId,
+            UUID workspaceId,
+            Set<String> allowedCandidates
+    ) {
+        for (int index = timeline.events().size() - 1; index >= 0; index--) {
+            CodeAgentLoopTimelineEventSummary event = timeline.events().get(index);
+            if (!"LOCAL_AGENT_APPROVAL_REQUEST_CREATED".equals(event.eventType())
+                    || event.toolName() != LocalAgentToolName.PATCH_APPLY
+                    || !requestId.equals(stringDetail(event, "requestId"))
+                    || !workspaceMatches(event, workspaceId)) {
+                continue;
+            }
+            return stringList(event.details().get("targetFiles")).stream()
+                    .filter(this::safeRelativePath)
+                    .filter(allowedCandidates::contains)
+                    .distinct()
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private boolean workspaceMatches(CodeAgentLoopTimelineEventSummary event, UUID workspaceId) {
+        if (workspaceId == null) {
+            return true;
+        }
+        String eventWorkspaceId = stringDetail(event, "workspaceId");
+        return eventWorkspaceId == null || eventWorkspaceId.isBlank() || workspaceId.toString().equals(eventWorkspaceId);
+    }
+
+    private String stringDetail(CodeAgentLoopTimelineEventSummary event, String key) {
+        if (event == null || event.details() == null) {
+            return null;
+        }
+        Object value = event.details().get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> items)) {
+            return List.of();
+        }
+        return items.stream()
+                .filter(item -> item != null && !String.valueOf(item).isBlank())
+                .map(String::valueOf)
+                .toList();
     }
 
     private String cleanJson(String value) {
@@ -592,6 +773,69 @@ public class CodeAgentLoopRunService {
                     || normalizedInstruction.contains(prefix + "_file"));
         }
         return false;
+    }
+
+    private List<String> extensionMatchesForInstruction(String instruction, List<String> safeCandidates) {
+        Set<String> requestedExtensions = requestedExtensions(instruction);
+        if (requestedExtensions.isEmpty()) {
+            return List.of();
+        }
+        return safeCandidates.stream()
+                .filter(path -> requestedExtensions.contains(extensionForPath(path)))
+                .toList();
+    }
+
+    private Set<String> requestedExtensions(String instruction) {
+        String normalized = normalizeForMention(instruction);
+        if (normalized.isBlank()) {
+            return Set.of();
+        }
+        Set<String> extensions = new LinkedHashSet<>();
+        addExtensionAliases(extensions, normalized, List.of("html", "htm"), "html", "htm");
+        addExtensionAliases(extensions, normalized, List.of("markdown", "md", "\uB9C8\uD06C\uB2E4\uC6B4"), "md", "markdown");
+        addExtensionAliases(extensions, normalized, List.of("text", "txt", "\uD14D\uC2A4\uD2B8"), "txt");
+        addExtensionAliases(extensions, normalized, List.of("json"), "json");
+        addExtensionAliases(extensions, normalized, List.of("css"), "css");
+        addExtensionAliases(extensions, normalized, List.of("javascript", "js", "\uC790\uBC14\uC2A4\uD06C\uB9BD\uD2B8"), "js", "jsx");
+        addExtensionAliases(extensions, normalized, List.of("typescript", "ts"), "ts", "tsx");
+        addExtensionAliases(extensions, normalized, List.of("java"), "java");
+        addExtensionAliases(extensions, normalized, List.of("python", "py"), "py");
+        addExtensionAliases(extensions, normalized, List.of("xml"), "xml");
+        addExtensionAliases(extensions, normalized, List.of("yaml", "yml"), "yaml", "yml");
+        return extensions;
+    }
+
+    private void addExtensionAliases(Set<String> extensions, String normalizedInstruction, List<String> tokens, String... aliases) {
+        for (String token : tokens) {
+            if (instructionMentionsExtensionToken(normalizedInstruction, token)) {
+                extensions.addAll(List.of(aliases));
+                return;
+            }
+        }
+    }
+
+    private boolean instructionMentionsExtensionToken(String normalizedInstruction, String token) {
+        if (normalizedInstruction == null || normalizedInstruction.isBlank() || token == null || token.isBlank()) {
+            return false;
+        }
+        return normalizedInstruction.contains("." + token)
+                || normalizedInstruction.contains(token + "\uD30C\uC77C")
+                || normalizedInstruction.contains(token + " file")
+                || normalizedInstruction.contains(token + "-file")
+                || normalizedInstruction.contains(token + "_file")
+                || (token.length() >= 4 && normalizedInstruction.contains(token));
+    }
+
+    private String extensionForPath(String path) {
+        String basename = normalizeForMention(path);
+        if (basename.contains("/")) {
+            basename = basename.substring(basename.lastIndexOf('/') + 1);
+        }
+        int index = basename.lastIndexOf('.');
+        if (index < 0 || index == basename.length() - 1) {
+            return "";
+        }
+        return basename.substring(index + 1);
     }
 
     private String normalizeForMention(String value) {
@@ -678,10 +922,21 @@ public class CodeAgentLoopRunService {
     }
 
     private Map<String, Object> patchBlockedDetails(List<String> targetFiles, String patchSource, CodeAgentPatchResponse patch, RuntimeException ex) {
+        return patchBlockedDetails(targetFiles, patchSource, patch, ex, Map.of());
+    }
+
+    private Map<String, Object> patchBlockedDetails(
+            List<String> targetFiles,
+            String patchSource,
+            CodeAgentPatchResponse patch,
+            RuntimeException ex,
+            Map<String, Object> targetSelectionDetails
+    ) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("schema", "learnbot.server.code-agent.patch-proposal-result.v1");
         details.put("targetFiles", targetFiles == null ? List.of() : targetFiles);
         details.put("patchSource", patchSource);
+        details.put("targetSelection", targetSelectionDetails == null ? Map.of() : targetSelectionDetails);
         details.put("valid", patch != null && patch.valid());
         details.put("summary", patch == null ? null : patch.summary());
         details.put("riskLevel", patch == null ? null : patch.riskLevel());
@@ -697,15 +952,35 @@ public class CodeAgentLoopRunService {
             boolean ready,
             List<String> targetFiles,
             String stopKey,
-            String message
+            String message,
+            Map<String, Object> details
     ) {
         private static TargetFileSelection ready(List<String> targetFiles) {
-            return new TargetFileSelection(true, List.copyOf(targetFiles), "READY", "Target file selection is clear.");
+            return ready(targetFiles, Map.of());
+        }
+
+        private static TargetFileSelection ready(List<String> targetFiles, Map<String, Object> details) {
+            return new TargetFileSelection(
+                    true,
+                    List.copyOf(targetFiles),
+                    "READY",
+                    "Target file selection is clear.",
+                    details == null ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(details))
+            );
         }
 
         private static TargetFileSelection blocked(String stopKey, String message, List<String> candidates) {
-            return new TargetFileSelection(false, List.copyOf(candidates), stopKey, message);
+            return new TargetFileSelection(false, List.copyOf(candidates), stopKey, message, Map.of());
         }
+    }
+
+    private record RecentPatchContext(
+            UUID loopId,
+            String instruction,
+            List<String> targetFiles,
+            OffsetDateTime completedAt,
+            UUID workspaceId
+    ) {
     }
 
     private CodeAgentLoopRunnerEnqueueResponse patchProposalResponse(

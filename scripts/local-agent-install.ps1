@@ -42,6 +42,10 @@ switch ($Action) {
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
         dotnet publish $project -c $Configuration -r $Runtime --self-contained false -o $InstallDir | Out-Host
+        $publishExitCode = $LASTEXITCODE
+        if ($publishExitCode -ne 0) {
+            throw "dotnet publish failed with exit code $publishExitCode. If LearnBotLocalAgent is running, stop it before reinstalling."
+        }
         if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
             throw "Published executable was not found: $exe"
         }

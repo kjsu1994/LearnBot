@@ -63,7 +63,8 @@ public class CodeAgentLocalPatchRequestService {
                 instruction,
                 diff,
                 targetFiles,
-                List.of()
+                List.of(),
+                Map.of()
         );
     }
 
@@ -78,6 +79,34 @@ public class CodeAgentLocalPatchRequestService {
             String diff,
             List<String> targetFiles,
             List<CodePatchFileLoader.LoadedPatchFile> observedFiles
+    ) {
+        return prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                instruction,
+                diff,
+                targetFiles,
+                observedFiles,
+                Map.of()
+        );
+    }
+
+    public LocalAgentToolExecutionResponse prepare(
+            UUID repositoryId,
+            UUID spaceId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            UUID loopId,
+            String instruction,
+            String diff,
+            List<String> targetFiles,
+            List<CodePatchFileLoader.LoadedPatchFile> observedFiles,
+            Map<String, Object> targetSelection
     ) {
         List<String> warnings = new ArrayList<>();
         List<String> normalizedTargets = fileLoader.normalizeRequestedPaths(targetFiles, warnings);
@@ -114,6 +143,9 @@ public class CodeAgentLocalPatchRequestService {
         input.put("instruction", safe(instruction));
         input.put("diff", safe(diff));
         input.put("targetFiles", List.copyOf(normalizedTargets));
+        if (targetSelection != null && !targetSelection.isEmpty()) {
+            input.put("targetSelection", new LinkedHashMap<>(targetSelection));
+        }
         input.put("approvalRequestId", approvalRequestId(repositoryId, loopId, safe(diff), normalizedTargets));
         input.put("approvalPersistenceRequired", true);
         input.put("approvalPersisted", true);
