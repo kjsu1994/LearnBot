@@ -25,6 +25,8 @@ public class CodeAgentService {
     private static final int PLAN_SEARCH_LIMIT = 12;
     private static final int MAX_PLAN_TARGETS = 3;
     private static final int LLM_DIAGNOSTIC_PREVIEW_CHARS = 2000;
+    private static final int PREVIOUS_PATCH_OUTPUT_PREVIEW_CHARS = 1200;
+    private static final int VALIDATION_WARNING_PREVIEW_CHARS = 600;
     private static final int PATCH_OUTPUT_TOKENS = 4096;
     private final CodeSearchService searchService;
     private final CodePatchFileLoader fileLoader;
@@ -138,11 +140,14 @@ public class CodeAgentService {
             diff = normalizePatchDiffAbsentContextLinesAfterAdditions(diff, filesToPatch, warnings, "initial");
             if (diff.isBlank() || diff.startsWith("NO_PATCH")) {
                 warnings.add("LLM patch generation returned no patch.");
+                if (modelResult.stoppedByLength()) {
+                    warnings.add("LLM patch initial stopped by length; repair will use compact context and a bounded previous-output preview.");
+                }
                 addLlmPatchOutputDiagnostics(warnings, "initial", modelResult, diff);
                 CodeAgentPatchResponse repaired = tryRepairLlmPatch(
                         safeInstruction,
                         filesToPatch,
-                        modelOutput,
+                        boundedPreviousPatchOutput(modelOutput),
                         List.of("Initial model output returned no patch. The provided file contents are the actual current workspace state; if the file appears incomplete or truncated, treat that as the bug and produce a minimal unified diff when it satisfies the user request."),
                         warnings
                 );
@@ -226,7 +231,7 @@ public class CodeAgentService {
         if (!validation.valid()) {
             warnings.add("LLM patch generation produced an invalid diff; LLM repair will be attempted before any deterministic fallback.");
             addLlmPatchOutputDiagnostics(warnings, "initial", modelResult, diff);
-            CodeAgentPatchResponse repaired = tryRepairLlmPatch(safeInstruction, filesToPatch, modelOutput, validation.warnings(), warnings);
+            CodeAgentPatchResponse repaired = tryRepairLlmPatch(safeInstruction, filesToPatch, boundedPreviousPatchOutput(modelOutput), validation.warnings(), warnings);
             if (repaired != null) {
                 return repaired;
             }
@@ -366,6 +371,9 @@ public class CodeAgentService {
                         phase
                 );
                 String repairedOutput = repairedResult.content();
+                if (repairedResult.stoppedByLength()) {
+                    warnings.add("LLM patch " + phase + " stopped by length; retry context will use a compact preview instead of the full truncated output.");
+                }
                 String repairedDiff = materializePatchFromModelOutput(repairedOutput, files, warnings, phase);
                 repairedDiff = normalizePatchDiffHeaders(repairedDiff, files, warnings, phase);
                 repairedDiff = normalizePatchDiffExistingLineWhitespace(repairedDiff, files, warnings, phase);
@@ -373,14 +381,14 @@ public class CodeAgentService {
                 if (looksLikeUnifiedDiffEnvelope(repairedDiff) && !hasPatchMutationLines(repairedDiff)) {
                     warnings.add("LLM patch " + phase + " output contained no added or removed lines.");
                     addLlmPatchOutputDiagnostics(warnings, phase, repairedResult, repairedDiff);
-                    repairPreviousOutput = repairedDiff;
+                    repairPreviousOutput = boundedPreviousPatchOutput(repairedDiff);
                     repairWarnings = List.of("Patch contains no added or removed file-content lines. Produce a real minimal unified diff against the exact current file contents.");
                     continue;
                 }
                 if (!looksLikeFormattingOnlyRequest(instruction) && isWhitespaceOnlyPatch(repairedDiff)) {
                     warnings.add("LLM patch " + phase + " output only changed whitespace for a non-formatting request.");
                     addLlmPatchOutputDiagnostics(warnings, phase, repairedResult, repairedDiff);
-                    repairPreviousOutput = repairedDiff;
+                    repairPreviousOutput = boundedPreviousPatchOutput(repairedDiff);
                     repairWarnings = List.of("Patch only changes whitespace, but the instruction asks for behavioral/content repair. Produce a meaningful minimal unified diff against the exact current file contents.");
                     continue;
                 }
@@ -394,7 +402,7 @@ public class CodeAgentService {
                 warnings.addAll(repairedValidation.warnings());
                 if (!repairedValidation.valid()) {
                     addLlmPatchOutputDiagnostics(warnings, phase, repairedResult, repairedDiff);
-                    repairPreviousOutput = repairedDiff;
+                    repairPreviousOutput = boundedPreviousPatchOutput(repairedResult.stoppedByLength() ? repairedOutput : repairedDiff);
                     repairWarnings = repairedValidation.warnings();
                     continue;
                 }
@@ -402,7 +410,7 @@ public class CodeAgentService {
                 warnings.addAll(repairedContextValidation.warnings());
                 if (!repairedContextValidation.valid()) {
                     addLlmPatchOutputDiagnostics(warnings, phase, repairedResult, repairedDiff);
-                    repairPreviousOutput = repairedDiff;
+                    repairPreviousOutput = boundedPreviousPatchOutput(repairedDiff);
                     repairWarnings = repairedContextValidation.warnings();
                     continue;
                 }
@@ -410,7 +418,7 @@ public class CodeAgentService {
                 warnings.addAll(repairedSemanticValidation.warnings());
                 if (!repairedSemanticValidation.valid()) {
                     addLlmPatchOutputDiagnostics(warnings, phase, repairedResult, repairedDiff);
-                    repairPreviousOutput = repairedDiff;
+                    repairPreviousOutput = boundedPreviousPatchOutput(repairedDiff);
                     repairWarnings = repairedSemanticValidation.warnings();
                     continue;
                 }
@@ -965,6 +973,12 @@ public class CodeAgentService {
         }
     }
 
+    private record AnchorRange(int start, int end) {
+    }
+
+    private record AnchorPoint(int anchorIndex, int insertion) {
+    }
+
     private record StructuredEdit(
             String editFormat,
             String path,
@@ -1104,9 +1118,8 @@ public class CodeAgentService {
 
     private String patchSystemPrompt() {
         return """
-                You are the decision maker for LearnBot Patch Agent v1.
+                You are LearnBot Patch Agent v1.
                 Return JSON only.
-                You decide whether more observation is needed, which exact current lines are wrong, and what patch should be proposed.
                 Do not output <think> blocks, reasoning, analysis, or explanations.
                 Do not use markdown fences.
                 Modify only the provided target files.
@@ -1115,13 +1128,16 @@ public class CodeAgentService {
                 Preserve the user's requested language and content constraints.
                 If the user asks for Korean/Hangul text, added prose must be Korean.
                 Do not invent generic placeholders such as "Added by LearnBot" unless the user explicitly asked for that text.
-                Prefer editFormat=operation_edit. Use small operations with exact anchors copied from EXACT_CONTENT.
+                Prefer editFormat=operation_edit.
+                Keep output compact: omit diagnosis, changeIntent, verificationPlan, and riskNotes unless essential.
+                Use small operations with exact anchors copied from EXACT_CONTENT.
+                Prefer insert_before_anchor, insert_after_anchor, replace_exact, or replace_between_anchors.
                 Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
                 Use search_replace only when the search block appears exactly once in the current file.
                 Use legacy unifiedDiff only when you are certain every hunk context line is copied exactly from the current file.
                 The server may reject unsafe or malformed output and may materialize your edits into a unified diff, but it must not author replacement content for you.
-                JSON shape:
-                {"action":"propose_patch|observe_more|ask_clarification|stop","editFormat":"operation_edit|full_file|search_replace|unified_diff","targetFiles":["path"],"diagnosis":"...","changeIntent":"...","operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text","reason":"..."}],"edits":[],"verificationPlan":["..."],"riskNotes":["..."]}
+                Compact JSON shape:
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text"}]}
                 For operation_edit, every anchorBefore, anchorAfter, and oldText value must be copied exactly from EXACT_CONTENT and must match uniquely.
                 For search_replace, edits items must be {"path":"path","search":"exact current text block","replace":"LLM-authored replacement block"}.
                 For full_file, edits items must be {"path":"path","fullFileContent":"complete updated file content"}.
@@ -1137,7 +1153,8 @@ public class CodeAgentService {
                 .append(instruction)
                 .append("\n\nSERVER_ROLE:\n")
                 .append("- The server only provides observations and validates safety.\n")
-                .append("- You must decide the target lines, diagnosis, and patch content.\n")
+                .append("- You must decide the target lines and patch content.\n")
+                .append("- Keep JSON compact so it is not truncated.\n")
                 .append("- If the supplied file content is insufficient, choose action=observe_more instead of guessing.\n\n")
                 .append("TARGET_FILES:\n");
         for (CodePatchFileLoader.LoadedPatchFile file : files) {
@@ -1150,12 +1167,12 @@ public class CodeAgentService {
         return """
                 You repair invalid LearnBot patch proposals.
                 Return JSON only.
-                You decide the corrected diagnosis and patch from the exact current file contents.
                 Do not output <think> blocks, reasoning, analysis, or explanations.
                 Do not use markdown fences.
                 Modify only the provided target files.
                 Do not create, delete, rename, or chmod files.
                 Prefer editFormat=operation_edit. Use small operations with exact anchors copied from EXACT_CONTENT.
+                Keep output compact: no diagnosis/changeIntent/verificationPlan/riskNotes unless essential.
                 Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
                 Use search_replace only when the search block appears exactly once in the current file.
                 Use legacy unifiedDiff only when every hunk context line is copied exactly from the provided file contents, including indentation.
@@ -1163,8 +1180,8 @@ public class CodeAgentService {
                 Preserve the user's requested language and content constraints.
                 The provided file contents are the actual current workspace state.
                 If the previous output declined because a file looked incomplete or truncated, treat that incomplete file state as the bug and produce a minimal repair diff when it satisfies the user request.
-                JSON shape:
-                {"action":"propose_patch|observe_more|ask_clarification|stop","editFormat":"operation_edit|full_file|search_replace|unified_diff","targetFiles":["path"],"diagnosis":"...","changeIntent":"...","operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text","reason":"..."}],"edits":[],"verificationPlan":["..."],"riskNotes":["..."]}
+                Compact JSON shape:
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["path"],"operations":[{"path":"path","operation":"replace_between_anchors|insert_after_anchor|insert_before_anchor|replace_exact|append_to_file","anchorBefore":"exact current text","anchorAfter":"exact current text","oldText":"exact current text","newText":"LLM-authored replacement or insertion text"}]}
                 For operation_edit, every anchorBefore, anchorAfter, and oldText value must be copied exactly from EXACT_CONTENT and must match uniquely.
                 For search_replace, edits items must be {"path":"path","search":"exact current text block","replace":"LLM-authored replacement block"}.
                 For full_file, edits items must be {"path":"path","fullFileContent":"complete updated file content"}.
@@ -1237,14 +1254,14 @@ public class CodeAgentService {
         }
         builder.append("Validation warnings:\n");
         for (String warning : validationWarnings == null ? List.<String>of() : validationWarnings) {
-            builder.append("- ").append(warning).append("\n");
+            builder.append("- ").append(boundedText(warning, VALIDATION_WARNING_PREVIEW_CHARS)).append("\n");
         }
         builder.append("\nTarget files with exact current contents:\n");
         for (CodePatchFileLoader.LoadedPatchFile file : files) {
             appendFileContext(builder, file, true);
         }
-        builder.append("Previous invalid output for reference only; do not assume it was applied:\n")
-                .append(safe(previousOutput))
+        builder.append("Previous invalid output preview for reference only; do not assume it was applied:\n")
+                .append(boundedPreviousPatchOutput(previousOutput))
                 .append("\n");
         return builder.toString();
     }
@@ -1261,10 +1278,8 @@ public class CodeAgentService {
                 .append("EDIT_RULE: For operation_edit, the server will materialize only your newText into a unified diff.\n")
                 .append("EDIT_RULE: For full_file, return the complete updated file content authored by you.\n")
                 .append("EDIT_RULE: For search_replace, the search block must be copied exactly from EXACT_CONTENT and match once.\n")
-                .append("PATCH_RULE: If using legacy unifiedDiff, hunk context must copy exact lines from EXACT_CONTENT, not LINE_NUMBERED_VIEW.\n")
-                .append("LINE_NUMBERED_VIEW:\n");
-        appendLineNumberedContent(builder, lines);
-        builder.append("EXACT_CONTENT_START ").append(file.path()).append("\n")
+                .append("PATCH_RULE: If using legacy unifiedDiff, hunk context must copy exact lines from EXACT_CONTENT.\n")
+                .append("EXACT_CONTENT_START ").append(file.path()).append("\n")
                 .append(content)
                 .append(content.endsWith("\n") || content.isEmpty() ? "" : "\n")
                 .append("EXACT_CONTENT_END ").append(file.path()).append("\n\n");
@@ -1281,6 +1296,18 @@ public class CodeAgentService {
         if (lines.size() > maxLines) {
             builder.append("... ").append(lines.size() - maxLines).append(" additional lines omitted from numbered view; exact content remains above/below if available.\n");
         }
+    }
+
+    private String boundedPreviousPatchOutput(String value) {
+        return boundedText(value, PREVIOUS_PATCH_OUTPUT_PREVIEW_CHARS);
+    }
+
+    private String boundedText(String value, int maxChars) {
+        String clean = safe(value).replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (maxChars <= 0 || clean.length() <= maxChars) {
+            return clean;
+        }
+        return clean.substring(0, maxChars) + "\n...<truncated>";
     }
 
     private String materializePatchFromModelOutput(
@@ -1496,7 +1523,7 @@ public class CodeAgentService {
             String path,
             String phase
     ) {
-        String operation = safe(edit.operation()).trim().toLowerCase(Locale.ROOT).replace('-', '_');
+        String operation = normalizeOperationName(edit.operation());
         if (operation.isBlank()) {
             operation = !safe(edit.oldText()).isBlank() ? "replace_exact" : "replace_between_anchors";
         }
@@ -1507,9 +1534,9 @@ public class CodeAgentService {
         String anchorAfter = safe(edit.anchorAfter()).replace("\r\n", "\n").replace('\r', '\n');
         return switch (operation) {
             case "replace_exact" -> replaceExactOperation(normalizedCurrent, oldText, newText, path, phase);
-            case "replace_between_anchors" -> replaceBetweenAnchorsOperation(normalizedCurrent, anchorBefore, anchorAfter, newText, path, phase);
-            case "insert_after_anchor" -> insertNearAnchorOperation(normalizedCurrent, anchorBefore, newText, path, phase, true);
-            case "insert_before_anchor" -> insertNearAnchorOperation(normalizedCurrent, anchorAfter, newText, path, phase, false);
+            case "replace_between_anchors" -> replaceBetweenAnchorsOperation(normalizedCurrent, anchorBefore, anchorAfter, oldText, newText, path, phase);
+            case "insert_after_anchor" -> insertNearAnchorOperation(normalizedCurrent, anchorBefore, anchorAfter, newText, path, phase, true);
+            case "insert_before_anchor" -> insertNearAnchorOperation(normalizedCurrent, anchorBefore, anchorAfter, newText, path, phase, false);
             case "append_to_file" -> OperationApplyResult.success(appendToFile(normalizedCurrent, newText));
             default -> OperationApplyResult.failure(
                     "LLM patch " + phase + " operation_edit for " + path + " used unsupported operation: " + edit.operation(),
@@ -1539,10 +1566,17 @@ public class CodeAgentService {
             String current,
             String anchorBefore,
             String anchorAfter,
+            String oldText,
             String newText,
             String path,
             String phase
     ) {
+        if (!oldText.isBlank()) {
+            int oldTextMatches = countOccurrences(current, oldText);
+            if (oldTextMatches == 1) {
+                return OperationApplyResult.success(current.replace(oldText, newText));
+            }
+        }
         if (anchorBefore.isBlank() || anchorAfter.isBlank()) {
             return OperationApplyResult.failure(
                     "LLM patch " + phase + " replace_between_anchors operation for " + path + " required non-blank anchorBefore and anchorAfter.",
@@ -1551,34 +1585,36 @@ public class CodeAgentService {
         }
         int beforeMatches = countOccurrences(current, anchorBefore);
         int afterMatches = countOccurrences(current, anchorAfter);
-        if (beforeMatches != 1 || afterMatches != 1) {
+        AnchorRange range = uniqueAnchorRange(current, anchorBefore, anchorAfter);
+        if (range == null) {
             return OperationApplyResult.failure(
                     "LLM patch " + phase + " replace_between_anchors operation for " + path
                             + " matched anchorBefore=" + beforeMatches + ", anchorAfter=" + afterMatches + "; exact single-match anchors are required.",
                     "replace_between_anchors anchors did not match exactly once"
             );
         }
-        int beforeIndex = current.indexOf(anchorBefore);
-        int start = beforeIndex + anchorBefore.length();
-        int end = current.indexOf(anchorAfter);
-        if (end < start) {
-            return OperationApplyResult.failure(
-                    "LLM patch " + phase + " replace_between_anchors operation for " + path + " had anchorAfter before anchorBefore.",
-                    "replace_between_anchors anchor order was invalid"
-            );
-        }
-        return OperationApplyResult.success(current.substring(0, start) + newText + current.substring(end));
+        return OperationApplyResult.success(current.substring(0, range.start()) + newText + current.substring(range.end()));
     }
 
     private OperationApplyResult insertNearAnchorOperation(
             String current,
-            String anchor,
+            String anchorBefore,
+            String anchorAfter,
             String newText,
             String path,
             String phase,
             boolean after
     ) {
         String operationName = after ? "insert_after_anchor" : "insert_before_anchor";
+        String primaryAnchor = after ? anchorBefore : anchorAfter;
+        String compatibilityAnchor = after ? anchorAfter : anchorBefore;
+        String anchor = primaryAnchor.isBlank() ? compatibilityAnchor : primaryAnchor;
+        String disambiguatingBefore = after ? anchorBefore : "";
+        String disambiguatingAfter = after ? anchorAfter : "";
+        if (primaryAnchor.isBlank() && !compatibilityAnchor.isBlank()) {
+            disambiguatingBefore = after ? anchor : "";
+            disambiguatingAfter = after ? "" : anchor;
+        }
         if (anchor.isBlank()) {
             return OperationApplyResult.failure(
                     "LLM patch " + phase + " " + operationName + " operation for " + path + " had a blank anchor.",
@@ -1586,16 +1622,138 @@ public class CodeAgentService {
             );
         }
         int matches = countOccurrences(current, anchor);
-        if (matches != 1) {
+        AnchorPoint point = matches == 1
+                ? new AnchorPoint(current.indexOf(anchor), after ? current.indexOf(anchor) + anchor.length() : current.indexOf(anchor))
+                : uniqueInsertionPoint(current, disambiguatingBefore, disambiguatingAfter, after);
+        if (point == null) {
             return OperationApplyResult.failure(
                     "LLM patch " + phase + " " + operationName + " operation for " + path
                             + " matched " + matches + " anchors; exact single-match anchor is required.",
                     "operation_edit anchor did not match exactly once"
             );
         }
-        int index = current.indexOf(anchor);
-        int insertion = after ? index + anchor.length() : index;
-        return OperationApplyResult.success(current.substring(0, insertion) + newText + current.substring(insertion));
+        return OperationApplyResult.success(current.substring(0, point.insertion()) + newText + current.substring(point.insertion()));
+    }
+
+    private String normalizeOperationName(String operation) {
+        String normalized = safe(operation)
+                .trim()
+                .replace('-', '_')
+                .replace(' ', '_')
+                .toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "replace", "replace_text", "replace_exact_text", "search_replace" -> "replace_exact";
+            case "replace_between", "replace_between_anchor", "replace_between_anchors" -> "replace_between_anchors";
+            case "insert_after", "insert_after_anchor", "insert_after_anchors" -> "insert_after_anchor";
+            case "insertafter", "insertafteranchor", "insert_afteranchor" -> "insert_after_anchor";
+            case "insert_before", "insert_before_anchor", "insert_before_anchors" -> "insert_before_anchor";
+            case "insertbefore", "insertbeforeanchor", "insert_beforeanchor" -> "insert_before_anchor";
+            case "append", "append_file", "append_to_file" -> "append_to_file";
+            default -> normalized;
+        };
+    }
+
+    private AnchorRange uniqueAnchorRange(String current, String anchorBefore, String anchorAfter) {
+        List<Integer> starts = occurrenceIndexes(current, anchorBefore);
+        List<Integer> ends = occurrenceIndexes(current, anchorAfter);
+        if (starts.isEmpty() || ends.isEmpty()) {
+            return null;
+        }
+        List<AnchorRange> ranges = new ArrayList<>();
+        for (int beforeIndex : starts) {
+            int start = beforeIndex + anchorBefore.length();
+            Integer end = ends.stream()
+                    .filter(candidate -> candidate >= start)
+                    .findFirst()
+                    .orElse(null);
+            if (end != null) {
+                ranges.add(new AnchorRange(start, end));
+            }
+        }
+        if (ranges.size() == 1) {
+            return ranges.get(0);
+        }
+        if (starts.size() == 1) {
+            int start = starts.get(0) + anchorBefore.length();
+            return ends.stream()
+                    .filter(candidate -> candidate >= start)
+                    .findFirst()
+                    .map(end -> new AnchorRange(start, end))
+                    .orElse(null);
+        }
+        if (ends.size() == 1) {
+            int end = ends.get(0);
+            Integer beforeIndex = starts.stream()
+                    .filter(candidate -> candidate + anchorBefore.length() <= end)
+                    .reduce((first, second) -> second)
+                    .orElse(null);
+            return beforeIndex == null ? null : new AnchorRange(beforeIndex + anchorBefore.length(), end);
+        }
+        return null;
+    }
+
+    private AnchorPoint uniqueInsertionPoint(String current, String anchorBefore, String anchorAfter, boolean after) {
+        if (after) {
+            if (anchorBefore.isBlank()) {
+                return null;
+            }
+            List<Integer> anchorIndexes = occurrenceIndexes(current, anchorBefore);
+            if (anchorIndexes.isEmpty()) {
+                return null;
+            }
+            if (anchorAfter.isBlank()) {
+                return anchorIndexes.size() == 1
+                        ? new AnchorPoint(anchorIndexes.get(0), anchorIndexes.get(0) + anchorBefore.length())
+                        : null;
+            }
+            List<AnchorPoint> points = new ArrayList<>();
+            for (int index = 0; index < anchorIndexes.size(); index++) {
+                int anchorIndex = anchorIndexes.get(index);
+                int insertion = anchorIndex + anchorBefore.length();
+                int nextSameAnchor = index + 1 < anchorIndexes.size() ? anchorIndexes.get(index + 1) : current.length();
+                int boundary = current.indexOf(anchorAfter, insertion);
+                if (boundary >= insertion && boundary <= nextSameAnchor) {
+                    points.add(new AnchorPoint(anchorIndex, insertion));
+                }
+            }
+            return points.size() == 1 ? points.get(0) : null;
+        }
+
+        if (anchorAfter.isBlank()) {
+            return null;
+        }
+        List<Integer> anchorIndexes = occurrenceIndexes(current, anchorAfter);
+        if (anchorIndexes.isEmpty()) {
+            return null;
+        }
+        if (anchorBefore.isBlank()) {
+            return anchorIndexes.size() == 1
+                    ? new AnchorPoint(anchorIndexes.get(0), anchorIndexes.get(0))
+                    : null;
+        }
+        List<AnchorPoint> points = new ArrayList<>();
+        int previousSameAnchor = -1;
+        for (int anchorIndex : anchorIndexes) {
+            int beforeIndex = current.lastIndexOf(anchorBefore, anchorIndex);
+            if (beforeIndex >= 0 && beforeIndex >= previousSameAnchor) {
+                points.add(new AnchorPoint(anchorIndex, anchorIndex));
+            }
+            previousSameAnchor = anchorIndex;
+        }
+        return points.size() == 1 ? points.get(0) : null;
+    }
+
+    private List<Integer> occurrenceIndexes(String value, String needle) {
+        if (value == null || needle == null || needle.isBlank()) {
+            return List.of();
+        }
+        List<Integer> indexes = new ArrayList<>();
+        int index = value.indexOf(needle);
+        while (index >= 0) {
+            indexes.add(index);
+            index = value.indexOf(needle, index + Math.max(1, needle.length()));
+        }
+        return indexes;
     }
 
     private String appendToFile(String current, String newText) {
@@ -1617,15 +1775,15 @@ public class CodeAgentService {
                 edits.add(new StructuredEdit(
                         safe(defaultFormat),
                         normalizePatchPath(path),
-                        firstNonBlank(edit.path("operation").asText(""), edit.path("type").asText("")),
-                        edit.path("fullFileContent").asText(null),
-                        edit.path("content").asText(null),
-                        edit.path("search").asText(null),
-                        edit.path("replace").asText(null),
-                        edit.path("oldText").asText(null),
-                        edit.path("newText").asText(null),
-                        edit.path("anchorBefore").asText(null),
-                        edit.path("anchorAfter").asText(null)
+                        textField(edit, "operation", "type"),
+                        textField(edit, "fullFileContent", "full_file_content", "fullFile", "replacementContent"),
+                        textField(edit, "content", "replacement"),
+                        textField(edit, "search", "oldText", "old_text"),
+                        textField(edit, "replace", "newText", "new_text"),
+                        textField(edit, "oldText", "old_text", "search"),
+                        textField(edit, "newText", "new_text", "replacement", "replace"),
+                        textField(edit, "anchorBefore", "anchor_before", "beforeAnchor", "before_anchor", "anchor"),
+                        textField(edit, "anchorAfter", "anchor_after", "afterAnchor", "after_anchor")
                 ));
             }
         } else if ("full_file".equals(defaultFormat) && root.has("fullFileContent")) {
@@ -1660,21 +1818,34 @@ public class CodeAgentService {
                 edits.add(new StructuredEdit(
                         "operation_edit",
                         normalizePatchPath(path),
-                        firstNonBlank(edit.path("operation").asText(""), edit.path("type").asText("")),
+                        textField(edit, "operation", "type"),
                         null,
                         null,
                         null,
                         null,
-                        edit.path("oldText").asText(null),
-                        edit.path("newText").asText(null),
-                        edit.path("anchorBefore").asText(null),
-                        edit.path("anchorAfter").asText(null)
+                        textField(edit, "oldText", "old_text", "search"),
+                        textField(edit, "newText", "new_text", "replacement", "replace", "insertText", "insert_text"),
+                        textField(edit, "anchorBefore", "anchor_before", "beforeAnchor", "before_anchor", "anchor"),
+                        textField(edit, "anchorAfter", "anchor_after", "afterAnchor", "after_anchor")
                 ));
             }
         }
         return edits.stream()
                 .filter(edit -> !edit.path().isBlank())
                 .toList();
+    }
+
+    private String textField(JsonNode node, String... names) {
+        if (node == null || names == null) {
+            return null;
+        }
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value != null && !value.isMissingNode() && !value.isNull()) {
+                return value.asText(null);
+            }
+        }
+        return null;
     }
 
     private String firstTargetPath(JsonNode root, List<CodePatchFileLoader.LoadedPatchFile> files) {

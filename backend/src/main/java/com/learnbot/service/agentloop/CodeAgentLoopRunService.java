@@ -33,6 +33,8 @@ import java.util.UUID;
 
 @Service
 public class CodeAgentLoopRunService {
+    private static final int MAX_MODEL_SELECTED_TARGET_FILES = 5;
+
     private final CodeAgentLoopPreviewService loopPreviewService;
     private final CodeAgentLoopToolSelectionService toolSelectionService;
     private final CodeAgentLoopRunnerService runnerService;
@@ -331,7 +333,7 @@ public class CodeAgentLoopRunService {
             return null;
         }
         var nextPreview = runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId);
-        if (nextPreview.candidate() != null && nextPreview.candidate().toolName() == LocalAgentToolName.FILE_READ) {
+        if (nextPreview.candidate() != null && isDiscoveryOrFileReadCandidate(nextPreview.candidate().toolName())) {
             return null;
         }
 
@@ -384,8 +386,7 @@ public class CodeAgentLoopRunService {
             String diff = patch.files().stream()
                     .map(PatchFileDiff::diff)
                     .filter(value -> value != null && !value.isBlank())
-                    .findFirst()
-                    .orElse("");
+                    .collect(java.util.stream.Collectors.joining("\n"));
             if (diff.isBlank()) {
                 loopPreviewService.appendPatchProposalBlocked(
                         userId,
@@ -436,6 +437,12 @@ public class CodeAgentLoopRunService {
                         && event.toolName() == LocalAgentToolName.PATCH_APPLY);
     }
 
+    private boolean isDiscoveryOrFileReadCandidate(LocalAgentToolName toolName) {
+        return toolName == LocalAgentToolName.WORKSPACE_TREE
+                || toolName == LocalAgentToolName.WORKSPACE_SEARCH
+                || toolName == LocalAgentToolName.FILE_READ;
+    }
+
     private List<String> fileReadTargets(CodeAgentLoopTimelineSummary timeline) {
         Set<String> targets = new LinkedHashSet<>();
         for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
@@ -476,17 +483,17 @@ public class CodeAgentLoopRunService {
             return TargetFileSelection.ready(safeCandidates);
         }
 
+        List<RecentPatchContext> recentContexts = recentPatchContexts(userId, repositoryId, workspaceId, timeline, safeCandidates);
+        TargetFileSelection modelSelection = selectPatchTargetsWithModel(timeline, safeCandidates, recentContexts);
+        if (modelSelection != null && modelSelection.ready()) {
+            return modelSelection;
+        }
+
         List<String> explicitMatches = safeCandidates.stream()
                 .filter(path -> instructionMentionsPath(instruction, path))
                 .toList();
         if (explicitMatches.size() == 1) {
             return TargetFileSelection.ready(explicitMatches);
-        }
-
-        List<RecentPatchContext> recentContexts = recentPatchContexts(userId, repositoryId, workspaceId, timeline, safeCandidates);
-        TargetFileSelection modelSelection = selectPatchTargetsWithModel(timeline, safeCandidates, recentContexts);
-        if (modelSelection != null && modelSelection.ready()) {
-            return modelSelection;
         }
 
         return TargetFileSelection.blocked(
@@ -525,7 +532,7 @@ public class CodeAgentLoopRunService {
                     selected.add(path);
                 }
             }
-            if (selected.size() == 1) {
+            if (!selected.isEmpty() && selected.size() <= MAX_MODEL_SELECTED_TARGET_FILES) {
                 return TargetFileSelection.ready(selected, targetSelectionDetails(root, recentContexts));
             }
             return null;
@@ -536,10 +543,11 @@ public class CodeAgentLoopRunService {
 
     private String targetSelectionSystemPrompt() {
         return """
-                You select the exact target file for a LearnBot local code edit.
+                You select the exact target file or files for a LearnBot local code edit.
                 Return JSON only.
                 Select targetFiles only from the provided candidate list.
                 If the user asks for one file and it is clear, return exactly one target file.
+                If the requested change clearly spans multiple listed files, return every required target file, up to five files.
                 Use the current file observations and recent successful edit context as evidence.
                 You may use recent successful edit context only as evidence for what the user means now.
                 Never select a file only because it appeared in recent context; it must also be in the provided candidate list.
@@ -584,6 +592,10 @@ public class CodeAgentLoopRunService {
                 Object content = map.get("contentForPatch");
                 builder.append("FILE: ").append(path == null ? "" : path).append("\n");
                 builder.append("EXTENSION: ").append(path == null ? "" : extensionForPath(String.valueOf(path))).append("\n");
+                if (content instanceof String text) {
+                    builder.append("CONTENT_LENGTH: ").append(text.length()).append("\n");
+                    builder.append("LINE_COUNT: ").append(lineCount(text)).append("\n");
+                }
                 builder.append("PREVIEW: ").append(preview == null ? "" : preview).append("\n");
                 if (content instanceof String text && !text.isBlank()) {
                     builder.append("CONTENT_FOR_TARGET_DECISION:\n")
@@ -598,6 +610,19 @@ public class CodeAgentLoopRunService {
                 {"targetFiles":["path/from/candidates"],"reason":"...","confidence":"low|medium|high","usedRecentContext":false,"contextSourceLoopId":null,"needsClarification":false}
                 """);
         return builder.toString();
+    }
+
+    private int lineCount(String value) {
+        if (value == null || value.isEmpty()) {
+            return 0;
+        }
+        int count = 1;
+        for (int index = 0; index < value.length(); index++) {
+            if (value.charAt(index) == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private Map<String, Object> targetSelectionDetails(JsonNode root, List<RecentPatchContext> recentContexts) {

@@ -2,6 +2,7 @@ package com.learnbot.service.agentloop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.AgentExecutionTarget;
+import com.learnbot.dto.CodeAgentLoopNextActionResponse;
 import com.learnbot.dto.CodeAgentLoopTimelineEventSummary;
 import com.learnbot.dto.CodeAgentLoopTimelineSummary;
 import com.learnbot.dto.LocalAgentQueuedToolRequest;
@@ -17,6 +18,7 @@ import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.LocalAgentToolGatewayService;
 import com.learnbot.service.OllamaClient;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -112,6 +114,51 @@ class CodeAgentLoopToolSelectionServiceTest {
         assertThat(result.modelDecision()).containsEntry("candidateId", "file.read:home.html")
                 .containsEntry("path", "home.html")
                 .containsEntry("toolName", "file.read");
+    }
+
+    @Test
+    void modelToolSelectionPromptIncludesInstructionAndFileCandidateMetadata() {
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        CodeAgentLoopToolCandidate fallback = candidate(userId, repositoryId, loopId, agentId, workspaceId, LocalAgentToolName.GIT_STATUS);
+        CodeAgentLoopToolCandidate fileRead = candidateWithInput(
+                userId,
+                repositoryId,
+                loopId,
+                agentId,
+                workspaceId,
+                LocalAgentToolName.FILE_READ,
+                Map.of(
+                        "path", "home.html",
+                        "fileName", "home.html",
+                        "extension", "html",
+                        "candidateRank", 2,
+                        "selectionReason", "Selected from completed workspace observations.",
+                        "maxBytes", 80_000
+                )
+        );
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId))
+                .thenReturn(previewWithInstruction(repositoryId, loopId, "PREPARED_READ_ONLY_CANDIDATE", fallback, "메인페이지를 더 화려하게 꾸며줘"));
+        when(runnerService.readOnlyToolCandidates(eq(userId), eq(repositoryId), any(), eq(agentId), eq(workspaceId)))
+                .thenReturn(List.of(fallback, fileRead));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(400))).thenReturn(chat("""
+                {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","candidateId":"file.read:home.html","toolName":"file.read","path":"home.html","query":"","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"Read the page file."}
+                """));
+
+        var result = service.selectNextToolPreview(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(result.selectionDecision()).isEqualTo("MODEL_SELECTED_READ_ONLY_CANDIDATE");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture(), eq(400));
+        assertThat(promptCaptor.getValue())
+                .contains("메인페이지를 더 화려하게 꾸며줘")
+                .contains("fileName: home.html")
+                .contains("extension: html")
+                .contains("candidateRank: 2")
+                .contains("Selected from completed workspace observations.");
     }
 
     @Test
@@ -946,6 +993,51 @@ class CodeAgentLoopToolSelectionServiceTest {
                 false,
                 false,
                 null,
+                candidate,
+                Map.of("mutationAllowed", false)
+        );
+    }
+
+    private CodeAgentLoopRunnerPreviewResponse previewWithInstruction(
+            UUID repositoryId,
+            UUID loopId,
+            String runnerDecision,
+            CodeAgentLoopToolCandidate candidate,
+            String instruction
+    ) {
+        return new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                runnerDecision,
+                "Preview.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                new CodeAgentLoopNextActionResponse(
+                        loopId,
+                        repositoryId,
+                        "RECORDED",
+                        "QUEUE_READ_ONLY_OBSERVATION",
+                        "Preview.",
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        UUID.randomUUID(),
+                        1,
+                        "LOOP_NEXT_DECISION_RECORDED",
+                        Map.of("instruction", instruction)
+                ),
                 candidate,
                 Map.of("mutationAllowed", false)
         );

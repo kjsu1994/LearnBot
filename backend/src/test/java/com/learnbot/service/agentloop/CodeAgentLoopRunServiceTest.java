@@ -11,7 +11,9 @@ import com.learnbot.dto.LocalAgentToolName;
 import com.learnbot.dto.LocalAgentToolStatus;
 import com.learnbot.dto.PatchFileDiff;
 import com.learnbot.dto.loop.CodeAgentLoopRunStatusResponse;
+import com.learnbot.dto.loop.CodeAgentLoopRunnerEnqueueResponse;
 import com.learnbot.dto.loop.CodeAgentLoopRunnerPreviewResponse;
+import com.learnbot.dto.loop.CodeAgentLoopToolCandidate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeAgentLocalPatchRequestService;
@@ -936,6 +938,232 @@ class CodeAgentLoopRunServiceTest {
                 any(),
                 any()
         );
+    }
+
+    @Test
+    void advanceAllowsModelToSelectMultipleCandidateFilesForPatch() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "Update the HTML page and its JavaScript tabs together";
+        String htmlDiff = """
+                --- a/home.html
+                +++ b/home.html
+                @@ -1 +1,2 @@
+                 <main></main>
+                +<script src="tabs.js"></script>
+                """;
+        String jsDiff = """
+                --- a/tabs.js
+                +++ b/tabs.js
+                @@ -1 +1,2 @@
+                 export function initTabs() {}
+                +export function enhanceTabs() {}
+                """;
+        String combinedDiff = htmlDiff + "\n" + jsDiff;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("home.html", "<main></main>\n"),
+                        fileReadEvent("tabs.js", "export function initTabs() {}\n"),
+                        fileReadEvent("readme.txt", "readme\n")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", combinedDiff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("""
+                {"targetFiles":["home.html","tabs.js"],"reason":"The requested UI change spans the page and its tab script.","confidence":"high","needsClarification":false}
+                """));
+        when(codeAgentService.patchFromLoadedFiles(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "ok",
+                List.of(new PatchFileDiff("home.html", htmlDiff), new PatchFileDiff("tabs.js", jsDiff)),
+                "medium",
+                List.of(),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(combinedDiff), eq(List.of("home.html", "tabs.js")), anyList(), anyMap()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        ArgumentCaptor<List<CodePatchFileLoader.LoadedPatchFile>> filesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeAgentService).patchFromLoadedFiles(eq(instruction), filesCaptor.capture());
+        assertThat(filesCaptor.getValue()).extracting(CodePatchFileLoader.LoadedPatchFile::path)
+                .containsExactly("home.html", "tabs.js");
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(combinedDiff),
+                eq(List.of("home.html", "tabs.js")),
+                anyList(),
+                anyMap()
+        );
+    }
+
+    @Test
+    void advanceContinuesReadOnlyDiscoveryWhenWorkspaceSearchCandidateRemainsAfterOneFileRead() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "내 홈페이지에 간단한 조직도 탭을 만들어줘";
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(fileReadEvent("cold.txt", "Added by LearnBot.\n"))
+        );
+        CodeAgentLoopToolCandidate searchCandidate = new CodeAgentLoopToolCandidate(
+                loopId,
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.WORKSPACE_SEARCH,
+                LocalAgentApprovalState.NOT_REQUIRED,
+                false,
+                false,
+                false,
+                false,
+                Map.of("path", ".", "query", instruction, "mutationAllowed", false),
+                List.of()
+        );
+        CodeAgentLoopRunnerPreviewResponse searchPreview = new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "PREPARED_READ_ONLY_CANDIDATE",
+                "Search is still needed before patch target selection.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                searchCandidate,
+                Map.of()
+        );
+        CodeAgentLoopRunnerEnqueueResponse enqueueResponse = new CodeAgentLoopRunnerEnqueueResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "ENQUEUED_READ_ONLY_OBSERVATION",
+                "Queued workspace.search.",
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                searchPreview,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_LOCAL_AGENT_OBSERVATION"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(searchPreview);
+        when(runnerService.enqueueReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(enqueueResponse);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("ENQUEUED_READ_ONLY_OBSERVATION");
+        verify(codeAgentService, never()).patchFromLoadedFiles(any(), anyList());
+        verify(localPatchRequestService, never()).prepare(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyList(), anyMap());
+        verify(runnerService).enqueueReadOnlyNextStep(userId, repositoryId, loopId, agentId, workspaceId);
     }
 
     private CodeAgentLoopTimelineSummary timeline(

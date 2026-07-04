@@ -39,6 +39,9 @@ import java.util.UUID;
 
 @Service
 public class CodeAgentLoopRunnerService {
+    private static final int MAX_FILE_READ_CANDIDATES = 8;
+    private static final int MAX_FILE_READ_OBSERVATIONS_BEFORE_PATCH = 5;
+
     private final CodeAgentLoopPreviewService loopPreviewService;
     private final LocalAgentToolGatewayService toolGatewayService;
     private final SavedAnswerService savedAnswerService;
@@ -197,16 +200,21 @@ public class CodeAgentLoopRunnerService {
 
         CodeAgentLoopTimelineSummary timeline = timeline(userId, repositoryId, nextAction.loopId());
         Set<String> alreadyRead = alreadyReadPaths(timeline);
+        int rank = 0;
         for (String path : fileReadCandidates(timeline, instructionText(nextAction))) {
             if (alreadyRead.contains(path)) {
                 continue;
             }
+            rank++;
             addReadOnlyCandidate(candidates, candidateKeys, sessionId, userId, agentId, workspaceId, LocalAgentToolName.FILE_READ,
                     baseReadOnlyInput(repositoryId, nextAction, Map.of(
                             "path", path,
                             "maxBytes", 80_000,
+                            "fileName", fileNameForPath(path),
+                            "extension", extensionForPath(path),
+                            "candidateRank", rank,
                             "selectionSchema", "learnbot.server.code-agent.file-read-selection.v1",
-                            "selectionReason", "Selected from completed workspace.search/workspace.tree observations."
+                            "selectionReason", "Selected from completed workspace.search/workspace.tree observations for model target inspection."
                     )));
         }
 
@@ -619,7 +627,7 @@ public class CodeAgentLoopRunnerService {
                     if (succeededSearch == 0) {
                         return LocalAgentToolName.WORKSPACE_SEARCH;
                     }
-                    if (succeededFileReads < Math.min(3, fileReadCandidates(timeline, instructionText(nextAction)).size())) {
+                    if (succeededFileReads < Math.min(MAX_FILE_READ_OBSERVATIONS_BEFORE_PATCH, fileReadCandidates(timeline, instructionText(nextAction)).size())) {
                         return LocalAgentToolName.FILE_READ;
                     }
                     return succeededStatus > succeededDiff ? LocalAgentToolName.GIT_DIFF : LocalAgentToolName.GIT_STATUS;
@@ -704,8 +712,19 @@ public class CodeAgentLoopRunnerService {
         return ranked.stream()
                 .filter(this::safeRelativePath)
                 .sorted((left, right) -> Integer.compare(candidateScore(right, hints), candidateScore(left, hints)))
-                .limit(5)
+                .limit(MAX_FILE_READ_CANDIDATES)
                 .toList();
+    }
+
+    private String fileNameForPath(String path) {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        return normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
+    }
+
+    private String extensionForPath(String path) {
+        String fileName = fileNameForPath(path).toLowerCase(java.util.Locale.ROOT);
+        int dot = fileName.lastIndexOf('.');
+        return dot >= 0 && dot < fileName.length() - 1 ? fileName.substring(dot + 1) : "";
     }
 
     private List<String> filenameHints(String instruction) {

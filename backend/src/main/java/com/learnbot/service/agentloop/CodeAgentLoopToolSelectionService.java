@@ -932,25 +932,45 @@ public class CodeAgentLoopToolSelectionService {
             candidateText.append("- candidateId: ").append(candidateId(candidate)).append("\n");
             candidateText.append("  toolName: ").append(candidate.toolName().wireName()).append("\n");
             candidateText.append("  path: ").append(candidate.input().getOrDefault("path", "")).append("\n");
+            candidateText.append("  fileName: ").append(candidate.input().getOrDefault("fileName", "")).append("\n");
+            candidateText.append("  extension: ").append(candidate.input().getOrDefault("extension", "")).append("\n");
+            candidateText.append("  candidateRank: ").append(candidate.input().getOrDefault("candidateRank", "")).append("\n");
+            candidateText.append("  selectionReason: ").append(candidate.input().getOrDefault("selectionReason", "")).append("\n");
             candidateText.append("  query: ").append(candidate.input().getOrDefault("query", "")).append("\n");
             candidateText.append("  readOnly: ").append(!candidate.sideEffectful()).append("\n");
         }
         return """
+                User instruction:
+                %s
+
                 Next action: %s
                 Runner decision: %s
-                Deterministic fallback candidateId: %s
+                Fallback candidateId if model selection is invalid or unavailable: %s
 
                 Available read-only candidates:
                 %s
 
+                Pick the next observation that gives the model the best evidence for the user's requested edit.
+                Prefer file.read only when a listed candidate path, file name, extension, or context is relevant to the instruction.
+                Do not invent paths; choose exactly one listed candidateId.
+
                 Return this JSON shape:
                 {"actionKey":"QUEUE_READ_ONLY_OBSERVATION","candidateId":"...","toolName":"...","path":"...","query":"...","readOnly":true,"requiresApproval":false,"mutationAllowed":false,"reason":"..."}
                 """.formatted(
+                instructionText(preview),
                 preview.actionKey(),
                 preview.runnerDecision(),
                 deterministicCandidate == null ? "" : candidateId(deterministicCandidate),
                 candidateText
         );
+    }
+
+    private String instructionText(CodeAgentLoopRunnerPreviewResponse preview) {
+        if (preview == null || preview.nextAction() == null || preview.nextAction().sourceDetails() == null) {
+            return "";
+        }
+        Object value = preview.nextAction().sourceDetails().get("instruction");
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String candidateId(CodeAgentLoopToolCandidate candidate) {

@@ -102,6 +102,7 @@ Design implications:
 - A Local Agent may access only user-approved workspace roots.
 - Every agent action should be tied to a session id, evidence, tool input, tool output, approval state, and rollback state where applicable.
 - After file changes, the RAG index must eventually be synchronized through partial reindexing or another explicit freshness mechanism.
+- In agent loop automation, do not fake intelligence with server-authored content shortcuts. The LLM must decide the target, diagnosis, edit intent, and replacement content from observed context. The server may select execution targets, bound context, validate schemas, materialize LLM-authored structured edits into diffs, enforce approval gates, run safety checks, and report blockers. The server must not hardcode task-specific code, prose, HTML/CSS, file names, language-specific patches, or canned "fix" content to make a demo pass. If the LLM output is missing, malformed, truncated, unsafe, or insufficient, improve the loop structure, context packaging, retry strategy, validation, or user-facing blocker report instead of silently substituting server-written changes.
 
 Quality remains the core product value: prefer a slower but grounded and recoverable workflow over a fast workflow that produces weak answers or unsafe code changes.
 
