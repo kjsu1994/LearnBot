@@ -65,6 +65,7 @@ public class CodeAgentInteractiveService {
         IntentDecision decision = classifyIntent(message, request.intentHint(), context, warnings);
         return switch (decision.intent()) {
             case "ANSWER_ONLY" -> answerOnly(user, selectedSpaceId, accessibleSpaceIds, request, context, warnings);
+            case "ADVISE" -> adviceResponse(request, context, decision, warnings);
             case "REVIEW" -> commandResponse(request, context, decision, "review", warnings);
             case "FIX" -> commandResponse(request, context, decision, "fix", warnings);
             case "READ_CONTEXT" -> readContextResponse(request, context, decision, warnings);
@@ -94,6 +95,20 @@ public class CodeAgentInteractiveService {
                 "loadedContext",
                 objectMapper.valueToTree(loadedContext)
         );
+        RagConversationTurn turn = conversationService.requireTurn(
+                user,
+                selectedSpaceId,
+                RagConversationService.CODE,
+                request.repositoryId(),
+                request.conversationId(),
+                request.turnId()
+        );
+        if ("agent_advice".equals(turn.mode())) {
+            Map<String, Object> next = continueAdviceAfterContextRead(user, selectedSpaceId, request, turn, loadedContext);
+            if (!next.isEmpty()) {
+                return next;
+            }
+        }
         return sessionContext(user, selectedSpaceId, request.repositoryId(), request.conversationId());
     }
 
@@ -183,6 +198,41 @@ public class CodeAgentInteractiveService {
                 false,
                 List.of(),
                 List.of(),
+                metadata(context, decision),
+                warnings
+        );
+    }
+
+    private CodeAgentInteractiveTurnResponse adviceResponse(
+            CodeAgentInteractiveTurnRequest request,
+            RagConversationContext context,
+            IntentDecision decision,
+            List<String> warnings
+    ) {
+        CodeAskResponse marker = new CodeAskResponse(
+                "agent_advice",
+                "로컬 workspace 구조를 먼저 확인한 뒤 개선 후보를 제안하겠습니다. 최신 CLI에서는 자동으로 이어집니다. 이 문장만 보이고 멈추면 learnbot restart --install로 CLI를 갱신하세요.",
+                List.of(),
+                decision.confidence(),
+                List.of("interactive intent=" + decision.intent())
+        );
+        CodeAskResponse saved = conversationService.saveCodeTurn(context, request.parentTurnId(), request.message(), marker);
+        return response(
+                saved.conversationId(),
+                saved.turnId(),
+                "ADVISE",
+                null,
+                firstNonBlank(decision.goal(), request.message()),
+                saved.answer(),
+                null,
+                false,
+                false,
+                true,
+                List.of(),
+                List.of(Map.of(
+                        "tool", "workspace.tree",
+                        "input", Map.of("path", ".", "maxEntries", 120, "maxDepth", 4)
+                )),
                 metadata(context, decision),
                 warnings
         );
@@ -368,7 +418,7 @@ public class CodeAgentInteractiveService {
             String json = extractJson(content);
             JsonNode root = objectMapper.readTree(json);
             String intent = safe(root.path("intent").asText()).toUpperCase(Locale.ROOT);
-            if (!List.of("ANSWER_ONLY", "REVIEW", "FIX", "READ_CONTEXT", "ASK_CLARIFICATION").contains(intent)) {
+            if (!List.of("ANSWER_ONLY", "ADVISE", "REVIEW", "FIX", "READ_CONTEXT", "ASK_CLARIFICATION").contains(intent)) {
                 return null;
             }
             return new IntentDecision(
@@ -388,8 +438,9 @@ public class CodeAgentInteractiveService {
         return """
                 You classify a LearnBot local coding-agent chat turn.
                 Return only JSON with keys: intent, goal, targetFiles, toolPlan, clarifyingQuestion, confidence.
-                intent must be one of ANSWER_ONLY, REVIEW, FIX, READ_CONTEXT, ASK_CLARIFICATION.
+                intent must be one of ANSWER_ONLY, ADVISE, REVIEW, FIX, READ_CONTEXT, ASK_CLARIFICATION.
                 ANSWER_ONLY: user asks an explanation, how-to guidance, or a question without asking the agent to change files.
+                ADVISE: user asks the local agent to inspect the workspace and suggest possible improvements, next steps, or what could be better, without directly asking to apply a change yet.
                 REVIEW: user asks to inspect risks, regressions, diff, or current code without changing files.
                 FIX: user asks the agent to modify, create, delete, improve, repair, implement, or apply code.
                 READ_CONTEXT: user asks you to read, load, remember, inspect, or use a specific local instruction/context file before later work.
@@ -445,6 +496,215 @@ public class CodeAgentInteractiveService {
             normalized.add(clean);
         }
         return normalized.stream().limit(8).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> continueAdviceAfterContextRead(
+            AppUser user,
+            UUID selectedSpaceId,
+            CodeAgentInteractiveContextReadResultRequest request,
+            RagConversationTurn turn,
+            Map<String, Object> loadedContext
+    ) {
+        List<Map<String, Object>> files = mapList(loadedContext.get("files"));
+        List<Map<String, Object>> toolResults = mapList(loadedContext.get("toolResults"));
+        List<String> warnings = stringList(loadedContext.get("warnings"));
+        if (files.stream().anyMatch(this::isSucceededFileRead)) {
+            Map<String, Object> advice = generateAdviceFromLoadedFiles(turn, files, warnings);
+            conversationService.updateTurnMetadata(
+                    user,
+                    selectedSpaceId,
+                    RagConversationService.CODE,
+                    request.repositoryId(),
+                    request.conversationId(),
+                    request.turnId(),
+                    "adviceResult",
+                    objectMapper.valueToTree(advice)
+            );
+            return advice;
+        }
+        Map<String, Object> readPlan = selectAdviceReadPlan(turn, toolResults, warnings);
+        if (!readPlan.isEmpty()) {
+            conversationService.updateTurnMetadata(
+                    user,
+                    selectedSpaceId,
+                    RagConversationService.CODE,
+                    request.repositoryId(),
+                    request.conversationId(),
+                    request.turnId(),
+                    "adviceReadPlan",
+                    objectMapper.valueToTree(readPlan)
+            );
+        }
+        return readPlan;
+    }
+
+    private Map<String, Object> selectAdviceReadPlan(
+            RagConversationTurn turn,
+            List<Map<String, Object>> toolResults,
+            List<String> warnings
+    ) {
+        try {
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
+                    adviceFileSelectionSystemPrompt(),
+                    adviceFileSelectionUserPrompt(turn, toolResults),
+                    OllamaClient.ChatRole.PRIMARY,
+                    900,
+                    Duration.ofSeconds(30)
+            );
+            JsonNode root = objectMapper.readTree(extractJson(result.content()));
+            List<String> targets = sanitizeTargetFiles(parseStringArray(root.path("targetFiles")), warnings);
+            if (targets.isEmpty()) {
+                return Map.of(
+                        "schema", "learnbot.server.code-agent.advice-result.v1",
+                        "contextRequired", false,
+                        "answer", firstNonBlank(root.path("clarifyingQuestion").asText(), "읽을 로컬 파일을 특정하지 못했습니다. 화면명이나 파일명을 조금 더 알려주세요."),
+                        "adviceCandidates", List.of(),
+                        "warnings", warnings
+                );
+            }
+            List<Map<String, Object>> toolPlan = targets.stream()
+                    .map(path -> Map.<String, Object>of(
+                            "tool", "file.read",
+                            "input", Map.of("path", path, "maxBytes", 16_000)
+                    ))
+                    .toList();
+            return Map.of(
+                    "schema", "learnbot.server.code-agent.advice-read-plan.v1",
+                    "contextRequired", true,
+                    "answer", "개선 후보를 판단하기 위해 로컬 파일을 읽겠습니다: " + String.join(", ", targets),
+                    "targetFiles", targets,
+                    "toolPlan", toolPlan,
+                    "warnings", warnings
+            );
+        } catch (Exception ex) {
+            return Map.of(
+                    "schema", "learnbot.server.code-agent.advice-result.v1",
+                    "contextRequired", false,
+                    "answer", "로컬 workspace 구조는 확인했지만 읽을 파일 선택에 실패했습니다. 파일명을 포함해 다시 요청해주세요.",
+                    "adviceCandidates", List.of(),
+                    "warnings", appendWarning(warnings, "Advice file selection failed: " + ex.getMessage())
+            );
+        }
+    }
+
+    private Map<String, Object> generateAdviceFromLoadedFiles(
+            RagConversationTurn turn,
+            List<Map<String, Object>> files,
+            List<String> warnings
+    ) {
+        try {
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
+                    adviceAnswerSystemPrompt(),
+                    adviceAnswerUserPrompt(turn, files),
+                    OllamaClient.ChatRole.PRIMARY,
+                    1800,
+                    Duration.ofSeconds(45)
+            );
+            JsonNode root = objectMapper.readTree(extractJson(result.content()));
+            List<Map<String, Object>> candidates = parseCandidateMaps(root.path("candidates"));
+            String answer = adviceAnswerText(root, candidates);
+            return Map.of(
+                    "schema", "learnbot.server.code-agent.advice-result.v1",
+                    "contextRequired", false,
+                    "answer", answer,
+                    "adviceCandidates", candidates,
+                    "warnings", warnings
+            );
+        } catch (Exception ex) {
+            return Map.of(
+                    "schema", "learnbot.server.code-agent.advice-result.v1",
+                    "contextRequired", false,
+                    "answer", "로컬 파일은 읽었지만 개선 후보 응답을 구조화하지 못했습니다. 같은 요청을 다시 보내거나 범위를 좁혀주세요.",
+                    "adviceCandidates", List.of(),
+                    "warnings", appendWarning(warnings, "Advice answer generation failed: " + ex.getMessage())
+            );
+        }
+    }
+
+    private String adviceFileSelectionSystemPrompt() {
+        return """
+                You are LearnBot Local Agent file-selection planner.
+                The local agent has already read the workspace tree. Choose the smallest set of existing files to read before suggesting improvements.
+                Return only JSON: {"targetFiles":["relative/path"],"reason":"...","clarifyingQuestion":""}
+                Do not invent files. Use only paths present in the workspace tree output.
+                Prefer files that define the visible UI or app entrypoint for the user's question.
+                Select at most 5 files.
+                """;
+    }
+
+    private String adviceFileSelectionUserPrompt(RagConversationTurn turn, List<Map<String, Object>> toolResults) {
+        return "User request:\n" + safe(turn.question())
+                + "\n\nConversation-aware request:\n" + safe(turn.rewrittenQuestion())
+                + "\n\nLocal agent read-only tool results:\n" + boundedText(toJson(toolResults), 12_000);
+    }
+
+    private String adviceAnswerSystemPrompt() {
+        return """
+                You are LearnBot Local Agent, an agentic coding assistant discussing the user's local workspace.
+                Use only the local files provided. Do not claim files were changed.
+                Suggest concrete improvements that fit the user's request and project context.
+                Return only JSON:
+                {"summary":"...","candidates":[{"title":"...","reason":"...","evidenceFiles":["path"],"expectedFiles":["path"],"riskLevel":"low|medium|high","testPlan":"...","recommendedFixGoal":"..."}]}
+                The recommendedFixGoal must be a natural-language request that can be passed to a later fix command.
+                """;
+    }
+
+    private String adviceAnswerUserPrompt(RagConversationTurn turn, List<Map<String, Object>> files) {
+        return "User request:\n" + safe(turn.question())
+                + "\n\nConversation-aware request:\n" + safe(turn.rewrittenQuestion())
+                + "\n\nLoaded local files:\n" + boundedText(toJson(files), 20_000);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> parseCandidateMaps(JsonNode candidatesNode) {
+        if (candidatesNode == null || !candidatesNode.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        for (JsonNode item : candidatesNode) {
+            if (!item.isObject()) {
+                continue;
+            }
+            Map<String, Object> candidate = objectMapper.convertValue(item, Map.class);
+            candidates.add(candidate);
+            if (candidates.size() >= 5) {
+                break;
+            }
+        }
+        return candidates;
+    }
+
+    private String adviceAnswerText(JsonNode root, List<Map<String, Object>> candidates) {
+        StringBuilder builder = new StringBuilder();
+        String summary = safe(root.path("summary").asText());
+        if (!summary.isBlank()) {
+            builder.append(summary).append("\n\n");
+        }
+        if (candidates.isEmpty()) {
+            return firstNonBlank(summary, "로컬 파일 기준으로 제안할 개선 후보를 충분히 만들지 못했습니다.");
+        }
+        builder.append("개선 후보:\n");
+        for (int index = 0; index < candidates.size(); index++) {
+            Map<String, Object> candidate = candidates.get(index);
+            builder.append(index + 1).append(". ")
+                    .append(firstNonBlank(String.valueOf(candidate.get("title")), "개선 후보"))
+                    .append("\n");
+            String reason = safe(String.valueOf(candidate.getOrDefault("reason", "")));
+            if (!reason.isBlank()) {
+                builder.append("   - 이유: ").append(reason).append("\n");
+            }
+            String expected = stringList(candidate.get("expectedFiles")).stream().collect(Collectors.joining(", "));
+            if (!expected.isBlank()) {
+                builder.append("   - 예상 수정 파일: ").append(expected).append("\n");
+            }
+            String testPlan = safe(String.valueOf(candidate.getOrDefault("testPlan", "")));
+            if (!testPlan.isBlank()) {
+                builder.append("   - 확인 방법: ").append(testPlan).append("\n");
+            }
+        }
+        builder.append("\n번호를 입력하면 해당 개선안으로 수정 제안을 만들 수 있습니다.");
+        return builder.toString().trim();
     }
 
     private List<Map<String, Object>> sanitizeToolPlan(List<Map<String, Object>> toolPlan, List<String> targetFiles, List<String> warnings) {
@@ -506,6 +766,54 @@ public class CodeAgentInteractiveService {
                 "files", loaded.path("files"),
                 "warnings", loaded.path("warnings")
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> mapList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> maps = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                maps.add((Map<String, Object>) map);
+            }
+        }
+        return maps;
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> strings = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                strings.add(String.valueOf(item));
+            }
+        }
+        return List.copyOf(strings);
+    }
+
+    private boolean isSucceededFileRead(Map<String, Object> file) {
+        return "SUCCEEDED".equalsIgnoreCase(String.valueOf(file.getOrDefault("status", "")))
+                && !safe(String.valueOf(file.getOrDefault("content", ""))).isBlank();
+    }
+
+    private List<String> appendWarning(List<String> warnings, String warning) {
+        List<String> copy = new ArrayList<>(warnings == null ? List.of() : warnings);
+        if (!safe(warning).isBlank()) {
+            copy.add(warning);
+        }
+        return List.copyOf(copy);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            return String.valueOf(value);
+        }
     }
 
     private String extractJson(String content) {

@@ -7,6 +7,7 @@ import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.dto.interactive.CodeAgentInteractiveTurnRequest;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -184,6 +185,55 @@ class CodeAgentInteractiveServiceTest {
         assertThat(response.contextRequired()).isTrue();
         assertThat(response.targetFiles()).containsExactly("agent.md");
         assertThat(response.toolPlan()).hasSize(1);
+        verify(codeRagService, never()).askConversational(any(), any(), any(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void llmAdviseIntentStartsReadOnlyWorkspaceObservationWithoutRunningFixOrRag() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AppUser user = user();
+        RagConversationContext context = context(conversationId);
+        when(conversationService.prepare(eq(user), eq(spaceId), eq(RagConversationService.CODE), eq(repositoryId), eq(null), anyString(), eq(true)))
+                .thenReturn(context);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.PRIMARY), anyInt(), any()))
+                .thenReturn(new OllamaClient.ChatResult(
+                        "{\"intent\":\"ADVISE\",\"goal\":\"Suggest homepage improvements\",\"confidence\":\"high\"}",
+                        "stop",
+                        true,
+                        10,
+                        20,
+                        "http://ollama",
+                        "model",
+                        "PRIMARY",
+                        false
+                ));
+        when(conversationService.saveCodeTurn(eq(context), eq(null), anyString(), any()))
+                .thenReturn(new CodeAskResponse("agent_advice", "saved", List.of(), "high", List.of())
+                        .withConversation(conversationId, turnId, null));
+
+        var response = service.handleTurn(user, spaceId, List.of(spaceId), new CodeAgentInteractiveTurnRequest(
+                repositoryId,
+                spaceId,
+                null,
+                null,
+                "내 홈페이지에서 추가적으로 뭘 더 개선하면 좋을까?",
+                null,
+                6,
+                UUID.randomUUID(),
+                UUID.randomUUID()
+        ));
+
+        assertThat(response.intent()).isEqualTo("ADVISE");
+        assertThat(response.shouldRunCommand()).isFalse();
+        assertThat(response.mutationRequiresApproval()).isFalse();
+        assertThat(response.contextRequired()).isTrue();
+        assertThat(response.toolPlan()).singleElement().satisfies(step -> assertThat(step.get("tool")).isEqualTo("workspace.tree"));
+        ArgumentCaptor<CodeAskResponse> markerCaptor = ArgumentCaptor.forClass(CodeAskResponse.class);
+        verify(conversationService).saveCodeTurn(eq(context), eq(null), anyString(), markerCaptor.capture());
+        assertThat(markerCaptor.getValue().answer()).contains("최신 CLI에서는 자동으로 이어집니다");
         verify(codeRagService, never()).askConversational(any(), any(), any(), anyString(), anyString(), any(), any());
     }
 

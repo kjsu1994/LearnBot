@@ -5,6 +5,7 @@ internal sealed partial class LearnBotLocalAgent
 {
     private Guid? _cliChatConversationId;
     private Guid? _cliChatParentTurnId;
+    private List<string> _cliAdviceFixGoals = [];
 
     private async Task<int> CliChat(string[] args)
     {
@@ -26,6 +27,11 @@ internal sealed partial class LearnBotLocalAgent
             line = line.Trim();
             if (line.Length == 0)
             {
+                continue;
+            }
+            if (TryResolveAdviceSelection(line, out var selectedAdviceGoal))
+            {
+                await RunCliInteractiveTurn("fix", selectedAdviceGoal, inheritedArgs, previewOnly: false);
                 continue;
             }
 
@@ -134,9 +140,20 @@ internal sealed partial class LearnBotLocalAgent
             _cliChatParentTurnId = result.TurnId;
         }
 
-        if (!string.IsNullOrWhiteSpace(result.Answer))
+        if (!string.IsNullOrWhiteSpace(result.Answer)
+            && !string.Equals(result.Intent, "ADVISE", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(result.Answer);
+        }
+
+        if (string.Equals(result.Intent, "ADVISE", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteCliAdviceContextRead(
+                webToken,
+                resolvedRepositoryId,
+                prepared.Preview.ServerSubmissionPlan.AgentId,
+                prepared.Preview.ServerSubmissionPlan.WorkspaceId,
+                result);
         }
 
         if (string.Equals(result.Intent, "READ_CONTEXT", StringComparison.OrdinalIgnoreCase))
@@ -206,8 +223,72 @@ internal sealed partial class LearnBotLocalAgent
             TryGetString(root, "answer"),
             TryGetBool(root, "shouldRunCommand").GetValueOrDefault(false),
             TryGetBool(root, "contextRequired").GetValueOrDefault(false),
-            TryGetStringArray(root, "targetFiles")
+            TryGetStringArray(root, "targetFiles"),
+            TryGetToolPlan(root, "toolPlan")
         );
+    }
+
+    private async Task<int> ExecuteCliAdviceContextRead(
+        string webToken,
+        Guid repositoryId,
+        Guid? agentId,
+        Guid? workspaceId,
+        CliInteractiveTurnResult result)
+    {
+        if (!result.ContextRequired || (result.TargetFiles.Count == 0 && result.ToolPlan.Count == 0))
+        {
+            return 0;
+        }
+        if (workspaceId is not Guid resolvedWorkspaceId || result.ConversationId is not Guid conversationId || result.TurnId is not Guid turnId)
+        {
+            Console.Error.WriteLine("ADVISE requires workspace/conversation context.");
+            return 1;
+        }
+
+        var config = LoadConfigOrDefault();
+        var targetFiles = result.TargetFiles;
+        var toolPlan = result.ToolPlan;
+        for (var round = 0; round < 3; round++)
+        {
+            var files = new List<Dictionary<string, object?>>();
+            var toolResults = new List<Dictionary<string, object?>>();
+            var warnings = new List<string>();
+            foreach (var step in BuildContextReadSteps(toolPlan, targetFiles).Take(12))
+            {
+                var response = ExecuteCliReadOnlyStep(config, resolvedWorkspaceId, step);
+                toolResults.Add(ToCliToolResult(step, response));
+                if (string.Equals(step.Tool, "file.read", StringComparison.OrdinalIgnoreCase))
+                {
+                    files.Add(ToCliContextReadFile(Convert.ToString(step.Input.GetValueOrDefault("path")) ?? "", response));
+                }
+                if (response.Status != "SUCCEEDED")
+                {
+                    warnings.Add(step.Tool + ": " + (response.Error ?? response.FailureCode ?? response.Status));
+                }
+            }
+
+            var post = await PostCliContextReadResult(webToken, repositoryId, conversationId, turnId, agentId, workspaceId, files, toolResults, warnings);
+            if (!string.IsNullOrWhiteSpace(post.Answer))
+            {
+                Console.WriteLine(post.Answer);
+            }
+            if (post.AdviceFixGoals.Count > 0)
+            {
+                _cliAdviceFixGoals = post.AdviceFixGoals.ToList();
+            }
+            if (!post.ContextRequired)
+            {
+                return warnings.Count == 0 ? 0 : 1;
+            }
+            targetFiles = post.TargetFiles;
+            toolPlan = post.ToolPlan;
+            if (targetFiles.Count == 0 && toolPlan.Count == 0)
+            {
+                return 1;
+            }
+        }
+        Console.Error.WriteLine("ADVISE context loop exceeded the safe round limit.");
+        return 1;
     }
 
     private async Task<int> ExecuteCliContextRead(
@@ -260,6 +341,50 @@ internal sealed partial class LearnBotLocalAgent
         return warnings.Count == 0 ? 0 : 1;
     }
 
+    private static IReadOnlyList<CliToolPlanStep> BuildContextReadSteps(IReadOnlyList<CliToolPlanStep> toolPlan, IReadOnlyList<string> targetFiles)
+    {
+        if (toolPlan.Count > 0)
+        {
+            return toolPlan;
+        }
+        return targetFiles
+            .Take(8)
+            .Select(path => new CliToolPlanStep("file.read", new Dictionary<string, object?>
+            {
+                ["path"] = path,
+                ["maxBytes"] = DefaultMaxReadBytes
+            }))
+            .ToList();
+    }
+
+    private ToolResponse ExecuteCliReadOnlyStep(AgentConfig config, Guid workspaceId, CliToolPlanStep step)
+    {
+        var tool = step.Tool;
+        if (!new[] { "workspace.tree", "workspace.search", "file.read", "git.status", "git.diff" }.Contains(tool, StringComparer.OrdinalIgnoreCase))
+        {
+            tool = "workspace.tree";
+        }
+        var input = new Dictionary<string, object?>(step.Input, StringComparer.OrdinalIgnoreCase)
+        {
+            ["workspaceId"] = workspaceId
+        };
+        var request = BuildToolRequest(workspaceId, input);
+        return HandleTool(config, Guid.NewGuid(), request, tool);
+    }
+
+    private static Dictionary<string, object?> ToCliToolResult(CliToolPlanStep step, ToolResponse response)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["tool"] = step.Tool,
+            ["input"] = step.Input,
+            ["status"] = response.Status,
+            ["failureCode"] = response.FailureCode,
+            ["error"] = response.Error,
+            ["output"] = response.Output
+        };
+    }
+
     private static Dictionary<string, object?> ToCliContextReadFile(string requestedPath, ToolResponse response)
     {
         var file = new Dictionary<string, object?>
@@ -280,7 +405,7 @@ internal sealed partial class LearnBotLocalAgent
         return file;
     }
 
-    private async Task PostCliContextReadResult(
+    private async Task<CliContextReadPostResult> PostCliContextReadResult(
         string webToken,
         Guid repositoryId,
         Guid conversationId,
@@ -316,6 +441,15 @@ internal sealed partial class LearnBotLocalAgent
         {
             throw new InvalidOperationException("HTTP " + (int)response.StatusCode + " " + body);
         }
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        return new CliContextReadPostResult(
+            TryGetString(root, "answer"),
+            TryGetBool(root, "contextRequired").GetValueOrDefault(false),
+            TryGetStringArray(root, "targetFiles"),
+            TryGetToolPlan(root, "toolPlan"),
+            TryGetAdviceFixGoals(root)
+        );
     }
 
     private async Task PrintCliSessionContext(string[] inheritedArgs)
@@ -371,6 +505,26 @@ internal sealed partial class LearnBotLocalAgent
             "preview" => new CliChatDirective("preview", goal),
             _ => new CliChatDirective("auto", line)
         };
+    }
+
+    private bool TryResolveAdviceSelection(string line, out string goal)
+    {
+        goal = "";
+        if (_cliAdviceFixGoals.Count == 0)
+        {
+            return false;
+        }
+        var clean = line.Trim();
+        if (!int.TryParse(clean, out var index))
+        {
+            return false;
+        }
+        if (index < 1 || index > _cliAdviceFixGoals.Count)
+        {
+            return false;
+        }
+        goal = _cliAdviceFixGoals[index - 1];
+        return !string.IsNullOrWhiteSpace(goal);
     }
 
     private static string[] BuildCliChatInheritedArgs(string[] args, string workspace)
@@ -435,6 +589,72 @@ internal sealed partial class LearnBotLocalAgent
             }
         }
         return values;
+    }
+
+    private static IReadOnlyList<CliToolPlanStep> TryGetToolPlan(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        var steps = new List<CliToolPlanStep>();
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("tool", out var toolNode))
+            {
+                continue;
+            }
+            var tool = toolNode.GetString() ?? "";
+            if (string.IsNullOrWhiteSpace(tool))
+            {
+                continue;
+            }
+            var input = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (item.TryGetProperty("input", out var inputNode) && inputNode.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in inputNode.EnumerateObject())
+                {
+                    input[property.Name] = JsonScalarValue(property.Value);
+                }
+            }
+            steps.Add(new CliToolPlanStep(tool, input));
+        }
+        return steps;
+    }
+
+    private static IReadOnlyList<string> TryGetAdviceFixGoals(JsonElement element)
+    {
+        if (!element.TryGetProperty("adviceCandidates", out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        var goals = new List<string>();
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("recommendedFixGoal", out var goalNode))
+            {
+                continue;
+            }
+            var goal = goalNode.GetString();
+            if (!string.IsNullOrWhiteSpace(goal))
+            {
+                goals.Add(goal);
+            }
+        }
+        return goals;
+    }
+
+    private static object? JsonScalarValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number when value.TryGetInt32(out var intValue) => intValue,
+            JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
     }
 
     private static void PrintCliChatHelp()
@@ -512,4 +732,14 @@ internal sealed record CliInteractiveTurnResult(
     string? Answer,
     bool ShouldRunCommand,
     bool ContextRequired,
-    IReadOnlyList<string> TargetFiles);
+    IReadOnlyList<string> TargetFiles,
+    IReadOnlyList<CliToolPlanStep> ToolPlan);
+
+internal sealed record CliToolPlanStep(string Tool, Dictionary<string, object?> Input);
+
+internal sealed record CliContextReadPostResult(
+    string? Answer,
+    bool ContextRequired,
+    IReadOnlyList<string> TargetFiles,
+    IReadOnlyList<CliToolPlanStep> ToolPlan,
+    IReadOnlyList<string> AdviceFixGoals);
