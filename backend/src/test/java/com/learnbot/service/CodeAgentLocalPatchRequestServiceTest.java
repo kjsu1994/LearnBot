@@ -172,6 +172,90 @@ class CodeAgentLocalPatchRequestServiceTest {
     }
 
     @Test
+    void prepareDoesNotTreatIndexHtmlMentionAsHtmFileCreationRequest() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        String path = "index.html";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                +<button data-tab="org">조직도</button>
+                 <body>Hello</body>
+                 </html>
+                """;
+        String instruction = """
+                Model-interpreted goal:
+                홈페이지(index.html)에 새로운 탭을 추가하고 해당 탭에 가상의 조직도 콘텐츠를 구현합니다.
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+        mockRepositoryAndApproval(repositoryId, spaceId, userId, agentId, workspaceId, requestId);
+
+        LocalAgentToolExecutionResponse response = service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                instruction,
+                diff,
+                List.of(path),
+                List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), path, "html", "<html>\n<body>Hello</body>\n</html>\n"))
+        );
+
+        assertThat(response.status()).isEqualTo(LocalAgentToolStatus.APPROVAL_REQUIRED);
+        assertThat(response.input()).containsEntry("updatedFiles", List.of(path));
+    }
+
+    @Test
+    void prepareStillBlocksExplicitHtmFileCreationRequestWhenNoHtmFileChanged() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        String path = "index.html";
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,3 +1,4 @@
+                 <html>
+                +<button data-tab="org">Org</button>
+                 <body>Hello</body>
+                 </html>
+                """;
+        when(fileLoader.normalizeRequestedPaths(org.mockito.ArgumentMatchers.eq(List.of(path)), org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(path));
+        when(validationService.validate(diff, List.of(path))).thenReturn(new PatchValidationResult(true, List.of("validated")));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.prepare(
+                repositoryId,
+                spaceId,
+                userId,
+                agentId,
+                workspaceId,
+                loopId,
+                "create a new .htm file for the organization chart",
+                diff,
+                List.of(path),
+                List.of(new CodePatchFileLoader.LoadedPatchFile(UUID.randomUUID(), path, "html", "<html>\n<body>Hello</body>\n</html>\n"))
+        ));
+
+        assertThat(ex.getMessage())
+                .contains("requested file creation/reference integrity")
+                .contains(".htm file addition");
+        verify(toolGatewayService, never()).createApprovalRequest(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void prepareAllowsHtmlReferenceWhenReferencedLocalFileAlreadyExists() {
         UUID repositoryId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();
@@ -1228,5 +1312,55 @@ class CodeAgentLocalPatchRequestServiceTest {
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
+    }
+
+    private void mockRepositoryAndApproval(
+            UUID repositoryId,
+            UUID spaceId,
+            UUID userId,
+            UUID agentId,
+            UUID workspaceId,
+            UUID requestId
+    ) {
+        when(codeRepository.findRepository(repositoryId)).thenReturn(Optional.of(new CodeRepositoryRecord(
+                repositoryId,
+                spaceId,
+                "site",
+                "LOCAL",
+                null,
+                null,
+                "C:/site",
+                null,
+                "NONE",
+                "C:/site",
+                "LOCAL",
+                null
+        )));
+        when(localAgentGatewayService.approvedWorkspace(userId, workspaceId)).thenReturn(Optional.of(
+                new LocalAgentWorkspaceSummary(workspaceId, "site", "C:/site", true)
+        ));
+        when(toolGatewayService.createApprovalRequest(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            LocalAgentToolRequest request = invocation.getArgument(0);
+            return new LocalAgentToolExecutionResponse(
+                    requestId,
+                    UUID.randomUUID(),
+                    userId,
+                    agentId,
+                    workspaceId,
+                    request.executionTarget(),
+                    request.toolName(),
+                    request.approvalState(),
+                    LocalAgentToolStatus.APPROVAL_REQUIRED,
+                    request.input(),
+                    Map.of(),
+                    null,
+                    null,
+                    request.warnings(),
+                    List.of(),
+                    null,
+                    null,
+                    null
+            );
+        });
     }
 }

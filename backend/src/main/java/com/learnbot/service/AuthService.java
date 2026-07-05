@@ -72,12 +72,12 @@ public class AuthService {
     public AuthResponse login(String loginId, String password, boolean rememberLogin) {
         String cleanLoginId = cleanLoginId(loginId);
         String passwordHash = securityRepository.findPasswordHashByEmail(cleanLoginId)
-                .orElseThrow(() -> new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎."));
+                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
         if (!passwordHasher.matches(password, passwordHash)) {
-            throw new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.");
+            throw new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다.");
         }
         AppUser user = securityRepository.findUserByEmail(cleanLoginId)
-                .orElseThrow(() -> new UnauthorizedException("ID ?먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎."));
+                .orElseThrow(() -> new UnauthorizedException("ID 또는 비밀번호가 올바르지 않습니다."));
         IssuedSession session = issueSessionTokens(user.id(), rememberLogin);
         securityRepository.updateLastLogin(user.id());
         securityRepository.createAuditLog(user.id(), "LOGIN", "USER", user.id().toString(), null, "User logged in.", java.util.Map.of());
@@ -226,28 +226,28 @@ public class AuthService {
         String cleanLoginId = loginId == null || loginId.isBlank() ? target.email() : cleanLoginId(loginId);
         String cleanDisplayName = displayName == null || displayName.isBlank() ? null : displayName.trim();
         if (cleanDisplayName == null) {
-            throw new IllegalArgumentException("?쒖떆 ?대쫫? ?꾩닔?낅땲??");
+            throw new IllegalArgumentException("표시 이름은 필수입니다.");
         }
         String cleanRole = target.isMaster() ? "MASTER" : (actor.isMaster() ? normalizeManagedUserRole(role, false) : "USER");
         if (target.isMaster() && !target.email().equalsIgnoreCase(cleanLoginId)) {
             throw new IllegalArgumentException("MASTER account ID cannot be changed.");
         }
         if (actor.id().equals(userId) && !target.role().equals(cleanRole)) {
-            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙???쒖뒪??沅뚰븳? 蹂寃쏀븷 ???놁뒿?덈떎.");
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 시스템 권한은 변경할 수 없습니다.");
         }
         boolean loginIdChanged = !target.email().equalsIgnoreCase(cleanLoginId);
         if (actor.id().equals(userId) && loginIdChanged) {
-            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙??ID?????붾㈃?먯꽌 蹂寃쏀븷 ???놁뒿?덈떎.");
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 ID는 이 화면에서 변경할 수 없습니다.");
         }
         if (target.isAdmin() && "USER".equals(cleanRole) && securityRepository.countActiveAdmins() <= 1) {
-            throw new IllegalArgumentException("留덉?留?愿由ъ옄 怨꾩젙? USER濡?蹂寃쏀븷 ???놁뒿?덈떎.");
+            throw new IllegalArgumentException("마지막 관리자 계정은 USER로 변경할 수 없습니다.");
         }
 
         if (loginIdChanged) {
             securityRepository.findUserByEmail(cleanLoginId)
                     .filter(existing -> !existing.id().equals(userId))
                     .ifPresent(existing -> {
-                        throw new IllegalArgumentException("?대? ?ъ슜 以묒씤 ID?낅땲??");
+                        throw new IllegalArgumentException("이미 사용 중인 ID입니다.");
                     });
         }
 
@@ -276,12 +276,12 @@ public class AuthService {
     public void resetUserPassword(AppUser actor, UUID userId, String newPassword) {
         requireAdmin(actor);
         if (actor.id().equals(userId)) {
-            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙??鍮꾨?踰덊샇?????붾㈃?먯꽌 ?ъ꽕?뺥븷 ???놁뒿?덈떎.");
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정의 비밀번호는 이 화면에서 재설정할 수 없습니다.");
         }
         AppUser target = activeUser(userId);
         requireManageableUser(actor, target);
         if (newPassword == null || newPassword.isBlank()) {
-            throw new IllegalArgumentException("??鍮꾨?踰덊샇???꾩닔?낅땲??");
+            throw new IllegalArgumentException("새 비밀번호는 필수입니다.");
         }
         securityRepository.updatePasswordHash(userId, passwordHasher.hash(newPassword));
         securityRepository.revokeSessionsForUser(userId);
@@ -307,10 +307,10 @@ public class AuthService {
     public void deleteUser(AppUser actor, UUID userId) {
         requireAdmin(actor);
         if (actor.id().equals(userId)) {
-            throw new IllegalArgumentException("?꾩옱 濡쒓렇?명븳 愿由ъ옄 怨꾩젙? ??젣?????놁뒿?덈떎.");
+            throw new IllegalArgumentException("현재 로그인한 관리자 계정은 삭제할 수 없습니다.");
         }
         AppUser target = securityRepository.findUserById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
         requireManageableUser(actor, target);
         if (target.isMaster()) {
             throw new IllegalArgumentException("MASTER account cannot be deleted.");
@@ -326,10 +326,10 @@ public class AuthService {
     public void updateSpace(AppUser actor, UUID spaceId, String name, String description) {
         requireMaster(actor);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("워크스페이스를 찾을 수 없습니다."));
         String cleanName = name == null || name.isBlank() ? null : name.trim();
         if (cleanName == null) {
-            throw new IllegalArgumentException("怨듦컙 ?대쫫? ?꾩닔?낅땲??");
+            throw new IllegalArgumentException("워크스페이스 이름은 필수입니다.");
         }
         String cleanDescription = description == null ? "" : description.trim();
         securityRepository.updateSpace(spaceId, cleanName, cleanDescription);
@@ -339,10 +339,10 @@ public class AuthService {
     public void deleteSpace(AppUser actor, UUID spaceId) {
         requireMaster(actor);
         if (SecurityRepository.DEFAULT_SPACE_ID.equals(spaceId)) {
-            throw new IllegalArgumentException("湲곕낯 怨듦컙? ??젣?????놁뒿?덈떎.");
+            throw new IllegalArgumentException("기본 워크스페이스는 삭제할 수 없습니다.");
         }
         SpaceSummary target = securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("워크스페이스를 찾을 수 없습니다."));
         securityRepository.deleteSpace(spaceId);
         securityRepository.createAuditLog(actor.id(), "SPACE_DELETED", "SPACE", spaceId.toString(), spaceId, "Space was deleted.", java.util.Map.of("name", target.name()));
     }
@@ -353,7 +353,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("워크스페이스를 찾을 수 없습니다."));
         securityRepository.addSpaceMember(spaceId, userId, normalizeSpaceRole(role));
         securityRepository.createAuditLog(actor.id(), "SPACE_MEMBER_UPDATED", "SPACE", spaceId.toString(), spaceId, "Space member was updated.", Map.of("userId", userId.toString()));
     }
@@ -364,7 +364,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("워크스페이스를 찾을 수 없습니다."));
         String cleanRole = normalizeSpaceRole(role);
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse("");
         securityRepository.addSpaceMember(spaceId, userId, cleanRole);
@@ -390,7 +390,7 @@ public class AuthService {
         requireManageableUser(actor, target);
         requireManageableSpace(actor, spaceId);
         securityRepository.findSpace(spaceId)
-                .orElseThrow(() -> new IllegalArgumentException("怨듦컙??李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("워크스페이스를 찾을 수 없습니다."));
         String oldRole = securityRepository.findSpaceMemberRole(spaceId, userId).orElse(null);
         if (oldRole == null) {
             return;
@@ -399,7 +399,7 @@ public class AuthService {
             throw new IllegalArgumentException("MASTER workspace assignment cannot be removed.");
         }
         if (securityRepository.countSpaceMemberships(userId) <= 1) {
-            throw new IllegalArgumentException("?ъ슜?먯쓽 留덉?留?怨듦컙 沅뚰븳? ?쒓굅?????놁뒿?덈떎.");
+            throw new IllegalArgumentException("사용자의 마지막 워크스페이스 권한은 제거할 수 없습니다.");
         }
         securityRepository.removeSpaceMember(spaceId, userId);
         securityRepository.createAuditLog(
@@ -479,9 +479,9 @@ public class AuthService {
 
     private AppUser activeUser(UUID userId) {
         AppUser target = securityRepository.findUserById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎."));
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
         if ("DELETED".equals(target.status())) {
-            throw new IllegalArgumentException("??젣???ъ슜?먮뒗 ?섏젙?????놁뒿?덈떎.");
+            throw new IllegalArgumentException("삭제된 사용자는 수정할 수 없습니다.");
         }
         return target;
     }

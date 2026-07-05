@@ -175,7 +175,7 @@ class CodeAgentServiceTest {
                 List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
         );
 
-        assertThat(response.valid()).isTrue();
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
         assertThat(response.files()).hasSize(1);
         assertThat(response.files().get(0).diff())
                 .contains("+  <button type=\"button\">Start</button>");
@@ -225,7 +225,7 @@ class CodeAgentServiceTest {
                 List.of()
         );
 
-        assertThat(response.valid()).isTrue();
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
         assertThat(response.files()).hasSize(1);
         assertThat(response.files().get(0).path()).isEqualTo("index.html");
         assertThat(response.files().get(0).diff())
@@ -1155,6 +1155,170 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesMaterializesFullFileContentFromOperationsEnvelope() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "index.html";
+        String current = """
+                <!doctype html>
+                <html lang="ko">
+                <body>
+                  <nav><button data-tab="home">홈</button></nav>
+                  <main><section id="home">홈</section></main>
+                </body>
+                </html>
+                """;
+        String proposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "full_file",
+                  "targetFiles": ["index.html"],
+                  "operations": [
+                    {
+                      "path": "index.html",
+                      "operation": "create_file",
+                      "content": "<!doctype html>\\n<html lang=\\"ko\\">\\n<body>\\n  <nav><button data-tab=\\"home\\">홈</button><button data-tab=\\"org\\">조직도</button></nav>\\n  <main><section id=\\"home\\">홈</section><section id=\\"org\\">조직도</section></main>\\n</body>\\n</html>\\n"
+                    }
+                  ]
+                }
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(proposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "홈페이지에 탭을 하나 추가하고 거기에 가상의 조직도넣어줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo(path);
+            assertThat(file.diff()).contains("+  <nav><button data-tab=\"home\">홈</button><button data-tab=\"org\">조직도</button></nav>");
+        });
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("editFormat=full_file"));
+    }
+
+    @Test
+    void patchContextValidationStopsAtUnifiedDiffHunkCounts() throws Exception {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,1 +1,1 @@
+                -<main></main>
+                +<main><section id="org"></section></main>
+                 trailing text outside the declared hunk must not be counted as file context
+                """;
+
+        java.lang.reflect.Method method = CodeAgentService.class.getDeclaredMethod(
+                "validatePatchContext",
+                String.class,
+                List.class
+        );
+        method.setAccessible(true);
+        Object result = method.invoke(
+                service,
+                diff,
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, "index.html", "html", "<main></main>\n"))
+        );
+        java.lang.reflect.Method valid = result.getClass().getDeclaredMethod("valid");
+        valid.setAccessible(true);
+
+        assertThat((Boolean) valid.invoke(result)).isTrue();
+    }
+
+    @Test
+    void patchFromLoadedFilesUsesOperationPayloadWhenEditFormatConflictsWithOperations() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "index.html";
+        String current = """
+                <nav>
+                  <button data-tab="home">Home</button>
+                </nav>
+                """;
+        String proposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "full_file",
+                  "targetFiles": ["index.html"],
+                  "operations": [
+                    {
+                      "path": "index.html",
+                      "operation": "replace_exact",
+                      "oldText": "  <button data-tab=\\"home\\">Home</button>",
+                      "newText": "  <button data-tab=\\"home\\">Home</button>\\n  <button data-tab=\\"org\\">Org</button>"
+                    }
+                  ]
+                }
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(proposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "Add an org tab",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo(path);
+            assertThat(file.diff()).contains("+  <button data-tab=\"org\">Org</button>");
+        });
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("conflicted with operation payload"));
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("editFormat=operation_edit"));
+    }
+
+    @Test
+    void patchFromLoadedFilesGuidesSmallMarkupFilesTowardFullFileWhenMultipleAnchorsWouldBeFragile() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "index.html";
+        String current = """
+                <!doctype html>
+                <html lang="ko">
+                <body>
+                  <nav><button data-tab="home">홈</button></nav>
+                  <main><section id="home">홈</section></main>
+                </body>
+                </html>
+                """;
+        String proposal = """
+                {"action":"propose_patch","editFormat":"full_file","targetFiles":["index.html"],"edits":[{"path":"index.html","fullFileContent":"<!doctype html>\\n<html lang=\\"ko\\">\\n<body>\\n  <nav><button data-tab=\\"home\\">홈</button><button data-tab=\\"org\\">조직도</button></nav>\\n  <main><section id=\\"home\\">홈</section><section id=\\"org\\">조직도</section></main>\\n</body>\\n</html>\\n"}]}
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(proposal));
+
+        service.patchFromLoadedFiles(
+                "홈페이지에 탭을 하나 추가하고 거기에 가상의 조직도넣어줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
+        );
+
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), userPromptCaptor.capture(), eq(4096));
+        assertThat(userPromptCaptor.getValue())
+                .contains("This is a small markup file")
+                .contains("prefer editFormat=full_file")
+                .contains("complete updated file content authored by you");
+    }
+
+    @Test
     void patchFromLoadedFilesRejectsMalformedJsonEnvelopeInsteadOfTreatingItAsFullFileContent() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
@@ -1480,8 +1644,79 @@ class CodeAgentServiceTest {
         assertThat(response.files()).hasSize(1);
         assertThat(response.files().get(0).diff())
                 .contains("+  <div id=\"orgchart\" class=\"card\">Org chart</div>")
-                .contains("+</main>");
+                .contains(" </main>");
         assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("editFormat=operation_edit"));
+    }
+
+    @Test
+    void patchFromLoadedFilesRepairsInsertOperationThatRepeatsAnchorInNewText() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "index.html";
+        String current = """
+                <main>
+                  <section id="contact" class="tab-content">
+                    <p>Phone: 010-1234-5678</p>
+                  </section>
+                </main>
+
+                <script src="script.js"></script>
+                """;
+        String badProposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "operation_edit",
+                  "targetFiles": ["index.html"],
+                  "operations": [
+                    {
+                      "path": "index.html",
+                      "operation": "insert_before_anchor",
+                      "anchorBefore": "</main>\\n\\n<script src=\\"script.js\\"></script>",
+                      "newText": "  <section id=\\"orgchart\\" class=\\"tab-content\\">\\n    <h2>Org chart</h2>\\n  </section>\\n</main>"
+                    }
+                  ]
+                }
+                """;
+        String repairedProposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "operation_edit",
+                  "targetFiles": ["index.html"],
+                  "operations": [
+                    {
+                      "path": "index.html",
+                      "operation": "insert_before_anchor",
+                      "anchorBefore": "</main>\\n\\n<script src=\\"script.js\\"></script>",
+                      "newText": "  <section id=\\"orgchart\\" class=\\"tab-content\\">\\n    <h2>Org chart</h2>\\n  </section>\\n"
+                    }
+                  ]
+                }
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096)))
+                .thenReturn(chat(badProposal), chat(repairedProposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "Add an organization chart section before the main closing tag",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current))
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).diff())
+                .contains("+  <section id=\"orgchart\" class=\"tab-content\">")
+                .contains(" </main>")
+                .doesNotContain("+</main>");
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, times(2)).chatResult(anyString(), userPromptCaptor.capture(), eq(4096));
+        String repairPrompt = userPromptCaptor.getAllValues().get(1);
+        assertThat(repairPrompt).contains("repeated its anchor text inside newText");
+        assertThat(repairPrompt).contains("keep the anchor only in anchorBefore/anchorAfter");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("repeated its anchor text inside newText"));
     }
 
     @Test
@@ -1579,8 +1814,7 @@ class CodeAgentServiceTest {
         assertThat(response.valid()).isTrue();
         assertThat(response.files()).hasSize(1);
         assertThat(response.files().get(0).diff())
-                .contains("-footer { footer {")
-                .contains("+footer { footer {")
+                .contains(" footer { footer {")
                 .contains("+  font-size: 14px;");
     }
 
@@ -1646,6 +1880,75 @@ class CodeAgentServiceTest {
     }
 
     @Test
+    void patchFromLoadedFilesGuidesRepairToShrinkOversizedFullFileEdits() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "script.js";
+        List<String> currentLines = new java.util.ArrayList<>();
+        List<String> rewrittenLines = new java.util.ArrayList<>();
+        for (int index = 1; index <= 260; index++) {
+            currentLines.add("const item" + index + " = " + index + ";");
+            rewrittenLines.add("const item" + index + " = " + (index + 1) + ";");
+        }
+        String current = String.join("\n", currentLines) + "\n";
+        String rewritten = String.join("\\n", rewrittenLines) + "\\n";
+        String oversizedProposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "full_file",
+                  "targetFiles": ["script.js"],
+                  "edits": [
+                    {
+                      "path": "script.js",
+                      "fullFileContent": "%s"
+                    }
+                  ]
+                }
+                """.formatted(rewritten);
+        String repairedProposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "operation_edit",
+                  "targetFiles": ["script.js"],
+                  "operations": [
+                    {
+                      "path": "script.js",
+                      "operation": "replace_exact",
+                      "oldText": "const item10 = 10;",
+                      "newText": "const item10 = 11;"
+                    }
+                  ]
+                }
+                """;
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096)))
+                .thenReturn(chat(oversizedProposal), chat(repairedProposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "Update only the requested behavior with the smallest targeted change",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "javascript", current))
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).hasSize(1);
+        assertThat(response.files().get(0).diff())
+                .contains("-const item10 = 10;")
+                .contains("+const item10 = 11;")
+                .doesNotContain("-const item260 = 260;");
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, times(2)).chatResult(anyString(), userPromptCaptor.capture(), eq(4096));
+        String repairPrompt = userPromptCaptor.getAllValues().get(1);
+        assertThat(repairPrompt).contains("Patch changes too many lines. changedLines=520, maxChangedLines=500, budgetReason=existing-file-safe-default");
+        assertThat(repairPrompt).contains("The previous patch exceeded the existing-file safe changed-line budget");
+        assertThat(repairPrompt).contains("Produce smaller operation_edit changes");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM patch repair attempted"));
+    }
+
+    @Test
     void fileLoaderRejectsUnsafePatchTargetsBeforeReadingContent() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeContentReader contentReader = mock(CodeContentReader.class);
@@ -1672,6 +1975,91 @@ class CodeAgentServiceTest {
         assertThat(result.files()).isEmpty();
         assertThat(result.warnings()).anySatisfy(warning -> assertThat(warning).contains("Path traversal"));
         assertThat(result.warnings()).anySatisfy(warning -> assertThat(warning).contains("Sensitive"));
+    }
+
+    @Test
+    void patchFromLoadedFilesInBatchesComposesValidatedLlmAuthoredBatchDiffs() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        List<CodePatchFileLoader.LoadedPatchFile> files = List.of(
+                new CodePatchFileLoader.LoadedPatchFile(null, "home.html", "html", "<main></main>\n"),
+                new CodePatchFileLoader.LoadedPatchFile(null, "style.css", "css", "body { margin: 0; }\n")
+        );
+        String plan = """
+                {"batches":[
+                  {"id":"markup","targetFiles":["home.html"],"goal":"Add the organization chart container","rationale":"markup only"},
+                  {"id":"style","targetFiles":["style.css"],"goal":"Style the organization chart","rationale":"style only"}
+                ]}
+                """;
+        String htmlProposal = """
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["home.html"],"operations":[{"path":"home.html","operation":"replace_exact","oldText":"<main></main>","newText":"<main><section id=\\"org-chart\\"></section></main>"}]}
+                """;
+        String cssProposal = """
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["style.css"],"operations":[{"path":"style.css","operation":"insert_after_anchor","anchorBefore":"body { margin: 0; }","newText":"\\n.org-card { border: 1px solid #ddd; }"}]}
+                """;
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1200))).thenReturn(chat(plan));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(htmlProposal), chat(cssProposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFilesInBatches(
+                "Add a homepage tab and a sample organization chart",
+                files
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).extracting("path").containsExactly("home.html", "style.css");
+        assertThat(response.files().get(0).diff()).contains("org-chart");
+        assertThat(response.files().get(0).diff()).contains(".org-card");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("LLM batch plan selected 2 patch batch"));
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("composed into one approval proposal"));
+        verify(ollamaClient).chatResult(anyString(), anyString(), eq(1200));
+        verify(ollamaClient, times(2)).chatResult(anyString(), anyString(), eq(4096));
+    }
+
+    @Test
+    void patchFromLoadedFilesInBatchesSplitsMultiFileModelPlanIntoOneFilePatchGenerations() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        List<CodePatchFileLoader.LoadedPatchFile> files = List.of(
+                new CodePatchFileLoader.LoadedPatchFile(null, "index.html", "html", "<main></main>\n"),
+                new CodePatchFileLoader.LoadedPatchFile(null, "script.js", "javascript", "const ready = true;\n"),
+                new CodePatchFileLoader.LoadedPatchFile(null, "style.css", "css", "body { margin: 0; }\n")
+        );
+        String plan = """
+                {"batches":[{"id":"ui","targetFiles":["index.html","script.js","style.css"],"goal":"Add the requested tab and organization chart","rationale":"The UI change spans markup, script, and style"}]}
+                """;
+        String htmlProposal = """
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["index.html"],"operations":[{"path":"index.html","operation":"replace_exact","oldText":"<main></main>","newText":"<main><section id=\\"org-chart\\"></section></main>"}]}
+                """;
+        String jsProposal = """
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["script.js"],"operations":[{"path":"script.js","operation":"insert_after_anchor","anchorBefore":"const ready = true;","newText":"\\nfunction showOrgChart() { return ready; }"}]}
+                """;
+        String cssProposal = """
+                {"action":"propose_patch","editFormat":"operation_edit","targetFiles":["style.css"],"operations":[{"path":"style.css","operation":"insert_after_anchor","anchorBefore":"body { margin: 0; }","newText":"\\n.org-chart { display: grid; }"}]}
+                """;
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(1200))).thenReturn(chat(plan));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(htmlProposal), chat(jsProposal), chat(cssProposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFilesInBatches(
+                "Add a homepage tab and a sample organization chart",
+                files
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        assertThat(response.files()).extracting("path").containsExactly("index.html", "script.js", "style.css");
+        assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("split them into one-file patch-generation batches"));
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, times(3)).chatResult(anyString(), userPromptCaptor.capture(), eq(4096));
+        assertThat(userPromptCaptor.getAllValues().get(0)).contains("targetFiles: [index.html]");
+        assertThat(userPromptCaptor.getAllValues().get(1)).contains("targetFiles: [script.js]");
+        assertThat(userPromptCaptor.getAllValues().get(2)).contains("targetFiles: [style.css]");
     }
 
     private CodeSearchResult result(UUID repositoryId, String path, double score) {

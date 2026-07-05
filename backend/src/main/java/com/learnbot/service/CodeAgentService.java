@@ -29,6 +29,7 @@ public class CodeAgentService {
     private static final int PREVIOUS_PATCH_OUTPUT_PREVIEW_CHARS = 1200;
     private static final int VALIDATION_WARNING_PREVIEW_CHARS = 600;
     private static final int PATCH_OUTPUT_TOKENS = 4096;
+    private static final int PATCH_REPAIR_ATTEMPTS = 3;
     private final CodeSearchService searchService;
     private final CodePatchFileLoader fileLoader;
     private final PatchValidationService validationService;
@@ -107,6 +108,72 @@ public class CodeAgentService {
         return patchLoadedFiles(safe(instruction), loadedFiles, warnings);
     }
 
+    public CodeAgentPatchResponse patchFromLoadedFilesInBatches(String instruction, List<CodePatchFileLoader.LoadedPatchFile> loadedFiles) {
+        String safeInstruction = safe(instruction);
+        List<CodePatchFileLoader.LoadedPatchFile> filesToPatch = loadedFiles == null ? List.of() : loadedFiles;
+        if (filesToPatch.size() <= 1) {
+            return null;
+        }
+        List<String> warnings = new ArrayList<>();
+        warnings.add("LLM patch batch orchestration attempted; server-authored patch content remains disabled.");
+        List<PatchBatchPlanItem> plan = oneFilePatchBatches(tryLlmPatchBatchPlan(safeInstruction, filesToPatch, warnings), warnings);
+        if (plan.isEmpty()) {
+            warnings.add("LLM batch plan was unavailable; using file-boundary batches only to reduce output size. The LLM still authors every patch body.");
+            plan = filesToPatch.stream()
+                    .map(file -> new PatchBatchPlanItem("batch-" + (filesToPatch.indexOf(file) + 1), List.of(file.path()), "Update this file for the user request.", "file-boundary fallback"))
+                    .toList();
+        }
+        List<PatchBatchResult> batchResults = new ArrayList<>();
+        List<String> combinedWarnings = new ArrayList<>(warnings);
+        for (int index = 0; index < plan.size(); index++) {
+            PatchBatchPlanItem item = plan.get(index);
+            List<CodePatchFileLoader.LoadedPatchFile> batchFiles = batchFiles(filesToPatch, item.targetFiles());
+            if (batchFiles.isEmpty()) {
+                combinedWarnings.add("Patch batch " + item.id() + " skipped because it did not reference loaded files: " + item.targetFiles());
+                continue;
+            }
+            String batchInstruction = patchBatchInstruction(safeInstruction, item, index + 1, plan.size());
+            CodeAgentPatchResponse response = patchLoadedFiles(batchInstruction, batchFiles, new ArrayList<>());
+            batchResults.add(new PatchBatchResult(item.id(), item.targetFiles(), response));
+            combinedWarnings.add("Patch batch " + item.id() + " targeted " + item.targetFiles() + " and valid=" + (response != null && response.valid()) + ".");
+            if (response != null && response.warnings() != null) {
+                response.warnings().stream()
+                        .map(warning -> "batch " + item.id() + ": " + warning)
+                        .forEach(combinedWarnings::add);
+            }
+            if (response == null || !response.valid() || response.files() == null || response.files().isEmpty()) {
+                return new CodeAgentPatchResponse(
+                        "Patch batch " + item.id() + " did not produce a valid unified diff.",
+                        List.of(),
+                        "high",
+                        List.copyOf(combinedWarnings),
+                        List.of(),
+                        false
+                );
+            }
+        }
+        List<PatchFileDiff> combinedFiles = combineBatchPatchFiles(batchResults);
+        if (combinedFiles.isEmpty()) {
+            return new CodeAgentPatchResponse(
+                    "Patch batch orchestration did not produce any usable diff.",
+                    List.of(),
+                    "high",
+                    List.copyOf(combinedWarnings),
+                    List.of(),
+                    false
+            );
+        }
+        combinedWarnings.add("Patch batches were composed into one approval proposal; the user still approves the grouped patch once.");
+        return new CodeAgentPatchResponse(
+                "Generated a grouped patch proposal from " + batchResults.size() + " validated LLM-authored patch batch(es). It has not been applied.",
+                combinedFiles,
+                combinedFiles.size() > 1 ? "medium" : "low",
+                List.copyOf(combinedWarnings),
+                testSuggestions(filesToPatch, combinedFiles.stream().map(PatchFileDiff::path).toList()),
+                true
+        );
+    }
+
     public CodeAgentPatchResponse repairPatchFromLoadedFiles(
             String instruction,
             List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
@@ -166,11 +233,14 @@ public class CodeAgentService {
                     warnings.add("LLM patch initial stopped by length; repair will use compact context and a bounded previous-output preview.");
                 }
                 addLlmPatchOutputDiagnostics(warnings, "initial", modelResult, diff);
+                List<String> noPatchRepairWarnings = new ArrayList<>();
+                noPatchRepairWarnings.add("Initial model output returned no patch. The provided file contents are the actual current workspace state; if the file appears incomplete or truncated, treat that as the bug and produce a minimal unified diff when it satisfies the user request.");
+                noPatchRepairWarnings.addAll(materializationFailureWarnings(warnings));
                 CodeAgentPatchResponse repaired = tryRepairLlmPatch(
                         safeInstruction,
                         filesToPatch,
                         boundedPreviousPatchOutput(modelOutput),
-                        List.of("Initial model output returned no patch. The provided file contents are the actual current workspace state; if the file appears incomplete or truncated, treat that as the bug and produce a minimal unified diff when it satisfies the user request."),
+                        noPatchRepairWarnings,
                         warnings
                 );
                 if (repaired != null) {
@@ -375,6 +445,177 @@ public class CodeAgentService {
         );
     }
 
+    private List<PatchBatchPlanItem> oneFilePatchBatches(List<PatchBatchPlanItem> plan, List<String> warnings) {
+        if (plan == null || plan.isEmpty()) {
+            return List.of();
+        }
+        List<PatchBatchPlanItem> normalized = new ArrayList<>();
+        boolean split = false;
+        for (PatchBatchPlanItem item : plan) {
+            List<String> targetFiles = item.targetFiles() == null ? List.of() : item.targetFiles().stream()
+                    .filter(path -> path != null && !path.isBlank())
+                    .distinct()
+                    .toList();
+            if (targetFiles.size() <= 1) {
+                normalized.add(item);
+                continue;
+            }
+            split = true;
+            for (String path : targetFiles) {
+                normalized.add(new PatchBatchPlanItem(
+                        item.id() + "-" + (normalized.size() + 1),
+                        List.of(path),
+                        item.goal(),
+                        item.rationale()
+                ));
+            }
+        }
+        if (split) {
+            warnings.add("LLM batch plan contained multi-file batches; server split them into one-file patch-generation batches to avoid oversized JSON output. The LLM still authors each batch patch body.");
+        }
+        return List.copyOf(normalized);
+    }
+
+    private List<PatchBatchPlanItem> tryLlmPatchBatchPlan(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            List<String> warnings
+    ) {
+        try {
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
+                    patchBatchPlanSystemPrompt(),
+                    patchBatchPlanUserPrompt(instruction, files),
+                    1200
+            );
+            JsonNode root = objectMapper.readTree(cleanJson(result.content()));
+            JsonNode batches = root.path("batches");
+            if (!batches.isArray()) {
+                warnings.add("LLM batch plan response did not contain a batches array.");
+                return List.of();
+            }
+            Set<String> loadedPaths = files.stream()
+                    .map(CodePatchFileLoader.LoadedPatchFile::path)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            List<PatchBatchPlanItem> planned = new ArrayList<>();
+            for (JsonNode batch : batches) {
+                List<String> targetFiles = textArrayOrEmpty(batch.path("targetFiles")).stream()
+                        .filter(loadedPaths::contains)
+                        .distinct()
+                        .toList();
+                if (targetFiles.isEmpty()) {
+                    continue;
+                }
+                planned.add(new PatchBatchPlanItem(
+                        firstNonBlank(batch.path("id").asText(null), "batch-" + (planned.size() + 1)),
+                        targetFiles,
+                        firstNonBlank(batch.path("goal").asText(null), "Apply the user-requested change for this batch."),
+                        firstNonBlank(batch.path("rationale").asText(null), "")
+                ));
+                if (planned.size() >= files.size()) {
+                    break;
+                }
+            }
+            if (!planned.isEmpty()) {
+                warnings.add("LLM batch plan selected " + planned.size() + " patch batch(es).");
+            }
+            return List.copyOf(planned);
+        } catch (RuntimeException | java.io.IOException ex) {
+            warnings.add("LLM batch plan parsing failed: " + ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private String patchBatchPlanSystemPrompt() {
+        return """
+                You are LearnBot Patch Batch Planner.
+                Return JSON only.
+                Do not write code, diffs, markdown, or explanations.
+                Decide how to split the requested code change into small patch-generation batches.
+                Keep each batch small enough that a later patch agent can output compact JSON without truncation.
+                Prefer one file per batch unless two files must be edited atomically.
+                Use only the provided loaded file paths.
+                JSON shape:
+                {"batches":[{"id":"batch-1","targetFiles":["path"],"goal":"specific edit goal for this batch","rationale":"why these files belong together"}]}
+                """;
+    }
+
+    private String patchBatchPlanUserPrompt(String instruction, List<CodePatchFileLoader.LoadedPatchFile> files) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("USER_INSTRUCTION:\n")
+                .append(instruction)
+                .append("\n\nLOADED_FILES:\n");
+        for (CodePatchFileLoader.LoadedPatchFile file : files == null ? List.<CodePatchFileLoader.LoadedPatchFile>of() : files) {
+            builder.append("- path: ").append(file.path()).append("\n")
+                    .append("  language: ").append(file.language()).append("\n")
+                    .append("  lineCount: ").append(lineCount(file.content())).append("\n")
+                    .append("  preview: ").append(preview(file.content())).append("\n");
+        }
+        return builder.toString();
+    }
+
+    private String patchBatchInstruction(String instruction, PatchBatchPlanItem item, int batchNumber, int batchCount) {
+        return """
+                %s
+
+                PATCH_BATCH_SCOPE:
+                - batch: %d/%d
+                - batchId: %s
+                - targetFiles: %s
+                - batchGoal: %s
+                - batchRationale: %s
+                - Produce only this batch's small, self-contained edits.
+                - Do not edit files outside this batch.
+                - If a later batch should handle related work, leave that work out of this batch.
+                - For a small HTML/HTM/XML/SVG batch that adds related navigation and content sections, prefer editFormat=full_file with complete updated file content authored by you instead of multiple anchor insert operations.
+                """.formatted(
+                instruction,
+                batchNumber,
+                batchCount,
+                item.id(),
+                item.targetFiles(),
+                item.goal(),
+                item.rationale()
+        );
+    }
+
+    private List<CodePatchFileLoader.LoadedPatchFile> batchFiles(
+            List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
+            List<String> targetFiles
+    ) {
+        Set<String> requested = new LinkedHashSet<>(targetFiles == null ? List.of() : targetFiles);
+        return loadedFiles == null
+                ? List.of()
+                : loadedFiles.stream()
+                .filter(file -> requested.contains(file.path()))
+                .toList();
+    }
+
+    private List<PatchFileDiff> combineBatchPatchFiles(List<PatchBatchResult> batchResults) {
+        String combinedDiff = batchResults == null
+                ? ""
+                : batchResults.stream()
+                .map(PatchBatchResult::response)
+                .filter(response -> response != null && response.files() != null)
+                .flatMap(response -> response.files().stream())
+                .map(PatchFileDiff::diff)
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .collect(java.util.stream.Collectors.joining("\n"));
+        if (combinedDiff.isBlank()) {
+            return List.of();
+        }
+        Set<String> paths = batchResults.stream()
+                .map(PatchBatchResult::response)
+                .filter(response -> response != null && response.files() != null)
+                .flatMap(response -> response.files().stream())
+                .map(PatchFileDiff::path)
+                .filter(path -> path != null && !path.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return paths.stream()
+                .map(path -> new PatchFileDiff(path, combinedDiff))
+                .toList();
+    }
+
     private CodeAgentPatchResponse tryRepairLlmPatch(
             String instruction,
             List<CodePatchFileLoader.LoadedPatchFile> files,
@@ -384,8 +625,8 @@ public class CodeAgentService {
     ) {
         String repairPreviousOutput = previousOutput;
         List<String> repairWarnings = validationWarnings == null ? List.of() : validationWarnings;
-        for (int attempt = 1; attempt <= 2; attempt++) {
-            String phase = attempt == 1 ? "repair" : "repair retry";
+        for (int attempt = 1; attempt <= PATCH_REPAIR_ATTEMPTS; attempt++) {
+            String phase = attempt == 1 ? "repair" : "repair retry " + (attempt - 1);
             try {
                 OllamaClient.ChatResult repairedResult = patchChatResult(
                         patchRepairSystemPrompt(),
@@ -464,6 +705,25 @@ public class CodeAgentService {
             }
         }
         return null;
+    }
+
+    private List<String> materializationFailureWarnings(List<String> warnings) {
+        if (warnings == null || warnings.isEmpty()) {
+            return List.of();
+        }
+        return warnings.stream()
+                .filter(warning -> {
+                    String clean = safe(warning);
+                    return clean.contains("insert operation repeated its anchor")
+                            || clean.contains("repeated its anchor text inside newText")
+                            || clean.contains("JSON proposal parsing failed")
+                            || clean.contains("malformed JSON patch proposal")
+                            || clean.contains("did not contain materializable edits")
+                            || clean.contains("operation_edit targeted an unloaded file")
+                            || clean.contains("operation_edit anchor did not match exactly once");
+                })
+                .distinct()
+                .toList();
     }
 
     private String cleanFullFileModelOutput(String value) {
@@ -852,29 +1112,62 @@ public class CodeAgentService {
                 continue;
             }
             if (rawLine.startsWith("@@")) {
-                Integer oldStart = parseOldStart(rawLine);
-                if (oldStart == null || currentPath.isBlank() || currentPath.equals("/dev/null")) {
+                PatchHunkHeader header = parseHunkHeader(rawLine);
+                if (header == null || currentPath.isBlank() || currentPath.equals("/dev/null")) {
                     currentHunk = null;
                     continue;
                 }
-                currentHunk = new PatchHunk(oldStart, new ArrayList<>());
+                currentHunk = new PatchHunk(header.oldStart(), header.oldCount(), header.newCount(), new ArrayList<>());
                 result.computeIfAbsent(currentPath, ignored -> new ArrayList<>()).add(currentHunk);
                 continue;
             }
             if (currentHunk == null || rawLine.startsWith("\\ No newline")) {
                 continue;
             }
+            if (hunkLineCountsSatisfied(currentHunk)) {
+                currentHunk = null;
+                continue;
+            }
             if (rawLine.isEmpty()) {
-                currentHunk.lines().add(new PatchLine(' ', ""));
+                addPatchLineIfWithinHeaderCounts(currentHunk, new PatchLine(' ', ""));
                 continue;
             }
             char marker = rawLine.charAt(0);
             if (marker == ' ' || marker == '-' || marker == '+') {
-                currentHunk.lines().add(new PatchLine(marker, rawLine.substring(1)));
+                addPatchLineIfWithinHeaderCounts(currentHunk, new PatchLine(marker, rawLine.substring(1)));
             }
         }
         result.entrySet().removeIf(entry -> entry.getValue().isEmpty());
         return result;
+    }
+
+    private boolean hunkLineCountsSatisfied(PatchHunk hunk) {
+        return countedOldLines(hunk) >= hunk.oldCount()
+                && countedNewLines(hunk) >= hunk.newCount();
+    }
+
+    private void addPatchLineIfWithinHeaderCounts(PatchHunk hunk, PatchLine line) {
+        int oldLines = countedOldLines(hunk);
+        int newLines = countedNewLines(hunk);
+        boolean consumesOld = line.marker() == ' ' || line.marker() == '-';
+        boolean consumesNew = line.marker() == ' ' || line.marker() == '+';
+        if ((consumesOld && oldLines >= hunk.oldCount())
+                || (consumesNew && newLines >= hunk.newCount())) {
+            return;
+        }
+        hunk.lines().add(line);
+    }
+
+    private int countedOldLines(PatchHunk hunk) {
+        return (int) hunk.lines().stream()
+                .filter(line -> line.marker() == ' ' || line.marker() == '-')
+                .count();
+    }
+
+    private int countedNewLines(PatchHunk hunk) {
+        return (int) hunk.lines().stream()
+                .filter(line -> line.marker() == ' ' || line.marker() == '+')
+                .count();
     }
 
     private String tryApplyPatchHunksForContext(List<String> originalLines, List<PatchHunk> hunks, String path) {
@@ -965,9 +1258,17 @@ public class CodeAgentService {
         return lines;
     }
 
-    private Integer parseOldStart(String hunkHeader) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@@ -(\\d+)").matcher(safe(hunkHeader));
-        return matcher.find() ? Integer.parseInt(matcher.group(1)) : null;
+    private PatchHunkHeader parseHunkHeader(String hunkHeader) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@")
+                .matcher(safe(hunkHeader));
+        if (!matcher.find()) {
+            return null;
+        }
+        int oldStart = Integer.parseInt(matcher.group(1));
+        int oldCount = matcher.group(2) == null ? 1 : Integer.parseInt(matcher.group(2));
+        int newCount = matcher.group(4) == null ? 1 : Integer.parseInt(matcher.group(4));
+        return new PatchHunkHeader(oldStart, oldCount, newCount);
     }
 
     private String normalizeDiffPath(String raw) {
@@ -988,7 +1289,10 @@ public class CodeAgentService {
     private record PatchContextValidationResult(boolean valid, List<String> warnings) {
     }
 
-    private record PatchHunk(int oldStart, List<PatchLine> lines) {
+    private record PatchHunk(int oldStart, int oldCount, int newCount, List<PatchLine> lines) {
+    }
+
+    private record PatchHunkHeader(int oldStart, int oldCount, int newCount) {
     }
 
     private record PatchLine(char marker, String text) {
@@ -1029,6 +1333,69 @@ public class CodeAgentService {
             String anchorBefore,
             String anchorAfter
     ) {
+    }
+
+    private String compactReplacementDiff(String path, String currentContent, String replacementContent) {
+        String cleanPath = safe(path).replace('\\', '/');
+        List<String> oldLines = contentLines(currentContent);
+        List<String> newLines = contentLines(replacementContent);
+        if (oldLines.equals(newLines)) {
+            return "";
+        }
+        int prefix = 0;
+        while (prefix < oldLines.size()
+                && prefix < newLines.size()
+                && oldLines.get(prefix).equals(newLines.get(prefix))) {
+            prefix++;
+        }
+        int oldSuffix = oldLines.size() - 1;
+        int newSuffix = newLines.size() - 1;
+        while (oldSuffix >= prefix
+                && newSuffix >= prefix
+                && oldLines.get(oldSuffix).equals(newLines.get(newSuffix))) {
+            oldSuffix--;
+            newSuffix--;
+        }
+        int context = 3;
+        int hunkOldStartIndex = Math.max(0, prefix - context);
+        int hunkNewStartIndex = Math.max(0, prefix - context);
+        int hunkOldEndExclusive = Math.min(oldLines.size(), oldSuffix + 1 + context);
+        int hunkNewEndExclusive = Math.min(newLines.size(), newSuffix + 1 + context);
+        int oldStart = oldLines.isEmpty() ? 0 : hunkOldStartIndex + 1;
+        int newStart = newLines.isEmpty() ? 0 : hunkNewStartIndex + 1;
+        StringBuilder builder = new StringBuilder();
+        builder.append("--- a/").append(cleanPath).append("\n");
+        builder.append("+++ b/").append(cleanPath).append("\n");
+        builder.append("@@ -")
+                .append(oldStart)
+                .append(",")
+                .append(Math.max(0, hunkOldEndExclusive - hunkOldStartIndex))
+                .append(" +")
+                .append(newStart)
+                .append(",")
+                .append(Math.max(0, hunkNewEndExclusive - hunkNewStartIndex))
+                .append(" @@\n");
+        int oldCursor = hunkOldStartIndex;
+        int newCursor = hunkNewStartIndex;
+        while (oldCursor < prefix && newCursor < prefix) {
+            builder.append(" ").append(oldLines.get(oldCursor)).append("\n");
+            oldCursor++;
+            newCursor++;
+        }
+        while (oldCursor <= oldSuffix) {
+            builder.append("-").append(oldLines.get(oldCursor)).append("\n");
+            oldCursor++;
+        }
+        while (newCursor <= newSuffix) {
+            builder.append("+").append(newLines.get(newCursor)).append("\n");
+            newCursor++;
+        }
+        while (oldCursor < hunkOldEndExclusive && newCursor < hunkNewEndExclusive) {
+            builder.append(" ").append(oldLines.get(oldCursor)).append("\n");
+            oldCursor++;
+            newCursor++;
+        }
+        return builder.toString().trim();
     }
 
     private String fullFileReplacementDiff(String path, String currentContent, String replacementContent) {
@@ -1189,7 +1556,9 @@ public class CodeAgentService {
                 Keep output compact: omit diagnosis, changeIntent, verificationPlan, and riskNotes unless essential.
                 Use small operations with exact anchors copied from EXACT_CONTENT.
                 Prefer insert_before_anchor, insert_after_anchor, replace_exact, replace_between_anchors, or create_file.
-                Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
+                For insert_before_anchor and insert_after_anchor, newText must contain only the inserted text; do not repeat the anchor text or boundary line inside newText.
+                For small HTML/HTM/XML/SVG files or markup edits that add related navigation and content sections, prefer editFormat=full_file over several insert operations. The fullFileContent must be the complete updated file authored by you.
+                Do not use editFormat=full_file for large files unless the user explicitly asks to rewrite the whole file.
                 Use search_replace only when the search block appears exactly once in the current file.
                 Use legacy unifiedDiff only when you are certain every hunk context line is copied exactly from the current file.
                 The server may reject unsafe or malformed output and may materialize your edits into a unified diff, but it must not author replacement content for you.
@@ -1236,8 +1605,10 @@ public class CodeAgentService {
                 You may create new files with operation=create_file when needed.
                 Do not delete, rename, or chmod files.
                 Prefer editFormat=operation_edit. Use small operations with exact anchors copied from EXACT_CONTENT.
+                For insert_before_anchor and insert_after_anchor, newText must contain only the inserted text; do not repeat the anchor text or boundary line inside newText.
                 Keep output compact: no diagnosis/changeIntent/verificationPlan/riskNotes unless essential.
-                Do not use editFormat=full_file unless the user explicitly asks to rewrite the whole file or the file is very small.
+                For small HTML/HTM/XML/SVG files or markup edits that add related navigation and content sections, prefer editFormat=full_file over several insert operations. The fullFileContent must be the complete updated file authored by you.
+                Do not use editFormat=full_file for large files unless the user explicitly asks to rewrite the whole file.
                 Use search_replace only when the search block appears exactly once in the current file.
                 Use legacy unifiedDiff only when every hunk context line is copied exactly from the provided file contents, including indentation.
                 Keep the patch small and targeted.
@@ -1323,6 +1694,7 @@ public class CodeAgentService {
         for (String warning : validationWarnings == null ? List.<String>of() : validationWarnings) {
             builder.append("- ").append(boundedText(warning, VALIDATION_WARNING_PREVIEW_CHARS)).append("\n");
         }
+        appendRepairFailureGuidance(builder, validationWarnings);
         builder.append("\nTarget files with exact current contents:\n");
         for (CodePatchFileLoader.LoadedPatchFile file : files) {
             appendFileContext(builder, file, true);
@@ -1331,6 +1703,46 @@ public class CodeAgentService {
                 .append(boundedPreviousPatchOutput(previousOutput))
                 .append("\n");
         return builder.toString();
+    }
+
+    private void appendRepairFailureGuidance(StringBuilder builder, List<String> validationWarnings) {
+        List<String> warnings = validationWarnings == null ? List.of() : validationWarnings;
+        boolean tooLarge = warnings.stream().anyMatch(warning -> safe(warning).contains("Patch changes too many lines"));
+        boolean ambiguousAnchor = warnings.stream().anyMatch(warning -> {
+            String clean = safe(warning);
+            return clean.contains("matched ") && clean.contains("exact single-match")
+                    || clean.contains("anchor did not match exactly once")
+                    || clean.contains("search_replace block did not match exactly once");
+        });
+        boolean malformed = warnings.stream().anyMatch(warning -> {
+            String lower = safe(warning).toLowerCase(Locale.ROOT);
+            return lower.contains("malformed json")
+                    || lower.contains("json proposal parsing failed")
+                    || lower.contains("not a unified diff")
+                    || lower.contains("did not contain materializable edits");
+        });
+        boolean repeatedInsertAnchor = warnings.stream().anyMatch(warning -> {
+            String clean = safe(warning);
+            return clean.contains("insert operation repeated its anchor")
+                    || clean.contains("repeated its anchor text inside newText");
+        });
+        if (!tooLarge && !ambiguousAnchor && !malformed && !repeatedInsertAnchor) {
+            return;
+        }
+        builder.append("\nRepair guidance derived from validation failures:\n");
+        if (tooLarge) {
+            builder.append("- The previous patch exceeded the existing-file safe changed-line budget. Do not rewrite whole existing files unless the user explicitly asked for a full rewrite. Produce smaller operation_edit changes, split across only the necessary files, and preserve unchanged surrounding content through anchors instead of full_file content.\n");
+        }
+        if (ambiguousAnchor) {
+            builder.append("- At least one anchor or search block was ambiguous. Copy a longer exact block from EXACT_CONTENT, or use replace_between_anchors with both unique surrounding anchors so each operation matches exactly once.\n");
+        }
+        if (malformed) {
+            builder.append("- The previous patch envelope was malformed or not materializable. Return compact JSON only, with action=propose_patch, editFormat=operation_edit, targetFiles, and operations; do not include markdown, comments, or trailing prose.\n");
+        }
+        if (repeatedInsertAnchor) {
+            builder.append("- An insert operation repeated anchor text inside newText. For insert_before_anchor and insert_after_anchor, keep the anchor only in anchorBefore/anchorAfter and put only the newly inserted lines in newText. If the target is a small markup file and the change touches multiple related locations, switch to editFormat=full_file and return complete updated file content authored by you.\n");
+        }
+        builder.append("- The server will only validate and materialize LLM-authored edits; it will not invent replacement content. If you cannot produce a bounded safe patch from the exact content below, return action=observe_more or ask_clarification.\n\n");
     }
 
     private void appendFileContext(StringBuilder builder, CodePatchFileLoader.LoadedPatchFile file, boolean repair) {
@@ -1346,6 +1758,7 @@ public class CodeAgentService {
                 .append("EDIT_RULE: For full_file, return the complete updated file content authored by you.\n")
                 .append("EDIT_RULE: For search_replace, the search block must be copied exactly from EXACT_CONTENT and match once.\n")
                 .append("PATCH_RULE: If using legacy unifiedDiff, hunk context must copy exact lines from EXACT_CONTENT.\n")
+                .append(markupFullFileGuidance(file, content))
                 .append("EXACT_CONTENT_START ").append(file.path()).append("\n")
                 .append(content)
                 .append(content.endsWith("\n") || content.isEmpty() ? "" : "\n")
@@ -1363,6 +1776,16 @@ public class CodeAgentService {
         if (lines.size() > maxLines) {
             builder.append("... ").append(lines.size() - maxLines).append(" additional lines omitted from numbered view; exact content remains above/below if available.\n");
         }
+    }
+
+    private String markupFullFileGuidance(CodePatchFileLoader.LoadedPatchFile file, String content) {
+        String extension = extensionForPath(file == null ? "" : file.path());
+        boolean markup = Set.of("html", "htm", "xml", "svg").contains(extension);
+        if (!markup || safe(content).length() > 12_000) {
+            return "";
+        }
+        return "EDIT_RULE: This is a small markup file. If the requested change touches multiple related locations such as navigation buttons plus content sections, prefer editFormat=full_file with one complete fullFileContent value instead of multiple insert_before_anchor/insert_after_anchor operations.\n"
+                + "EDIT_RULE: Do not repeat anchor or boundary text inside insert newText. If that is hard to guarantee for this markup file, use full_file.\n";
     }
 
     private String boundedPreviousPatchOutput(String value) {
@@ -1426,6 +1849,15 @@ public class CodeAgentService {
             String phase
     ) {
         String editFormat = safe(root.path("editFormat").asText("")).toLowerCase(Locale.ROOT);
+        String operationInferredFormat = inferOperationContainerEditFormat(root.path("operations"));
+        if (!operationInferredFormat.isBlank()
+                && (editFormat.isBlank() || "full_file".equals(editFormat) || "full-file".equals(editFormat) || "fullfile".equals(editFormat))) {
+            if (!editFormat.isBlank() && !normalizeEditFormat(editFormat).equals(operationInferredFormat)) {
+                warnings.add("LLM patch " + phase + " editFormat=" + editFormat
+                        + " conflicted with operation payload; materializing as " + operationInferredFormat + ".");
+            }
+            editFormat = operationInferredFormat;
+        }
         if (editFormat.isBlank() && root.has("fullFileContent")) {
             editFormat = "full_file";
         }
@@ -1442,6 +1874,42 @@ public class CodeAgentService {
             case "unified_diff", "unified-diff", "unifieddiff" -> "";
             default -> "";
         };
+    }
+
+    private String normalizeEditFormat(String editFormat) {
+        return safe(editFormat).trim().replace('-', '_').toLowerCase(Locale.ROOT);
+    }
+
+    private String inferOperationContainerEditFormat(JsonNode operations) {
+        if (operations == null || !operations.isArray() || operations.isEmpty()) {
+            return "";
+        }
+        boolean hasOperationEdit = false;
+        boolean hasFullFile = false;
+        for (JsonNode operation : operations) {
+            String operationName = normalizeOperationName(textField(operation, "operation", "type"));
+            if ("create_file".equals(operationName)) {
+                hasFullFile = true;
+                continue;
+            }
+            if (!operationName.isBlank()
+                    || operation.has("oldText")
+                    || operation.has("old_text")
+                    || operation.has("anchorBefore")
+                    || operation.has("anchor_after")
+                    || operation.has("anchorAfter")
+                    || operation.has("newText")
+                    || operation.has("new_text")) {
+                hasOperationEdit = true;
+            }
+            if (operation.has("fullFileContent") || operation.has("full_file_content") || operation.has("fullFile") || operation.has("fileContent")) {
+                hasFullFile = true;
+            }
+        }
+        if (hasOperationEdit) {
+            return "operation_edit";
+        }
+        return hasFullFile ? "full_file" : "";
     }
 
     private String inferEditFormat(JsonNode edits) {
@@ -1511,7 +1979,7 @@ public class CodeAgentService {
             if (updated == null || sameNormalizedContent(file.content(), updated)) {
                 continue;
             }
-            diffs.add(fullFileReplacementDiff(file.path(), file.content(), updated));
+            diffs.add(compactReplacementDiff(file.path(), file.content(), updated));
         }
         if (diffs.isEmpty()) {
             return "NO_PATCH\nreason: operation_edit edits made no changes";
@@ -1594,7 +2062,7 @@ public class CodeAgentService {
             if (updated == null || sameNormalizedContent(file.content(), updated)) {
                 continue;
             }
-            diffs.add(fullFileReplacementDiff(file.path(), file.content(), updated));
+            diffs.add(compactReplacementDiff(file.path(), file.content(), updated));
         }
         if (diffs.isEmpty()) {
             return "NO_PATCH\nreason: search_replace edits made no changes";
@@ -1718,7 +2186,38 @@ public class CodeAgentService {
                     "operation_edit anchor did not match exactly once"
             );
         }
+        String repeatedAnchor = repeatedInsertAnchorText(anchor, newText);
+        if (!repeatedAnchor.isBlank()) {
+            return OperationApplyResult.failure(
+                    "LLM patch " + phase + " " + operationName + " operation for " + path
+                            + " repeated its anchor text inside newText: " + diagnosticPreview(repeatedAnchor),
+                    "insert operation repeated its anchor text inside newText"
+            );
+        }
         return OperationApplyResult.success(current.substring(0, point.insertion()) + newText + current.substring(point.insertion()));
+    }
+
+    private String repeatedInsertAnchorText(String anchor, String newText) {
+        String cleanAnchor = safe(anchor).replace("\r\n", "\n").replace('\r', '\n');
+        String cleanNewText = safe(newText).replace("\r\n", "\n").replace('\r', '\n');
+        if (cleanAnchor.isBlank() || cleanNewText.isBlank()) {
+            return "";
+        }
+        if (meaningfulInsertAnchorFragment(cleanAnchor) && cleanNewText.contains(cleanAnchor)) {
+            return cleanAnchor;
+        }
+        for (String rawLine : cleanAnchor.split("\n")) {
+            String line = rawLine.trim();
+            if (meaningfulInsertAnchorFragment(line) && cleanNewText.contains(line)) {
+                return line;
+            }
+        }
+        return "";
+    }
+
+    private boolean meaningfulInsertAnchorFragment(String value) {
+        String clean = safe(value).trim();
+        return clean.length() >= 6 && (clean.contains("<") || clean.contains("@") || clean.matches(".*[A-Za-z0-9가-힣].*"));
     }
 
     private String normalizeOperationName(String operation) {
@@ -1914,20 +2413,40 @@ public class CodeAgentService {
                         textField(edit, "anchorAfter", "anchor_after", "afterAnchor", "after_anchor")
                 ));
             }
-        } else if ("full_file".equals(defaultFormat) && root.has("fullFileContent")) {
-            edits.add(new StructuredEdit(
-                    "full_file",
-                    normalizePatchPath(firstTargetPath(root, files)),
-                    "",
-                    root.path("fullFileContent").asText(""),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null
-            ));
+        } else if ("full_file".equals(defaultFormat)) {
+            if (root.has("fullFileContent")) {
+                edits.add(new StructuredEdit(
+                        "full_file",
+                        normalizePatchPath(firstTargetPath(root, files)),
+                        "",
+                        root.path("fullFileContent").asText(""),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                ));
+            } else if (root.path("operations").isArray()) {
+                for (JsonNode edit : root.path("operations")) {
+                    String path = firstNonBlank(edit.path("path").asText(""), singleLoadedFilePath(files));
+                    String fullContent = textField(edit, "fullFileContent", "full_file_content", "fullFile", "fileContent", "content", "newText", "new_text");
+                    edits.add(new StructuredEdit(
+                            "full_file",
+                            normalizePatchPath(path),
+                            textField(edit, "operation", "type"),
+                            fullContent,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null
+                    ));
+                }
+            }
         }
         return edits.stream()
                 .filter(edit -> !edit.path().isBlank())
@@ -2372,6 +2891,19 @@ public class CodeAgentService {
         return values.isEmpty() ? List.of("선택된 target file을 기준으로 최소 변경 계획을 검토하세요.") : List.copyOf(values);
     }
 
+    private List<String> textArrayOrEmpty(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode item : node) {
+                String value = item.asText();
+                if (value != null && !value.isBlank()) {
+                    values.add(value);
+                }
+            }
+        }
+        return List.copyOf(values);
+    }
+
     private List<String> testSuggestions(List<CodePatchFileLoader.LoadedPatchFile> files) {
         return testSuggestions(files, files == null ? List.of() : files.stream().map(CodePatchFileLoader.LoadedPatchFile::path).toList());
     }
@@ -2409,6 +2941,20 @@ public class CodeAgentService {
     private String preview(String value) {
         String clean = safe(value).replaceAll("\\s+", " ").trim();
         return clean.length() <= 360 ? clean : clean.substring(0, 360) + "...";
+    }
+
+    private int lineCount(String value) {
+        String clean = safe(value);
+        if (clean.isEmpty()) {
+            return 0;
+        }
+        int count = 1;
+        for (int index = 0; index < clean.length(); index++) {
+            if (clean.charAt(index) == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private String planText(String value) {
@@ -2459,5 +3005,20 @@ public class CodeAgentService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private record PatchBatchPlanItem(
+            String id,
+            List<String> targetFiles,
+            String goal,
+            String rationale
+    ) {
+    }
+
+    private record PatchBatchResult(
+            String id,
+            List<String> targetFiles,
+            CodeAgentPatchResponse response
+    ) {
     }
 }

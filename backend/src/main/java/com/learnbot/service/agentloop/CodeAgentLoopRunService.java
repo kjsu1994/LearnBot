@@ -358,17 +358,27 @@ public class CodeAgentLoopRunService {
                 patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), List.of());
                 patchSource = "local-agent-creation-mode";
             } else {
-                patch = observedFiles.isEmpty()
-                        ? codeAgentService.patch(
-                        repositoryId,
-                        timeline.spaceId(),
-                        timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
-                        timeline.instruction(),
-                        targetFiles
-                )
-                        : codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+                if (observedFiles.isEmpty()) {
+                    patch = codeAgentService.patch(
+                            repositoryId,
+                            timeline.spaceId(),
+                            timeline.spaceId() == null ? List.of() : List.of(timeline.spaceId()),
+                            timeline.instruction(),
+                            targetFiles
+                    );
+                } else {
+                    patch = codeAgentService.patchFromLoadedFilesInBatches(timeline.instruction(), observedFiles);
+                    if (patch == null) {
+                        patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+                    } else {
+                        patchSource = "local-agent-file-read-batched";
+                    }
+                }
             }
-            if ((patch == null || !patch.valid()) && !observedFiles.isEmpty() && observedFiles.size() < targetFiles.size()) {
+            if ((patch == null || !patch.valid())
+                    && !"local-agent-file-read-batched".equals(patchSource)
+                    && !observedFiles.isEmpty()
+                    && observedFiles.size() < targetFiles.size()) {
                 patch = codeAgentService.patch(
                         repositoryId,
                         timeline.spaceId(),
@@ -434,7 +444,7 @@ public class CodeAgentLoopRunService {
                         diff,
                         approvalTargetFiles,
                         observedPatchFiles(timeline, approvalTargetFiles),
-                        targetSelection.details()
+                        patchApprovalMetadata(targetSelection.details(), patchSource, patch)
                 );
             } catch (IllegalArgumentException ex) {
                 if (!repairableApprovalPreflightFailure(ex)) {
@@ -473,7 +483,7 @@ public class CodeAgentLoopRunService {
                         repairedDiff,
                         repairedTargetFiles,
                         observedPatchFiles(timeline, repairedTargetFiles),
-                        targetSelection.details()
+                        patchApprovalMetadata(targetSelection.details(), patchSource + "-repair", repairedPatch)
                 );
             }
             return patchProposalResponse(
@@ -1093,6 +1103,27 @@ public class CodeAgentLoopRunService {
 
     private Map<String, Object> patchBlockedDetails(List<String> targetFiles, String patchSource, CodeAgentPatchResponse patch, RuntimeException ex) {
         return patchBlockedDetails(targetFiles, patchSource, patch, ex, Map.of());
+    }
+
+    private Map<String, Object> patchApprovalMetadata(
+            Map<String, Object> targetSelectionDetails,
+            String patchSource,
+            CodeAgentPatchResponse patch
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        if (targetSelectionDetails != null) {
+            details.putAll(targetSelectionDetails);
+        }
+        Map<String, Object> patchGeneration = new LinkedHashMap<>();
+        patchGeneration.put("schema", "learnbot.server.code-agent.patch-generation.v1");
+        patchGeneration.put("source", patchSource);
+        patchGeneration.put("valid", patch != null && patch.valid());
+        patchGeneration.put("summary", patch == null ? null : patch.summary());
+        patchGeneration.put("riskLevel", patch == null ? null : patch.riskLevel());
+        patchGeneration.put("warnings", patch == null || patch.warnings() == null ? List.of() : patch.warnings());
+        patchGeneration.put("testSuggestions", patch == null || patch.testSuggestions() == null ? List.of() : patch.testSuggestions());
+        details.put("patchGeneration", java.util.Collections.unmodifiableMap(patchGeneration));
+        return java.util.Collections.unmodifiableMap(details);
     }
 
     private Map<String, Object> patchBlockedDetails(

@@ -16,7 +16,7 @@ class PatchValidationServiceTest {
     private final PatchValidationService service = new PatchValidationService(fileLoader);
 
     @Test
-    void validateKeepsExistingFilePatchLineBudgetConservative() {
+    void validateAllowsExistingFilePatchWithinRaisedLineBudget() {
         when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
         String diff = """
                 --- a/index.html
@@ -25,6 +25,23 @@ class PatchValidationServiceTest {
                 -<main>Home</main>
                 %s
                 """.formatted("+<p>x</p>\n".repeat(400));
+
+        PatchValidationResult result = service.validate(diff, List.of("index.html"), "make the homepage more flashy but keep the existing structure");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
+    void validateStillRejectsExistingFilePatchBeyondRaisedLineBudget() {
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1 +1,551 @@
+                -<main>Home</main>
+                %s
+                """.formatted("+<p>x</p>\n".repeat(550));
 
         PatchValidationResult result = service.validate(diff, List.of("index.html"), "make the homepage more flashy but keep the existing structure");
 
@@ -44,7 +61,7 @@ class PatchValidationServiceTest {
                 %s
                 """.formatted("+console.log('x');\n".repeat(801));
 
-        PatchValidationResult result = service.validate(diff, List.of("script.js"), "js파일을 하나 추가해줘");
+        PatchValidationResult result = service.validate(diff, List.of("script.js"), "js 파일을 하나 추가해줘");
 
         assertThat(result.valid()).isTrue();
         assertThat(result.warnings()).isEmpty();
@@ -61,7 +78,7 @@ class PatchValidationServiceTest {
                 %s
                 """.formatted("+<p>new</p>\n".repeat(801));
 
-        PatchValidationResult result = service.validate(diff, List.of("index.html"), "index.html 전체 재작성해줘");
+        PatchValidationResult result = service.validate(diff, List.of("index.html"), "index.html 전체 작성해줘");
 
         assertThat(result.valid()).isTrue();
         assertThat(result.warnings()).isEmpty();

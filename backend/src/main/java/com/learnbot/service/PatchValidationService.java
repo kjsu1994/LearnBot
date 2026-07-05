@@ -12,7 +12,7 @@ import java.util.Set;
 @Service
 public class PatchValidationService {
     private static final int MAX_CHANGED_FILES = 5;
-    private static final int MAX_CHANGED_LINES = 300;
+    private static final int MAX_CHANGED_LINES = 500;
     private static final int MAX_EXPLICIT_REWRITE_CHANGED_LINES = 1_200;
     private static final int MAX_CREATED_FILE_CHANGED_LINES = 1_500;
     private static final int MAX_DIFF_CHARS = 30_000;
@@ -108,7 +108,7 @@ public class PatchValidationService {
                 || lower.contains("from scratch")
                 || lower.contains("전체 교체")
                 || lower.contains("전체를 교체")
-                || lower.contains("전체 재작성")
+                || lower.contains("전체 작성")
                 || lower.contains("새로 작성")
                 || lower.contains("처음부터");
     }

@@ -1456,6 +1456,223 @@ class CodeAgentLoopRunServiceTest {
     }
 
     @Test
+    void advanceUsesValidatedBatchPatchBeforeOneShotPatchForMultipleObservedFiles() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "Add a homepage tab and a sample organization chart";
+        String htmlDiff = """
+                --- a/home.html
+                +++ b/home.html
+                @@ -1 +1,2 @@
+                 <main></main>
+                +<section id="org-chart"></section>
+                """;
+        String cssDiff = """
+                --- a/style.css
+                +++ b/style.css
+                @@ -1 +1,2 @@
+                 body { margin: 0; }
+                +.org-card { border: 1px solid #ddd; }
+                """;
+        String groupedDiff = htmlDiff + "\n" + cssDiff;
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("home.html", "<main></main>\n"),
+                        fileReadEvent("style.css", "body { margin: 0; }\n")
+                )
+        );
+        LocalAgentToolExecutionResponse approval = new LocalAgentToolExecutionResponse(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                userId,
+                agentId,
+                workspaceId,
+                AgentExecutionTarget.USER_LOCAL_AGENT,
+                LocalAgentToolName.PATCH_APPLY,
+                LocalAgentApprovalState.REQUIRED,
+                LocalAgentToolStatus.APPROVAL_REQUIRED,
+                Map.of("diff", groupedDiff),
+                Map.of(),
+                null,
+                null,
+                List.of(),
+                List.of(),
+                OffsetDateTime.now(),
+                null,
+                null
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "WAIT_FOR_APPROVAL"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("""
+                {"targetFiles":["home.html","style.css"],"reason":"The UI change spans markup and styles.","confidence":"high","needsClarification":false}
+                """));
+        when(codeAgentService.patchFromLoadedFilesInBatches(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "batched",
+                List.of(new PatchFileDiff("home.html", groupedDiff), new PatchFileDiff("style.css", groupedDiff)),
+                "medium",
+                List.of("Patch batches were composed into one approval proposal."),
+                List.of(),
+                true
+        ));
+        when(localPatchRequestService.prepare(eq(repositoryId), eq(spaceId), eq(userId), eq(agentId), eq(workspaceId), eq(loopId), eq(instruction), eq(groupedDiff), eq(List.of("home.html", "style.css")), anyList(), anyMap()))
+                .thenReturn(approval);
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("CREATED_VALIDATED_PATCH_APPROVAL_REQUEST");
+        verify(codeAgentService).patchFromLoadedFilesInBatches(eq(instruction), anyList());
+        verify(codeAgentService, never()).patchFromLoadedFiles(eq(instruction), anyList());
+        verify(localPatchRequestService).prepare(
+                eq(repositoryId),
+                eq(spaceId),
+                eq(userId),
+                eq(agentId),
+                eq(workspaceId),
+                eq(loopId),
+                eq(instruction),
+                eq(groupedDiff),
+                eq(List.of("home.html", "style.css")),
+                anyList(),
+                anyMap()
+        );
+    }
+
+    @Test
+    void advanceBlocksWithBatchWarningsInsteadOfFallingBackToOneShotWhenBatchPatchFails() {
+        CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
+        CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);
+        CodeAgentLoopRunnerService runnerService = mock(CodeAgentLoopRunnerService.class);
+        CodeAgentService codeAgentService = mock(CodeAgentService.class);
+        CodeAgentLocalPatchRequestService localPatchRequestService = mock(CodeAgentLocalPatchRequestService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentLoopRunService service = new CodeAgentLoopRunService(
+                loopPreviewService,
+                toolSelectionService,
+                runnerService,
+                codeAgentService,
+                localPatchRequestService,
+                ollamaClient,
+                new ObjectMapper()
+        );
+        UUID userId = UUID.randomUUID();
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID loopId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        String instruction = "Add a homepage tab and a sample organization chart";
+        CodeAgentLoopTimelineSummary timeline = timeline(
+                repositoryId,
+                spaceId,
+                loopId,
+                instruction,
+                List.of(
+                        fileReadEvent("index.html", "<main></main>\n"),
+                        fileReadEvent("script.js", "const ready = true;\n"),
+                        fileReadEvent("style.css", "body { margin: 0; }\n")
+                )
+        );
+
+        when(loopPreviewService.nextAction(userId, repositoryId, loopId))
+                .thenReturn(next(loopId, repositoryId, "QUEUE_READ_ONLY_OBSERVATION"))
+                .thenReturn(next(loopId, repositoryId, "STOP_WITH_REASON"));
+        when(loopPreviewService.recentTimelines(userId, repositoryId, 20)).thenReturn(List.of(timeline));
+        when(runnerService.previewNextStep(userId, repositoryId, loopId, agentId, workspaceId)).thenReturn(new CodeAgentLoopRunnerPreviewResponse(
+                loopId,
+                repositoryId,
+                "RECORDED",
+                "QUEUE_READ_ONLY_OBSERVATION",
+                "NO_MORE_READS",
+                "No further read-only step is needed.",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                Map.of()
+        ));
+        when(ollamaClient.chatResult(any(), any(), eq(500))).thenReturn(chat("""
+                {"targetFiles":["index.html","script.js","style.css"],"reason":"The requested UI change spans markup, script, and style.","confidence":"high","needsClarification":false}
+                """));
+        when(codeAgentService.patchFromLoadedFilesInBatches(eq(instruction), anyList())).thenReturn(new CodeAgentPatchResponse(
+                "Patch batch style did not produce a valid unified diff.",
+                List.of(),
+                "high",
+                List.of("Patch batch style targeted [style.css] and valid=false.", "reason: malformed JSON patch proposal"),
+                List.of(),
+                false
+        ));
+
+        CodeAgentLoopRunStatusResponse response = service.advance(userId, repositoryId, loopId, agentId, workspaceId);
+
+        assertThat(response.runnerDecision()).isEqualTo("PATCH_PROPOSAL_BLOCKED");
+        verify(codeAgentService).patchFromLoadedFilesInBatches(eq(instruction), anyList());
+        verify(codeAgentService, never()).patchFromLoadedFiles(eq(instruction), anyList());
+        verify(localPatchRequestService, never()).prepare(any(), any(), any(), any(), any(), any(), any(), any(), any(), anyList(), anyMap());
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(loopPreviewService).appendPatchProposalBlocked(
+                eq(userId),
+                eq(repositoryId),
+                eq(loopId),
+                eq("PATCH_PROPOSAL_BLOCKED"),
+                eq("Patch proposal did not produce a valid unified diff."),
+                detailsCaptor.capture()
+        );
+        assertThat(detailsCaptor.getValue()).containsEntry("patchSource", "local-agent-file-read-batched");
+        assertThat(detailsCaptor.getValue().get("warnings").toString()).contains("malformed JSON patch proposal");
+    }
+
+    @Test
     void advanceContinuesReadOnlyDiscoveryWhenWorkspaceSearchCandidateRemainsAfterOneFileRead() {
         CodeAgentLoopPreviewService loopPreviewService = mock(CodeAgentLoopPreviewService.class);
         CodeAgentLoopToolSelectionService toolSelectionService = mock(CodeAgentLoopToolSelectionService.class);

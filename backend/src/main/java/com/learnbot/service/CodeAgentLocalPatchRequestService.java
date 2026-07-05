@@ -807,13 +807,16 @@ public class CodeAgentLocalPatchRequestService {
     }
 
     private boolean requiresNewTypedFile(String instruction, String extension) {
-        String lower = instruction == null ? "" : instruction.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        String lowerWithSpaces = instruction == null ? "" : instruction.toLowerCase(Locale.ROOT);
+        String lower = lowerWithSpaces.replaceAll("\\s+", "");
         if (lower.isBlank()) {
             return false;
         }
         boolean mentionsType = lower.contains(extension + "파일")
                 || lower.contains(extension + "file")
-                || lower.contains("." + extension);
+                || lowerWithSpaces.contains(extension + " file")
+                || lowerWithSpaces.contains("." + extension + " file")
+                || mentionsDottedExtensionToken(lowerWithSpaces, extension);
         boolean asksCreate = lower.contains("추가")
                 || lower.contains("생성")
                 || lower.contains("만들")
@@ -822,6 +825,15 @@ public class CodeAgentLocalPatchRequestService {
                 || lower.contains("create")
                 || lower.contains("new");
         return mentionsType && asksCreate;
+    }
+
+    private boolean mentionsDottedExtensionToken(String instruction, String extension) {
+        String lower = instruction == null ? "" : instruction.toLowerCase(Locale.ROOT);
+        if (lower.isBlank()) {
+            return false;
+        }
+        Pattern pattern = Pattern.compile("(^|[^a-z0-9_])\\." + Pattern.quote(extension.toLowerCase(Locale.ROOT)) + "($|[^a-z0-9_])");
+        return pattern.matcher(lower).find();
     }
 
     private boolean hasExtension(String path, String extension) {

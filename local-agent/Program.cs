@@ -30,13 +30,13 @@ internal sealed partial class LearnBotLocalAgent
     {
         if (args.Length == 0)
         {
-            Help();
-            return 0;
+            return await CliChat([]);
         }
         ApplyConfigOverride(args);
 
         return args[0].ToLowerInvariant() switch
         {
+            "chat" => await CliChat(args[1..]),
             "pair" => await Pair(args[1..]),
             "agent" => await Agent(args[1..]),
             "workspace" => await Workspace(args[1..]),
@@ -7036,6 +7036,10 @@ internal sealed partial class LearnBotLocalAgent
         if (string.Equals(args[0], "codex-command-preview-contract", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestCodexCommandPreviewContract();
+        }
+        if (string.Equals(args[0], "cli-chat-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCliChatContract();
         }
         if (string.Equals(args[0], "codex-read-only-observation-contract", StringComparison.OrdinalIgnoreCase))
         {
