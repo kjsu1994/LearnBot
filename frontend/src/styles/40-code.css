@@ -193,6 +193,132 @@
   color: rgba(255, 255, 255, 0.94);
 }
 
+.implementation-guide-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.guide-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 0.86rem;
+}
+
+.code-turn-change-assist {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.code-turn-change-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-turn-change-actions small {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 12px;
+}
+
+.code-turn-change-detail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.guide-file-list {
+  display: grid;
+  gap: 12px;
+}
+
+.guide-status-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.guide-status-grid span {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  color: rgba(226, 232, 240, 0.76);
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.guide-status-grid strong {
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 1rem;
+}
+
+.guide-file-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  min-width: 0;
+}
+
+.guide-file-card-diff_ready {
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.guide-file-card-candidate_only {
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.guide-file-card p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.74);
+}
+
+.guide-card-actions,
+.guide-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.guide-file-card .result-heading > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.guide-file-card .result-heading small {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guide-diff-preview {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: rgba(5, 7, 12, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.guide-diff-preview code {
+  white-space: pre;
+  font-size: 0.82rem;
+}
+
 .code-workspace-product .local-agent-token-row .bg-emerald-50 {
   background: rgba(16, 185, 129, 0.2);
   border-color: rgba(52, 211, 153, 0.5);
@@ -272,6 +398,18 @@
   display: grid;
   gap: 8px;
   padding: 0 12px 12px;
+}
+
+@media (max-width: 860px) {
+  .guide-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .guide-status-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .file-list {

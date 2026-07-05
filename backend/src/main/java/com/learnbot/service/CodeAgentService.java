@@ -11,6 +11,7 @@ import com.learnbot.dto.PatchTargetFile;
 import com.learnbot.dto.PatchValidationResult;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -57,9 +58,9 @@ public class CodeAgentService {
         if (candidatePaths.isEmpty()) {
             return new CodeAgentPlanResponse(
                     intent(safeInstruction),
-                    "??㉱???袁⑤?獄??잙??딀뤃?살쾸? ?遊붋?브퀗?꿴뜮????깆쓧????瑜곸젧 ??ｌ뫓???嶺뚮씭??キ?????怨룸????덈펲.",
+                    "관련 코드 근거를 찾지 못했습니다. 저장소 인덱싱 상태와 질문 범위를 확인하세요.",
                     List.of(),
-                    List.of("嶺뚯쉶?꾣룇 ?뺢퀡???낅ご???る궞??묒퀪?⑤벚?????逾х춯? ???????닿뎄, 嶺뚮∥?꾥땻??類ㅺ뎄???怨뺣뼺????낅슣?섋땻??"),
+                    List.of("검색어를 더 구체화하거나 관련 저장소를 다시 인덱싱한 뒤 수정 후보를 다시 생성하세요."),
                     "high",
                     true,
                     List.copyOf(warnings),
@@ -73,12 +74,12 @@ public class CodeAgentService {
         warnings.add("LLM plan JSON parsing failed or was unavailable; server-authored target selection fallback is disabled.");
         return new CodeAgentPlanResponse(
                 intent(safeInstruction),
-                "?롪틵????잙??딀뤃?용ご??リ옇????怨쀬Ŧ ??瑜곸젧 ?熬곣뫀沅????逾????ル‘????곕????덈펲.",
+                "모델 계획 응답을 해석하지 못했습니다. 안전을 위해 서버가 임의로 수정 대상 파일을 선택하지 않습니다.",
                 List.of(),
                 List.of(
-                        "??ル‘??????逾???熬곣뫗????뚮뿭寃???筌먦끉逾??紐껊퉵??",
-                        "??븐슙??????됱굚??嶺뚯쉳?????㉱???살춨 嶺뚣끉裕???곌떠??롪퍔?ε퐲???戮?닱??紐껊퉵??",
-                        "diff ??諛댁뎽 ????類ㅼ뮅 ?롪틵?嶺뚯빘鍮?????沅??unified diff嶺??꾩룇瑗???紐껊퉵??"
+                        "후보 파일 목록을 만들 수 없어 적용 전 diff 초안 생성을 중단했습니다.",
+                        "질문을 더 구체화하거나 관련 파일명을 포함해 다시 요청하세요.",
+                        "diff 초안은 모델 계획이 정상 파싱된 뒤에만 생성됩니다."
                 ),
                 "medium",
                 true,
@@ -620,7 +621,7 @@ public class CodeAgentService {
             for (JsonNode node : root.path("targetFiles")) {
                 String path = safe(node.path("path").asText());
                 if (candidates.contains(path) && !fileLoader.isSensitiveOrUnsafe(path)) {
-                    targets.add(new PatchTargetFile(path, firstNonBlank(node.path("reason").asText(), "Selected by patch plan.")));
+                    targets.add(new PatchTargetFile(path, planText(firstNonBlank(node.path("reason").asText(), "Selected by patch plan."))));
                 }
                 if (targets.size() >= MAX_PLAN_TARGETS) {
                     break;
@@ -631,9 +632,9 @@ public class CodeAgentService {
             }
             return new CodeAgentPlanResponse(
                     firstNonBlank(root.path("intent").asText(), intent(instruction)),
-                    firstNonBlank(root.path("summary").asText(), "??瑜곸젧 ??ｌ뫓?????諛댁뎽???곕????덈펲."),
+                    planText(firstNonBlank(root.path("summary").asText(), "모델이 수정 계획 요약을 제공하지 않았습니다.")),
                     List.copyOf(targets),
-                    textArray(root.path("changePlan")),
+                    textArray(root.path("changePlan")).stream().map(this::planText).toList(),
                     risk(root.path("riskLevel").asText()),
                     root.path("needsMoreContext").asBoolean(false),
                     List.copyOf(warnings),
@@ -2368,7 +2369,7 @@ public class CodeAgentService {
                 }
             }
         }
-        return values.isEmpty() ? List.of("??ル‘???target file??嶺뚣끉裕???곌떠??롪퍔????뿉???瑜곸젧??紐껊퉵??") : List.copyOf(values);
+        return values.isEmpty() ? List.of("선택된 target file을 기준으로 최소 변경 계획을 검토하세요.") : List.copyOf(values);
     }
 
     private List<String> testSuggestions(List<CodePatchFileLoader.LoadedPatchFile> files) {
@@ -2408,6 +2409,38 @@ public class CodeAgentService {
     private String preview(String value) {
         String clean = safe(value).replaceAll("\\s+", " ").trim();
         return clean.length() <= 360 ? clean : clean.substring(0, 360) + "...";
+    }
+
+    private String planText(String value) {
+        String clean = safe(value).trim();
+        if (containsHangul(clean) || !looksLikeUtf8DecodedAsLatin1(clean)) {
+            return clean;
+        }
+        String repaired = new String(clean.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        return containsHangul(repaired) ? repaired : clean;
+    }
+
+    private boolean looksLikeUtf8DecodedAsLatin1(String value) {
+        int suspicious = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if ((ch >= '\u0080' && ch <= '\u009F') || ch == 'ë' || ch == 'ì' || ch == 'í' || ch == 'ê') {
+                suspicious++;
+            }
+        }
+        return suspicious >= 2;
+    }
+
+    private boolean containsHangul(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(value.charAt(i));
+            if (block == Character.UnicodeBlock.HANGUL_SYLLABLES
+                    || block == Character.UnicodeBlock.HANGUL_JAMO
+                    || block == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String firstNonBlank(String value, String fallback) {

@@ -111,6 +111,32 @@ public class RagConversationRepository {
         return count != null && count > 0;
     }
 
+    public void updateTurnMetadataKey(UUID conversationId, UUID turnId, String key, JsonNode value) {
+        if (conversationId == null || turnId == null || key == null || key.isBlank()) {
+            return;
+        }
+        jdbc.update("""
+                UPDATE rag_conversation_turns
+                SET metadata = jsonb_set(
+                    COALESCE(metadata, '{}'::jsonb),
+                    ('{' || :key || '}')::text[],
+                    CAST(:value AS jsonb),
+                    true
+                )
+                WHERE conversation_id = :conversationId
+                  AND id = :turnId
+                """, new MapSqlParameterSource()
+                .addValue("conversationId", conversationId)
+                .addValue("turnId", turnId)
+                .addValue("key", key)
+                .addValue("value", toJson(value, false)));
+        jdbc.update("""
+                UPDATE rag_conversations
+                SET updated_at = now()
+                WHERE id = :conversationId
+                """, new MapSqlParameterSource().addValue("conversationId", conversationId));
+    }
+
     public List<RagConversationTurnContext> recentTurnContexts(UUID conversationId, int limit) {
         return jdbc.query("""
                 SELECT question, answer, mode, evidence::text AS evidence

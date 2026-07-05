@@ -4795,6 +4795,15 @@ internal sealed partial class LearnBotLocalAgent
 
                 if (!releaseForExecutionAttempted)
                 {
+                    var freshReadinessElement = await GetJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/readiness");
+                    releaseReadiness = ToJsonObject(freshReadinessElement);
+                    if (!IsReleaseAttemptReadyForClaim(freshReadinessElement))
+                    {
+                        events.Add(AutoLoopEvent("release-for-execution", "WAITING_FOR_FRESH_EVIDENCE", "waiting for linked git.status and patch dry-run evidence before mutation release"));
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                        continue;
+                    }
+
                     try
                     {
                         releaseForExecution = ToJsonObject(await PostJsonElement(webClient, $"/api/local-agents/tools/{approvalRequestId}/release-for-execution", new { }));
@@ -4980,6 +4989,16 @@ internal sealed partial class LearnBotLocalAgent
             || message.Contains("Linked patch dry-run output is required", StringComparison.OrdinalIgnoreCase)
             || message.Contains("Patch execution gate is not ready", StringComparison.OrdinalIgnoreCase)
             || message.Contains("release preconditions are incomplete", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReleaseAttemptReadyForClaim(JsonElement readinessElement)
+    {
+        var ready = TryGetNestedBool(readinessElement, "releaseAttemptModel", "latestAttempt", "releaseAttemptFinalReadiness", "ready") == true;
+        var status = TryGetNestedString(readinessElement, "releaseAttemptModel", "latestAttempt", "releaseAttemptFinalReadiness", "status");
+        var evidenceStatus = TryGetNestedString(readinessElement, "releaseAttemptModel", "latestAttempt", "releaseAttemptFinalReadiness", "evidenceCompletenessStatus");
+        return ready
+            && string.Equals(status, "READY_RELEASE_DISABLED", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(evidenceStatus, "ALL_LINKED_RELEASE_DISABLED", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsTerminalLocalAgentToolStatus(string? status) =>

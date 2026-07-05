@@ -9,6 +9,7 @@ import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,6 +55,51 @@ class CodeAgentServiceTest {
         assertThat(response.targetFiles()).isEmpty();
         assertThat(response.warnings()).anySatisfy(warning -> assertThat(warning).contains("server-authored target selection fallback is disabled"));
         assertThat(response.evidence()).hasSize(2);
+    }
+
+    @Test
+    void planRepairsMojibakeKoreanFromLlmJson() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = mock(PatchValidationService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        UUID repositoryId = UUID.randomUUID();
+        String path = "backend/src/main/java/AuthController.java";
+        CodeSearchResult controller = result(repositoryId, path, 0.9);
+        String summary = "JWT 만료 시 401 응답을 반환하도록 개선합니다.";
+        String reason = "JWT 만료 처리의 핵심 파일입니다.";
+        String step = "만료된 토큰이면 401 응답을 반환합니다.";
+        String planJson = """
+                {
+                  "intent": "bugfix",
+                  "summary": "%s",
+                  "targetFiles": [{"path": "%s", "reason": "%s"}],
+                  "changePlan": ["%s"],
+                  "riskLevel": "medium",
+                  "needsMoreContext": false
+                }
+                """.formatted(mojibake(summary), path, mojibake(reason), mojibake(step));
+
+        when(searchService.search(eq(repositoryId), anyString(), anyInt(), anyList(), eq(SecurityRepository.DEFAULT_SPACE_ID)))
+                .thenReturn(List.of(controller));
+        when(fileLoader.isSensitiveOrUnsafe(path)).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(700))).thenReturn(chat(planJson));
+
+        CodeAgentPlanResponse response = service.plan(
+                repositoryId,
+                SecurityRepository.DEFAULT_SPACE_ID,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "JWT 만료 시 401 응답을 반환하도록 개선하고 싶어",
+                null
+        );
+
+        assertThat(response.summary()).isEqualTo(summary);
+        assertThat(response.targetFiles()).singleElement().satisfies(target -> {
+            assertThat(target.path()).isEqualTo(path);
+            assertThat(target.reason()).isEqualTo(reason);
+        });
+        assertThat(response.changePlan()).containsExactly(step);
     }
 
     @Test
@@ -1653,6 +1699,10 @@ class CodeAgentServiceTest {
 
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+    }
+
+    private static String mojibake(String value) {
+        return new String(value.getBytes(StandardCharsets.UTF_8), StandardCharsets.ISO_8859_1);
     }
 
     private static OllamaClient.ChatResult chatLength(String content) {

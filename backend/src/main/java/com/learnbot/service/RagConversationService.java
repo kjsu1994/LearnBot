@@ -54,6 +54,20 @@ public class RagConversationService {
                 .orElseThrow(() -> new IllegalArgumentException("RAG conversation was not found."));
     }
 
+    public RagConversationTurn requireTurn(AppUser user, UUID spaceId, String domain, UUID repositoryId, UUID conversationId, UUID turnId) {
+        RagConversationDetail detail = detail(user, conversationId);
+        validateConversationScope(detail.conversation(), spaceId, normalizeDomain(domain), repositoryId);
+        return detail.turns().stream()
+                .filter(turn -> turn.id().equals(turnId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("RAG conversation turn was not found."));
+    }
+
+    public void updateTurnMetadata(AppUser user, UUID spaceId, String domain, UUID repositoryId, UUID conversationId, UUID turnId, String key, JsonNode value) {
+        requireTurn(user, spaceId, domain, repositoryId, conversationId, turnId);
+        repository.updateTurnMetadataKey(conversationId, turnId, key, value);
+    }
+
     public void delete(AppUser user, UUID conversationId) {
         repository.softDelete(user.id(), conversationId);
     }

@@ -263,6 +263,8 @@ export default function App() {
     askCode,
     cancelCodeAsk,
     generateCodeAgentPlan,
+    generateCodeAgentGuide,
+    generateCodeTurnChangeAssist,
     previewCodeAgentLoop,
     previewCodeAgentLoopRunner,
     previewCodeAgentLoopRunnerToolSelection,
@@ -1095,6 +1097,8 @@ export default function App() {
             askCode={askCode}
             cancelCodeAsk={cancelCodeAsk}
             generateCodeAgentPlan={generateCodeAgentPlan}
+            generateCodeAgentGuide={generateCodeAgentGuide}
+            generateCodeTurnChangeAssist={generateCodeTurnChangeAssist}
             previewCodeAgentLoop={previewCodeAgentLoop}
             previewCodeAgentLoopRunner={previewCodeAgentLoopRunner}
             previewCodeAgentLoopRunnerToolSelection={previewCodeAgentLoopRunnerToolSelection}

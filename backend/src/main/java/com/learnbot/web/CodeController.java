@@ -1,5 +1,6 @@
 package com.learnbot.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.CodeAskRequest;
 import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeAskResponse;
@@ -14,11 +15,18 @@ import com.learnbot.dto.CodeRepositoryIndexRequest;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchRequest;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.CodeTurnChangeAssistRequest;
 import com.learnbot.dto.IndexingJobSummary;
 import com.learnbot.dto.IndexingJobFailureSummary;
+import com.learnbot.dto.CodeAgentPatchResponse;
+import com.learnbot.dto.CodeAgentPlanResponse;
+import com.learnbot.dto.CodeAgentLoopPreviewResponse;
 import com.learnbot.security.CurrentUserProvider;
 import com.learnbot.service.AuthService;
+import com.learnbot.service.CodeAgentService;
+import com.learnbot.service.CodeAgentLoopPreviewService;
 import com.learnbot.service.CodeFileBrowserService;
+import com.learnbot.service.CodeChangeAssistViewBuilder;
 import com.learnbot.service.CodeIndexingService;
 import com.learnbot.service.CodeRagService;
 import com.learnbot.service.RagConversationService;
@@ -52,6 +60,10 @@ public class CodeController {
     private final CodeRagService ragService;
     private final RagConversationService conversationService;
     private final CodeReferenceService referenceService;
+    private final CodeAgentService codeAgentService;
+    private final CodeAgentLoopPreviewService loopPreviewService;
+    private final CodeChangeAssistViewBuilder changeAssistViewBuilder;
+    private final ObjectMapper objectMapper;
     private final AuthService authService;
     private final CurrentUserProvider currentUserProvider;
     private final RagSseEmitterSupport sseSupport;
@@ -63,6 +75,10 @@ public class CodeController {
             CodeRagService ragService,
             RagConversationService conversationService,
             CodeReferenceService referenceService,
+            CodeAgentService codeAgentService,
+            CodeAgentLoopPreviewService loopPreviewService,
+            CodeChangeAssistViewBuilder changeAssistViewBuilder,
+            ObjectMapper objectMapper,
             AuthService authService,
             CurrentUserProvider currentUserProvider,
             RagSseEmitterSupport sseSupport
@@ -73,6 +89,10 @@ public class CodeController {
         this.ragService = ragService;
         this.conversationService = conversationService;
         this.referenceService = referenceService;
+        this.codeAgentService = codeAgentService;
+        this.loopPreviewService = loopPreviewService;
+        this.changeAssistViewBuilder = changeAssistViewBuilder;
+        this.objectMapper = objectMapper;
         this.authService = authService;
         this.currentUserProvider = currentUserProvider;
         this.sseSupport = sseSupport;
@@ -314,8 +334,93 @@ public class CodeController {
         });
     }
 
+    @PostMapping("/conversations/{conversationId}/turns/{turnId}/change-assist")
+    Map<String, Object> changeAssist(
+            @PathVariable UUID conversationId,
+            @PathVariable UUID turnId,
+            @Valid @RequestBody CodeTurnChangeAssistRequest request
+    ) {
+        var user = currentUserProvider.currentUser();
+        UUID selectedSpaceId = request.spaceId() == null ? null : authService.resolveSpace(user, request.spaceId());
+        UUID repositorySpaceId = repositorySpace(user, request.repositoryId());
+        authService.requireSpace(user, repositorySpaceId);
+        selectedSpaceId = repositorySpaceId;
+        var turn = conversationService.requireTurn(
+                user,
+                selectedSpaceId,
+                RagConversationService.CODE,
+                request.repositoryId(),
+                conversationId,
+                turnId
+        );
+        String instruction = changeAssistInstruction(request.instruction(), turn.question(), turn.answer());
+        CodeAgentPlanResponse plan = codeAgentService.plan(
+                request.repositoryId(),
+                selectedSpaceId,
+                authService.accessibleSpaceIds(user),
+                instruction,
+                null
+        );
+        List<String> targetFiles = plan.targetFiles() == null
+                ? List.of()
+                : plan.targetFiles().stream().map(com.learnbot.dto.PatchTargetFile::path).filter(path -> path != null && !path.isBlank()).toList();
+        CodeAgentPatchResponse patch = null;
+        if (!targetFiles.isEmpty()) {
+            patch = codeAgentService.patch(
+                    request.repositoryId(),
+                    selectedSpaceId,
+                    authService.accessibleSpaceIds(user),
+                    instruction,
+                    targetFiles
+            );
+        }
+        CodeAgentLoopPreviewResponse loopPreview = null;
+        try {
+            loopPreview = loopPreviewService.preview(user.id(), request.repositoryId(), selectedSpaceId, instruction, 6);
+        } catch (RuntimeException ignored) {
+            // Change assist is read-only; a loop preview failure must not hide the diff proposal.
+        }
+        Map<String, Object> result = changeAssistViewBuilder.build(plan, patch, loopPreview);
+        conversationService.updateTurnMetadata(
+                user,
+                selectedSpaceId,
+                RagConversationService.CODE,
+                request.repositoryId(),
+                conversationId,
+                turnId,
+                "changeAssist",
+                objectMapper.valueToTree(result)
+        );
+        return result;
+    }
+
     private UUID repositorySpace(UUID repositoryId) {
         return repositorySpace(currentUserProvider.currentUser(), repositoryId);
+    }
+
+    private String changeAssistInstruction(String instruction, String question, String answer) {
+        return """
+                User requested a code change proposal from a prior Code RAG answer.
+
+                Requested change:
+                %s
+
+                Original question:
+                %s
+
+                Prior RAG answer context:
+                %s
+
+                Use the prior answer only as context. The model must decide target files, diagnosis, edit intent, and diff content from retrieved code evidence. Do not apply files.
+                """.formatted(clean(instruction), clean(question), compact(clean(answer), 2400));
+    }
+
+    private String clean(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String compact(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, max).trim() + "...";
     }
 
     private UUID repositorySpace(com.learnbot.service.AppUser user, UUID repositoryId) {

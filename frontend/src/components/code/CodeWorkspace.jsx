@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { codeModes } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
@@ -7,7 +7,14 @@ import { IconButton, ModeControl, StatusBadge } from '../common/Common.jsx';
 import { RagChatPanel } from '../common/RagChatPanel.jsx';
 import { MarkdownAnswer } from '../markdown/MarkdownAnswer.jsx';
 import { Badge } from '../ui/badge.jsx';
-import { CodeEvidenceList, CodeReferenceResults, CodeSearchResults } from './CodeEvidencePanels.jsx';
+import {
+  CodeEvidenceList,
+  CodeReferenceResults,
+  CodeSearchResults,
+  codeEvidenceMetaText,
+  codeEvidenceRange,
+  codeEvidenceRanges,
+} from './CodeEvidencePanels.jsx';
 import { CodeFileModal } from './CodeFilePanels.jsx';
 import { buildMutationExecutionReadinessBoundaryView } from './mutationExecutionReadinessBoundary.js';
 import { buildMutationHandoffSummaryView } from './mutationHandoffSummary.js';
@@ -59,6 +66,7 @@ import { buildDryRunResultSummaryView } from './dryRunResultSummary.js';
 import { buildDryRunPatchFilesSummaryView } from './dryRunPatchFilesSummary.js';
 import { buildAgentLoopPreviewSummaryView } from './agentLoopPreviewSummary.js';
 import { buildAgentLoopTimelineHistoryView } from './agentLoopTimelineSummary.js';
+import { buildCodeChangeAssistantResult } from './codeChangeAssistantResult.js';
 import { buildAgentLoopRunnerHandoffSummaryView } from './agentLoopRunnerHandoffSummary.js';
 import { buildApprovedExecutionFlowInspectionView } from './approvedExecutionFlowInspectionSummary.js';
 import { buildValidatedDryRunIntentEligibilityView } from './validatedDryRunIntentEligibilitySummary.js';
@@ -128,6 +136,8 @@ function CodeWorkspace(props) {
     openCodeFile = () => {},
     askCode = (event) => event.preventDefault(),
     generateCodeAgentPlan = (event) => event.preventDefault(),
+    generateCodeAgentGuide = (event) => event.preventDefault(),
+    generateCodeTurnChangeAssist = () => {},
     previewCodeAgentLoop = () => {},
     previewCodeAgentLoopRunner = () => {},
     previewCodeAgentLoopRunnerToolSelection = () => {},
@@ -279,76 +289,19 @@ function CodeWorkspace(props) {
             { label: '변경 영향', prompt: '이 코드를 변경하면 영향을 받을 수 있는 모듈과 테스트 포인트를 알려줘.' },
           ]}
           evidenceRenderer={(turn) => <CodeEvidenceList evidence={turn.evidence} onOpenEvidence={openCodeFile} />}
+          turnFooterRenderer={(turn) => (
+            <CodeTurnChangeAssistPanel
+              turn={turn}
+              loading={loading}
+              onGenerate={generateCodeTurnChangeAssist}
+              onOpenEvidence={openCodeFile}
+            />
+          )}
           onSaveAnswer={props.saveAnswer}
           onCancel={props.cancelCodeAsk}
           answerSavedId={props.answerSavedId}
           saveLoading={loading('save-code-answer')}
           streamAnchorRef={answerStreamAnchorRef}
-        />
-        <CodeAgentPanel
-          instruction={codeAgentInstruction}
-          setInstruction={setCodeAgentInstruction}
-          plan={codeAgentPlan}
-          patch={codeAgentPatch}
-          applyResult={codeAgentApplyResult}
-          testResult={codeAgentTestResult}
-          mutationPolicy={codeAgentMutationPolicy}
-          loopPreview={codeAgentLoopPreview}
-          loopSubmissionPlan={codeAgentLoopSubmissionPlan}
-          loopTimelines={codeAgentLoopTimelines}
-          loopRunnerPreview={codeAgentLoopRunnerPreview}
-          loopRunnerToolSelectionPreview={codeAgentLoopRunnerToolSelectionPreview}
-          loopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
-          loopRunnerReleaseReviewResult={codeAgentLoopRunnerReleaseReviewResult}
-          loopRunnerFinalResultPublicationPreview={codeAgentLoopRunnerFinalResultPublicationPreview}
-          loopRunnerM8EntryReadiness={codeAgentLoopRunnerM8EntryReadiness}
-          loopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
-          loopRunnerObservationContinuation={codeAgentLoopRunnerObservationContinuation}
-          localPatchRequest={codeAgentLocalPatchRequest}
-          localPatchReadiness={codeAgentLocalPatchReadiness}
-          localPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
-          localPatchDryRunResult={codeAgentLocalPatchDryRunResult}
-          localRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
-          localRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
-          approvedExecutionFlowInspection={codeAgentApprovedExecutionFlowInspection}
-          validatedDryRunIntentEligibility={codeAgentValidatedDryRunIntentEligibility}
-          validatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
-          localAgentStatus={localAgentStatus}
-          localAgentPendingApprovals={localAgentPendingApprovals}
-          localAgentTokens={props.localAgentTokens}
-          selectedRepositoryId={selectedRepositoryId}
-          loading={loading}
-          onPlan={generateCodeAgentPlan}
-          onLoopPreview={previewCodeAgentLoop}
-          onLoopRunnerPreview={previewCodeAgentLoopRunner}
-          onLoopRunnerToolSelectionPreview={previewCodeAgentLoopRunnerToolSelection}
-          onLoopRunnerEnqueueReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
-          onLoopRunnerReleaseReview={reviewCodeAgentLoopRunnerReleaseGate}
-          onLoopRunnerFinalResultPublicationPreview={previewCodeAgentLoopRunnerFinalResultPublication}
-          onLoopRunnerM8EntryReadiness={previewCodeAgentLoopRunnerM8EntryReadiness}
-          onLoopRunnerEnqueueSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
-          onRefreshLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
-          onRefreshLoopTimelines={refreshCodeAgentLoopTimelines}
-          onPatch={generateCodeAgentPatch}
-          onPrepareLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
-          onLocalPatchApproval={decideCodeAgentLocalPatchApproval}
-          onRefreshLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
-          onQueueLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
-          onQueueReleaseFreshObservations={queueCodeAgentReleaseFreshObservations}
-          onReleaseLocalPatchForExecution={releaseCodeAgentLocalPatchForExecution}
-          onRefreshLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
-          onQueueLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
-          onRefreshLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
-          onInspectApprovedExecutionFlow={inspectCodeAgentApprovedExecutionFlow}
-          onInspectValidatedDryRunIntentEligibility={inspectCodeAgentValidatedDryRunIntentEligibility}
-          onPreviewValidatedDryRunIntentTransition={previewCodeAgentValidatedDryRunIntentTransition}
-          onRefreshLocalAgent={refreshLocalAgentStatus}
-          onRefreshLocalAgentPendingApprovals={props.refreshLocalAgentPendingApprovals}
-          onRefreshLocalAgentTokens={props.refreshLocalAgentTokens}
-          onRevokeLocalAgentToken={props.revokeLocalAgentToken}
-          onApply={applyCodeAgentPatch}
-          onRollback={rollbackCodeAgentPatch}
-          onTest={runCodeAgentTest}
         />
         <form className="panel search-panel rag-search-panel" onSubmit={searchCode}>
           <div className="panel-title">
@@ -648,6 +601,344 @@ function buildAgentLoopOneCycleDecisionText({
     return `agent loop one-cycle decision: continue loop / action ${actionKey} / runner ${runnerDecision} / approval false / replan false / report false`;
   }
   return `agent loop one-cycle decision: pending / action ${actionKey} / runner ${runnerDecision} / approval false / replan false / report false`;
+}
+
+function CodeTurnChangeAssistPanel({
+  turn,
+  loading = () => false,
+  onGenerate = () => {},
+  onOpenEvidence = () => {},
+}) {
+  const [copiedPath, setCopiedPath] = useState('');
+  const [open, setOpen] = useState(false);
+  const turnId = turn?.id || turn?.turnId || '';
+  const changeAssist = turn?.metadata?.changeAssist || null;
+  const isGenerating = loading(`code-turn-change-assist-${turnId}`) || changeAssist?.overallStatus === 'GENERATING';
+  const canGenerate = Boolean(turnId) && !turn?.streaming && turn?.status !== 'streaming' && !isGenerating;
+  const cards = Array.isArray(changeAssist?.cards) ? changeAssist.cards : [];
+  const counts = changeAssist?.counts || {};
+
+  async function copyDiff(file) {
+    if (!file?.diff || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(file.diff);
+    setCopiedPath(file.path || 'diff');
+    window.setTimeout(() => setCopiedPath(''), 1600);
+  }
+
+  return (
+    <div className="code-turn-change-assist">
+      <div className="code-turn-change-actions">
+        <button
+          type="button"
+          className="ghost-button compact-action"
+          disabled={!canGenerate}
+          onClick={() => onGenerate(turn)}
+        >
+          {isGenerating ? <Loader2 className="spin" size={14} /> : <FileCode2 size={14} />}
+          {changeAssist ? '상세 diff 다시 만들기' : '상세 diff 만들기'}
+        </button>
+        {changeAssist && (
+          <button type="button" className="ghost-button compact-action" onClick={() => setOpen((current) => !current)}>
+            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            상세 diff 보기
+          </button>
+        )}
+        {changeAssist && (
+          <small>
+            {changeAssist.overallStatusLabel || '상세 diff'} / 수정 예시 {counts.diffReady || 0}개 / 후보 {counts.candidatesOnly || 0}개 / 실제 적용 0개
+          </small>
+        )}
+      </div>
+
+      {open && changeAssist && (
+        <div className="code-turn-change-detail">
+          <div className="guide-status-grid" aria-label="상세 diff 결과 요약">
+            <span><strong>{counts.diffReady || 0}</strong> 수정 예시 있음</span>
+            <span><strong>{counts.candidatesOnly || 0}</strong> 후보만 확인됨</span>
+            <span><strong>{counts.needsMoreContext || 0}</strong> 추가 정보 필요</span>
+            <span><strong>0</strong> 실제 파일 적용</span>
+          </div>
+          {changeAssist.planSummary && <small>{changeAssist.planSummary}</small>}
+          {!!changeAssist.warnings?.length && <WarningList warnings={changeAssist.warnings} />}
+          {!!cards.length && (
+            <div className="guide-file-list">
+              {cards.map((file) => {
+                const fileEvidence = Array.isArray(file.evidence) ? file.evidence : [];
+                const primaryEvidence = fileEvidence.find((item) => item.repositoryId && item.fileId) || null;
+                return (
+                  <article className={`guide-file-card guide-file-card-${String(file.status || '').toLowerCase()}`} key={file.path}>
+                    <div className="result-heading">
+                      <span>
+                        <strong>{file.path}</strong>
+                        <small>{file.statusLabel}</small>
+                      </span>
+                      <div className="guide-card-actions">
+                        {primaryEvidence && (
+                          <button
+                            type="button"
+                            className="ghost-button compact-action"
+                            onClick={() => onOpenEvidence(primaryEvidence.repositoryId, primaryEvidence.fileId, codeEvidenceRanges(fileEvidence))}
+                          >
+                            <Eye size={14} />
+                            파일 원문 보기
+                          </button>
+                        )}
+                        {file.diff && (
+                          <button type="button" className="ghost-button compact-action" onClick={() => copyDiff(file)}>
+                            {copiedPath === file.path ? '복사됨' : 'diff 복사'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <p>{file.reason || 'LLM이 수정 후보로 선택한 파일입니다.'}</p>
+                    {!!fileEvidence.length && (
+                      <div className="guide-evidence-list">
+                        {fileEvidence.slice(0, 4).map((item) => (
+                          <button
+                            type="button"
+                            className="ghost-button compact-action"
+                            disabled={!item.repositoryId || !item.fileId}
+                            key={`${item.citationNumber}-${item.chunkId || item.lineStart}`}
+                            onClick={() => onOpenEvidence(item.repositoryId, item.fileId, codeEvidenceRange(item))}
+                          >
+                            [{item.citationNumber}] {codeEvidenceMetaText(item)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {file.diff ? (
+                      <pre className="guide-diff-preview"><code>{file.diff}</code></pre>
+                    ) : (
+                      <small>{file.nextActionText || 'diff 초안이 없어 근거와 계획을 기준으로 검토하세요.'}</small>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+          {!cards.length && <small>표시할 상세 diff 결과가 없습니다. 질문을 더 구체화한 뒤 다시 생성하세요.</small>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeImplementationGuidePanel({
+  instruction = '',
+  setInstruction = () => {},
+  plan,
+  patch,
+  loopPreview,
+  loopTimelines = [],
+  selectedRepository,
+  selectedRepositoryId = '',
+  loading = () => false,
+  onGuide = (event) => event.preventDefault(),
+  onOpenEvidence = () => {},
+  onRefreshLoopTimelines = () => {},
+}) {
+  const [copiedPath, setCopiedPath] = useState('');
+  const loopSummary = buildAgentLoopPreviewSummaryView(loopPreview);
+  const assistantResult = buildCodeChangeAssistantResult({ plan, patch });
+  const canBuildGuide = Boolean(instruction.trim()) && Boolean(selectedRepositoryId) && !loading('code-agent-guide');
+  const repositoryLabel = selectedRepository
+    ? `${selectedRepository.name}${selectedRepository.lastIndexedCommit ? ` / ${selectedRepository.lastIndexedCommit.slice(0, 12)}` : ''}`
+    : '저장소를 선택하세요';
+
+  async function copyDiff(file) {
+    if (!file?.diff || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(file.diff);
+    setCopiedPath(file.path || 'diff');
+    window.setTimeout(() => setCopiedPath(''), 1600);
+  }
+
+  return (
+    <section className="panel code-agent-panel implementation-guide-panel">
+      <div className="panel-title">
+        <FileCode2 size={18} />
+        <div>
+          <h2>수정 후보 파일</h2>
+          <p>RAG 근거와 Agent 계획을 바탕으로 적용 전 파일 묶음과 diff 초안을 만듭니다.</p>
+        </div>
+      </div>
+
+      <form className="stack" onSubmit={onGuide}>
+        <label htmlFor="code-agent-instruction">어떻게 개선하고 싶나요?</label>
+        <textarea
+          id="code-agent-instruction"
+          rows={4}
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          placeholder="예: JWT 만료 시 401 응답을 반환하도록 개선하고 싶어"
+        />
+        <div className="guide-context-row">
+          <Badge variant={selectedRepositoryId ? 'outline' : 'secondary'}>{repositoryLabel}</Badge>
+          <span>아직 실제 파일에는 적용되지 않습니다. 웹에서는 검토용 diff 초안만 제공합니다.</span>
+        </div>
+        <div className="action-row">
+          <button disabled={!canBuildGuide}>
+            {loading('code-agent-guide') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+            수정 후보 만들기
+          </button>
+        </div>
+      </form>
+
+      {!plan && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>수정 후보 대기 중</strong>
+            <Badge variant="secondary">read only</Badge>
+          </div>
+          <small>개선하고 싶은 내용을 입력하면 관련 파일, 근거, 수정 방향, 적용 전 diff 초안을 정리합니다.</small>
+        </div>
+      )}
+
+      {plan && (
+        <div className="code-agent-result guide-summary">
+          <div className="result-heading">
+            <strong>{assistantResult.overallStatusLabel}</strong>
+            <Badge variant={assistantResult.overallStatus === 'FAILED' ? 'destructive' : 'outline'}>
+              {patch?.valid === false ? 'invalid' : 'preview only'}
+            </Badge>
+          </div>
+          <div className="guide-status-grid" aria-label="수정 제안 결과 요약">
+            <span><strong>{assistantResult.counts.diffReady}</strong> 수정 예시 있음</span>
+            <span><strong>{assistantResult.counts.candidatesOnly}</strong> 후보만 확인됨</span>
+            <span><strong>{assistantResult.counts.needsMoreContext}</strong> 추가 정보 필요</span>
+            <span><strong>0</strong> 실제 파일 적용</span>
+          </div>
+          <small>{plan.summary || plan.intent || 'RAG 근거 기반으로 수정 후보를 정리했습니다.'}</small>
+          {!!plan.changePlan?.length && (
+            <ol className="code-agent-list">
+              {plan.changePlan.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ol>
+          )}
+          <WarningList warnings={assistantResult.warnings} />
+        </div>
+      )}
+
+      {!!assistantResult.cards.length && (
+        <div className="guide-file-list">
+          {assistantResult.cards.map((file) => {
+            const path = file.path;
+            const fileEvidence = file.evidence || [];
+            const primaryEvidence = fileEvidence.find((item) => item.repositoryId && item.fileId) || null;
+            return (
+              <article className={`guide-file-card guide-file-card-${String(file.status || '').toLowerCase()}`} key={path}>
+                <div className="result-heading">
+                  <span>
+                    <strong>{path}</strong>
+                    <small>{file.statusLabel}</small>
+                  </span>
+                  <div className="guide-card-actions">
+                    {primaryEvidence && (
+                      <button
+                        type="button"
+                        className="ghost-button compact-action"
+                        onClick={() => onOpenEvidence(primaryEvidence.repositoryId, primaryEvidence.fileId, codeEvidenceRanges(fileEvidence))}
+                      >
+                        <Eye size={14} />
+                        파일 원문 보기
+                      </button>
+                    )}
+                    {file.diff && (
+                      <button type="button" className="ghost-button compact-action" onClick={() => copyDiff(file)}>
+                        {copiedPath === path ? '복사됨' : 'diff 복사'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p>{file.reason || 'Agent가 수정 후보로 선택한 파일입니다.'}</p>
+                <small>아직 실제 파일에는 적용되지 않았습니다.</small>
+                {!!fileEvidence.length && (
+                  <div className="guide-evidence-list">
+                    {fileEvidence.slice(0, 4).map((item) => (
+                      <button
+                        type="button"
+                        className="ghost-button compact-action"
+                        disabled={!item.repositoryId || !item.fileId}
+                        key={`${item.citationNumber}-${item.chunkId || item.lineStart}`}
+                        onClick={() => onOpenEvidence(item.repositoryId, item.fileId, codeEvidenceRange(item))}
+                      >
+                        [{item.citationNumber}] {codeEvidenceMetaText(item)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {file.diff ? (
+                  <pre className="guide-diff-preview"><code>{file.diff}</code></pre>
+                ) : (
+                  <small>{file.nextActionText}</small>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {patch && (
+        <div className="code-agent-result compact-result">
+          <div className="result-heading">
+            <strong>{patch.valid ? '적용 전 diff 초안 생성 완료' : '적용 전 diff 초안 검증 필요'}</strong>
+            <Badge variant={patch.valid ? 'outline' : 'destructive'}>{patch.valid ? 'preview only' : 'invalid'}</Badge>
+          </div>
+          {!!patch.testSuggestions?.length && (
+            <div className="code-agent-tests">
+              {patch.testSuggestions.map((test) => <Badge variant="secondary" key={test}>{test}</Badge>)}
+            </div>
+          )}
+          <WarningList warnings={patch.warnings} />
+        </div>
+      )}
+
+      {loopSummary && (
+        <details className="code-agent-result compact-result code-agent-timeline-details">
+          <summary className="result-heading">
+            <span>
+              <strong>Agent loop 근거 요약</strong>
+              <small>읽기 전용 계획 흐름만 표시합니다.</small>
+            </span>
+            <Badge className="code-agent-timeline-badge" variant="outline">read only</Badge>
+          </summary>
+          <div className="code-agent-timeline-content">
+            <small>{loopSummary.headerText}</small>
+            <small>{loopSummary.stateText}</small>
+            {!!loopSummary.stepLines.length && (
+              <ol className="code-agent-list">
+                {loopSummary.stepLines.map((line) => <li key={line}>{line}</li>)}
+              </ol>
+            )}
+            <WarningList warnings={loopSummary.warnings} />
+          </div>
+        </details>
+      )}
+
+      <details className="code-agent-result compact-result code-agent-timeline-details">
+        <summary className="result-heading">
+          <span>
+            <strong>고급 진단</strong>
+            <small>최근 agent loop 기록을 확인합니다. 파일 적용 기능은 제공하지 않습니다.</small>
+          </span>
+          <Badge className="code-agent-timeline-badge" variant="secondary">{loopTimelines.length}</Badge>
+        </summary>
+        <div className="code-agent-timeline-content">
+          <button type="button" className="ghost-button compact-action" disabled={!selectedRepositoryId || loading('code-agent-loop-timelines')} onClick={() => onRefreshLoopTimelines(selectedRepositoryId)}>
+            {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+            기록 새로고침
+          </button>
+          {!loopTimelines.length ? (
+            <small>표시할 agent loop 기록이 없습니다.</small>
+          ) : (
+            loopTimelines.slice(0, 5).map((timeline) => (
+              <small key={timeline.loopId || timeline.id}>
+                {timeline.status || 'UNKNOWN'} / {timeline.loopId || timeline.id} / {timeline.updatedAt ? formatDate(timeline.updatedAt) : 'time unknown'}
+              </small>
+            ))
+          )}
+        </div>
+      </details>
+    </section>
+  );
 }
 
 function buildAgentLoopSubmissionPlanReviewView(submissionPlan = null) {

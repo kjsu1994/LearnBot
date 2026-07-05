@@ -21,6 +21,7 @@ function RagChatPanel({
   emptyTitle = '질문을 시작하세요',
   emptyDescription = '',
   evidenceRenderer,
+  turnFooterRenderer,
   onSaveAnswer,
   onCancel,
   answerSavedId = '',
@@ -122,6 +123,7 @@ function RagChatPanel({
                 domain={domain}
                 isLatest={index === turns.length - 1}
                 evidenceRenderer={evidenceRenderer}
+                turnFooterRenderer={turnFooterRenderer}
                 streamAnchorRef={streamAnchorRef}
               />
             ))}
@@ -174,6 +176,7 @@ function RagChatPanel({
 function RagChatTurn({
   turn,
   isLatest,
+  turnFooterRenderer,
   streamAnchorRef,
 }) {
   const answer = turn.answer || '';
@@ -192,6 +195,7 @@ function RagChatTurn({
           <MarkdownAnswer text={answer || pendingStatusText(status, turn)} streaming={status === 'streaming'} />
           {isLatest && <span className="stream-scroll-anchor" ref={streamAnchorRef} aria-hidden="true" />}
         </div>
+        {turnFooterRenderer?.(turn)}
       </div>
     </article>
   );

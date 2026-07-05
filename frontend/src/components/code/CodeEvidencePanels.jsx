@@ -229,4 +229,11 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
   );
 }
 
-export { CodeEvidenceList, CodeReferenceResults, CodeSearchResults };
+export {
+  CodeEvidenceList,
+  CodeReferenceResults,
+  CodeSearchResults,
+  codeEvidenceMetaText,
+  codeEvidenceRange,
+  codeEvidenceRanges,
+};

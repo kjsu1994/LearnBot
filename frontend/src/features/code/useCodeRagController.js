@@ -1100,6 +1100,131 @@ export function useCodeRagController({
     });
   }
 
+  async function generateCodeAgentGuide(event) {
+    event?.preventDefault?.();
+    const instruction = codeAgentInstruction.trim();
+    if (!instruction || !selectedRepositoryId) return;
+    await run('code-agent-guide', async () => {
+      const plan = await request('/api/code-agent/plan', {
+        method: 'POST',
+        json: {
+          repositoryId: selectedRepositoryId,
+          spaceId: activeSpaceId,
+          instruction,
+        },
+      });
+      setCodeAgentPlan(plan);
+      setCodeAgentPatch(null);
+      setCodeAgentApplyResult(null);
+      setCodeAgentTestResult(null);
+      setCodeAgentLocalPatchRequest(null);
+      setCodeAgentLocalPatchReadiness(null);
+      setCodeAgentLocalPatchDryRunRequest(null);
+      setCodeAgentLocalPatchDryRunResult(null);
+      setCodeAgentLocalRepositoryObservationRequest(null);
+      setCodeAgentLocalRepositoryObservationResult(null);
+      setCodeAgentApprovedExecutionFlowInspection(null);
+      setCodeAgentValidatedDryRunIntentEligibility(null);
+      setCodeAgentValidatedDryRunIntentTransitionPreview(null);
+
+      const targetFiles = (plan?.targetFiles || []).map((file) => file.path).filter(Boolean);
+      if (targetFiles.length) {
+        const patch = await request('/api/code-agent/patch', {
+          method: 'POST',
+          json: {
+            repositoryId: selectedRepositoryId,
+            spaceId: activeSpaceId,
+            instruction,
+            targetFiles,
+          },
+        });
+        setCodeAgentPatch(patch);
+      }
+
+      try {
+        const preview = await request('/api/code-agent/loop/preview', {
+          method: 'POST',
+          json: {
+            repositoryId: selectedRepositoryId,
+            spaceId: activeSpaceId,
+            instruction,
+            maxSteps: 6,
+          },
+        });
+        setCodeAgentLoopPreview(preview);
+      } catch {
+        setCodeAgentLoopPreview(null);
+      }
+      setCodeAgentLoopSubmissionPlan(null);
+      setCodeAgentLoopRunnerPreview(null);
+      setCodeAgentLoopRunnerToolSelectionPreview(null);
+      setCodeAgentLoopRunnerEnqueueResult(null);
+      setCodeAgentLoopRunnerReleaseReviewResult(null);
+      setCodeAgentLoopRunnerFinalResultPublicationPreview(null);
+      setCodeAgentLoopRunnerM8EntryReadiness(null);
+      setCodeAgentLoopRunnerQueuedObservationResult(null);
+      setCodeAgentLoopRunnerObservationContinuation(null);
+      await refreshCodeAgentLoopTimelines(selectedRepositoryId);
+    });
+  }
+
+  async function generateCodeTurnChangeAssist(turn) {
+    const conversationId = turn?.conversationId || codeConversationId || codeAnswer?.conversationId;
+    const turnId = turn?.id || turn?.turnId;
+    const repositoryId = turn?.repositoryId || codeAnswer?.repositoryId || selectedRepositoryId;
+    const instruction = turn?.question || codeAgentInstruction || codeQuestion;
+    if (!conversationId || !turnId || !repositoryId || !instruction?.trim?.()) return null;
+    return await run(`code-turn-change-assist-${turnId}`, async () => {
+      const pendingAssist = {
+        status: 'GENERATING',
+        overallStatus: 'GENERATING',
+        overallStatusLabel: '상세 diff 생성 중',
+        counts: { diffReady: 0, candidatesOnly: 0, needsMoreContext: 0 },
+        cards: [],
+        warnings: [],
+      };
+      updateCodeTurnChangeAssist(turnId, pendingAssist);
+      try {
+        const result = await request(`/api/code/conversations/${conversationId}/turns/${turnId}/change-assist`, {
+          method: 'POST',
+          json: {
+            repositoryId,
+            spaceId: activeSpaceId,
+            instruction,
+          },
+        });
+        updateCodeTurnChangeAssist(turnId, result);
+        return result;
+      } catch (error) {
+        updateCodeTurnChangeAssist(turnId, {
+          status: 'FAILED',
+          overallStatus: 'FAILED',
+          overallStatusLabel: '상세 diff 생성 실패',
+          counts: { diffReady: 0, candidatesOnly: 0, needsMoreContext: 0 },
+          cards: [],
+          warnings: [error?.message || '상세 diff 생성 중 오류가 발생했습니다. 기존 답변과 근거는 그대로 사용할 수 있습니다.'],
+        });
+        throw error;
+      }
+    });
+  }
+
+  function updateCodeTurnChangeAssist(turnId, changeAssist) {
+    const apply = (turn) => {
+      if (!turn || (turn.id || turn.turnId) !== turnId) return turn;
+      return {
+        ...turn,
+        metadata: {
+          ...(turn.metadata || {}),
+          changeAssist,
+        },
+      };
+    };
+    setCodeConversationTurns((current) => current.map(apply));
+    setPendingCodeTurn((current) => apply(current));
+    setCodeAnswer((current) => apply(current));
+  }
+
   async function prepareCodeAgentLocalPatchRequest() {
     const instruction = codeAgentInstruction.trim();
     const targetFiles = (codeAgentPlan?.targetFiles || []).map((file) => file.path).filter(Boolean);
@@ -1503,6 +1628,8 @@ export function useCodeRagController({
     askCode,
     cancelCodeAsk,
     generateCodeAgentPlan,
+    generateCodeAgentGuide,
+    generateCodeTurnChangeAssist,
     previewCodeAgentLoop,
     previewCodeAgentLoopRunner,
     previewCodeAgentLoopRunnerToolSelection,
