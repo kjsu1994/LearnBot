@@ -105,5 +105,3 @@ Design implications:
 - In agent loop automation, do not fake intelligence with server-authored content shortcuts. The LLM must decide the target, diagnosis, edit intent, and replacement content from observed context. The server may select execution targets, bound context, validate schemas, materialize LLM-authored structured edits into diffs, enforce approval gates, run safety checks, and report blockers. The server must not hardcode task-specific code, prose, HTML/CSS, file names, language-specific patches, or canned "fix" content to make a demo pass. If the LLM output is missing, malformed, truncated, unsafe, or insufficient, improve the loop structure, context packaging, retry strategy, validation, or user-facing blocker report instead of silently substituting server-written changes.
 
 Quality remains the core product value: prefer a slower but grounded and recoverable workflow over a fast workflow that produces weak answers or unsafe code changes.
-
-서비스의 궁극적인 목표는 최상의 답변품질을 보유한 RAG기반 agent 서비스야(로컬 codex를 만들고싶어) (속도가 빠르면 좋겠지만 속도만 빠른 쓰레기를 뱉는 서비스는 내가원하는방향이 아니야)

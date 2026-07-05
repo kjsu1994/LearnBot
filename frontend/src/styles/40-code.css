@@ -93,6 +93,52 @@
   overflow-wrap: anywhere;
 }
 
+.local-agent-overview {
+  gap: 12px;
+}
+
+.local-agent-status-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.local-agent-status-grid div {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.local-agent-status-grid span {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.local-agent-status-grid strong {
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.local-agent-primary-actions {
+  margin-top: 2px;
+}
+
+.local-agent-diagnostics {
+  margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+  .local-agent-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .code-workspace-product > *,
 .code-workspace-product .right-column,
 .code-workspace-product .rag-chat-panel,

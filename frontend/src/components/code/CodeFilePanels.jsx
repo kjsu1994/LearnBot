@@ -110,10 +110,10 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
             <FileCode2 size={18} />
             <div>
               <h2 id="code-modal-title">{fileName}</h2>
-              <p>{detail?.filePath || '肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.'}</p>
+              <p>{detail?.filePath || '코드 파일을 불러오는 중입니다.'}</p>
             </div>
           </div>
-          <button className="icon-button code-modal-close" type="button" title={'?リ린'} onClick={() => onClose?.()}>
+          <button className="icon-button code-modal-close" type="button" title="닫기" onClick={() => onClose?.()}>
             <X size={18} />
           </button>
         </header>
@@ -128,14 +128,14 @@ function CodeFileModal({ detail, highlightRange, loading, onClose }) {
           {loading && (
             <div className="code-modal-state">
               <Loader2 className="spin" size={22} />
-              <strong>{'肄붾뱶 ?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.'}</strong>
+              <strong>코드 파일을 불러오는 중입니다.</strong>
             </div>
           )}
 
           {!loading && !detail && (
             <div className="code-modal-state">
               <FileCode2 size={22} />
-              <strong>{'?쒖떆??肄붾뱶媛 ?놁뒿?덈떎.'}</strong>
+              <strong>표시할 코드가 없습니다.</strong>
             </div>
           )}
 
@@ -181,8 +181,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>{'肄붾뱶 誘몃━蹂닿린'}</h2>
-            <p>{'?뚯씪??遺덈윭?ㅻ뒗 以묒엯?덈떎.'}</p>
+            <h2>코드 미리보기</h2>
+            <p>파일을 불러오는 중입니다.</p>
           </div>
         </div>
       </section>
@@ -194,8 +194,8 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <div className="panel-title">
           <FileCode2 size={18} />
           <div>
-            <h2>{'肄붾뱶 誘몃━蹂닿린'}</h2>
-            <p>{'?뚯씪?대굹 洹쇨굅瑜??좏깮?섎㈃ ?먮Ц 肄붾뱶瑜??뺤씤?????덉뒿?덈떎.'}</p>
+            <h2>코드 미리보기</h2>
+            <p>파일이나 근거를 선택하면 원문 코드를 확인할 수 있습니다.</p>
           </div>
         </div>
       </section>
@@ -209,7 +209,7 @@ function CodeFileViewer({ detail, highlightRange, loading }) {
         <FileCode2 size={18} />
         <div>
           <h2>{detail.filePath}</h2>
-          <p>{detail.language} {'쨌'} {detail.chunks?.length || 0} chunks</p>
+          <p>{detail.language} / {detail.chunks?.length || 0} chunks</p>
         </div>
       </div>
       <pre className="code-viewer">
@@ -247,7 +247,7 @@ function isLineHighlighted(lineNumber, ranges = []) {
 function highlightRangeLabel(ranges = []) {
   if (!ranges.length) return '';
   if (ranges.length === 1) return `lines ${ranges[0].start}-${ranges[0].end}`;
-  return `${ranges.length} ranges 쨌 ${ranges.slice(0, 3).map((range) => `${range.start}-${range.end}`).join(', ')}${ranges.length > 3 ? ` +${ranges.length - 3}` : ''}`;
+  return `${ranges.length} ranges / ${ranges.slice(0, 3).map((range) => `${range.start}-${range.end}`).join(', ')}${ranges.length > 3 ? ` +${ranges.length - 3}` : ''}`;
 }
 
 export { CodeFileModal, CodeFileViewer };

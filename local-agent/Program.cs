@@ -17,6 +17,9 @@ return await app.Run(args);
 internal sealed partial class LearnBotLocalAgent
 {
     private const string Version = "0.1.0";
+    private const int LocalDataRetentionDays = 7;
+    private static readonly TimeSpan LocalDataCleanupInterval = TimeSpan.FromDays(1);
+    private static readonly TimeSpan StaleSnapshotStagingRetention = TimeSpan.FromDays(1);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -148,8 +151,10 @@ internal sealed partial class LearnBotLocalAgent
         var activeTransport = transport == "polling" ? "polling" : "starting";
         var webSocketFailures = 0;
         DateTimeOffset? nextWebSocketRetryAt = null;
+        var nextLocalDataCleanupAt = DateTimeOffset.UtcNow.Add(LocalDataCleanupInterval);
         var finalStatus = "stopped";
         var finalEvent = once ? "completed once" : "stopped";
+        RunLocalDataRetentionCleanup(logResult: false);
         WriteRunState("running", null, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
         Log(once ? $"agent start once transport={transport}" : $"agent start transport={transport} intervalSeconds={intervalSeconds}");
         Console.WriteLine(once
@@ -214,6 +219,11 @@ internal sealed partial class LearnBotLocalAgent
                     }
                     await PollOnce(config);
                     WriteRunState("running", "poll", transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
+                    if (!once && DateTimeOffset.UtcNow >= nextLocalDataCleanupAt)
+                    {
+                        RunLocalDataRetentionCleanup(logResult: true);
+                        nextLocalDataCleanupAt = DateTimeOffset.UtcNow.Add(LocalDataCleanupInterval);
+                    }
                     if (once) break;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -317,14 +327,14 @@ internal sealed partial class LearnBotLocalAgent
     {
         var tail = Math.Clamp(ParseInt(GetOption(args, "--tail"), 80), 1, 1000);
         var path = LogPath();
-        if (!File.Exists(path))
+        if (!File.Exists(path) && !Directory.Exists(LogArchiveDirectory()))
         {
             Console.WriteLine("No Local Agent log file exists yet.");
             Console.WriteLine(path);
             return 0;
         }
 
-        foreach (var line in File.ReadLines(path).TakeLast(tail))
+        foreach (var line in ReadAvailableLogLines().TakeLast(tail))
         {
             Console.WriteLine(line);
         }
@@ -3714,6 +3724,10 @@ internal sealed partial class LearnBotLocalAgent
 
     private static string LogPath() => Path.Combine(AgentDataDirectory(), "agent.log");
 
+    private static string LogArchiveDirectory() => Path.Combine(AgentDataDirectory(), "logs");
+
+    private static string CurrentDatedLogPath() => Path.Combine(LogArchiveDirectory(), "agent-" + DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") + ".log");
+
     private static string StatePath() => Path.Combine(AgentDataDirectory(), "agent-state.json");
 
     private static string WebSessionPath() => Path.Combine(AgentDataDirectory(), "web-session.json");
@@ -4082,7 +4096,184 @@ internal sealed partial class LearnBotLocalAgent
     {
         var path = LogPath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.AppendAllText(path, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
+        var line = $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}";
+        File.AppendAllText(path, line);
+        var datedLogPath = CurrentDatedLogPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(datedLogPath)!);
+        File.AppendAllText(datedLogPath, line);
+    }
+
+    private static IEnumerable<string> ReadLogLines(string path)
+    {
+        try
+        {
+            return File.ReadLines(path).ToList();
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> ReadAvailableLogLines()
+    {
+        if (File.Exists(LogPath()))
+        {
+            return ReadLogLines(LogPath());
+        }
+        var archiveDirectory = LogArchiveDirectory();
+        if (!Directory.Exists(archiveDirectory)) return [];
+        var root = Path.GetFullPath(archiveDirectory);
+        return Directory.EnumerateFiles(root, "agent-*.log", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFullPath)
+            .Where(path => IsWithin(root, path))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .SelectMany(ReadLogLines)
+            .ToList();
+    }
+
+    private static void RunLocalDataRetentionCleanup(bool logResult)
+    {
+        try
+        {
+            var result = CleanupLocalAgentData(DateTimeOffset.UtcNow);
+            if (logResult && (result.DeletedLogFiles > 0 || result.DeletedLogLines > 0 || result.DeletedSnapshots > 0 || result.DeletedStagingSnapshots > 0))
+            {
+                Log($"retention cleanup deleted logFiles={result.DeletedLogFiles} logLines={result.DeletedLogLines} snapshots={result.DeletedSnapshots} stagingSnapshots={result.DeletedStagingSnapshots}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            if (logResult)
+            {
+                Log("retention cleanup failed: " + ex.Message);
+            }
+        }
+    }
+
+    private static LocalDataCleanupResult CleanupLocalAgentData(DateTimeOffset now)
+    {
+        var cutoff = now.ToUniversalTime().AddDays(-LocalDataRetentionDays);
+        var staleStagingCutoff = now.ToUniversalTime().Subtract(StaleSnapshotStagingRetention);
+        var deletedLogLines = PruneAggregateLog(LogPath(), cutoff);
+        var deletedLogFiles = DeleteOldDatedLogs(LogArchiveDirectory(), cutoff);
+        var snapshotResult = DeleteOldSnapshots(AgentDataDirectory(), cutoff, staleStagingCutoff);
+        return new LocalDataCleanupResult(deletedLogFiles, deletedLogLines, snapshotResult.DeletedSnapshots, snapshotResult.DeletedStagingSnapshots);
+    }
+
+    private static int PruneAggregateLog(string path, DateTimeOffset cutoff)
+    {
+        if (!File.Exists(path)) return 0;
+        var lines = File.ReadAllLines(path);
+        var kept = new List<string>();
+        var deleted = 0;
+        foreach (var line in lines)
+        {
+            if (TryReadLogTimestamp(line, out var timestamp) && timestamp.ToUniversalTime() >= cutoff)
+            {
+                kept.Add(line);
+            }
+            else
+            {
+                deleted++;
+            }
+        }
+        if (deleted > 0)
+        {
+            File.WriteAllLines(path, kept, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        }
+        return deleted;
+    }
+
+    private static int DeleteOldDatedLogs(string logDirectory, DateTimeOffset cutoff)
+    {
+        if (!Directory.Exists(logDirectory)) return 0;
+        var deleted = 0;
+        var root = Path.GetFullPath(logDirectory);
+        foreach (var file in Directory.EnumerateFiles(root, "agent-*.log", SearchOption.TopDirectoryOnly))
+        {
+            var fullPath = Path.GetFullPath(file);
+            if (!IsWithin(root, fullPath)) continue;
+            var lastWrite = File.GetLastWriteTimeUtc(fullPath);
+            if (lastWrite >= cutoff.UtcDateTime) continue;
+            File.Delete(fullPath);
+            deleted++;
+        }
+        return deleted;
+    }
+
+    private static SnapshotCleanupResult DeleteOldSnapshots(string agentDataDirectory, DateTimeOffset cutoff, DateTimeOffset staleStagingCutoff)
+    {
+        var snapshotsRoot = Path.GetFullPath(Path.Combine(agentDataDirectory, "snapshots")).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!Directory.Exists(snapshotsRoot)) return new SnapshotCleanupResult(0, 0);
+        var deletedSnapshots = 0;
+        var deletedStagingSnapshots = 0;
+        foreach (var directory in Directory.EnumerateDirectories(snapshotsRoot, "*", SearchOption.TopDirectoryOnly))
+        {
+            var fullPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!IsWithin(snapshotsRoot, fullPath)) continue;
+            var name = Path.GetFileName(fullPath);
+            if (name.Contains(".staging-", StringComparison.Ordinal))
+            {
+                if (Directory.GetLastWriteTimeUtc(fullPath) < staleStagingCutoff.UtcDateTime)
+                {
+                    Directory.Delete(fullPath, recursive: true);
+                    deletedStagingSnapshots++;
+                }
+                continue;
+            }
+            if (!name.StartsWith("snap-", StringComparison.Ordinal)) continue;
+            if (SnapshotCreatedAt(fullPath) is { } createdAt)
+            {
+                if (createdAt.ToUniversalTime() >= cutoff) continue;
+            }
+            else if (Directory.GetLastWriteTimeUtc(fullPath) >= cutoff.UtcDateTime)
+            {
+                continue;
+            }
+            Directory.Delete(fullPath, recursive: true);
+            deletedSnapshots++;
+        }
+        return new SnapshotCleanupResult(deletedSnapshots, deletedStagingSnapshots);
+    }
+
+    private static DateTimeOffset? SnapshotCreatedAt(string snapshotRoot)
+    {
+        var manifestPath = Path.Combine(snapshotRoot, "manifest.json");
+        if (!File.Exists(manifestPath)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
+            if (document.RootElement.TryGetProperty("createdAt", out var createdAt)
+                && createdAt.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(createdAt.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        return null;
+    }
+
+    private static bool TryReadLogTimestamp(string line, out DateTimeOffset timestamp)
+    {
+        timestamp = default;
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        var firstSpace = line.IndexOf(' ');
+        if (firstSpace <= 0) return false;
+        return DateTimeOffset.TryParse(line[..firstSpace], out timestamp);
     }
 
     private static void WriteRunState(
@@ -5981,7 +6172,7 @@ internal sealed partial class LearnBotLocalAgent
             ["files"] = fileResults.Select(file => SnapshotManifestFilePreview(file, layout)).ToList(),
             ["cleanupPolicy"] = new Dictionary<string, object?>
             {
-                ["retentionDays"] = 30,
+                ["retentionDays"] = LocalDataRetentionDays,
                 ["deleteOnlyAfterSuccessfulRollbackOrUserCleanup"] = true
             }
         };
@@ -6168,7 +6359,7 @@ internal sealed partial class LearnBotLocalAgent
                 ["files"] = manifestFiles,
                 ["cleanupPolicy"] = new Dictionary<string, object?>
                 {
-                    ["retentionDays"] = 30,
+                    ["retentionDays"] = LocalDataRetentionDays,
                     ["deleteOnlyAfterSuccessfulRollbackOrUserCleanup"] = true
                 }
             };
@@ -6890,6 +7081,10 @@ internal sealed partial class LearnBotLocalAgent
         if (string.Equals(args[0], "pair-atomic-config-contract", StringComparison.OrdinalIgnoreCase))
         {
             return await SelfTestPairAtomicConfigContract();
+        }
+        if (string.Equals(args[0], "local-data-retention-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestLocalDataRetentionContract();
         }
         if (string.Equals(args[0], "workspace-tree-contract", StringComparison.OrdinalIgnoreCase))
         {
@@ -10102,6 +10297,93 @@ internal sealed partial class LearnBotLocalAgent
         }
     }
 
+    private static int SelfTestLocalDataRetentionContract()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "learnbot-agent-retention-" + Guid.NewGuid().ToString("N"));
+        var previousConfig = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        try
+        {
+            var agentRoot = Path.Combine(root, "agent");
+            Directory.CreateDirectory(agentRoot);
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", Path.Combine(agentRoot, "agent.json"));
+            File.WriteAllText(ConfigPath(), "{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(StatePath(), "{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(WebSessionPath(), "{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            var now = new DateTimeOffset(2026, 7, 5, 12, 0, 0, TimeSpan.Zero);
+            var oldLine = now.AddDays(-8).ToString("O") + " old line";
+            var recentLine = now.AddDays(-2).ToString("O") + " recent line";
+            File.WriteAllLines(LogPath(), [oldLine, recentLine, "legacy line without timestamp"], new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            var logArchive = LogArchiveDirectory();
+            Directory.CreateDirectory(logArchive);
+            var oldArchive = Path.Combine(logArchive, "agent-2026-06-20.log");
+            var recentArchive = Path.Combine(logArchive, "agent-2026-07-04.log");
+            File.WriteAllText(oldArchive, oldLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(recentArchive, recentLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.SetLastWriteTimeUtc(oldArchive, now.AddDays(-10).UtcDateTime);
+            File.SetLastWriteTimeUtc(recentArchive, now.AddDays(-1).UtcDateTime);
+
+            var snapshotsRoot = Path.Combine(agentRoot, "snapshots");
+            var oldSnapshot = Path.Combine(snapshotsRoot, "snap-old");
+            var recentSnapshot = Path.Combine(snapshotsRoot, "snap-recent");
+            var brokenOldSnapshot = Path.Combine(snapshotsRoot, "snap-broken-old");
+            var stagingSnapshot = Path.Combine(snapshotsRoot, "snap-stale.staging-123");
+            Directory.CreateDirectory(oldSnapshot);
+            Directory.CreateDirectory(recentSnapshot);
+            Directory.CreateDirectory(brokenOldSnapshot);
+            Directory.CreateDirectory(stagingSnapshot);
+            File.WriteAllText(Path.Combine(oldSnapshot, "manifest.json"), JsonSerializer.Serialize(new { createdAt = now.AddDays(-8) }, JsonOptions));
+            File.WriteAllText(Path.Combine(recentSnapshot, "manifest.json"), JsonSerializer.Serialize(new { createdAt = now.AddDays(-1) }, JsonOptions));
+            Directory.SetLastWriteTimeUtc(brokenOldSnapshot, now.AddDays(-9).UtcDateTime);
+            Directory.SetLastWriteTimeUtc(stagingSnapshot, now.AddDays(-2).UtcDateTime);
+
+            var result = CleanupLocalAgentData(now);
+            var aggregateLines = File.ReadAllLines(LogPath());
+            File.Delete(LogPath());
+            var fallbackLines = ReadAvailableLogLines().ToList();
+            var ok = result.DeletedLogFiles == 1
+                && result.DeletedLogLines == 2
+                && result.DeletedSnapshots == 2
+                && result.DeletedStagingSnapshots == 1
+                && aggregateLines.SequenceEqual([recentLine])
+                && fallbackLines.SequenceEqual([recentLine])
+                && File.Exists(ConfigPath())
+                && File.Exists(StatePath())
+                && File.Exists(WebSessionPath())
+                && !File.Exists(oldArchive)
+                && File.Exists(recentArchive)
+                && !Directory.Exists(oldSnapshot)
+                && Directory.Exists(recentSnapshot)
+                && !Directory.Exists(brokenOldSnapshot)
+                && !Directory.Exists(stagingSnapshot);
+            if (!ok)
+            {
+                Console.Error.WriteLine("local data retention contract self-test failed");
+                return 1;
+            }
+            Console.WriteLine("local-data-retention-contract-ok");
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEARNBOT_AGENT_CONFIG", previousConfig);
+            if (Directory.Exists(root))
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
     private static int SelfTestPatchApplyMemory()
     {
         var parsed = ParseUnifiedDiff("""
@@ -10690,6 +10972,10 @@ internal sealed record SnapshotCreationResult(bool Created, string? Error, Dicti
 
     public static SnapshotCreationResult Failed(string error) => new(false, error, null);
 }
+
+internal sealed record LocalDataCleanupResult(int DeletedLogFiles, int DeletedLogLines, int DeletedSnapshots, int DeletedStagingSnapshots);
+
+internal sealed record SnapshotCleanupResult(int DeletedSnapshots, int DeletedStagingSnapshots);
 
 internal sealed record SnapshotLayout(
     string ManifestId,

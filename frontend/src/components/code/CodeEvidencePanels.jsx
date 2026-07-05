@@ -11,15 +11,15 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
   useEffect(() => {
     setExpanded(false);
   }, [evidenceKey]);
-  if (!evidence.length) return <p className="empty compact-empty">{'?쒖떆??肄붾뱶 洹쇨굅媛 ?놁뒿?덈떎.'}</p>;
+  if (!evidence.length) return <p className="empty compact-empty">표시할 코드 근거가 없습니다.</p>;
   const groupedEvidence = groupCodeEvidence(evidence);
   const visibleEvidence = expanded ? groupedEvidence : groupedEvidence.slice(0, evidencePreviewLimit);
   const hiddenCount = Math.max(groupedEvidence.length - visibleEvidence.length, 0);
   return (
     <div className={expanded ? 'evidence-section evidence-section-expanded' : 'evidence-section'}>
       <div className="evidence-header">
-        <strong>{'肄붾뱶 洹쇨굅'}</strong>
-        <small>{visibleEvidence.length}/{groupedEvidence.length}{'媛??뚯씪 ?쒖떆'}</small>
+        <strong>코드 근거</strong>
+        <small>{visibleEvidence.length}/{groupedEvidence.length}개 파일 표시</small>
       </div>
       <div className="evidence-list">
         {visibleEvidence.map((group) => {
@@ -29,7 +29,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
           const groupRanges = codeEvidenceRanges(group.items);
           const openRanges = groupRanges.length ? groupRanges : primaryRange;
           const metaText = group.items.length > 1
-            ? `${group.items.length}媛?洹쇨굅 쨌 ${group.locationSummary}`
+            ? `${group.items.length}개 근거 / ${group.locationSummary}`
             : codeEvidenceMetaText(item);
           return (
             <article className="evidence-card code-evidence" key={group.evidenceKey}>
@@ -38,7 +38,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
                 {canOpen && (
                   <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, openRanges)}>
                     <Eye size={14} />
-                    {'?닿린'}
+                    열기
                   </button>
                 )}
               </div>
@@ -69,7 +69,7 @@ function CodeEvidenceList({ evidence = [], onOpenEvidence }) {
       {groupedEvidence.length > evidencePreviewLimit && (
         <button className="ghost-button compact-action evidence-toggle" type="button" onClick={() => setExpanded((current) => !current)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? '?듭떖 洹쇨굅留?蹂닿린' : `?꾩껜 洹쇨굅 ?뚯씪 ${groupedEvidence.length}媛?蹂닿린`}
+          {expanded ? '핵심 근거만 보기' : `전체 근거 파일 ${groupedEvidence.length}개 보기`}
           {!expanded && hiddenCount > 0 ? <span>+{hiddenCount}</span> : null}
         </button>
       )}
@@ -133,10 +133,10 @@ function codeEvidenceRanges(items = []) {
 function codeEvidenceMetaText(item = {}) {
   const isCommitDiff = item.metadata?.kind === 'commit_diff';
   if (isCommitDiff) {
-    return `${item.metadata?.changeType || item.chunkType} 쨌 +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`;
+    return `${item.metadata?.changeType || item.chunkType} / +${item.metadata?.insertions ?? 0}/-${item.metadata?.deletions ?? 0}`;
   }
   const location = item.lineStart > 0 ? `${item.lineStart}-${item.lineEnd || item.lineStart}` : 'lines -';
-  return `${location} 쨌 ${item.chunkType || 'code'}`;
+  return `${location} / ${item.chunkType || 'code'}`;
 }
 
 function codeEvidenceLocationSummary(items = []) {
@@ -150,7 +150,7 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
   const columns = [
     {
       accessorKey: 'filePath',
-      header: '?뚯씪',
+      header: '파일',
       cell: ({ row }) => (
         <div className="code-table-file">
           <strong>{row.original.filePath}</strong>
@@ -160,12 +160,12 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
     },
     {
       accessorKey: 'lineStart',
-      header: '?쇱씤',
+      header: '라인',
       cell: ({ row }) => <Badge variant="outline">{row.original.lineStart}-{row.original.lineEnd}</Badge>,
     },
     {
       accessorKey: 'score',
-      header: '?먯닔',
+      header: '점수',
       cell: ({ row }) => Number(row.original.score || 0).toFixed(3),
     },
     {
@@ -182,7 +182,7 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
           }}
         >
           <Eye size={14} />
-          {'?닿린'}
+          열기
         </Button>
       ),
     },
@@ -192,7 +192,7 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
       className="code-search-table"
       columns={columns}
       data={results}
-      empty={'肄붾뱶 寃??寃곌낵媛 ?놁뒿?덈떎.'}
+      empty="코드 검색 결과가 없습니다."
       onRowClick={(item) => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}
     />
   );
@@ -201,8 +201,8 @@ function CodeSearchResults({ results = [], onOpenEvidence }) {
 function CodeReferenceResults({ result, onOpenEvidence }) {
   return (
     <div className="reference-results">
-      <ReferenceGroup title={'?뺤쓽'} items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
-      <ReferenceGroup title={'李몄“'} items={result.references || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title="정의" items={result.definitions || []} onOpenEvidence={onOpenEvidence} />
+      <ReferenceGroup title="참조" items={result.references || []} onOpenEvidence={onOpenEvidence} />
     </div>
   );
 }
@@ -217,14 +217,14 @@ function ReferenceGroup({ title, items, onOpenEvidence }) {
             <strong>{item.filePath}</strong>
             <button className="ghost-button compact-action" type="button" onClick={() => onOpenEvidence?.(item.repositoryId, item.fileId, { start: item.lineStart, end: item.lineEnd })}>
               <Eye size={14} />
-              {'?닿린'}
+              열기
             </button>
           </div>
-          <small>{item.lineStart}-{item.lineEnd} {'쨌'} {item.chunkType}</small>
+          <small>{item.lineStart}-{item.lineEnd} / {item.chunkType}</small>
           <p>{item.content}</p>
         </article>
       ))}
-      {!items.length && <p className="empty compact-empty">{'寃곌낵 ?놁쓬'}</p>}
+      {!items.length && <p className="empty compact-empty">결과 없음</p>}
     </div>
   );
 }

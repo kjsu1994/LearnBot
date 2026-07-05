@@ -1090,6 +1090,10 @@ function CodeAgentPanel({
   const transportLabel = activeTransport || configuredTransport;
   const retryAt = localAgentStatus?.nextWebSocketRetryAt;
   const mutationTarget = mutationPolicy?.intendedExecutionTarget || 'USER_LOCAL_AGENT';
+  const workspaceCount = localAgentStatus?.workspaces?.length || 0;
+  const approvedWorkspaceCount = localAgentStatus?.workspaces?.filter((workspace) => workspace.approved).length || 0;
+  const localAgentConnected = localAgentStatus?.state === 'CONNECTED';
+  const mutationReady = Boolean(mutationPolicy?.localAgentMutationEnabled);
   const agentLoopPreviewSummaryView = buildAgentLoopPreviewSummaryView(loopPreview);
   const agentLoopSubmissionPlanReviewView = buildAgentLoopSubmissionPlanReviewView(loopSubmissionPlan);
   const agentLoopApprovalIntentPreviewView = buildAgentLoopApprovalIntentPreviewView(loopSubmissionPlan);
@@ -1505,48 +1509,37 @@ function CodeAgentPanel({
           <h2>Local Agent</h2>
         </div>
       </div>
-      <div className="code-agent-result compact-result">
+      <div className="code-agent-result compact-result local-agent-overview">
         <div className="result-heading">
           <strong>Local Agent</strong>
-          <Badge variant={localAgentStatus?.state === 'CONNECTED' ? 'outline' : 'destructive'}>{localAgentStatus?.state || 'DISCONNECTED'}</Badge>
+          <Badge variant={localAgentConnected ? 'outline' : 'destructive'}>{localAgentStatus?.state || 'DISCONNECTED'}</Badge>
         </div>
         <small>{localAgentStatus?.message || 'No Local Agent is connected. User-owned file changes require a per-user Local Agent.'}</small>
-        {transportLabel && (
-          <small>
-            transport: {configuredTransport && activeTransport && configuredTransport !== activeTransport
-              ? `${configuredTransport} -> ${activeTransport}`
-              : transportLabel}
-            {localAgentStatus?.webSocketFailureCount ? `, websocket failures ${localAgentStatus.webSocketFailureCount}` : ''}
-            {retryAt ? `, next retry ${formatDate(retryAt)}` : ''}
-          </small>
-        )}
-        {!!localAgentStatus?.workspaces?.length && (
-          <small>{localAgentStatus.workspaces.filter((workspace) => workspace.approved).length}/{localAgentStatus.workspaces.length} approved workspaces</small>
-        )}
-        <small>
-          mutation target: {mutationTarget}
-          {mutationPolicy?.localAgentMutationEnabled ? ', enabled' : ', apply/test/rollback disabled'}
-          {mutationPolicy?.serverLocalMutationEnabled ? ', server-local prototype enabled' : ''}
-        </small>
-        {mutationPolicy?.message && <small>{mutationPolicy.message}</small>}
-          <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
-          <RefreshCw size={14} />
-          refresh
-        </button>
+        <div className="local-agent-status-grid">
+          <div>
+            <span>작업 폴더</span>
+            <strong>{workspaceCount ? `${approvedWorkspaceCount}/${workspaceCount}` : '0/0'}</strong>
+          </div>
+          <div>
+            <span>승인 대기</span>
+            <strong>{localAgentPendingApprovals.length}건</strong>
+          </div>
+          <div>
+            <span>파일 적용</span>
+            <strong>{mutationReady ? '사용 가능' : '대기 중'}</strong>
+          </div>
+        </div>
+        <div className="action-row local-agent-primary-actions">
+          <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentPendingApprovals(); }}>
+            <RefreshCw size={14} />
+            상태 새로고침
+          </button>
+        </div>
         <div className="local-agent-token-list">
           <div className="result-heading">
             <strong>대기 중인 승인</strong>
             <Badge variant={localAgentPendingApprovals.length ? 'destructive' : 'secondary'}>{localAgentPendingApprovals.length}건</Badge>
           </div>
-          <button
-            type="button"
-            className="ghost-button compact-action"
-            disabled={loading('local-agent-pending-approvals')}
-            onClick={onRefreshLocalAgentPendingApprovals}
-          >
-            {loading('local-agent-pending-approvals') ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
-            승인 목록 새로고침
-          </button>
           {!localAgentPendingApprovals.length ? (
             <small>승인이 필요한 로컬 파일 변경 요청이 없습니다.</small>
           ) : (
@@ -1567,7 +1560,6 @@ function CodeAgentPanel({
                     className="ghost-button compact-action"
                     disabled={loading(approveKey) || loading(denyKey)}
                     onClick={() => onLocalPatchApproval('APPROVE', approval.requestId)}
-                    title="이 요청의 로컬 파일 변경을 승인하고 에이전트가 계속 진행하게 합니다."
                   >
                     {loading(approveKey) ? <Loader2 className="spin" size={14} /> : <ShieldCheck size={14} />}
                     승인
@@ -1577,7 +1569,6 @@ function CodeAgentPanel({
                     className="ghost-button compact-action"
                     disabled={loading(approveKey) || loading(denyKey)}
                     onClick={() => onLocalPatchApproval('DENY', approval.requestId)}
-                    title="이 요청을 거절합니다. 로컬 파일은 수정되지 않습니다."
                   >
                     {loading(denyKey) ? <Loader2 className="spin" size={14} /> : <X size={14} />}
                     거절
@@ -1587,39 +1578,69 @@ function CodeAgentPanel({
             })
           )}
         </div>
-        <div className="local-agent-token-list">
-          <div className="result-heading">
-            <strong>Tokens</strong>
-            <Badge variant={activeTokenCount ? 'outline' : 'secondary'}>{activeTokenCount} active</Badge>
-          </div>
-          {!localAgentTokens.length ? (
-            <small>No paired Local Agent tokens.</small>
-          ) : (
-            localAgentTokens.slice(0, 5).map((token) => (
-              <div className="local-agent-token-row" key={token.id}>
-                <span>
-                  <strong>{token.label || 'Local Agent'}</strong>
-                  <small>{token.agentId}</small>
-                  <small>{token.lastSeenAt ? `last seen ${formatDate(token.lastSeenAt)}` : `created ${formatDate(token.createdAt)}`}</small>
-                </span>
-                <Badge variant={token.revokedAt ? 'secondary' : token.active ? 'success' : 'secondary'}>{token.revokedAt ? 'revoked' : token.active ? 'active' : 'expired'}</Badge>
-                {!token.revokedAt && (
-                  <button
-                    type="button"
-                    className="ghost-button compact-action"
-                    disabled={loading(`local-agent-token-revoke-${token.id}`)}
-                    onClick={() => onRevokeLocalAgentToken(token.id)}
-                  >
-                    {loading(`local-agent-token-revoke-${token.id}`) ? <Loader2 className="spin" size={14} /> : <Trash2 size={14} />}
-                    revoke
-                  </button>
-                )}
+        <details className="code-agent-result compact-result code-agent-timeline-details local-agent-diagnostics">
+          <summary className="result-heading">
+            <span>
+              <strong>Local Agent 고급 진단</strong>
+              <small>transport, mutation 정책, pairing token 관리를 확인합니다.</small>
+            </span>
+            <Badge className="code-agent-timeline-badge" variant="outline">진단</Badge>
+          </summary>
+          <div className="code-agent-timeline-content">
+            {transportLabel && (
+              <small>
+                transport: {configuredTransport && activeTransport && configuredTransport !== activeTransport
+                  ? `${configuredTransport} -> ${activeTransport}`
+                  : transportLabel}
+                {localAgentStatus?.webSocketFailureCount ? `, websocket failures ${localAgentStatus.webSocketFailureCount}` : ''}
+                {retryAt ? `, next retry ${formatDate(retryAt)}` : ''}
+              </small>
+            )}
+            <small>
+              mutation target: {mutationTarget}
+              {mutationPolicy?.localAgentMutationEnabled ? ', enabled' : ', apply/test/rollback disabled'}
+              {mutationPolicy?.serverLocalMutationEnabled ? ', server-local prototype enabled' : ''}
+            </small>
+            {mutationPolicy?.message && <small>{mutationPolicy.message}</small>}
+            <button type="button" className="ghost-button compact-action" onClick={() => { onRefreshLocalAgent(); onRefreshLocalAgentTokens(); }}>
+              <RefreshCw size={14} />
+              토큰 포함 새로고침
+            </button>
+            <div className="local-agent-token-list">
+              <div className="result-heading">
+                <strong>Tokens</strong>
+                <Badge variant={activeTokenCount ? 'outline' : 'secondary'}>{activeTokenCount} active</Badge>
               </div>
-            ))
-          )}
-          {localAgentTokens.length > 5 && <small>{localAgentTokens.length - 5} older tokens hidden</small>}
-          {tokenRefreshLoading && <small>Refreshing tokens...</small>}
-        </div>
+              {!localAgentTokens.length ? (
+                <small>No paired Local Agent tokens.</small>
+              ) : (
+                localAgentTokens.slice(0, 5).map((token) => (
+                  <div className="local-agent-token-row" key={token.id}>
+                    <span>
+                      <strong>{token.label || 'Local Agent'}</strong>
+                      <small>{token.agentId}</small>
+                      <small>{token.lastSeenAt ? `last seen ${formatDate(token.lastSeenAt)}` : `created ${formatDate(token.createdAt)}`}</small>
+                    </span>
+                    <Badge variant={token.revokedAt ? 'secondary' : token.active ? 'success' : 'secondary'}>{token.revokedAt ? 'revoked' : token.active ? 'active' : 'expired'}</Badge>
+                    {!token.revokedAt && (
+                      <button
+                        type="button"
+                        className="ghost-button compact-action"
+                        disabled={loading(`local-agent-token-revoke-${token.id}`)}
+                        onClick={() => onRevokeLocalAgentToken(token.id)}
+                      >
+                        {loading(`local-agent-token-revoke-${token.id}`) ? <Loader2 className="spin" size={14} /> : <Trash2 size={14} />}
+                        revoke
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+              {localAgentTokens.length > 5 && <small>{localAgentTokens.length - 5} older tokens hidden</small>}
+              {tokenRefreshLoading && <small>Refreshing tokens...</small>}
+            </div>
+          </div>
+        </details>
       </div>
       <form className="stack" onSubmit={onPlan}>
         <label htmlFor="code-agent-instruction">수정 요청</label>
@@ -1635,6 +1656,29 @@ function CodeAgentPanel({
             {loading('code-agent-plan') ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
             수정 계획 만들기
           </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canEnqueueSelectedReadOnlyRunner}
+            onClick={() => onLoopRunnerEnqueueSelectedReadOnly(loopPreview)}
+          >
+            {loading('code-agent-loop-runner-enqueue-selected-read-only') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+            다음 읽기 작업 실행
+          </button>
+          <button type="button" className="ghost-button" disabled={!canPatch} onClick={onPatch}>
+            {loading('code-agent-patch') ? <Loader2 className="spin" size={16} /> : <FileCode2 size={16} />}
+            수정안 만들기
+          </button>
+        </div>
+        <details className="code-agent-result compact-result code-agent-timeline-details local-agent-diagnostics">
+          <summary className="result-heading">
+            <span>
+              <strong>자동 작업 고급 진단</strong>
+              <small>차단 사유, 모델 도구 선택, 작업 기록을 확인합니다.</small>
+            </span>
+            <Badge className="code-agent-timeline-badge" variant="outline">진단</Badge>
+          </summary>
+          <div className="action-row code-agent-timeline-content">
           <button type="button" className="ghost-button" disabled={!canPreviewLoop} onClick={onLoopPreview}>
             {loading('code-agent-loop-preview') ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
             자동 작업 흐름 확인
@@ -1713,11 +1757,8 @@ function CodeAgentPanel({
             {loading('code-agent-loop-timelines') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
             작업 기록 새로고침
           </button>
-          <button type="button" className="ghost-button" disabled={!canPatch} onClick={onPatch}>
-            {loading('code-agent-patch') ? <Loader2 className="spin" size={16} /> : <FileCode2 size={16} />}
-            수정안 만들기
-          </button>
-        </div>
+          </div>
+        </details>
       </form>
       {agentLoopPreviewSummaryView && (
         <div className="code-agent-result compact-result">
@@ -4274,5 +4315,3 @@ function RepositorySelect({ repositories, selectedRepository, selectedRepository
 }
 
 export { CodeSourceManagementPanel, CodeWorkspace };
-
-
