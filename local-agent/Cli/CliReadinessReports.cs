@@ -655,7 +655,7 @@ internal sealed partial class LearnBotLocalAgent
     private static IReadOnlyList<string> GoalQueryHints(string goal)
     {
         var hints = goal
-            .Split([' ', '\t', '\r', '\n', '.', ',', ';', ':', '/', '\\', '-', '_', '"', '\''], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ';', ':', '/', '\\', '-', '_', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(term => term.Length >= 3)
             .Select(term => term.Length > 40 ? term[..40] : term)
             .Distinct(StringComparer.OrdinalIgnoreCase)
