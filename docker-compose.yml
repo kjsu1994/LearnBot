@@ -92,7 +92,7 @@ services:
     container_name: learnbot-ollama-pull
     environment:
       OLLAMA_HOST: http://ollama:11434
-      PRIMARY_LLM_MODEL: ${PRIMARY_LLM_MODEL:-qwen3:8b-q4_K_M}
+      PRIMARY_LLM_MODEL: ornith:9b
       AUXILIARY_LLM_MODEL: ${AUXILIARY_LLM_MODEL:-qwen3:4b-instruct}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
     depends_on:
@@ -129,7 +129,7 @@ services:
       SPRING_DATASOURCE_USERNAME: learnbot
       SPRING_DATASOURCE_PASSWORD: learnbot
       OLLAMA_BASE_URL: http://ollama:11434
-      PRIMARY_LLM_MODEL: ${PRIMARY_LLM_MODEL:-qwen3:8b-q4_K_M}
+      PRIMARY_LLM_MODEL: ornith:9b
       AUXILIARY_LLM_MODEL: ${AUXILIARY_LLM_MODEL:-qwen3:4b-instruct}
       LLM_CONTEXT_WINDOW: ${LLM_CONTEXT_WINDOW:-4096}
       LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-0}

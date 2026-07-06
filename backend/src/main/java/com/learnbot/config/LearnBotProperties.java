@@ -418,10 +418,10 @@ public class LearnBotProperties {
         private String baseUrl = "http://localhost:11434";
 
         @NotBlank
-        private String chatModel = "qwen3:8b-q4_K_M";
+        private String chatModel = "ornith:9b";
 
         @NotBlank
-        private String primaryChatModel = "qwen3:8b-q4_K_M";
+        private String primaryChatModel = "ornith:9b";
 
         @NotBlank
         private String auxiliaryChatModel = "qwen3:4b-instruct";
