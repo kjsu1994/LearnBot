@@ -8,6 +8,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class PatchValidationService {
@@ -16,6 +18,8 @@ public class PatchValidationService {
     private static final int MAX_EXPLICIT_REWRITE_CHANGED_LINES = 1_200;
     private static final int MAX_CREATED_FILE_CHANGED_LINES = 1_500;
     private static final int MAX_DIFF_CHARS = 30_000;
+    private static final Pattern HUNK_HEADER = Pattern.compile(
+            "^@@\\s+-(\\d+)(?:,(\\d+))?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@.*$");
 
     private final CodePatchFileLoader fileLoader;
 
@@ -80,7 +84,68 @@ public class PatchValidationService {
                     + ", maxChangedLines=" + changedLineBudget.maxChangedLines()
                     + ", budgetReason=" + changedLineBudget.reason());
         }
+        warnings.addAll(emptyingExistingFileWarnings(clean));
         return new PatchValidationResult(warnings.isEmpty(), List.copyOf(warnings));
+    }
+
+    private List<String> emptyingExistingFileWarnings(String diff) {
+        List<String> warnings = new ArrayList<>();
+        String oldPath = null;
+        String newPath = null;
+        FilePatchShape shape = null;
+        for (String line : diff.split("\n")) {
+            if (line.startsWith("--- ")) {
+                if (shape != null && shape.emptiesExistingFile()) {
+                    warnings.add("Patch would empty an existing file: " + shape.path());
+                }
+                oldPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                newPath = null;
+                shape = null;
+                continue;
+            }
+            if (line.startsWith("+++ ")) {
+                newPath = normalizeDiffPath(line.substring(4).trim().split("\\s+", 2)[0]);
+                if (oldPath != null && !"/dev/null".equals(oldPath) && !"/dev/null".equals(newPath)) {
+                    shape = new FilePatchShape(newPath);
+                }
+                continue;
+            }
+            if (shape == null || newPath == null) {
+                continue;
+            }
+            Matcher matcher = HUNK_HEADER.matcher(line);
+            if (matcher.matches()) {
+                shape.observeHunk(
+                        parsePositiveInt(matcher.group(1), 0),
+                        parsePositiveInt(matcher.group(2), 1),
+                        parsePositiveInt(matcher.group(3), 0),
+                        parsePositiveInt(matcher.group(4), 1)
+                );
+                continue;
+            }
+            if (line.startsWith("\\") || line.isEmpty()) {
+                continue;
+            }
+            char marker = line.charAt(0);
+            if (marker == '-' || marker == '+' || marker == ' ') {
+                shape.observeLine(marker);
+            }
+        }
+        if (shape != null && shape.emptiesExistingFile()) {
+            warnings.add("Patch would empty an existing file: " + shape.path());
+        }
+        return warnings;
+    }
+
+    private int parsePositiveInt(String value, int defaultValue) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ex) {
+            return defaultValue;
+        }
     }
 
     private ChangedLineBudget changedLineBudget(String diff, List<PatchFileChange> changes, String instruction) {
@@ -168,5 +233,46 @@ public class PatchValidationService {
     }
 
     private record ChangedLineBudget(long changedLines, int maxChangedLines, String reason) {
+    }
+
+    private static final class FilePatchShape {
+        private final String path;
+        private boolean hasHunk;
+        private boolean firstHunkStartsAtFileStart;
+        private boolean everyHunkHasZeroNewLines = true;
+        private boolean hasRemovedLine;
+        private boolean hasKeptOrAddedLine;
+
+        private FilePatchShape(String path) {
+            this.path = path;
+        }
+
+        private String path() {
+            return path;
+        }
+
+        private void observeHunk(int oldStart, int oldCount, int newStart, int newCount) {
+            if (!hasHunk) {
+                firstHunkStartsAtFileStart = oldStart == 1 && oldCount > 0 && newStart <= 1;
+            }
+            hasHunk = true;
+            everyHunkHasZeroNewLines = everyHunkHasZeroNewLines && newCount == 0;
+        }
+
+        private void observeLine(char marker) {
+            if (marker == '-') {
+                hasRemovedLine = true;
+            } else if (marker == '+' || marker == ' ') {
+                hasKeptOrAddedLine = true;
+            }
+        }
+
+        private boolean emptiesExistingFile() {
+            return hasHunk
+                    && firstHunkStartsAtFileStart
+                    && everyHunkHasZeroNewLines
+                    && hasRemovedLine
+                    && !hasKeptOrAddedLine;
+        }
     }
 }

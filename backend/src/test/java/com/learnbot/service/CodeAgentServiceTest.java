@@ -9,6 +9,7 @@ import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.OffsetDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -191,6 +192,79 @@ class CodeAgentServiceTest {
                 .doesNotContain("    1 | <main>")
                 .contains("EXACT_CONTENT_START home.html")
                 .contains("<main>\n</main>\n");
+    }
+
+    @Test
+    void patchFromLoadedFilesIncludesCodexLikeProjectContextEnvelopeWhenProvided() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodePatchFileLoader fileLoader = mock(CodePatchFileLoader.class);
+        PatchValidationService validationService = new PatchValidationService(fileLoader);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeAgentService service = new CodeAgentService(searchService, fileLoader, validationService, ollamaClient, new ObjectMapper());
+        String path = "index.html";
+        String current = """
+                <main>
+                  <section id="home"></section>
+                </main>
+                """;
+        String proposal = """
+                {
+                  "action": "propose_patch",
+                  "editFormat": "operation_edit",
+                  "targetFiles": ["index.html"],
+                  "operations": [
+                    {
+                      "path": "index.html",
+                      "operation": "insert_after_anchor",
+                      "anchorAfter": "  <section id=\\"home\\"></section>",
+                      "newText": "  <section id=\\"team\\">Team</section>\\n"
+                    }
+                  ]
+                }
+                """;
+        PatchContextEnvelopeBuilder.Input context = new PatchContextEnvelopeBuilder.Input(
+                List.of(
+                        PatchContextEnvelopeBuilder.projectMapEntry("index.html", "file", 1420L),
+                        PatchContextEnvelopeBuilder.projectMapEntry("style.css", "file", 2200L),
+                        PatchContextEnvelopeBuilder.projectMapEntry("script.js", "file", 800L)
+                ),
+                List.of(
+                        PatchContextEnvelopeBuilder.fileCandidate("index.html", 1420L, "local-agent-observation", "<main>...</main>", current),
+                        PatchContextEnvelopeBuilder.fileCandidate("script.js", 800L, "local-agent-observation", "function switchTab() {}", "function switchTab() {}\n")
+                ),
+                List.of(PatchContextEnvelopeBuilder.recentContext(
+                        UUID.randomUUID().toString(),
+                        "previous request created portfolio homepage",
+                        List.of("index.html", "style.css", "script.js"),
+                        OffsetDateTime.parse("2026-07-06T00:00:00Z")
+                )),
+                true
+        );
+
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(4096))).thenReturn(chat(proposal));
+
+        CodeAgentPatchResponse response = service.patchFromLoadedFiles(
+                "방금 만든 홈페이지에 탭을 추가해줘",
+                List.of(new CodePatchFileLoader.LoadedPatchFile(null, path, "html", current)),
+                context
+        );
+
+        assertThat(response.valid()).as("warnings=%s", response.warnings()).isTrue();
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture(), eq(4096));
+        assertThat(promptCaptor.getValue())
+                .contains("PATCH_CONTEXT_ENVELOPE v2")
+                .contains("USER_REQUEST:")
+                .contains("PROJECT_MAP:")
+                .contains("- index.html (file, 1420 bytes)")
+                .contains("FILE_CANDIDATES:")
+                .contains("roleHint: markup/main-page-candidate")
+                .contains("RECENT_CONTEXT:")
+                .contains("previous request created portfolio homepage")
+                .contains("CREATION_POLICY:")
+                .contains("SELECTED_CONTEXT:")
+                .contains("EXACT_CONTENT_START index.html");
     }
 
     @Test

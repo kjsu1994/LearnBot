@@ -3421,6 +3421,14 @@ internal sealed partial class LearnBotLocalAgent
             }
             var hunkResults = file.Hunks.Select(hunk => DryRunHunk(lines, hunk)).ToList();
             var contextMatches = hunkResults.All(item => item.ContextMatches);
+            if (contextMatches
+                && existedBefore
+                && bytes.LongLength > 0
+                && TryApplyPatchToLines(lines, file, out var dryRunUpdatedLines, out _)
+                && LinesRepresentEmptyFile(dryRunUpdatedLines))
+            {
+                return ToolResult.Fail("REJECTED", "UNSAFE_TOOL", "Patch would empty an existing file: " + file.Path);
+            }
 
             fileResults.Add(new Dictionary<string, object?>
             {
@@ -6775,6 +6783,10 @@ internal sealed partial class LearnBotLocalAgent
         {
             return PatchWriteSequenceResult.Failed(error ?? "Patch hunk could not be applied.");
         }
+        if (existedBefore && beforeBytes.LongLength > 0 && LinesRepresentEmptyFile(updatedLines))
+        {
+            return PatchWriteSequenceResult.Failed("Patch would empty an existing file.");
+        }
 
         var updatedText = string.Join(newline, updatedLines);
         if (hadFinalNewline)
@@ -6816,6 +6828,9 @@ internal sealed partial class LearnBotLocalAgent
 
     private static string DetectLineEnding(string text) =>
         text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+
+    private static bool LinesRepresentEmptyFile(IReadOnlyList<string> lines) =>
+        lines.Count == 0 || lines.All(line => line.Length == 0);
 
     private static string DecodeUtf8PreservingBom(byte[] bytes, out bool hasUtf8Bom)
     {
@@ -10565,6 +10580,36 @@ internal sealed partial class LearnBotLocalAgent
                 }
             }, JsonOptions));
             var mismatchResult = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, mismatchRequestJson.RootElement);
+            var emptyingDiff = """
+            --- a/src/App.cs
+            +++ b/src/App.cs
+            @@ -1,3 +0,0 @@
+            -class App {
+            -    string Name = "old";
+            -}
+            """;
+            using var emptyingRequestJson = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["workspaceId"] = workspaceId,
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["workspaceId"] = workspaceId,
+                    ["sourceRequestId"] = "22222222-2222-2222-2222-222222222222",
+                    ["dryRunOnly"] = true,
+                    ["mutationAllowed"] = false,
+                    ["diff"] = emptyingDiff,
+                    ["targetFiles"] = new[] { "src/App.cs" },
+                    ["expectedFiles"] = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["path"] = "src/App.cs",
+                            ["sha256"] = originalHash
+                        }
+                    }
+                }
+            }, JsonOptions));
+            var emptyingResult = new LearnBotLocalAgent().DryRunPatchApply(config, workspaceId, emptyingRequestJson.RootElement);
             var createDiff = """
             --- /dev/null
             +++ b/src/NewPage.html
@@ -10628,6 +10673,10 @@ internal sealed partial class LearnBotLocalAgent
                 && mismatchResult.FailureCode == "CONTEXT_MISMATCH"
                 && mismatchResult.Output.TryGetValue("preflightPassed", out var mismatchPreflightPassed)
                 && mismatchPreflightPassed is false
+                && !emptyingResult.Success
+                && emptyingResult.Status == "REJECTED"
+                && emptyingResult.FailureCode == "UNSAFE_TOOL"
+                && string.Equals(emptyingResult.Error, "Patch would empty an existing file: src/App.cs", StringComparison.Ordinal)
                 && createResult.Success
                 && createResult.Status == "SUCCEEDED"
                 && createResult.Output.TryGetValue("snapshotCreated", out var createSnapshotCreated)
@@ -10804,6 +10853,15 @@ internal sealed partial class LearnBotLocalAgent
             -    string Name = "missing";
             +    string Name = "new";
             """);
+            var emptying = ParseUnifiedDiff("""
+            --- a/src/App.cs
+            +++ b/src/App.cs
+            @@ -1,4 +0,0 @@
+            -class App {
+            -    string Name = "new";
+            -    string Mode = "safe";
+            -}
+            """);
             var escapedPath = Path.Combine(root, "escape.cs");
             File.WriteAllText(escapedPath, original, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -10819,6 +10877,10 @@ internal sealed partial class LearnBotLocalAgent
             var staleHashResult = parsed.Success && parsed.Files.Count == 1
                 ? TryWritePatchedFileWithRecheck(workspaceRoot, targetPath, parsed.Files[0], originalHash)
                 : PatchWriteSequenceResult.Failed("stale parse failed");
+            var emptyingResult = emptying.Success && emptying.Files.Count == 1
+                ? TryWritePatchedFileWithRecheck(workspaceRoot, targetPath, emptying.Files[0], unchangedHash)
+                : PatchWriteSequenceResult.Failed("emptying parse failed");
+            var afterEmptying = File.ReadAllText(targetPath);
             var escapeResult = parsed.Success && parsed.Files.Count == 1
                 ? TryWritePatchedFileWithRecheck(workspaceRoot, escapedPath, parsed.Files[0], Sha256Hex(File.ReadAllBytes(escapedPath)))
                 : PatchWriteSequenceResult.Failed("escape parse failed");
@@ -10831,6 +10893,9 @@ internal sealed partial class LearnBotLocalAgent
                 && !mismatchResult.Success
                 && afterMismatch == updated
                 && !staleHashResult.Success
+                && !emptyingResult.Success
+                && string.Equals(emptyingResult.Error, "Patch would empty an existing file.", StringComparison.Ordinal)
+                && afterEmptying == updated
                 && !escapeResult.Success;
             if (!ok)
             {

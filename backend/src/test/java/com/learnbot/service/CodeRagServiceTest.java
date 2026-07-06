@@ -874,7 +874,7 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void streamingUsesStatusEventsCompactContextAndModeOutputLimit() {
+    void streamingUsesStatusEventsCompactContextAndNoDefaultOutputLimit() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -892,7 +892,7 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(results);
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.streamChat(anyString(), anyString(), eq(1400)))
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(0)))
                 .thenReturn(Flux.just(streamDelta("Login calls the controller and service path [1][2].", false), streamDelta("", true)));
 
         StringBuilder statuses = new StringBuilder();
@@ -924,7 +924,7 @@ class CodeRagServiceTest {
         );
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), eq(1400));
+        verify(ollamaClient).streamChat(anyString(), promptCaptor.capture(), eq(0));
         assertThat(promptCaptor.getValue()).contains("Key excerpt:");
         assertThat(statuses.toString()).contains("retrieval_started|", "evidence_ready|", "llm_started|");
         assertThat(response.evidence()).hasSize(6);
@@ -948,15 +948,21 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.streamChat(anyString(), anyString(), eq(1400)))
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(0)))
                 .thenReturn(Flux.just(
                         streamDelta("Login first authenticates the user and starts token issuance [1].", false),
                         streamDelta("", "length", true)
                 ));
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(900)))
-                .thenReturn(chat("It then records audit information and returns the login response, completing the flow [1]."));
+        when(ollamaClient.streamChat(anyString(), anyString(), eq(900)))
+                .thenReturn(Flux.just(
+                        streamDelta("It then records audit information ", false),
+                        streamDelta("and returns the login response, completing the flow [1].", false),
+                        streamDelta("", "stop", true)
+                ));
 
         StringBuilder visible = new StringBuilder();
+        StringBuilder replacements = new StringBuilder();
+        StringBuilder statuses = new StringBuilder();
         CodeAskResponse response = service.askStreaming(
                 null,
                 null,
@@ -965,6 +971,11 @@ class CodeRagServiceTest {
                 "flow",
                 4,
                 new CodeRagService.CodeAnswerStreamSink() {
+                    @Override
+                    public void onStatus(String stage, String message) {
+                        statuses.append(stage).append("|");
+                    }
+
                     @Override
                     public void onEvidence(List<com.learnbot.dto.CodeEvidence> evidence) {
                     }
@@ -976,14 +987,15 @@ class CodeRagServiceTest {
 
                     @Override
                     public void onReplace(String answer, String reason) {
-                        visible.setLength(0);
-                        visible.append(answer);
+                        replacements.append(reason).append("|");
                     }
                 }
         );
 
         assertThat(response.answer()).contains("starts token issuance [1]", "completing the flow [1]");
         assertThat(visible.toString()).isEqualTo(response.answer());
+        assertThat(replacements).isEmpty();
+        assertThat(statuses.toString()).contains("continuation_started|");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("automatically continued"));
     }
 

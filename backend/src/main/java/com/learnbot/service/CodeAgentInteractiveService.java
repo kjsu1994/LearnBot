@@ -593,6 +593,7 @@ public class CodeAgentInteractiveService {
             List<Map<String, Object>> files,
             List<String> warnings
     ) {
+        List<String> adviceWarnings = new ArrayList<>(warnings == null ? List.of() : warnings);
         try {
             OllamaClient.ChatResult result = ollamaClient.chatResult(
                     adviceAnswerSystemPrompt(),
@@ -601,7 +602,7 @@ public class CodeAgentInteractiveService {
                     1800,
                     Duration.ofSeconds(45)
             );
-            JsonNode root = objectMapper.readTree(extractJson(result.content()));
+            JsonNode root = adviceJsonRoot(result.content(), turn, files, adviceWarnings);
             List<Map<String, Object>> candidates = parseCandidateMaps(root.path("candidates"));
             String answer = adviceAnswerText(root, candidates);
             return Map.of(
@@ -609,7 +610,7 @@ public class CodeAgentInteractiveService {
                     "contextRequired", false,
                     "answer", answer,
                     "adviceCandidates", candidates,
-                    "warnings", warnings
+                    "warnings", List.copyOf(adviceWarnings)
             );
         } catch (Exception ex) {
             return Map.of(
@@ -617,8 +618,37 @@ public class CodeAgentInteractiveService {
                     "contextRequired", false,
                     "answer", "로컬 파일은 읽었지만 개선 후보 응답을 구조화하지 못했습니다. 같은 요청을 다시 보내거나 범위를 좁혀주세요.",
                     "adviceCandidates", List.of(),
-                    "warnings", appendWarning(warnings, "Advice answer generation failed: " + ex.getMessage())
+                    "warnings", appendWarning(adviceWarnings, "Advice answer generation failed: " + ex.getMessage())
             );
+        }
+    }
+
+    private JsonNode adviceJsonRoot(
+            String modelOutput,
+            RagConversationTurn turn,
+            List<Map<String, Object>> files,
+            List<String> warnings
+    ) throws Exception {
+        try {
+            return objectMapper.readTree(extractJson(modelOutput));
+        } catch (Exception initial) {
+            warnings.add("Advice answer JSON parsing failed; retrying JSON repair with model-authored content only: " + initial.getMessage());
+            try {
+                OllamaClient.ChatResult repaired = ollamaClient.chatResult(
+                        adviceJsonRepairSystemPrompt(),
+                        adviceJsonRepairUserPrompt(turn, files, modelOutput),
+                        OllamaClient.ChatRole.PRIMARY,
+                        1200,
+                        Duration.ofSeconds(30)
+                );
+                return objectMapper.readTree(extractJson(repaired.content()));
+            } catch (Exception repair) {
+                warnings.add("Advice answer JSON repair failed; returning raw model answer: " + repair.getMessage());
+                com.fasterxml.jackson.databind.node.ObjectNode fallback = objectMapper.createObjectNode();
+                fallback.put("summary", boundedText(modelOutput, 4000));
+                fallback.set("candidates", objectMapper.createArrayNode());
+                return fallback;
+            }
         }
     }
 
@@ -650,10 +680,28 @@ public class CodeAgentInteractiveService {
                 """;
     }
 
+    private String adviceJsonRepairSystemPrompt() {
+        return """
+                Convert the previous LearnBot Local Agent advice into the required JSON shape.
+                Return JSON only. Do not add markdown, prose, comments, or code fences.
+                Use only the previous answer and local file facts supplied by the user message.
+                Required JSON shape:
+                {"summary":"...","candidates":[{"title":"...","reason":"...","evidenceFiles":["path"],"expectedFiles":["path"],"riskLevel":"low|medium|high","testPlan":"...","recommendedFixGoal":"..."}]}
+                If the previous answer contains useful advice but no clear candidates, put it in summary and use candidates=[].
+                """;
+    }
+
     private String adviceAnswerUserPrompt(RagConversationTurn turn, List<Map<String, Object>> files) {
         return "User request:\n" + safe(turn.question())
                 + "\n\nConversation-aware request:\n" + safe(turn.rewrittenQuestion())
                 + "\n\nLoaded local files:\n" + boundedText(toJson(files), 20_000);
+    }
+
+    private String adviceJsonRepairUserPrompt(RagConversationTurn turn, List<Map<String, Object>> files, String previousOutput) {
+        return "User request:\n" + safe(turn.question())
+                + "\n\nConversation-aware request:\n" + safe(turn.rewrittenQuestion())
+                + "\n\nLoaded local file facts:\n" + boundedText(toJson(files), 10_000)
+                + "\n\nPrevious non-conforming advice output:\n" + boundedText(previousOutput, 6_000);
     }
 
     @SuppressWarnings("unchecked")

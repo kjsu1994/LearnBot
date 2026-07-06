@@ -9,6 +9,7 @@ import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.PatchFileDiff;
 import com.learnbot.dto.PatchTargetFile;
 import com.learnbot.dto.PatchValidationResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -35,6 +36,7 @@ public class CodeAgentService {
     private final PatchValidationService validationService;
     private final OllamaClient ollamaClient;
     private final ObjectMapper objectMapper;
+    private final PatchContextEnvelopeBuilder patchContextEnvelopeBuilder;
 
     public CodeAgentService(
             CodeSearchService searchService,
@@ -43,11 +45,24 @@ public class CodeAgentService {
             OllamaClient ollamaClient,
             ObjectMapper objectMapper
     ) {
+        this(searchService, fileLoader, validationService, ollamaClient, objectMapper, new PatchContextEnvelopeBuilder());
+    }
+
+    @Autowired
+    public CodeAgentService(
+            CodeSearchService searchService,
+            CodePatchFileLoader fileLoader,
+            PatchValidationService validationService,
+            OllamaClient ollamaClient,
+            ObjectMapper objectMapper,
+            PatchContextEnvelopeBuilder patchContextEnvelopeBuilder
+    ) {
         this.searchService = searchService;
         this.fileLoader = fileLoader;
         this.validationService = validationService;
         this.ollamaClient = ollamaClient;
         this.objectMapper = objectMapper;
+        this.patchContextEnvelopeBuilder = patchContextEnvelopeBuilder == null ? new PatchContextEnvelopeBuilder() : patchContextEnvelopeBuilder;
     }
 
     public CodeAgentPlanResponse plan(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String instruction, Integer limit) {
@@ -99,16 +114,32 @@ public class CodeAgentService {
                 : requestedTargetFiles;
         CodePatchFileLoader.LoadResult loaded = fileLoader.load(repositoryId, targetFiles);
         warnings.addAll(loaded.warnings());
-        return patchLoadedFiles(safeInstruction, loaded.files(), warnings);
+        return patchLoadedFiles(safeInstruction, loaded.files(), warnings, null);
     }
 
     public CodeAgentPatchResponse patchFromLoadedFiles(String instruction, List<CodePatchFileLoader.LoadedPatchFile> loadedFiles) {
+        return patchFromLoadedFiles(instruction, loadedFiles, null);
+    }
+
+    public CodeAgentPatchResponse patchFromLoadedFiles(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
+            PatchContextEnvelopeBuilder.Input contextEnvelopeInput
+    ) {
         List<String> warnings = new ArrayList<>();
         warnings.add("Patch input came from completed Local Agent file.read observations.");
-        return patchLoadedFiles(safe(instruction), loadedFiles, warnings);
+        return patchLoadedFiles(safe(instruction), loadedFiles, warnings, contextEnvelopeInput);
     }
 
     public CodeAgentPatchResponse patchFromLoadedFilesInBatches(String instruction, List<CodePatchFileLoader.LoadedPatchFile> loadedFiles) {
+        return patchFromLoadedFilesInBatches(instruction, loadedFiles, null);
+    }
+
+    public CodeAgentPatchResponse patchFromLoadedFilesInBatches(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
+            PatchContextEnvelopeBuilder.Input contextEnvelopeInput
+    ) {
         String safeInstruction = safe(instruction);
         List<CodePatchFileLoader.LoadedPatchFile> filesToPatch = loadedFiles == null ? List.of() : loadedFiles;
         if (filesToPatch.size() <= 1) {
@@ -133,7 +164,8 @@ public class CodeAgentService {
                 continue;
             }
             String batchInstruction = patchBatchInstruction(safeInstruction, item, index + 1, plan.size());
-            CodeAgentPatchResponse response = patchLoadedFiles(batchInstruction, batchFiles, new ArrayList<>());
+            PatchContextEnvelopeBuilder.Input batchContext = patchContextEnvelopeBuilder.narrowToFiles(contextEnvelopeInput, batchFiles);
+            CodeAgentPatchResponse response = patchLoadedFiles(batchInstruction, batchFiles, new ArrayList<>(), batchContext);
             batchResults.add(new PatchBatchResult(item.id(), item.targetFiles(), response));
             combinedWarnings.add("Patch batch " + item.id() + " targeted " + item.targetFiles() + " and valid=" + (response != null && response.valid()) + ".");
             if (response != null && response.warnings() != null) {
@@ -205,7 +237,8 @@ public class CodeAgentService {
     private CodeAgentPatchResponse patchLoadedFiles(
             String safeInstruction,
             List<CodePatchFileLoader.LoadedPatchFile> loadedFiles,
-            List<String> warnings
+            List<String> warnings,
+            PatchContextEnvelopeBuilder.Input contextEnvelopeInput
     ) {
         List<CodePatchFileLoader.LoadedPatchFile> filesToPatch = loadedFiles == null ? List.of() : loadedFiles;
         if (filesToPatch.isEmpty()) {
@@ -218,7 +251,7 @@ public class CodeAgentService {
             warnings.add("LLM patch generation attempted; server-authored patch content is disabled.");
             modelResult = patchChatResult(
                     patchSystemPrompt(),
-                    patchUserPrompt(safeInstruction, filesToPatch),
+                    patchUserPrompt(safeInstruction, filesToPatch, contextEnvelopeInput),
                     warnings,
                     "initial"
             );
@@ -1573,17 +1606,15 @@ public class CodeAgentService {
                 """;
     }
 
-    private String patchUserPrompt(String instruction, List<CodePatchFileLoader.LoadedPatchFile> files) {
+    private String patchUserPrompt(
+            String instruction,
+            List<CodePatchFileLoader.LoadedPatchFile> files,
+            PatchContextEnvelopeBuilder.Input contextEnvelopeInput
+    ) {
         StringBuilder builder = new StringBuilder();
-        builder.append("PATCH_CONTEXT_ENVELOPE v1\n")
-                .append("USER_INSTRUCTION:\n")
-                .append(instruction)
-                .append("\n\nSERVER_ROLE:\n")
-                .append("- The server only provides observations and validates safety.\n")
-                .append("- You must decide the target lines and patch content.\n")
-                .append("- Keep JSON compact so it is not truncated.\n")
-                .append("- If the supplied file content is insufficient for modifying existing files, choose action=observe_more instead of guessing.\n")
-                .append("- If no existing files are provided and the user asks to create something, choose create_file operations with safe relative paths.\n\n")
+        PatchContextEnvelopeBuilder.Input narrowedContext = patchContextEnvelopeBuilder.narrowToFiles(contextEnvelopeInput, files);
+        builder.append(patchContextEnvelopeBuilder.header(instruction, narrowedContext))
+                .append("COMPATIBILITY_MARKER: PATCH_CONTEXT_ENVELOPE v1\n")
                 .append("TARGET_FILES:\n");
         if (files == null || files.isEmpty()) {
             builder.append("- none; creation mode is allowed for safe relative workspace files.\n");

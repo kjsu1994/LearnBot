@@ -19,6 +19,7 @@ import com.learnbot.service.CodeAgentLocalPatchRequestService;
 import com.learnbot.service.CodePatchFileLoader;
 import com.learnbot.service.CodeAgentService;
 import com.learnbot.service.OllamaClient;
+import com.learnbot.service.PatchContextEnvelopeBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -351,11 +352,21 @@ public class CodeAgentLoopRunService {
             return patchProposalResponse(loopId, repositoryId, targetSelection.stopKey(), targetSelection.message());
         }
         List<CodePatchFileLoader.LoadedPatchFile> observedFiles = observedPatchFiles(timeline, targetFiles);
+        PatchContextEnvelopeBuilder.Input patchContext = patchContextEnvelopeInput(
+                userId,
+                repositoryId,
+                workspaceId,
+                timeline,
+                fileReadTargets(timeline)
+        );
         String patchSource = observedFiles.isEmpty() ? "indexed-loader" : "local-agent-file-read";
         try {
             CodeAgentPatchResponse patch;
             if (targetFiles.isEmpty()) {
-                patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), List.of());
+                patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), List.of(), patchContext);
+                if (patch == null) {
+                    patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), List.of());
+                }
                 patchSource = "local-agent-creation-mode";
             } else {
                 if (observedFiles.isEmpty()) {
@@ -367,9 +378,15 @@ public class CodeAgentLoopRunService {
                             targetFiles
                     );
                 } else {
-                    patch = codeAgentService.patchFromLoadedFilesInBatches(timeline.instruction(), observedFiles);
+                    patch = codeAgentService.patchFromLoadedFilesInBatches(timeline.instruction(), observedFiles, patchContext);
                     if (patch == null) {
-                        patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+                        patch = codeAgentService.patchFromLoadedFilesInBatches(timeline.instruction(), observedFiles);
+                    }
+                    if (patch == null) {
+                        patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles, patchContext);
+                        if (patch == null) {
+                            patch = codeAgentService.patchFromLoadedFiles(timeline.instruction(), observedFiles);
+                        }
                     } else {
                         patchSource = "local-agent-file-read-batched";
                     }
@@ -1075,6 +1092,97 @@ public class CodeAgentLoopRunService {
             filesByPath.put(path, new CodePatchFileLoader.LoadedPatchFile(null, path, languageForPath(path), content));
         }
         return List.copyOf(filesByPath.values());
+    }
+
+    private PatchContextEnvelopeBuilder.Input patchContextEnvelopeInput(
+            UUID userId,
+            UUID repositoryId,
+            UUID workspaceId,
+            CodeAgentLoopTimelineSummary timeline,
+            List<String> candidatePaths
+    ) {
+        List<String> safeCandidates = candidatePaths == null
+                ? List.of()
+                : candidatePaths.stream()
+                .filter(this::safeRelativePath)
+                .distinct()
+                .toList();
+        List<PatchContextEnvelopeBuilder.ProjectMapEntry> projectMap = projectMapEntries(timeline);
+        List<PatchContextEnvelopeBuilder.FileCandidate> fileCandidates = fileCandidates(timeline, safeCandidates);
+        List<PatchContextEnvelopeBuilder.RecentContext> recent = recentPatchContexts(userId, repositoryId, workspaceId, timeline, safeCandidates).stream()
+                .map(context -> PatchContextEnvelopeBuilder.recentContext(
+                        context.loopId() == null ? "" : context.loopId().toString(),
+                        context.instruction(),
+                        context.targetFiles(),
+                        context.completedAt()
+                ))
+                .toList();
+        return new PatchContextEnvelopeBuilder.Input(projectMap, fileCandidates, recent, true);
+    }
+
+    private List<PatchContextEnvelopeBuilder.ProjectMapEntry> projectMapEntries(CodeAgentLoopTimelineSummary timeline) {
+        if (timeline == null || timeline.events() == null) {
+            return List.of();
+        }
+        Map<String, PatchContextEnvelopeBuilder.ProjectMapEntry> entries = new LinkedHashMap<>();
+        for (CodeAgentLoopTimelineEventSummary event : timeline.events()) {
+            if (!"LOCAL_AGENT_OBSERVATION_RESULT".equals(event.eventType())
+                    || event.toolName() != LocalAgentToolName.WORKSPACE_TREE
+                    || !"SUCCEEDED".equals(String.valueOf(event.details().get("status")))) {
+                continue;
+            }
+            Object outputSummary = event.details().get("outputSummary");
+            if (!(outputSummary instanceof Map<?, ?> map) || !(map.get("entries") instanceof List<?> list)) {
+                continue;
+            }
+            for (Object item : list) {
+                if (!(item instanceof Map<?, ?> entry)) {
+                    continue;
+                }
+                Object pathValue = entry.get("path");
+                String path = pathValue == null ? "" : String.valueOf(pathValue);
+                if (!safeRelativePath(path)) {
+                    continue;
+                }
+                Object typeValue = entry.get("type");
+                String type = typeValue == null || String.valueOf(typeValue).isBlank() ? "file" : String.valueOf(typeValue);
+                Long bytes = longValue(entry.get("bytes"));
+                entries.putIfAbsent(path, PatchContextEnvelopeBuilder.projectMapEntry(path, type, bytes));
+            }
+        }
+        return List.copyOf(entries.values());
+    }
+
+    private List<PatchContextEnvelopeBuilder.FileCandidate> fileCandidates(CodeAgentLoopTimelineSummary timeline, List<String> candidatePaths) {
+        if (candidatePaths == null || candidatePaths.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Map<?, ?>> summariesByPath = readObservationSummariesByPath(timeline);
+        return candidatePaths.stream()
+                .map(path -> {
+                    Map<?, ?> summary = summariesByPath.getOrDefault(path, Map.of());
+                    Object contentValue = summary.get("contentForPatch");
+                    Object previewValue = summary.get("contentPreview");
+                    String content = contentValue == null ? "" : String.valueOf(contentValue);
+                    String preview = previewValue == null ? "" : String.valueOf(previewValue);
+                    Long bytes = longValue(summary.get("bytes"));
+                    return PatchContextEnvelopeBuilder.fileCandidate(path, bytes, "local-agent-observation", preview, content);
+                })
+                .toList();
+    }
+
+    private Long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private String languageForPath(String path) {

@@ -2,7 +2,8 @@ param(
     [switch]$Build,
     [switch]$NoBuild,
     [switch]$Cpu,
-    [switch]$Reranker
+    [switch]$Reranker,
+    [switch]$PullOllama
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,10 +67,23 @@ function Build-FrontendDist {
     }
 }
 
+function Update-OllamaImages {
+    if (-not $PullOllama) {
+        return
+    }
+
+    Write-Host "Pulling latest Ollama images."
+    & docker compose pull ollama ollama-pull
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker compose pull ollama ollama-pull exited with code $LASTEXITCODE"
+    }
+}
+
 $baseFiles = @("docker-compose.yml")
 $gpuFiles = @("docker-compose.yml", "docker-compose.gpu.yml")
 
 Build-FrontendDist
+Update-OllamaImages
 
 if ($Cpu) {
     Write-Host "Starting LearnBot with CPU Ollama."

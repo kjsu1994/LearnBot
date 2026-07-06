@@ -83,4 +83,25 @@ class PatchValidationServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.warnings()).isEmpty();
     }
+
+    @Test
+    void validateRejectsPatchThatEmptiesExistingFile() {
+        when(fileLoader.isSensitiveOrUnsafe(anyString())).thenReturn(false);
+        String diff = """
+                --- a/index.html
+                +++ b/index.html
+                @@ -1,4 +0,0 @@
+                -<!DOCTYPE html>
+                -<html lang="ko">
+                -<body>Home</body>
+                -</html>
+                """;
+
+        PatchValidationResult result = service.validate(diff, List.of("index.html"), "improve the homepage organization chart");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.warnings()).anySatisfy(warning -> assertThat(warning)
+                .contains("Patch would empty an existing file")
+                .contains("index.html"));
+    }
 }

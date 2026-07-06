@@ -4,13 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationTurn;
 import com.learnbot.dto.RagConversationTurnContext;
+import com.learnbot.dto.interactive.CodeAgentInteractiveContextReadResultRequest;
 import com.learnbot.dto.interactive.CodeAgentInteractiveTurnRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -235,6 +238,79 @@ class CodeAgentInteractiveServiceTest {
         verify(conversationService).saveCodeTurn(eq(context), eq(null), anyString(), markerCaptor.capture());
         assertThat(markerCaptor.getValue().answer()).contains("최신 CLI에서는 자동으로 이어집니다");
         verify(codeRagService, never()).askConversational(any(), any(), any(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void adviceContextReadRepairsNonJsonAdviceAnswerInsteadOfDroppingIt() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        AppUser user = user();
+        when(conversationService.requireTurn(eq(user), eq(spaceId), eq(RagConversationService.CODE), eq(repositoryId), eq(conversationId), eq(turnId)))
+                .thenReturn(new RagConversationTurn(
+                        turnId,
+                        conversationId,
+                        null,
+                        "What else should I improve on my homepage?",
+                        "Suggest additional homepage improvements.",
+                        "agent_advice",
+                        "saved",
+                        "high",
+                        null,
+                        null,
+                        null,
+                        null,
+                        OffsetDateTime.now()
+                ));
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.PRIMARY), anyInt(), any()))
+                .thenReturn(new OllamaClient.ChatResult(
+                        "You could improve the tab navigation and add a clearer organization section.",
+                        "stop",
+                        true,
+                        100,
+                        40,
+                        "http://ollama",
+                        "model",
+                        "PRIMARY",
+                        false
+                ))
+                .thenReturn(new OllamaClient.ChatResult(
+                        """
+                        {"summary":"Homepage improvements are available.","candidates":[{"title":"Improve tab navigation","reason":"The homepage has tabs but the visual state can be clearer.","evidenceFiles":["index.html","script.js"],"expectedFiles":["index.html","script.js","style.css"],"riskLevel":"low","testPlan":"Open the homepage and switch tabs.","recommendedFixGoal":"Improve homepage tab navigation and active state styling."}]}
+                        """,
+                        "stop",
+                        true,
+                        100,
+                        120,
+                        "http://ollama",
+                        "model",
+                        "PRIMARY",
+                        false
+                ));
+
+        Map<String, Object> response = service.saveContextReadResult(user, spaceId, new CodeAgentInteractiveContextReadResultRequest(
+                repositoryId,
+                conversationId,
+                turnId,
+                spaceId,
+                agentId,
+                workspaceId,
+                List.of(Map.of(
+                        "path", "index.html",
+                        "status", "SUCCEEDED",
+                        "content", "<main><nav><button>Home</button></nav></main>"
+                )),
+                List.of(),
+                List.of()
+        ));
+
+        assertThat(response.get("contextRequired")).isEqualTo(false);
+        assertThat(String.valueOf(response.get("answer"))).contains("개선 후보").contains("Improve tab navigation");
+        assertThat(response.get("adviceCandidates")).asList().hasSize(1);
+        assertThat(response.get("warnings").toString()).contains("Advice answer JSON parsing failed");
     }
 
     @Test

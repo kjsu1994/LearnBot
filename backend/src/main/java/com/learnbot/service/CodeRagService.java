@@ -264,16 +264,15 @@ public class CodeRagService {
             answerDoneReason = chatResult.doneReason();
             if (isLengthStop(answerDoneReason)) {
                 long continuationStarted = System.nanoTime();
-                LengthContinuation continuation = continueLengthLimitedAnswer(systemPrompt, userPrompt, answer, questionMode, answerResults.size());
+                LengthContinuation continuation = streamSink == null
+                        ? continueLengthLimitedAnswer(systemPrompt, userPrompt, answer, questionMode, answerResults.size())
+                        : continueLengthLimitedAnswerStreaming(systemPrompt, userPrompt, streamedAnswer, questionMode, answerResults.size(), streamSink);
                 llmMs += elapsedMs(continuationStarted);
                 if (continuation.continued()) {
                     answer = continuation.answer();
                     answerDoneReason = continuation.doneReason();
                     finalChatResult = continuation.chatResult();
                     answerContinued = true;
-                    if (streamSink != null) {
-                        streamSink.onReplace(answer, "length_continuation");
-                    }
                 }
             }
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
@@ -282,7 +281,7 @@ public class CodeRagService {
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
                 long retryStarted = System.nanoTime();
-                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, Math.min(maxOutputTokens, 700));
+                OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, repairOutputTokens(maxOutputTokens));
                 llmMs += elapsedMs(retryStarted);
                 String retryAnswer = retryResult.content();
                 if (qualityFailureReason(retryAnswer, answerResults.size(), retryResult.doneReason()) == null) {
@@ -1006,13 +1005,58 @@ public class CodeRagService {
         return new LengthContinuation(combined.toString().trim(), doneReason, lastResult, true);
     }
 
+    private LengthContinuation continueLengthLimitedAnswerStreaming(
+            String systemPrompt,
+            String originalUserPrompt,
+            StringBuilder streamedAnswer,
+            CodeQuestionMode questionMode,
+            int evidenceCount,
+            CodeAnswerStreamSink streamSink
+    ) {
+        StringBuilder combined = new StringBuilder(safe(streamedAnswer.toString(), "").trim());
+        OllamaClient.ChatResult lastResult = null;
+        String doneReason = "length";
+        int attempts = 0;
+        while (attempts < 2 && isLengthStop(doneReason)) {
+            attempts++;
+            streamSink.onStatus("continuation_started", "답변이 길어 이어서 생성합니다.");
+            String continuationPrompt = continuationPrompt(originalUserPrompt, combined.toString(), attempts);
+            OllamaClient.ChatResult continuation = streamContinuation(
+                    systemPrompt + "\nContinue incomplete answers instead of restarting them. Keep citations valid and finish the answer.",
+                    continuationPrompt,
+                    continuationOutputTokens(questionMode, attempts),
+                    combined,
+                    streamedAnswer,
+                    streamSink
+            );
+            lastResult = mergeChatResults(lastResult, continuation, combined.toString());
+            doneReason = continuation.doneReason();
+            if (qualityFailureReason(combined.toString(), evidenceCount, doneReason) == null) {
+                break;
+            }
+        }
+        if (lastResult == null || combined.toString().trim().isBlank()) {
+            return new LengthContinuation(streamedAnswer.toString().trim(), "length", null, false);
+        }
+        return new LengthContinuation(combined.toString().trim(), doneReason, lastResult, true);
+    }
+
     private String continuationPrompt(String originalUserPrompt, String partialAnswer, int attempt) {
+        String tail = continuationTail(partialAnswer);
         return originalUserPrompt
                 + "\n\nThe previous answer was cut off because the model reached the output limit."
                 + "\nDo not repeat completed sections. Continue from the exact point where it stopped."
                 + "\nFinish the remaining explanation with citations such as [1]."
                 + "\nThis is continuation attempt " + attempt + " of 2."
-                + "\n\nPartial answer to continue:\n" + partialAnswer;
+                + "\n\nOnly the tail of the partial answer is shown below. Continue after it; do not summarize or restart it:\n" + tail;
+    }
+
+    private String continuationTail(String partialAnswer) {
+        String clean = safe(partialAnswer, "").trim();
+        if (clean.length() <= 1800) {
+            return clean;
+        }
+        return clean.substring(clean.length() - 1800);
     }
 
     private int continuationOutputTokens(CodeQuestionMode questionMode, int attempt) {
@@ -1030,10 +1074,35 @@ public class CodeRagService {
             answer.append(addition);
             return;
         }
-        if (!answer.toString().endsWith("\n") && !addition.startsWith("\n")) {
+        String cleanAddition = removeContinuationOverlap(answer.toString(), addition);
+        if (cleanAddition.isBlank()) {
+            return;
+        }
+        if (!answer.toString().endsWith("\n") && !cleanAddition.startsWith("\n")) {
             answer.append("\n\n");
         }
-        answer.append(addition);
+        answer.append(cleanAddition);
+    }
+
+    private String removeContinuationOverlap(String existing, String addition) {
+        String cleanAddition = safe(addition, "").trim();
+        String cleanExisting = safe(existing, "").trim();
+        if (cleanAddition.isBlank() || cleanExisting.isBlank()) {
+            return cleanAddition;
+        }
+        int max = Math.min(Math.min(cleanExisting.length(), cleanAddition.length()), 800);
+        for (int length = max; length >= 40; length--) {
+            String suffix = cleanExisting.substring(cleanExisting.length() - length);
+            String prefix = cleanAddition.substring(0, length);
+            if (normalizeContinuationBoundary(suffix).equals(normalizeContinuationBoundary(prefix))) {
+                return cleanAddition.substring(length).trim();
+            }
+        }
+        return cleanAddition;
+    }
+
+    private String normalizeContinuationBoundary(String value) {
+        return safe(value, "").replaceAll("\\s+", " ").trim();
     }
 
     private OllamaClient.ChatResult mergeChatResults(OllamaClient.ChatResult previous, OllamaClient.ChatResult current, String existingContent) {
@@ -1084,6 +1153,69 @@ public class CodeRagService {
         OllamaClient.ChatStreamDelta done = finalDelta.get();
         return new OllamaClient.ChatResult(
                 streamedAnswer.toString().trim(),
+                done == null ? null : done.doneReason(),
+                done == null || done.done(),
+                done == null ? 0 : done.promptEvalCount(),
+                done == null ? 0 : done.evalCount(),
+                done == null ? "" : done.baseUrl(),
+                done == null ? "" : done.model(),
+                done == null ? "primary" : done.role(),
+                done != null && done.fallbackUsed()
+        );
+    }
+
+    private OllamaClient.ChatResult streamContinuation(
+            String systemPrompt,
+            String userPrompt,
+            int maxOutputTokens,
+            StringBuilder combined,
+            StringBuilder streamedAnswer,
+            CodeAnswerStreamSink streamSink
+    ) {
+        AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
+        StringBuilder rawContinuation = new StringBuilder();
+        StringBuilder visibleContinuation = new StringBuilder();
+        String baseAnswer = combined.toString();
+        ollamaClient.streamChat(systemPrompt, userPrompt, maxOutputTokens)
+                .bufferTimeout(256, java.time.Duration.ofMillis(35))
+                .filter(batch -> !batch.isEmpty())
+                .doOnNext(batch -> {
+                    StringBuilder next = new StringBuilder();
+                    for (OllamaClient.ChatStreamDelta delta : batch) {
+                        if (delta.done()) {
+                            finalDelta.set(delta);
+                        }
+                        if (!delta.content().isEmpty()) {
+                            rawContinuation.append(delta.content());
+                            next.append(delta.content());
+                        }
+                    }
+                    if (!next.isEmpty()) {
+                        String visible = removeContinuationOverlap(baseAnswer, rawContinuation.toString());
+                        if (visible.length() > visibleContinuation.length()) {
+                            String delta = visible.substring(visibleContinuation.length());
+                            if (!delta.isBlank()) {
+                                String emittedDelta = delta;
+                                if (visibleContinuation.isEmpty()) {
+                                    if (!combined.toString().endsWith("\n") && !delta.startsWith("\n")) {
+                                        emittedDelta = "\n\n" + delta;
+                                    }
+                                    appendContinuation(combined, delta);
+                                } else {
+                                    combined.append(delta);
+                                }
+                                visibleContinuation.append(delta);
+                                streamedAnswer.setLength(0);
+                                streamedAnswer.append(combined);
+                                streamSink.onDelta(emittedDelta);
+                            }
+                        }
+                    }
+                })
+                .blockLast();
+        OllamaClient.ChatStreamDelta done = finalDelta.get();
+        return new OllamaClient.ChatResult(
+                rawContinuation.toString().trim(),
                 done == null ? null : done.doneReason(),
                 done == null || done.done(),
                 done == null ? 0 : done.promptEvalCount(),
@@ -1215,12 +1347,11 @@ public class CodeRagService {
         if (configured > 0) {
             return configured;
         }
-        return switch (questionMode) {
-            case OVERVIEW, REASONING -> 1600;
-            case CALL_FLOW, EXPLAIN_METHOD -> 1400;
-            case UI_EVENT, IMPACT -> 1200;
-            case LOCATE -> 800;
-        };
+        return 0;
+    }
+
+    private int repairOutputTokens(int maxOutputTokens) {
+        return maxOutputTokens > 0 ? Math.min(maxOutputTokens, 700) : 700;
     }
 
     private int estimateTokens(String value) {
