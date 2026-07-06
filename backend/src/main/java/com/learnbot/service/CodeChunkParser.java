@@ -1,12 +1,14 @@
 package com.learnbot.service;
 
 import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.stereotype.Component;
 
@@ -37,11 +39,23 @@ public class CodeChunkParser {
     );
     private static final Pattern PYTHON_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:async\\s+)?(?:def|class)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*[(:]");
     private static final Pattern DART_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:class\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:Future<[^>]+>|[A-Za-z_][A-Za-z0-9_<>,?]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^;]*\\)\\s*(?:async\\s*)?\\{?)");
-    private static final Pattern GENERIC_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:func|fn|function|def|class|struct|enum|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)");
+    private static final Pattern GO_SYMBOL_PATTERN = Pattern.compile("^\\s*func\\s+(?:\\([^)]*\\)\\s*)?([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    private static final Pattern RUST_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:fn\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:struct|enum|trait|impl)\\s+([A-Za-z_][A-Za-z0-9_]*))");
+    private static final Pattern KOTLIN_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:public|private|protected|internal|open|override|suspend|inline|data|sealed|abstract|final|companion\\s+)*\\s*(?:fun\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:class|object|interface|enum\\s+class|data\\s+class)\\s+([A-Za-z_][A-Za-z0-9_]*))");
+    private static final Pattern PHP_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:public|private|protected|static|final|abstract\\s+)*\\s*(?:function\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:class|interface|trait|enum)\\s+([A-Za-z_][A-Za-z0-9_]*))");
+    private static final Pattern RUBY_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:def|class|module)\\s+(?:self\\.)?([A-Za-z_][A-Za-z0-9_!?=]*(?:::[A-Za-z_][A-Za-z0-9_]*)?)");
+    private static final Pattern SWIFT_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:public|private|internal|open|fileprivate|static|final|override\\s+)*\\s*(?:func\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:class|struct|enum|protocol|actor|extension)\\s+([A-Za-z_][A-Za-z0-9_]*))");
+    private static final Pattern CPP_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:template\\s*<[^>]+>\\s*)?(?:(?:class|struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)|(?:[A-Za-z_][A-Za-z0-9_:<>~*&\\s]+\\s+)+([A-Za-z_~][A-Za-z0-9_:~]*)\\s*\\([^;]*\\)\\s*(?:const\\s*)?(?:\\{|;))");
+    private static final Pattern GENERIC_SYMBOL_PATTERN = Pattern.compile("^\\s*(?:export\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|static\\s+|async\\s+|open\\s+|override\\s+|suspend\\s+)*(?:func|fn|fun|function|def|class|struct|enum|interface|trait|impl|type)\\s+([A-Za-z_][A-Za-z0-9_]*)");
     private static final Pattern SQL_STATEMENT_PATTERN = Pattern.compile("^\\s*(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|SELECT)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern YAML_TOP_LEVEL_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+\\s*:");
     private static final Pattern CSS_SELECTOR_PATTERN = Pattern.compile("^\\s*([^@{}][^{};]{1,160})\\s*\\{\\s*$");
     private static final Pattern XML_TAG_PATTERN = Pattern.compile("^\\s*<([A-Za-z_][A-Za-z0-9_.:-]*)(\\s|>|/>)");
+    private static final Pattern QML_COMPONENT_PATTERN = Pattern.compile("^\\s*([A-Z][A-Za-z0-9_]*)\\s*\\{\\s*$");
+
+    static {
+        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+    }
 
     public List<ParsedCodeChunk> parse(String relativePath, String language, String content) {
         String lowerPath = relativePath.toLowerCase(Locale.ROOT);
@@ -55,7 +69,8 @@ public class CodeChunkParser {
             if (lowerPath.endsWith(".xaml")) {
                 return parseXaml(relativePath, content);
             }
-            if (lowerPath.endsWith(".js") || lowerPath.endsWith(".jsx") || lowerPath.endsWith(".ts") || lowerPath.endsWith(".tsx")) {
+            if (lowerPath.endsWith(".js") || lowerPath.endsWith(".jsx") || lowerPath.endsWith(".ts") || lowerPath.endsWith(".tsx")
+                    || lowerPath.endsWith(".vue") || lowerPath.endsWith(".svelte") || lowerPath.endsWith(".astro")) {
                 return parsePatternSymbols(relativePath, language, content, JS_SYMBOL_PATTERN, "function", 120);
             }
             if (lowerPath.endsWith(".dart")) {
@@ -64,11 +79,27 @@ public class CodeChunkParser {
             if (lowerPath.endsWith(".py")) {
                 return parsePatternSymbols(relativePath, language, content, PYTHON_SYMBOL_PATTERN, "symbol", 120);
             }
-            if (lowerPath.endsWith(".go") || lowerPath.endsWith(".rs") || lowerPath.endsWith(".kt")
-                    || lowerPath.endsWith(".kts") || lowerPath.endsWith(".php") || lowerPath.endsWith(".rb")
-                    || lowerPath.endsWith(".swift") || lowerPath.endsWith(".c") || lowerPath.endsWith(".cc")
+            if (lowerPath.endsWith(".go")) {
+                return parsePatternSymbols(relativePath, language, content, GO_SYMBOL_PATTERN, "function", 120);
+            }
+            if (lowerPath.endsWith(".rs")) {
+                return parsePatternSymbols(relativePath, language, content, RUST_SYMBOL_PATTERN, "symbol", 120);
+            }
+            if (lowerPath.endsWith(".kt") || lowerPath.endsWith(".kts")) {
+                return parsePatternSymbols(relativePath, language, content, KOTLIN_SYMBOL_PATTERN, "symbol", 120);
+            }
+            if (lowerPath.endsWith(".php")) {
+                return parsePatternSymbols(relativePath, language, content, PHP_SYMBOL_PATTERN, "symbol", 120);
+            }
+            if (lowerPath.endsWith(".rb")) {
+                return parsePatternSymbols(relativePath, language, content, RUBY_SYMBOL_PATTERN, "symbol", 120);
+            }
+            if (lowerPath.endsWith(".swift")) {
+                return parsePatternSymbols(relativePath, language, content, SWIFT_SYMBOL_PATTERN, "symbol", 120);
+            }
+            if (lowerPath.endsWith(".c") || lowerPath.endsWith(".cc")
                     || lowerPath.endsWith(".cpp") || lowerPath.endsWith(".h") || lowerPath.endsWith(".hpp")) {
-                return parsePatternSymbols(relativePath, language, content, GENERIC_SYMBOL_PATTERN, "symbol", 120);
+                return parsePatternSymbols(relativePath, language, content, CPP_SYMBOL_PATTERN, "symbol", 120);
             }
             if (lowerPath.endsWith(".sql")) {
                 return parseDelimited(relativePath, language, content, SQL_STATEMENT_PATTERN, "sql_statement", ";", 120);
@@ -79,6 +110,9 @@ public class CodeChunkParser {
             if (lowerPath.endsWith(".css") || lowerPath.endsWith(".scss")) {
                 return parsePatternSymbols(relativePath, language, content, CSS_SELECTOR_PATTERN, "css_rule", 80);
             }
+            if (lowerPath.endsWith(".qml")) {
+                return parsePatternSymbols(relativePath, language, content, QML_COMPONENT_PATTERN, "component", 100);
+            }
             if (lowerPath.endsWith(".xml") || lowerPath.endsWith(".config") || lowerPath.endsWith(".csproj")
                     || lowerPath.endsWith(".html")) {
                 return parsePatternSymbols(relativePath, language, content, XML_TAG_PATTERN, "xml_element", 100);
@@ -86,8 +120,8 @@ public class CodeChunkParser {
             if (lowerPath.endsWith(".md")) {
                 return parseMarkdown(relativePath, language, content);
             }
-        } catch (RuntimeException ignored) {
-            return fallbackChunks(relativePath, language, content, 90);
+        } catch (RuntimeException ex) {
+            return fallbackChunks(relativePath, language, content, 90, parserNameForPath(lowerPath), ex);
         }
         return fallbackChunks(relativePath, language, content, 90);
     }
@@ -99,12 +133,12 @@ public class CodeChunkParser {
         List<ParsedCodeChunk> chunks = new ArrayList<>();
 
         for (TypeDeclaration<?> type : unit.findAll(TypeDeclaration.class)) {
-            if (type instanceof ClassOrInterfaceDeclaration || type instanceof EnumDeclaration) {
+            if (type instanceof ClassOrInterfaceDeclaration || type instanceof EnumDeclaration || type instanceof RecordDeclaration) {
                 Range range = range(type, lines.length);
                 String className = type.getNameAsString();
                 chunks.add(buildChunk(
                         chunks.size(),
-                        type instanceof EnumDeclaration ? "enum" : "class",
+                        type instanceof EnumDeclaration ? "enum" : type instanceof RecordDeclaration ? "record" : "class",
                         className,
                         className,
                         null,
@@ -298,8 +332,28 @@ public class CodeChunkParser {
     }
 
     private List<ParsedCodeChunk> fallbackChunks(String relativePath, String language, String content, int windowSize) {
+        return fallbackChunks(relativePath, language, content, windowSize, "", null);
+    }
+
+    private List<ParsedCodeChunk> fallbackChunks(
+            String relativePath,
+            String language,
+            String content,
+            int windowSize,
+            String fallbackFrom,
+            RuntimeException failure
+    ) {
         String[] lines = splitLines(content);
         List<ParsedCodeChunk> chunks = new ArrayList<>();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("windowSize", windowSize);
+        if (fallbackFrom != null && !fallbackFrom.isBlank()) {
+            metadata.put("fallbackFrom", fallbackFrom);
+        }
+        if (failure != null) {
+            metadata.put("fallbackReason", failure.getClass().getSimpleName());
+            metadata.put("fallbackMessage", abbreviate(failure.getMessage(), 220));
+        }
         for (int start = 0; start < lines.length; start += windowSize) {
             int end = Math.min(lines.length - 1, start + windowSize - 1);
             chunks.add(buildChunk(
@@ -315,7 +369,7 @@ public class CodeChunkParser {
                     end + 1,
                     relativePath,
                     slice(lines, start, end),
-                    metadata(language, "line_window", Map.of("windowSize", windowSize))
+                    metadata(language, "line_window", metadata)
             ));
         }
         return chunks;
@@ -365,7 +419,7 @@ public class CodeChunkParser {
                     end + 1,
                     relativePath,
                     slice(lines, start, end),
-                    metadata(language, "regex_symbol", Map.of("symbol", symbol))
+                    metadata(language, "regex_symbol", metadataValues("symbol", symbol, "symbolKind", chunkType))
             ));
         }
         return chunks;
@@ -632,6 +686,55 @@ public class CodeChunkParser {
         return values;
     }
 
+    private String parserNameForPath(String lowerPath) {
+        if (lowerPath.endsWith(".java")) {
+            return "javaparser";
+        }
+        if (lowerPath.endsWith(".cs")) {
+            return "csharp_regex";
+        }
+        if (lowerPath.endsWith(".xaml")) {
+            return "xml_regex";
+        }
+        if (lowerPath.endsWith(".js") || lowerPath.endsWith(".jsx")
+                || lowerPath.endsWith(".ts") || lowerPath.endsWith(".tsx")
+                || lowerPath.endsWith(".dart") || lowerPath.endsWith(".py")
+                || lowerPath.endsWith(".go") || lowerPath.endsWith(".rs")
+                || lowerPath.endsWith(".kt") || lowerPath.endsWith(".kts")
+                || lowerPath.endsWith(".php") || lowerPath.endsWith(".rb")
+                || lowerPath.endsWith(".swift") || lowerPath.endsWith(".c")
+                || lowerPath.endsWith(".cc") || lowerPath.endsWith(".cpp")
+                || lowerPath.endsWith(".h") || lowerPath.endsWith(".hpp")
+                || lowerPath.endsWith(".vue") || lowerPath.endsWith(".svelte")
+                || lowerPath.endsWith(".astro")) {
+            return "regex_symbol";
+        }
+        if (lowerPath.endsWith(".qml")) {
+            return "regex_symbol";
+        }
+        if (lowerPath.endsWith(".sql")) {
+            return "statement";
+        }
+        if (lowerPath.endsWith(".yml") || lowerPath.endsWith(".yaml")) {
+            return "top_level_block";
+        }
+        if (lowerPath.endsWith(".md")) {
+            return "markdown_heading";
+        }
+        return "";
+    }
+
+    private String abbreviate(String value, int maxChars) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        if (compact.length() <= maxChars) {
+            return compact;
+        }
+        return compact.substring(0, Math.max(0, maxChars - 3)) + "...";
+    }
+
     private String slice(String[] lines, int start, int end) {
         StringBuilder builder = new StringBuilder();
         for (int i = Math.max(0, start); i <= Math.min(lines.length - 1, end); i++) {
@@ -692,14 +795,25 @@ public class CodeChunkParser {
 
     private String inferChunkType(String defaultType, String symbol, String line) {
         String lower = line == null ? "" : line.toLowerCase(Locale.ROOT);
-        if (lower.contains("class ")) {
+        if (lower.contains("class ") || lower.contains("struct ") || lower.contains("interface ")
+                || lower.contains("enum ") || lower.contains("trait ") || lower.contains("protocol ")
+                || lower.contains("actor ")) {
             return "class";
         }
-        if (lower.contains("component") || (symbol != null && !symbol.isBlank() && Character.isUpperCase(symbol.charAt(0)))) {
+        boolean looksLikeFunction = lower.contains("function") || lower.contains("=>") || lower.contains("def ")
+                || lower.contains("func ") || lower.contains("fn ") || lower.contains("fun ");
+        if (looksLikeFunction && symbol != null && !symbol.isBlank() && Character.isUpperCase(symbol.charAt(0))
+                && (lower.contains("=>") || lower.contains("function"))) {
             return "component";
         }
-        if (lower.contains("function") || lower.contains("=>") || lower.contains("def ") || lower.contains("func ") || lower.contains("fn ")) {
-            return "method";
+        if (looksLikeFunction) {
+            if ("method".equals(defaultType)) {
+                return "method";
+            }
+            return "function";
+        }
+        if (lower.contains("component")) {
+            return "component";
         }
         return defaultType;
     }

@@ -6,6 +6,8 @@ public record ActiveCodeFileSnapshot(
         UUID fileId,
         String filePath,
         String contentHash,
-        int chunkCount
+        int chunkCount,
+        String parserSignature,
+        String chunkProfile
 ) {
 }

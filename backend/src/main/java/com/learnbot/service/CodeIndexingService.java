@@ -37,6 +37,11 @@ import java.util.concurrent.Future;
 @Service
 public class CodeIndexingService {
     private static final Logger log = LoggerFactory.getLogger(CodeIndexingService.class);
+    static final String CODE_PARSER_SIGNATURE = "code-symbol-v3";
+    static final String CODE_CHUNK_PROFILE = "symbolic-main-v3";
+    static final String PROJECT_CONTEXT_PARSER_SIGNATURE = "project-context-v2";
+    static final String PROJECT_CONTEXT_CHUNK_PROFILE = "project-context-v2";
+
     private final CodeRepository repository;
     private final GitWorkspaceService gitWorkspaceService;
     private final ZipCodeArchiveService zipCodeArchiveService;
@@ -377,8 +382,7 @@ public class CodeIndexingService {
                         ));
                     }
                     if (previousFile != null
-                            && previousFile.contentHash().equals(contentHash)
-                            && previousFile.chunkCount() > 0) {
+                            && canReusePreviousSnapshot(previousFile, contentHash)) {
                         repository.copyActiveFileToIndex(repositoryId, previousFile.fileId(), UUID.randomUUID(), jobId);
                         totalChunks += previousFile.chunkCount();
                         unchangedFiles++;
@@ -428,7 +432,15 @@ public class CodeIndexingService {
                 int offset = 0;
                 for (PendingCodeFile file : pendingFiles) {
                     int end = offset + file.chunks().size();
-                    UUID fileId = repository.createFile(repositoryId, jobId, file.filePath(), file.language(), file.contentHash());
+                    UUID fileId = repository.createFile(
+                            repositoryId,
+                            jobId,
+                            file.filePath(),
+                            file.language(),
+                            file.contentHash(),
+                            CODE_PARSER_SIGNATURE,
+                            CODE_CHUNK_PROFILE
+                    );
                     repository.addChunks(repositoryId, fileId, jobId, file.filePath(), file.chunks(), embeddings.subList(offset, end));
                     totalChunks += file.chunks().size();
                     offset = end;
@@ -506,7 +518,9 @@ public class CodeIndexingService {
                     jobId,
                     CodeProjectContextBuilder.CONTEXT_FILE_PATH,
                     "markdown",
-                    sha256(combinedContent)
+                    sha256(combinedContent),
+                    PROJECT_CONTEXT_PARSER_SIGNATURE,
+                    PROJECT_CONTEXT_CHUNK_PROFILE
             );
             repository.addChunks(record.id(), fileId, jobId, CodeProjectContextBuilder.CONTEXT_FILE_PATH, chunks, embeddings);
             return chunks.size();
@@ -560,6 +574,14 @@ public class CodeIndexingService {
                     repositoryId, jobId, stage, message, rootMessage(diagnosticFailure)
             );
         }
+    }
+
+    static boolean canReusePreviousSnapshot(ActiveCodeFileSnapshot previousFile, String contentHash) {
+        return previousFile != null
+                && previousFile.contentHash().equals(contentHash)
+                && previousFile.chunkCount() > 0
+                && CODE_PARSER_SIGNATURE.equals(previousFile.parserSignature())
+                && CODE_CHUNK_PROFILE.equals(previousFile.chunkProfile());
     }
 
     private void updateProgress(

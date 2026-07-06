@@ -724,24 +724,40 @@ public class CodeRepository {
                 .addValue("message", message));
     }
 
-    public UUID createFile(UUID repositoryId, UUID indexVersion, String filePath, String language, String contentHash) {
+    public UUID createFile(
+            UUID repositoryId,
+            UUID indexVersion,
+            String filePath,
+            String language,
+            String contentHash,
+            String parserSignature,
+            String chunkProfile
+    ) {
         UUID fileId = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO code_files (id, repository_id, index_version, file_path, language, content_hash, active)
-                VALUES (:id, :repositoryId, :indexVersion, :filePath, :language, :contentHash, FALSE)
+                INSERT INTO code_files (
+                    id, repository_id, index_version, file_path, language, content_hash,
+                    parser_signature, chunk_profile, active
+                )
+                VALUES (
+                    :id, :repositoryId, :indexVersion, :filePath, :language, :contentHash,
+                    :parserSignature, :chunkProfile, FALSE
+                )
                 """, new MapSqlParameterSource()
                 .addValue("id", fileId)
                 .addValue("repositoryId", repositoryId)
                 .addValue("indexVersion", indexVersion)
                 .addValue("filePath", filePath)
                 .addValue("language", language)
-                .addValue("contentHash", contentHash));
+                .addValue("contentHash", contentHash)
+                .addValue("parserSignature", safeParserSignature(parserSignature))
+                .addValue("chunkProfile", safeChunkProfile(chunkProfile)));
         return fileId;
     }
 
     public Map<String, ActiveCodeFileSnapshot> listActiveFileSnapshots(UUID repositoryId) {
         return jdbc.query("""
-                SELECT f.id, f.file_path, f.content_hash, COUNT(c.id) AS chunk_count
+                SELECT f.id, f.file_path, f.content_hash, f.parser_signature, f.chunk_profile, COUNT(c.id) AS chunk_count
                 FROM code_files f
                 LEFT JOIN code_chunks c ON c.file_id = f.id AND c.active
                 WHERE f.repository_id = :repositoryId
@@ -754,7 +770,9 @@ public class CodeRepository {
                         rs.getObject("id", UUID.class),
                         rs.getString("file_path"),
                         rs.getString("content_hash"),
-                        rs.getInt("chunk_count")
+                        rs.getInt("chunk_count"),
+                        rs.getString("parser_signature"),
+                        rs.getString("chunk_profile")
                 );
                 snapshots.put(snapshot.filePath(), snapshot);
             }
@@ -793,8 +811,12 @@ public class CodeRepository {
 
     public UUID copyActiveFileToIndex(UUID repositoryId, UUID oldFileId, UUID newFileId, UUID indexVersion) {
         int files = jdbc.update("""
-                INSERT INTO code_files (id, repository_id, index_version, file_path, language, content_hash, active)
-                SELECT :newFileId, repository_id, :indexVersion, file_path, language, content_hash, FALSE
+                INSERT INTO code_files (
+                    id, repository_id, index_version, file_path, language, content_hash,
+                    parser_signature, chunk_profile, active
+                )
+                SELECT :newFileId, repository_id, :indexVersion, file_path, language, content_hash,
+                       parser_signature, chunk_profile, FALSE
                 FROM code_files
                 WHERE id = :oldFileId
                   AND repository_id = :repositoryId
@@ -827,6 +849,14 @@ public class CodeRepository {
                 .addValue("newFileId", newFileId)
                 .addValue("indexVersion", indexVersion));
         return newFileId;
+    }
+
+    private String safeParserSignature(String value) {
+        return value == null || value.isBlank() ? "legacy" : value;
+    }
+
+    private String safeChunkProfile(String value) {
+        return value == null || value.isBlank() ? "legacy" : value;
     }
 
     public List<CodeFileSummary> listActiveFiles(UUID repositoryId, String query, int limit) {

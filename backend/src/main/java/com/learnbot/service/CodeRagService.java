@@ -2383,6 +2383,12 @@ public class CodeRagService {
         Map<String, Long> runtimeRoles = safeResults.stream()
                 .map(CodeSourceClassifier::runtimeRole)
                 .collect(Collectors.groupingBy(role -> role == null || role.isBlank() ? "unknown" : role, LinkedHashMap::new, Collectors.counting()));
+        Map<String, Long> parsers = safeResults.stream()
+                .map(this::parserName)
+                .collect(Collectors.groupingBy(parser -> parser.isBlank() ? "unknown" : parser, LinkedHashMap::new, Collectors.counting()));
+        long structured = safeResults.stream().filter(result -> isStructured(result.chunkType())).count();
+        long fallbackLineWindows = safeResults.stream().filter(this::isLineWindowEvidence).count();
+        int structuredPercent = safeResults.isEmpty() ? 0 : (int) Math.round((structured * 100.0) / safeResults.size());
         long graphExpanded = safeResults.stream().filter(this::isGraphExpanded).count();
         long required = safeResults.stream().filter(this::isRequiredConversationPinned).count();
         long llmAdjudicated = safeResults.stream()
@@ -2394,10 +2400,25 @@ public class CodeRagService {
                 + ", chunkTypes=" + typeCounts
                 + ", sourceRoles=" + sourceRoles
                 + ", runtimeRoles=" + runtimeRoles
+                + ", parsers=" + parsers
+                + ", structured=" + structured + "/" + safeResults.size() + " (" + structuredPercent + "%)"
+                + ", lineWindowFallback=" + fallbackLineWindows
                 + ", graphExpanded=" + graphExpanded
                 + ", requiredPinned=" + required
                 + ", llmAdjudicated=" + llmAdjudicated
                 + ", llmFollowUp=" + llmFollowUp + ".";
+    }
+
+    private String parserName(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return "";
+        }
+        Object parser = result.metadata().getOrDefault("parser", result.metadata().get("strategy"));
+        return parser == null ? "" : String.valueOf(parser);
+    }
+
+    private boolean isLineWindowEvidence(CodeSearchResult result) {
+        return "line_window".equals(parserName(result));
     }
 
     private List<String> diagnostics(
