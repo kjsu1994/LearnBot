@@ -486,8 +486,20 @@ public class CodeChunkParser {
                 lineStart,
                 lineEnd,
                 enrichedContent,
-                metadata
+                enrichMetadata(relativePath, chunkType, metadata)
         );
+    }
+
+    private Map<String, Object> enrichMetadata(String relativePath, String chunkType, Map<String, Object> metadata) {
+        Map<String, Object> enriched = new LinkedHashMap<>(metadata == null ? Map.of() : metadata);
+        String parser = String.valueOf(enriched.getOrDefault("parser", enriched.getOrDefault("strategy", "")));
+        CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(relativePath, chunkType, parser);
+        enriched.putIfAbsent("sourceRole", profile.sourceRole());
+        enriched.putIfAbsent("runtimeRole", profile.runtimeRole());
+        enriched.putIfAbsent("domainRole", profile.domainRole());
+        enriched.putIfAbsent("parserConfidence", profile.parserConfidence());
+        enriched.putIfAbsent("localAgentEvidence", profile.localAgentEvidence());
+        return enriched;
     }
 
     private String[] splitLines(String content) {

@@ -609,12 +609,19 @@ public class LearnBotProperties {
 
             private boolean answerRepairEnabled = true;
             private boolean queryEmbeddingCacheEnabled = true;
+            private boolean codeEvidenceAdjudicationEnabled = false;
 
             @Min(1)
             private int queryEmbeddingCacheMaxEntries = 1024;
 
             @Min(1)
             private int queryEmbeddingCacheTtlSeconds = 3600;
+            @Min(1)
+            private int codeEvidenceAdjudicationMaxCandidates = 10;
+            @Min(1)
+            private int codeEvidenceAdjudicationMaxOutputTokens = 384;
+            @Min(1)
+            private int codeEvidenceAdjudicationTimeoutSeconds = 8;
             private Reranker reranker = new Reranker();
 
             public boolean isRewriteEnabled() {
@@ -761,6 +768,14 @@ public class LearnBotProperties {
                 this.queryEmbeddingCacheEnabled = queryEmbeddingCacheEnabled;
             }
 
+            public boolean isCodeEvidenceAdjudicationEnabled() {
+                return codeEvidenceAdjudicationEnabled;
+            }
+
+            public void setCodeEvidenceAdjudicationEnabled(boolean codeEvidenceAdjudicationEnabled) {
+                this.codeEvidenceAdjudicationEnabled = codeEvidenceAdjudicationEnabled;
+            }
+
             public int getQueryEmbeddingCacheMaxEntries() {
                 return queryEmbeddingCacheMaxEntries;
             }
@@ -775,6 +790,30 @@ public class LearnBotProperties {
 
             public void setQueryEmbeddingCacheTtlSeconds(int queryEmbeddingCacheTtlSeconds) {
                 this.queryEmbeddingCacheTtlSeconds = queryEmbeddingCacheTtlSeconds;
+            }
+
+            public int getCodeEvidenceAdjudicationMaxCandidates() {
+                return codeEvidenceAdjudicationMaxCandidates;
+            }
+
+            public void setCodeEvidenceAdjudicationMaxCandidates(int codeEvidenceAdjudicationMaxCandidates) {
+                this.codeEvidenceAdjudicationMaxCandidates = codeEvidenceAdjudicationMaxCandidates;
+            }
+
+            public int getCodeEvidenceAdjudicationMaxOutputTokens() {
+                return codeEvidenceAdjudicationMaxOutputTokens;
+            }
+
+            public void setCodeEvidenceAdjudicationMaxOutputTokens(int codeEvidenceAdjudicationMaxOutputTokens) {
+                this.codeEvidenceAdjudicationMaxOutputTokens = codeEvidenceAdjudicationMaxOutputTokens;
+            }
+
+            public int getCodeEvidenceAdjudicationTimeoutSeconds() {
+                return codeEvidenceAdjudicationTimeoutSeconds;
+            }
+
+            public void setCodeEvidenceAdjudicationTimeoutSeconds(int codeEvidenceAdjudicationTimeoutSeconds) {
+                this.codeEvidenceAdjudicationTimeoutSeconds = codeEvidenceAdjudicationTimeoutSeconds;
             }
 
             public Reranker getReranker() {

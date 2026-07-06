@@ -118,9 +118,6 @@ public class CodeRagService {
     }
 
     public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
-        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
-            return commitInsightService.answer(repositoryId, question);
-        }
         ollamaClient.beginPrimaryRequest();
         try {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, null);
@@ -130,9 +127,6 @@ public class CodeRagService {
     }
 
     public CodeAskResponse askConversational(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
-        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
-            return commitInsightService.answer(repositoryId, question);
-        }
         ollamaClient.beginPrimaryRequest();
         try {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, null);
@@ -142,14 +136,6 @@ public class CodeRagService {
     }
 
     public CodeAskResponse askStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, CodeAnswerStreamSink streamSink) {
-        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
-            CodeAskResponse response = commitInsightService.answer(repositoryId, question);
-            if (streamSink != null) {
-                streamSink.onReplace(response.answer(), "commit_insight");
-                streamSink.onEvidence(response.evidence());
-            }
-            return response;
-        }
         ollamaClient.beginPrimaryRequest();
         try {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, streamSink);
@@ -159,14 +145,6 @@ public class CodeRagService {
     }
 
     public CodeAskResponse askConversationalStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext, CodeAnswerStreamSink streamSink) {
-        if (commitInsightService != null && commitInsightService.isCommitQuestion(question)) {
-            CodeAskResponse response = commitInsightService.answer(repositoryId, question);
-            if (streamSink != null) {
-                streamSink.onReplace(response.answer(), "commit_insight");
-                streamSink.onEvidence(response.evidence());
-            }
-            return response;
-        }
         ollamaClient.beginPrimaryRequest();
         try {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, streamSink);
@@ -179,7 +157,23 @@ public class CodeRagService {
         long askStarted = System.nanoTime();
         String originalQuestion = safe(question, "");
         String effectiveQuestion = effectiveQuestion(originalQuestion, conversationContext);
-        CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, mode, conversationContext);
+        RagPipelineService.CodeRagRouteDecision routeDecision = routeCodeRagIntent(originalQuestion, mode, conversationContext);
+        boolean commitFallbackUsed = false;
+        if (routeDecision.route() == RagPipelineService.CodeRagRoute.COMMIT_DIFF && commitInsightService != null) {
+            CodeAskResponse commitResponse = commitInsightService.answer(repositoryId, routedCommitQuestion(originalQuestion, routeDecision));
+            if (!commitResponse.evidence().isEmpty()) {
+                CodeAskResponse routed = withRouteDiagnostics(commitResponse, routeDecision, false);
+                if (streamSink != null) {
+                    streamSink.onReplace(routed.answer(), "commit_insight");
+                    streamSink.onEvidence(routed.evidence());
+                }
+                return routed;
+            }
+            commitFallbackUsed = true;
+        }
+        effectiveQuestion = routedQuestion(effectiveQuestion, routeDecision);
+        String effectiveMode = routedMode(mode, routeDecision);
+        CodeQuestionMode questionMode = classifyCodeQuestion(effectiveQuestion, effectiveMode, conversationContext);
         int safeLimit = safeLimit(questionMode, limit);
         if (streamSink != null) {
             streamSink.onStatus("retrieval_started", "코드 근거를 검색하고 있습니다.");
@@ -337,13 +331,115 @@ public class CodeRagService {
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
                 conversationDiagnostics(
-                        diagnostics(questionMode, results, answerResults, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval, contextBudgetDropped),
+                        routeDiagnostics(diagnostics(questionMode, results, answerResults, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval, contextBudgetDropped), routeDecision, commitFallbackUsed),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
                         retrieval
                 )
         );
+    }
+
+    private RagPipelineService.CodeRagRouteDecision routeCodeRagIntent(
+            String originalQuestion,
+            String requestedMode,
+            RagConversationContext conversationContext
+    ) {
+        boolean releasedPrimarySlot = ollamaClient.hasPrimaryRequestInFlight();
+        if (releasedPrimarySlot) {
+            ollamaClient.finishPrimaryRequest();
+        }
+        RagPipelineService.CodeRagRouteDecision decision;
+        try {
+            decision = pipelineService.routeCodeRagIntent(
+                    originalQuestion,
+                    requestedMode,
+                    conversationContext,
+                    commitInsightService != null
+            );
+        } finally {
+            if (releasedPrimarySlot) {
+                ollamaClient.beginPrimaryRequest();
+            }
+        }
+        return decision;
+    }
+
+    private String routedCommitQuestion(String originalQuestion, RagPipelineService.CodeRagRouteDecision routeDecision) {
+        String commitRef = safe(routeDecision.commitRef(), "");
+        return commitRef.isBlank() ? originalQuestion : originalQuestion + "\nCommit reference: " + commitRef;
+    }
+
+    private String routedQuestion(String fallback, RagPipelineService.CodeRagRouteDecision routeDecision) {
+        if (routeDecision == null) {
+            return fallback;
+        }
+        String query = routeDecision.queries().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("");
+        if (!query.isBlank()) {
+            return query;
+        }
+        String symbol = safe(routeDecision.targetSymbol(), "");
+        String file = safe(routeDecision.targetFile(), "");
+        String combined = (file + " " + symbol + " " + fallback).trim();
+        return combined.isBlank() ? fallback : combined;
+    }
+
+    private String routedMode(String requestedMode, RagPipelineService.CodeRagRouteDecision routeDecision) {
+        if (routeDecision == null) {
+            return requestedMode;
+        }
+        String mode = safe(routeDecision.mode(), "");
+        if (!mode.isBlank() && !"auto".equalsIgnoreCase(mode)) {
+            return mode;
+        }
+        return switch (routeDecision.route()) {
+            case CODE_OVERVIEW_FLOW -> "overview";
+            case LOCATE_SYMBOL -> "locate";
+            case EXPLAIN_METHOD -> "method";
+            case IMPACT_ANALYSIS -> "impact";
+            case EXPAND_PREVIOUS_ANSWER, ANSWER_FROM_PRIOR -> safe(requestedMode, "").isBlank() ? "overview" : requestedMode;
+            default -> requestedMode;
+        };
+    }
+
+    private CodeAskResponse withRouteDiagnostics(
+            CodeAskResponse response,
+            RagPipelineService.CodeRagRouteDecision routeDecision,
+            boolean commitFallbackUsed
+    ) {
+        return new CodeAskResponse(
+                response.mode(),
+                response.answer(),
+                response.evidence(),
+                response.confidence(),
+                routeDiagnostics(response.diagnostics(), routeDecision, commitFallbackUsed),
+                response.conversationId(),
+                response.turnId(),
+                response.rewrittenQuestion()
+        );
+    }
+
+    private List<String> routeDiagnostics(List<String> diagnostics, RagPipelineService.CodeRagRouteDecision routeDecision) {
+        return routeDiagnostics(diagnostics, routeDecision, false);
+    }
+
+    private List<String> routeDiagnostics(List<String> diagnostics, RagPipelineService.CodeRagRouteDecision routeDecision, boolean commitFallbackUsed) {
+        List<String> notes = new ArrayList<>(diagnostics == null ? List.of() : diagnostics);
+        if (routeDecision == null) {
+            return notes;
+        }
+        notes.add("Agentic RAG route: route=" + routeDecision.route()
+                + ", confidence=" + routeDecision.confidence()
+                + ", mode=" + safe(routeDecision.mode(), "")
+                + ", queries=" + routeDecision.queries().size()
+                + ", attempted=" + routeDecision.attempted()
+                + ", fallback=" + routeDecision.fallback()
+                + ", commitFallback=" + commitFallbackUsed
+                + ", reason=" + safe(routeDecision.reason(), "") + ".");
+        return notes;
     }
 
     private String effectiveQuestion(String originalQuestion, RagConversationContext conversationContext) {
@@ -814,6 +910,10 @@ public class CodeRagService {
     private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
         int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
+        RagPipelineService.CodeEvidenceAdjudication adjudication = pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit);
+        if (adjudication.attempted()) {
+            ranked = adjudication.results();
+        }
         List<CodeSearchResult> selected;
         if (questionMode == CodeQuestionMode.CALL_FLOW) {
             selected = ranked.stream()
@@ -821,14 +921,129 @@ public class CodeRagService {
                             .thenComparingInt(this::flowRank))
                     .limit(limit)
                     .toList();
-            return preservePinnedEvidence(ranked, selected, limit);
+            return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
-            return preservePinnedEvidence(ranked, selected, limit);
+            return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
         }
         selected = ranked.stream().limit(limit).toList();
-        return preservePinnedEvidence(ranked, selected, limit);
+        return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
+    }
+
+    private List<CodeSearchResult> sourceAwareEvidenceSelection(
+            CodeQuestionMode questionMode,
+            String question,
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
+        if (ranked == null || ranked.isEmpty() || adjusted.isEmpty() || asksForTests(question)) {
+            return adjusted;
+        }
+        boolean localAgentQuestion = asksForLocalAgent(question);
+        if (!localAgentQuestion) {
+            adjusted.removeIf(result -> !isRequiredConversationPinned(result)
+                    && CodeSourceClassifier.isLocalAgentEvidence(result)
+                    && replacementAvailable(ranked, adjusted, question, localAgentQuestion));
+        }
+        int requiredMain = switch (questionMode) {
+            case OVERVIEW, CALL_FLOW, REASONING, IMPACT -> Math.min(2, Math.max(1, limit));
+            default -> 1;
+        };
+        while (mainImplementationCount(adjusted, localAgentQuestion) < requiredMain) {
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> isMainImplementationEvidence(result, localAgentQuestion))
+                    .findFirst()
+                    .orElse(null);
+            if (replacement == null) {
+                break;
+            }
+            int replaceIndex = weakestAuxiliaryIndex(adjusted);
+            if (replaceIndex < 0) {
+                if (adjusted.size() < limit) {
+                    adjusted.add(replacement);
+                    continue;
+                }
+                break;
+            }
+            adjusted.set(replaceIndex, replacement);
+        }
+        return adjusted.stream().limit(limit).toList();
+    }
+
+    private boolean replacementAvailable(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, String question, boolean localAgentQuestion) {
+        return ranked.stream()
+                .anyMatch(result -> !containsChunk(selected, result) && isMainImplementationEvidence(result, localAgentQuestion));
+    }
+
+    private int mainImplementationCount(List<CodeSearchResult> results, boolean localAgentQuestion) {
+        return (int) results.stream()
+                .filter(result -> isMainImplementationEvidence(result, localAgentQuestion))
+                .count();
+    }
+
+    private boolean isMainImplementationEvidence(CodeSearchResult result, boolean localAgentQuestion) {
+        if (result == null || isProjectContext(result.chunkType())) {
+            return false;
+        }
+        if (!localAgentQuestion && CodeSourceClassifier.isLocalAgentEvidence(result)) {
+            return false;
+        }
+        return CodeSourceClassifier.SOURCE_MAIN.equals(CodeSourceClassifier.sourceRole(result));
+    }
+
+    private int weakestAuxiliaryIndex(List<CodeSearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result)
+                    && (CodeSourceClassifier.SOURCE_TEST.equals(CodeSourceClassifier.sourceRole(result))
+                    || CodeSourceClassifier.SOURCE_DOCS.equals(CodeSourceClassifier.sourceRole(result))
+                    || CodeSourceClassifier.SOURCE_GENERATED.equals(CodeSourceClassifier.sourceRole(result))
+                    || CodeSourceClassifier.SOURCE_VENDOR.equals(CodeSourceClassifier.sourceRole(result))
+                    || CodeSourceClassifier.isLocalAgentEvidence(result))) {
+                return index;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isRequiredConversationPinned(selected.get(index)) && !isMainImplementationEvidence(selected.get(index), false)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private boolean containsChunk(List<CodeSearchResult> results, CodeSearchResult candidate) {
+        return candidate != null && results.stream().anyMatch(result -> result.chunkId().equals(candidate.chunkId()));
+    }
+
+    private boolean asksForTests(String question) {
+        String normalized = normalizeQuestionText(question);
+        return normalized.contains("test")
+                || normalized.contains("테스트")
+                || normalized.contains("spec")
+                || normalized.contains("coverage")
+                || normalized.contains("검증");
+    }
+
+    private boolean asksForLocalAgent(String question) {
+        String normalized = normalizeQuestionText(question);
+        return normalized.contains("local agent")
+                || normalized.contains("localagent")
+                || normalized.contains("agent")
+                || normalized.contains("에이전트")
+                || normalized.contains("patch")
+                || normalized.contains("tool")
+                || normalized.contains("mutation");
+    }
+
+    private String normalizeQuestionText(String value) {
+        return value == null ? "" : value.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\p{IsHangul}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private List<CodeSearchResult> preservePinnedEvidence(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, int limit) {
@@ -1677,13 +1892,25 @@ public class CodeRagService {
         Map<String, Long> typeCounts = safeResults.stream()
                 .map(result -> safe(result.chunkType(), "unknown"))
                 .collect(Collectors.groupingBy(type -> type.isBlank() ? "unknown" : type, LinkedHashMap::new, Collectors.counting()));
+        Map<String, Long> sourceRoles = safeResults.stream()
+                .map(CodeSourceClassifier::sourceRole)
+                .collect(Collectors.groupingBy(role -> role == null || role.isBlank() ? "unknown" : role, LinkedHashMap::new, Collectors.counting()));
+        Map<String, Long> runtimeRoles = safeResults.stream()
+                .map(CodeSourceClassifier::runtimeRole)
+                .collect(Collectors.groupingBy(role -> role == null || role.isBlank() ? "unknown" : role, LinkedHashMap::new, Collectors.counting()));
         long graphExpanded = safeResults.stream().filter(this::isGraphExpanded).count();
         long required = safeResults.stream().filter(this::isRequiredConversationPinned).count();
+        long llmAdjudicated = safeResults.stream()
+                .filter(result -> result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("llmEvidenceAdjudicationSelected")))
+                .count();
         return "Evidence selection: selected=" + safeResults.size()
                 + ", budgetDropped=" + Math.max(0, contextBudgetDropped)
                 + ", chunkTypes=" + typeCounts
+                + ", sourceRoles=" + sourceRoles
+                + ", runtimeRoles=" + runtimeRoles
                 + ", graphExpanded=" + graphExpanded
-                + ", requiredPinned=" + required + ".";
+                + ", requiredPinned=" + required
+                + ", llmAdjudicated=" + llmAdjudicated + ".";
     }
 
     private List<String> diagnostics(

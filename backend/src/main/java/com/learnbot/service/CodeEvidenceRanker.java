@@ -131,7 +131,8 @@ public class CodeEvidenceRanker {
         double legacy = Math.max(0, legacyRelevance(question, mode, result) - result.score()) * 0.20;
         double flow = mode == CodeRagService.CodeQuestionMode.CALL_FLOW ? Math.max(0, 0.025 * (5 - flowRank(result))) : 0;
         double conversation = isConversationPinned(result) ? 0.18 : 0;
-        double total = base + text + graph + intent + structure + legacy + flow + conversation;
+        double sourcePolicy = sourcePolicyScore(question, mode, result);
+        double total = base + text + graph + intent + structure + legacy + flow + conversation + sourcePolicy;
         Map<String, Object> parts = new LinkedHashMap<>();
         parts.put("baseSearch", round(base));
         parts.put("textMatch", round(text));
@@ -145,7 +146,10 @@ public class CodeEvidenceRanker {
         if (conversation > 0) {
             parts.put("conversationPinned", round(conversation));
         }
-        return withMetadata(result, total, parts, reason(mode, result, graph, intent, structure, flow));
+        if (sourcePolicy != 0) {
+            parts.put("sourcePolicy", round(sourcePolicy));
+        }
+        return withMetadata(result, total, parts, reason(question, mode, result, graph, intent, structure, flow, sourcePolicy));
     }
 
     private CodeSearchResult adjust(CodeSearchResult result, double adjustment, String reason) {
@@ -256,6 +260,42 @@ public class CodeEvidenceRanker {
         };
     }
 
+    private double sourcePolicyScore(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {
+        String sourceRole = CodeSourceClassifier.sourceRole(result);
+        String runtimeRole = CodeSourceClassifier.runtimeRole(result);
+        boolean asksForTests = asksForTests(question);
+        boolean asksForLocalAgent = asksForLocalAgent(question);
+        double score = 0;
+
+        if (CodeSourceClassifier.SOURCE_MAIN.equals(sourceRole)) {
+            score += mode == CodeRagService.CodeQuestionMode.OVERVIEW
+                    || mode == CodeRagService.CodeQuestionMode.CALL_FLOW
+                    || mode == CodeRagService.CodeQuestionMode.REASONING
+                    || mode == CodeRagService.CodeQuestionMode.IMPACT ? 0.18 : 0.08;
+        } else if (CodeSourceClassifier.SOURCE_TEST.equals(sourceRole)) {
+            score += asksForTests ? 0.16 : -0.38;
+        } else if (CodeSourceClassifier.SOURCE_DOCS.equals(sourceRole)) {
+            score += mode == CodeRagService.CodeQuestionMode.OVERVIEW ? -0.04 : -0.16;
+        } else if (CodeSourceClassifier.SOURCE_GENERATED.equals(sourceRole) || CodeSourceClassifier.SOURCE_VENDOR.equals(sourceRole)) {
+            score -= 0.45;
+        }
+
+        if (!asksForLocalAgent && CodeSourceClassifier.isLocalAgentEvidence(result)) {
+            score -= 0.55;
+        } else if (asksForLocalAgent && CodeSourceClassifier.isLocalAgentEvidence(result)) {
+            score += 0.18;
+        }
+
+        if (mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.OVERVIEW
+                || mode == CodeRagService.CodeQuestionMode.REASONING) {
+            score += switch (runtimeRole) {
+                case "controller", "service", "repository", "project_context" -> 0.08;
+                default -> 0;
+            };
+        }
+        return score;
+    }
+
     private double structureEvidenceScore(CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {
         double score = isStructured(result.chunkType()) ? 0.10 : 0;
         if (notBlank(result.methodName())) score += 0.05;
@@ -266,12 +306,19 @@ public class CodeEvidenceRanker {
         return Math.min(0.24, score);
     }
 
-    private String reason(CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double flow) {
+    private String reason(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double flow, double sourcePolicy) {
         List<String> reasons = new ArrayList<>();
         if (graph > 0) reasons.add("graph " + String.valueOf(result.metadata().getOrDefault("graphEdgeType", "RELATED")));
         if (intent >= 0.18) reasons.add(mode.value() + " intent match");
         if (structure >= 0.10) reasons.add("structured code evidence");
         if (flow > 0) reasons.add("flow order hint");
+        if (sourcePolicy > 0) reasons.add("implementation source policy");
+        if (sourcePolicy < 0 && CodeSourceClassifier.SOURCE_TEST.equals(CodeSourceClassifier.sourceRole(result)) && !asksForTests(question)) {
+            reasons.add("test evidence deprioritized");
+        }
+        if (sourcePolicy < 0 && CodeSourceClassifier.isLocalAgentEvidence(result) && !asksForLocalAgent(question)) {
+            reasons.add("local-agent evidence deprioritized");
+        }
         if (reasons.isEmpty()) reasons.add("hybrid search relevance");
         return String.join(", ", reasons);
     }
@@ -381,6 +428,26 @@ public class CodeEvidenceRanker {
         return normalized.contains("login")
                 || normalized.contains("signin")
                 || normalized.contains("auth");
+    }
+
+    private boolean asksForTests(String question) {
+        String normalized = normalize(question);
+        return normalized.contains("test")
+                || normalized.contains("테스트")
+                || normalized.contains("spec")
+                || normalized.contains("coverage")
+                || normalized.contains("검증");
+    }
+
+    private boolean asksForLocalAgent(String question) {
+        String normalized = normalize(question);
+        return normalized.contains("local agent")
+                || normalized.contains("localagent")
+                || normalized.contains("agent")
+                || normalized.contains("에이전트")
+                || normalized.contains("patch")
+                || normalized.contains("tool")
+                || normalized.contains("mutation");
     }
 
     private String normalize(String value) {

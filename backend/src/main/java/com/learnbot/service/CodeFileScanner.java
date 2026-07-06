@@ -23,7 +23,7 @@ public class CodeFileScanner {
     );
     private static final Set<String> EXCLUDED_DIRS = Set.of(
             ".git", "bin", "obj", ".vs", ".idea", ".gradle", "node_modules",
-            "dist", "build", "target", "out", "vendor", "packages"
+            "dist", "build", "target", "out", "vendor", "third_party", "external"
     );
     private static final Set<String> EXCLUDED_EXTENSIONS = Set.of(
             ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".pdf", ".zip", ".7z",

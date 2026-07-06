@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
 import com.learnbot.dto.CodeConversationAnchor;
+import com.learnbot.dto.CodeEvidence;
 import com.learnbot.dto.ConversationIntent;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.PreviousAnswerItem;
@@ -31,20 +32,40 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
 class CodeRagServiceTest {
     @Test
-    void commitQuestionsBypassNormalSearchFlow() {
+    void commitQuestionsUseModelRouteInsteadOfServerRegexBypass() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         CommitInsightService commitInsightService = mock(CommitInsightService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
         CodeRagService service = new CodeRagService(searchService, referenceService, commitInsightService, ollamaClient, new LearnBotProperties());
-        CodeAskResponse commitResponse = new CodeAskResponse("commit", "commit answer [1]", List.of(), "높음", List.of());
+        CodeAskResponse commitResponse = new CodeAskResponse("commit", "commit answer [1]", List.of(new CodeEvidence(
+                1,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "LearnBot",
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "commit_diff",
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                1,
+                "commit diff",
+                0.9,
+                Map.of("kind", "commit_diff")
+        )), "높음", List.of());
 
-        when(commitInsightService.isCommitQuestion("latest changes")).thenReturn(true);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(chat("{\"route\":\"COMMIT_DIFF\",\"mode\":\"overview\",\"confidence\":0.92,\"queries\":[],\"commitRef\":\"\",\"reason\":\"user asked for latest changes\"}"));
         when(commitInsightService.answer(null, "latest changes")).thenReturn(commitResponse);
 
         CodeAskResponse response = service.ask(
@@ -56,8 +77,121 @@ class CodeRagServiceTest {
                 4
         );
 
-        assertThat(response).isSameAs(commitResponse);
-        verifyNoInteractions(searchService, referenceService, ollamaClient);
+        assertThat(response.mode()).isEqualTo("commit");
+        assertThat(response.answer()).isEqualTo("commit answer [1]");
+        assertThat(response.evidence()).hasSize(1);
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Agentic RAG route: route=COMMIT_DIFF"));
+        verify(commitInsightService, never()).isCommitQuestion(anyString());
+        verifyNoInteractions(searchService, referenceService);
+    }
+
+    @Test
+    void numericFollowupDoesNotRouteToCommitInsightWhenModelSelectsPreviousAnswerContext() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        CommitInsightService commitInsightService = mock(CommitInsightService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(
+                searchService,
+                codeRepository,
+                referenceService,
+                commitInsightService,
+                ollamaClient,
+                properties,
+                new RagPipelineService(ollamaClient, properties),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.86,
+                "askPrioritized retrieves evidence, builds context, and generates the code RAG answer"
+        );
+        RagConversationContext context = new RagConversationContext(
+                UUID.randomUUID(),
+                "2",
+                List.of(new RagConversationTurnContext(
+                        "Explain indexing to RAG answer flow",
+                        "1. Indexing [1]\n2. Code RAG answer generation [2]",
+                        "overview",
+                        new ObjectMapper().createArrayNode()
+                )),
+                List.of(),
+                List.of(),
+                true
+        );
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(chat("{\"route\":\"EXPAND_PREVIOUS_ANSWER\",\"mode\":\"overview\",\"confidence\":0.88,\"queries\":[\"Code RAG answer generation flow\"],\"reason\":\"numeric follow-up refers to previous answer item\"}"));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Code RAG answer generation is handled by askPrioritized [1]."));
+
+        CodeAskResponse response = service.askConversational(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "2",
+                "auto",
+                4,
+                context
+        );
+
+        verify(commitInsightService, never()).isCommitQuestion(anyString());
+        verify(commitInsightService, never()).answer(any(), anyString());
+        assertThat(response.evidence()).hasSize(1);
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("Agentic RAG route: route=EXPAND_PREVIOUS_ANSWER"));
+    }
+
+    @Test
+    void routerFailureFallsBackToCodeSearchAndRestoresPrimaryRequestSlot() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.86,
+                "askPrioritized retrieves evidence, builds context, and generates the answer"
+        );
+
+        when(ollamaClient.hasPrimaryRequestInFlight()).thenReturn(true);
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenThrow(new IllegalStateException("auxiliary busy"));
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Code RAG answer generation is handled by askPrioritized [1]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain the Code RAG flow",
+                "overview",
+                4
+        );
+
+        assertThat(response.evidence()).hasSize(1);
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note)
+                        .contains("Agentic RAG route: route=CODE_SEARCH")
+                        .contains("fallback=true")
+                        .contains("router failed: auxiliary busy"));
+        verify(ollamaClient, times(2)).beginPrimaryRequest();
+        verify(ollamaClient, times(2)).finishPrimaryRequest();
     }
 
     @Test
@@ -1134,6 +1268,167 @@ class CodeRagServiceTest {
         verify(searchService).search(isNull(), eq("Fix the login bug and identify impacted tests"), anyInt(), anyList(), isNull());
         verify(searchService).search(isNull(), argThat(query -> query.contains("target files methods validation tests")), anyInt(), anyList(), isNull());
         verify(searchService).search(isNull(), argThat(query -> query.contains("bug cause fix location related callers")), anyInt(), anyList(), isNull());
+    }
+
+    @Test
+    void overviewPrioritizesRuntimeImplementationEvidenceOverTestsAndLocalAgentNoise() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(2);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult testEvidence = result(
+                "backend/src/test/java/com/learnbot/service/CodeRagServiceTest.java",
+                "method",
+                "diagnosticsReportCodeEvidenceSelectionSummary",
+                0.95,
+                "test explains indexing rag answer flow"
+        );
+        CodeSearchResult localAgentEvidence = result(
+                "backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java",
+                "method",
+                "queue",
+                0.93,
+                "local agent queue handles patch tools"
+        );
+        CodeSearchResult indexingService = result(
+                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                "method",
+                "runIndex",
+                0.72,
+                "runIndex scans code files, parses chunks, embeds them, and stores code chunks"
+        );
+        CodeSearchResult ragService = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.70,
+                "askPrioritized retrieves code evidence, builds context, and asks the LLM"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(testEvidence, localAgentEvidence, indexingService, ragService));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Indexing is handled by CodeIndexingService and answers are generated by CodeRagService [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "내 서비스의 인덱싱부터 RAG 답변까지 흐름을 설명해줘",
+                "overview",
+                4
+        );
+
+        assertThat(response.evidence())
+                .extracting(evidence -> evidence.filePath())
+                .containsExactlyInAnyOrder(
+                        "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                        "backend/src/main/java/com/learnbot/service/CodeRagService.java"
+                );
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("sourceRoles={main=2}").contains("runtimeRoles={service=2}"));
+    }
+
+    @Test
+    void llmCodeEvidenceAdjudicationCanChooseLowerScoredButBetterEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(1);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult broadService = result(
+                "backend/src/main/java/com/learnbot/service/RagService.java",
+                "method",
+                "ask",
+                0.92,
+                "document rag answer generation flow"
+        );
+        CodeSearchResult exactCodeService = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.70,
+                "code rag answer generation retrieves code evidence and builds code context"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(broadService, exactCodeService));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(chat("{\"selected\":[{\"index\":2,\"score\":0.96,\"reason\":\"direct code rag flow evidence\"}],\"reason\":\"prefer exact code rag service\"}"));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Code RAG answer generation is handled in CodeRagService [1]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "코드 RAG 답변 생성 흐름은 어디서 처리돼?",
+                "overview",
+                2
+        );
+
+        assertThat(response.evidence())
+                .extracting(evidence -> evidence.filePath())
+                .containsExactly("backend/src/main/java/com/learnbot/service/CodeRagService.java");
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("llmAdjudicated=1"));
+    }
+
+    @Test
+    void llmCodeEvidenceAdjudicationFallsBackToDeterministicRankingWhenJudgeFails() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(1);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult top = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.90,
+                "code rag answer generation retrieves code evidence and builds code context"
+        );
+        CodeSearchResult lower = result(
+                "backend/src/main/java/com/learnbot/service/RagService.java",
+                "method",
+                "ask",
+                0.70,
+                "document rag answer generation flow"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(top, lower));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenThrow(new RuntimeException("judge unavailable"));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Code RAG answer generation is handled in CodeRagService [1]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "코드 RAG 답변 생성 흐름은 어디서 처리돼?",
+                "overview",
+                2
+        );
+
+        assertThat(response.evidence())
+                .extracting(evidence -> evidence.filePath())
+                .containsExactly("backend/src/main/java/com/learnbot/service/CodeRagService.java");
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("llmAdjudicated=0"));
     }
 
     private static OllamaClient.ChatResult chat(String content) {

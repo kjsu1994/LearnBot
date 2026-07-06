@@ -3,7 +3,11 @@ package com.learnbot.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.CodeConversationAnchor;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.PreviousAnswerItem;
+import com.learnbot.dto.RagConversationContext;
+import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.dto.SearchResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -27,6 +31,7 @@ public class RagPipelineService {
     private static final Pattern CITATION_PATTERN = Pattern.compile("\\[(\\d+)]");
     private static final int MAX_REWRITE_QUERIES = 6;
     private static final int MAX_QUERY_CHARS = 180;
+    private static final int CODE_RAG_ROUTE_TIMEOUT_SECONDS = 20;
 
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
@@ -211,8 +216,306 @@ public class RagPipelineService {
         return runtimeTuningService == null ? properties.getRag().getOverview().getMaxCodeCategories() : runtimeTuningService.overviewMaxCodeCategories();
     }
 
+    public CodeRagRouteDecision routeCodeRagIntent(
+            String question,
+            String requestedMode,
+            RagConversationContext conversationContext,
+            boolean commitInsightAvailable
+    ) {
+        try {
+            String response = ollamaClient.chatResult(
+                    codeRagRouterSystemPrompt(),
+                    codeRagRouterUserPrompt(question, requestedMode, conversationContext, commitInsightAvailable),
+                    OllamaClient.ChatRole.AUXILIARY,
+                    420,
+                    Duration.ofSeconds(CODE_RAG_ROUTE_TIMEOUT_SECONDS)
+            ).content();
+            CodeRagRouteDecision decision = parseCodeRagRoute(response);
+            if (decision.route() == CodeRagRoute.UNKNOWN) {
+                return CodeRagRouteDecision.fallback("router returned unknown route");
+            }
+            return decision;
+        } catch (RuntimeException ex) {
+            String message = safeMessage(ex);
+            log.info("Code RAG route skipped reason={} message={} question={}",
+                    ex.getClass().getSimpleName(), message, abbreviate(question));
+            return CodeRagRouteDecision.fallback("router failed: " + message);
+        }
+    }
+
+    public CodeEvidenceAdjudication adjudicateCodeEvidence(String question, String mode, List<CodeSearchResult> candidates, int limit) {
+        if (!pipeline().isCodeEvidenceAdjudicationEnabled() || candidates == null || candidates.isEmpty()) {
+            return new CodeEvidenceAdjudication(false, false, "llm code evidence adjudication disabled", candidates == null ? List.of() : candidates);
+        }
+        int candidateLimit = Math.max(1, Math.min(pipeline().getCodeEvidenceAdjudicationMaxCandidates(), candidates.size()));
+        List<CodeSearchResult> head = candidates.stream().limit(candidateLimit).toList();
+        try {
+            String response = ollamaClient.chatResult(
+                    codeAdjudicationSystemPrompt(),
+                    codeAdjudicationUserPrompt(question, mode, head, limit),
+                    OllamaClient.ChatRole.AUXILIARY,
+                    Math.max(1, pipeline().getCodeEvidenceAdjudicationMaxOutputTokens()),
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceAdjudicationTimeoutSeconds()))
+            ).content();
+            Map<Integer, AdjudicatedCandidate> decisions = parseCodeAdjudication(response);
+            if (decisions.isEmpty()) {
+                return new CodeEvidenceAdjudication(true, false, "llm code evidence adjudication returned no usable selections", candidates);
+            }
+            List<CodeSearchResult> adjudicated = applyCodeAdjudication(candidates, head, decisions);
+            return new CodeEvidenceAdjudication(true, true, "llm code evidence adjudication used", adjudicated);
+        } catch (RuntimeException ex) {
+            log.info("RAG code evidence adjudication skipped reason={} question={}",
+                    ex.getClass().getSimpleName(), abbreviate(question));
+            return new CodeEvidenceAdjudication(true, false, "llm code evidence adjudication failed", candidates);
+        }
+    }
+
     private LearnBotProperties.Rag.Pipeline pipeline() {
         return properties.getRag().getPipeline();
+    }
+
+    private String codeRagRouterSystemPrompt() {
+        return """
+                You route LearnBot code RAG questions.
+                Return strict JSON only. No Markdown.
+                The server will validate your JSON and will fall back to normal code search if uncertain.
+                Do not answer the user.
+                Prefer conversation context for short follow-ups such as numbers, "that", "more", or item references.
+                Choose COMMIT_DIFF only when the user clearly asks about a git commit, hash, HEAD, latest changes, or diff.
+                Do not route to COMMIT_DIFF merely because the text contains digits or a short hex-like token.
+
+                JSON schema:
+                {"route":"CODE_SEARCH","mode":"overview","confidence":0.0,"queries":["query"],"commitRef":"","targetFile":"","targetSymbol":"","reason":"short reason"}
+
+                Allowed routes:
+                ANSWER_FROM_PRIOR, EXPAND_PREVIOUS_ANSWER, CODE_OVERVIEW_FLOW, LOCATE_SYMBOL, EXPLAIN_METHOD, IMPACT_ANALYSIS, COMMIT_DIFF, CLARIFY, CODE_SEARCH.
+                Allowed modes:
+                overview, flow, locate, method, reasoning, impact, auto.
+                """;
+    }
+
+    private String codeRagRouterUserPrompt(
+            String question,
+            String requestedMode,
+            RagConversationContext conversationContext,
+            boolean commitInsightAvailable
+    ) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Question:\n").append(safe(question)).append("\n\n");
+        prompt.append("Requested mode: ").append(safe(requestedMode).isBlank() ? "auto" : safe(requestedMode)).append("\n");
+        prompt.append("Commit insight available: ").append(commitInsightAvailable).append("\n\n");
+        if (conversationContext != null) {
+            prompt.append("Conversation contextual: ").append(conversationContext.contextual()).append("\n");
+            prompt.append("Previous answer expansion requested by server heuristic: ").append(conversationContext.previousAnswerExpansion()).append("\n");
+            prompt.append("Recent turns:\n");
+            for (RagConversationTurnContext turn : conversationContext.recentTurns().stream().limit(4).toList()) {
+                prompt.append("- mode=").append(safe(turn.mode()))
+                        .append(" q=").append(trimForPrompt(turn.question(), 220))
+                        .append("\n  answer=").append(trimForPrompt(turn.answer(), 260))
+                        .append("\n");
+            }
+            prompt.append("Code anchors:\n");
+            for (CodeConversationAnchor anchor : conversationContext.codeAnchors().stream().limit(6).toList()) {
+                prompt.append("- ").append(safe(anchor.filePath()))
+                        .append(nullable("#", firstNonBlank(anchor.methodName(), anchor.className(), anchor.symbolName())))
+                        .append(" lines=").append(anchor.lineStart()).append("-").append(anchor.lineEnd()).append("\n");
+            }
+            prompt.append("Previous answer items:\n");
+            int index = 1;
+            for (PreviousAnswerItem item : conversationContext.previousAnswerItems().stream().limit(10).toList()) {
+                prompt.append(index++).append(". ").append(trimForPrompt(item.label(), 100))
+                        .append(" evidenceChunks=").append(item.evidenceChunkIds().size())
+                        .append("\n");
+            }
+            prompt.append("\n");
+        }
+        prompt.append("Return JSON only.");
+        return prompt.toString();
+    }
+
+    private CodeRagRouteDecision parseCodeRagRoute(String response) {
+        String json = extractJsonObject(response);
+        if (json.isBlank()) {
+            throw new IllegalArgumentException("Code RAG route response did not contain JSON");
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(json, new TypeReference<>() {
+            });
+            CodeRagRoute route = CodeRagRoute.from(String.valueOf(parsed.getOrDefault("route", "CODE_SEARCH")));
+            String mode = normalizeRouteMode(String.valueOf(parsed.getOrDefault("mode", "")));
+            double confidence = Math.max(0, Math.min(1, parseDouble(parsed.get("confidence"), 0.0)));
+            List<String> queries = parsedStrings(parsed.get("queries")).stream().limit(4).toList();
+            return new CodeRagRouteDecision(
+                    route,
+                    mode,
+                    confidence,
+                    queries,
+                    stringValue(parsed.get("commitRef")),
+                    stringValue(parsed.get("targetFile")),
+                    stringValue(parsed.get("targetSymbol")),
+                    stringValue(parsed.get("reason")),
+                    true,
+                    false
+            );
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid code RAG route JSON", ex);
+        }
+    }
+
+    private String normalizeRouteMode(String value) {
+        String mode = safe(value).trim().toLowerCase(Locale.ROOT);
+        return switch (mode) {
+            case "overview", "flow", "locate", "method", "reasoning", "impact", "auto" -> mode;
+            default -> "";
+        };
+    }
+
+    private List<String> parsedStrings(Object value) {
+        LinkedHashSet<String> output = new LinkedHashSet<>();
+        addParsedStrings(output, value);
+        return output.stream().toList();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String nullable(String prefix, String value) {
+        return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private String safeMessage(RuntimeException ex) {
+        String message = ex.getMessage();
+        return message == null || message.isBlank() ? ex.getClass().getSimpleName() : abbreviate(message);
+    }
+
+    private String codeAdjudicationSystemPrompt() {
+        return """
+                You are an evidence selection judge for code RAG.
+                Decide which retrieved code chunks are the best evidence for answering the user's question.
+                Return strict JSON only. No Markdown.
+                JSON schema: {"selected":[{"index":1,"score":0.0,"reason":"short reason"}],"reason":"short reason"}
+                Rules:
+                - Do not answer the user question.
+                - Prefer source chunks that directly implement runtime behavior for architecture, flow, and reasoning questions.
+                - Use tests only when the question asks about tests or when they are clearly supporting evidence.
+                - Use local-agent/tooling chunks only when the question asks about local agents, tools, patching, or agent execution.
+                - Prefer direct evidence over indirect summaries when both are available.
+                - Select only indexes from the candidate list.
+                """;
+    }
+
+    private String codeAdjudicationUserPrompt(String question, String mode, List<CodeSearchResult> candidates, int limit) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Question:\n").append(safe(question)).append("\n\n");
+        prompt.append("Question mode: ").append(safe(mode)).append("\n");
+        prompt.append("Maximum useful evidence items: ").append(Math.max(1, limit)).append("\n\n");
+        prompt.append("Candidates:\n");
+        for (int index = 0; index < candidates.size(); index++) {
+            CodeSearchResult result = candidates.get(index);
+            CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(result);
+            prompt.append(index + 1).append(". file=").append(safe(result.filePath()))
+                    .append(" lines=").append(result.lineStart()).append("-").append(result.lineEnd())
+                    .append(" chunkType=").append(safe(result.chunkType()))
+                    .append(" sourceRole=").append(profile.sourceRole())
+                    .append(" runtimeRole=").append(profile.runtimeRole())
+                    .append(" domainRole=").append(profile.domainRole())
+                    .append(" parserConfidence=").append(profile.parserConfidence())
+                    .append("\nSymbols: ")
+                    .append(safe(result.className())).append(" ")
+                    .append(safe(result.methodName())).append(" ")
+                    .append(safe(result.symbolName())).append("\n")
+                    .append("Excerpt:\n")
+                    .append(trimForPrompt(result.content(), 900))
+                    .append("\n\n");
+        }
+        prompt.append("Return JSON only.");
+        return prompt.toString();
+    }
+
+    private Map<Integer, AdjudicatedCandidate> parseCodeAdjudication(String response) {
+        String json = extractJsonObject(response);
+        if (json.isBlank()) {
+            throw new IllegalArgumentException("Code evidence adjudication response did not contain JSON");
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(json, new TypeReference<>() {
+            });
+            Object selected = parsed.get("selected");
+            if (!(selected instanceof Collection<?> collection)) {
+                return Map.of();
+            }
+            java.util.LinkedHashMap<Integer, AdjudicatedCandidate> decisions = new java.util.LinkedHashMap<>();
+            int rank = 0;
+            for (Object item : collection) {
+                if (!(item instanceof Map<?, ?> map)) {
+                    continue;
+                }
+                int index = parseInt(map.get("index"), -1);
+                if (index < 1 || decisions.containsKey(index)) {
+                    continue;
+                }
+                double score = Math.max(0, Math.min(1, parseDouble(map.get("score"), Math.max(0.1, 1.0 - (rank * 0.08)))));
+                Object reasonValue = map.get("reason");
+                String reason = reasonValue == null ? "selected by llm evidence adjudicator" : String.valueOf(reasonValue);
+                decisions.put(index, new AdjudicatedCandidate(index, score, reason));
+                rank++;
+            }
+            return Map.copyOf(decisions);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid code evidence adjudication JSON", ex);
+        }
+    }
+
+    private List<CodeSearchResult> applyCodeAdjudication(List<CodeSearchResult> candidates, List<CodeSearchResult> head, Map<Integer, AdjudicatedCandidate> decisions) {
+        List<CodeSearchResult> adjusted = new ArrayList<>();
+        for (int index = 0; index < head.size(); index++) {
+            CodeSearchResult result = head.get(index);
+            AdjudicatedCandidate decision = decisions.get(index + 1);
+            double bonus = decision == null ? -0.04 : 0.28 + (decision.score() * 0.32);
+            adjusted.add(withAdjudicationMetadata(result, decision, bonus));
+        }
+        if (candidates.size() > head.size()) {
+            adjusted.addAll(candidates.subList(head.size(), candidates.size()));
+        }
+        return adjusted.stream()
+                .sorted(java.util.Comparator.comparingDouble(this::adjudicatedScore).reversed())
+                .toList();
+    }
+
+    private CodeSearchResult withAdjudicationMetadata(CodeSearchResult result, AdjudicatedCandidate decision, double bonus) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        double currentScore = parseDouble(metadata.get("evidenceScore"), result.score());
+        metadata.put("llmEvidenceAdjudicationAttempted", true);
+        metadata.put("llmEvidenceAdjudicationSelected", decision != null);
+        metadata.put("llmEvidenceAdjudicationBonus", round(currentScore + bonus));
+        metadata.put("evidenceScore", round(currentScore + bonus));
+        if (decision != null) {
+            metadata.put("llmEvidenceAdjudicationScore", round(decision.score()));
+            metadata.put("llmEvidenceAdjudicationReason", decision.reason());
+        }
+        return new CodeSearchResult(
+                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
+                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
+                result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
+                result.content(), result.score(), Map.copyOf(metadata)
+        );
+    }
+
+    private double adjudicatedScore(CodeSearchResult result) {
+        return parseDouble(result.metadata() == null ? null : result.metadata().get("llmEvidenceAdjudicationBonus"), result.score());
     }
 
     private String rewriteSystemPrompt(Domain domain) {
@@ -429,6 +732,40 @@ public class RagPipelineService {
         return value != null && !value.isBlank();
     }
 
+    private int parseInt(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? fallback : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private double parseDouble(Object value, double fallback) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        try {
+            return value == null ? fallback : Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private double round(double value) {
+        return Math.round(value * 1000.0) / 1000.0;
+    }
+
+    private String trimForPrompt(String value, int maxChars) {
+        String text = safe(value).replaceAll("\\s+", " ").trim();
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, Math.max(0, maxChars)).trim() + "...";
+    }
+
     private String abbreviate(String value) {
         String compact = safe(value).replaceAll("\\s+", " ").trim();
         return compact.length() <= 120 ? compact : compact.substring(0, 120) + "...";
@@ -464,5 +801,67 @@ public class RagPipelineService {
     }
 
     public record AnswerAssessment(boolean acceptable, String reason) {
+    }
+
+    public record CodeEvidenceAdjudication(
+            boolean attempted,
+            boolean used,
+            String reason,
+            List<CodeSearchResult> results
+    ) {
+    }
+
+    public enum CodeRagRoute {
+        ANSWER_FROM_PRIOR,
+        EXPAND_PREVIOUS_ANSWER,
+        CODE_OVERVIEW_FLOW,
+        LOCATE_SYMBOL,
+        EXPLAIN_METHOD,
+        IMPACT_ANALYSIS,
+        COMMIT_DIFF,
+        CLARIFY,
+        CODE_SEARCH,
+        UNKNOWN;
+
+        static CodeRagRoute from(String value) {
+            if (value == null || value.isBlank()) {
+                return CODE_SEARCH;
+            }
+            try {
+                return CodeRagRoute.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                return UNKNOWN;
+            }
+        }
+    }
+
+    public record CodeRagRouteDecision(
+            CodeRagRoute route,
+            String mode,
+            double confidence,
+            List<String> queries,
+            String commitRef,
+            String targetFile,
+            String targetSymbol,
+            String reason,
+            boolean attempted,
+            boolean fallback
+    ) {
+        public CodeRagRouteDecision {
+            route = route == null ? CodeRagRoute.CODE_SEARCH : route;
+            mode = mode == null ? "" : mode;
+            queries = queries == null ? List.of() : List.copyOf(queries);
+            commitRef = commitRef == null ? "" : commitRef;
+            targetFile = targetFile == null ? "" : targetFile;
+            targetSymbol = targetSymbol == null ? "" : targetSymbol;
+            reason = reason == null ? "" : reason;
+        }
+
+        static CodeRagRouteDecision fallback(String reason) {
+            return new CodeRagRouteDecision(CodeRagRoute.CODE_SEARCH, "", 0.0, List.of(), "", "", "", reason, true, true);
+        }
+    }
+
+    private record AdjudicatedCandidate(int index, double score, String reason) {
     }
 }
