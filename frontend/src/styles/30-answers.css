@@ -463,13 +463,14 @@
 }
 
 .code-mode-control {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(72px, 1fr));
 }
 
 .code-mode-control .mode-button {
   font-size: 12px;
   min-height: 32px;
   padding: 0 4px;
+  white-space: nowrap;
 }
 
 .code-grid .ask-panel {
