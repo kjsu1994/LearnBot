@@ -609,7 +609,7 @@ public class LearnBotProperties {
 
             private boolean answerRepairEnabled = true;
             private boolean queryEmbeddingCacheEnabled = true;
-            private boolean codeEvidenceAdjudicationEnabled = false;
+            private boolean codeEvidenceAdjudicationEnabled = true;
 
             @Min(1)
             private int queryEmbeddingCacheMaxEntries = 1024;

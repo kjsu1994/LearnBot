@@ -1243,6 +1243,95 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
+    public List<CodeSearchResult> runtimeRoleSearch(
+            UUID repositoryId,
+            String domainPattern,
+            String behaviorPattern,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("domainPattern", domainPattern)
+                .addValue("behaviorPattern", behaviorPattern)
+                .addValue("limit", Math.max(1, Math.min(limit, 50)))
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId);
+
+        return jdbc.query("""
+                WITH candidate_chunks AS (
+                    SELECT c.*,
+                           lower(concat_ws(' ',
+                               c.file_path,
+                               c.symbol_name,
+                               c.class_name,
+                               c.method_name,
+                               c.namespace_name,
+                               c.control_name,
+                               c.event_name
+                           )) AS identity_haystack,
+                           lower(concat_ws(' ',
+                               c.file_path,
+                               c.symbol_name,
+                               c.class_name,
+                               c.method_name,
+                               c.namespace_name,
+                               c.control_name,
+                               c.event_name,
+                               c.content
+                           )) AS haystack
+                    FROM code_chunks c
+                    JOIN code_repositories r ON r.id = c.repository_id
+                    WHERE c.active
+                      AND r.deleted_at IS NULL
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                      AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                      AND lower(c.file_path) !~ '(^|/)(test|tests|spec|__tests__|node_modules|vendor|third_party|external|generated|build|dist|target)(/|$)'
+                      AND lower(c.file_path) !~ '(local-agent|localagent|/local-agents/|/agentloop/|/code-agent/)'
+                      AND (
+                        lower(c.file_path) ~ '(^|/)(service|services|application|usecase|usecases|handler|handlers|pipeline|pipelines|web|controller|controllers|routes|router)(/|$)'
+                        OR lower(c.file_path) ~ '(service|handler|controller|pipeline)\\.[a-z0-9]+$'
+                      )
+                )
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       (
+                         CASE WHEN c.identity_haystack ~ :domainPattern THEN 0.55 ELSE 0 END +
+                         CASE WHEN c.haystack ~ :behaviorPattern THEN 0.45 ELSE 0 END +
+                         CASE WHEN lower(c.file_path) ~ '(^|/)(service|services|application|usecase|usecases|pipeline|pipelines)(/|$)' THEN 0.25 ELSE 0 END +
+                         CASE WHEN c.chunk_type IN ('method', 'function', 'class') THEN 0.12 ELSE 0 END +
+                         CASE WHEN c.haystack ~ '(retriev|search|context|prompt|answer|response|generation|model|llm|chat|stream)' THEN 0.20 ELSE 0 END -
+                         CASE WHEN c.identity_haystack ~ '(conversation|history|savedanswer|metrics|tuning|handoff|gate|verification|summary|schema|profile|dto|jobsummary|failure)' THEN 0.35 ELSE 0 END
+                       ) AS score
+                FROM candidate_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id
+                WHERE c.identity_haystack ~ :domainPattern
+                  AND c.haystack ~ :behaviorPattern
+                ORDER BY score DESC, c.file_path, c.line_start
+                LIMIT :limit
+                """, params, this::mapSearchResult);
+    }
+
     public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)

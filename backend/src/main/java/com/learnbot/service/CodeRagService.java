@@ -11,6 +11,8 @@ import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.RagConversationTurnContext;
 import com.learnbot.repository.CodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -30,6 +32,7 @@ import java.util.stream.IntStream;
 
 @Service
 public class CodeRagService {
+    private static final Logger log = LoggerFactory.getLogger(CodeRagService.class);
     private static final int OVERVIEW_CONTEXT_LIMIT = 12;
     private static final int DEFAULT_CONTEXT_LIMIT = 8;
     private static final int OVERVIEW_CONTEXT_CHARS = 620;
@@ -37,6 +40,7 @@ public class CodeRagService {
     private static final int REASONING_CONTEXT_CHARS = 1000;
     private static final int FALLBACK_EXCERPT_CHARS = 180;
     private static final double CONVERSATION_PINNED_BOOST = 0.18;
+    private static final Pattern LEADING_FILE_QUERY_PATTERN = Pattern.compile("(?i)\\b[\\w./\\\\-]+\\.(?:java|kt|cs|js|jsx|ts|tsx|py|go|rs|php|rb|scala|swift)\\s*:\\s*");
 
     private final CodeSearchService searchService;
     private final CodeRepository codeRepository;
@@ -240,6 +244,7 @@ public class CodeRagService {
         boolean answerContinued = false;
         boolean answerKeptAfterStreamValidation = false;
         String answerDoneReason = null;
+        AnswerQualityTrace answerQualityTrace = AnswerQualityTrace.empty();
         OllamaClient.ChatResult finalChatResult = null;
         long llmMs = 0;
         StringBuilder streamedAnswer = new StringBuilder();
@@ -270,17 +275,21 @@ public class CodeRagService {
                 }
             }
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
-            if (qualityReason != null && streamedAnswer.isEmpty() && pipelineService.maxIterations() > 1) {
+            answerQualityTrace = AnswerQualityTrace.fromInitial(answer, answerDoneReason, answerResults, qualityReason);
+            if (qualityReason != null && pipelineService.maxIterations() > 1) {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
                 long retryStarted = System.nanoTime();
                 OllamaClient.ChatResult retryResult = chatWithLimit(systemPrompt + "\nBe concise and citation-strict.", retryPrompt, repairOutputTokens(maxOutputTokens));
                 llmMs += elapsedMs(retryStarted);
-                String retryAnswer = retryResult.content();
-                if (qualityFailureReason(retryAnswer, answerResults.size(), retryResult.doneReason()) == null) {
+                String retryAnswer = retryResult == null ? "" : retryResult.content();
+                String retryDoneReason = retryResult == null ? null : retryResult.doneReason();
+                String retryQualityReason = qualityFailureReason(retryAnswer, answerResults.size(), retryDoneReason);
+                answerQualityTrace = answerQualityTrace.withRetry(retryAnswer, retryDoneReason, answerResults, retryQualityReason);
+                if (retryQualityReason == null) {
                     answer = retryAnswer;
-                    answerDoneReason = retryResult.doneReason();
+                    answerDoneReason = retryDoneReason;
                     finalChatResult = retryResult;
                     answerRetried = true;
                     if (streamSink != null) {
@@ -295,20 +304,19 @@ public class CodeRagService {
             answer = fallbackAnswer(questionMode, originalQuestion, answerResults);
             answerDoneReason = null;
             llmUnavailable = true;
+            answerQualityTrace = AnswerQualityTrace.unavailable(ex);
             if (streamSink != null) {
                 streamSink.onReplace(answer, "llm_unavailable_fallback");
             }
         }
-        if (qualityFailureReason(answer, answerResults.size(), answerDoneReason) != null) {
+        String finalQualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
+        if (finalQualityReason != null) {
             answerRewritten = true;
-            if (streamedAnswer.isEmpty()) {
-                answer = questionMode == CodeQuestionMode.OVERVIEW
-                        ? overviewFallbackAnswer(answerResults)
-                        : fallbackAnswer(questionMode, originalQuestion, answerResults);
-            } else {
-                answerKeptAfterStreamValidation = true;
-            }
-            if (streamSink != null && streamedAnswer.isEmpty()) {
+            answerQualityTrace = answerQualityTrace.withFinalFailure(answer, answerDoneReason, answerResults, finalQualityReason);
+            answer = questionMode == CodeQuestionMode.OVERVIEW
+                    ? overviewFallbackAnswer(answerResults)
+                    : fallbackAnswer(questionMode, originalQuestion, answerResults);
+            if (streamSink != null) {
                 streamSink.onReplace(answer, "quality_fallback");
             }
         }
@@ -331,7 +339,7 @@ public class CodeRagService {
                 buildEvidence(answerResults),
                 confidence(answerResults, retrieval.assessment()),
                 conversationDiagnostics(
-                        routeDiagnostics(diagnostics(questionMode, results, answerResults, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, retrieval, contextBudgetDropped), routeDecision, commitFallbackUsed),
+                        routeDiagnostics(diagnostics(questionMode, results, answerResults, answer, answerDoneReason, llmUnavailable, answerRewritten, answerRetried, answerContinued, answerKeptAfterStreamValidation, answerQualityTrace, retrieval, contextBudgetDropped), routeDecision, commitFallbackUsed),
                         originalQuestion,
                         effectiveQuestion,
                         conversationContext,
@@ -396,7 +404,7 @@ public class CodeRagService {
             return mode;
         }
         return switch (routeDecision.route()) {
-            case CODE_OVERVIEW_FLOW -> "overview";
+            case CODE_OVERVIEW_FLOW -> "flow";
             case LOCATE_SYMBOL -> "locate";
             case EXPLAIN_METHOD -> "method";
             case IMPACT_ANALYSIS -> "impact";
@@ -610,15 +618,21 @@ public class CodeRagService {
                 "initial search"
         );
         int iteration = 1;
+        int followUpCandidateCount = 0;
+        RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan = pipelineService.planCodeEvidenceFollowUp(
+                question,
+                questionMode.value(),
+                results,
+                4
+        );
+        int followUpQueriesUsed = 0;
 
-        if (!assessment.sufficient() && pipelineService.maxIterations() > 1) {
-            queryPlan = pipelineService.buildQueryPlan(
-                    question,
-                    RagPipelineService.Domain.CODE,
-                    searchService.expandedQueries(question)
-            );
-            for (String query : queryPlan.queries()) {
-                collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+        if (!followUpPlan.enough() && !followUpPlan.followUpQueries().isEmpty() && pipelineService.maxIterations() > 1) {
+            for (int index = 0; index < followUpPlan.followUpQueries().size(); index++) {
+                String query = followUpPlan.followUpQueries().get(index);
+                String queryArea = index < followUpPlan.queryAreas().size() ? followUpPlan.queryAreas().get(index) : "";
+                followUpCandidateCount += collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, query, queryArea, questionMode, searchLimit, merged);
+                followUpQueriesUsed++;
             }
             iteration = 2;
             results = rankedCodeEvidence(question, questionMode, merged, limit);
@@ -628,10 +642,34 @@ public class CodeRagService {
                     minCodeEvidence(questionMode),
                     iteration
             );
+            queryPlan = new RagPipelineService.QueryPlan(
+                    RagPipelineService.Domain.CODE,
+                    java.util.stream.Stream.concat(java.util.stream.Stream.of(question), followUpPlan.followUpQueries().stream()).distinct().toList(),
+                    true,
+                    true,
+                    false,
+                    "llm evidence follow-up: " + safe(followUpPlan.reason(), "")
+            );
         }
 
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
-        return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+        long followUpSelectedCount = results.stream().filter(this::isLlmFollowUpEvidence).count();
+        log.info("Code RAG evidence follow-up attempted={} enough={} queriesUsed={} candidatesAdded={} selected={} missingAreas={} reason={} question={}",
+                followUpPlan.attempted(),
+                followUpPlan.enough(),
+                followUpQueriesUsed,
+                followUpCandidateCount,
+                followUpSelectedCount,
+                followUpPlan.missingAreas(),
+                safe(followUpPlan.reason(), ""),
+                abbreviate(question, 180));
+        if (followUpPlan.attempted()) {
+            log.info("Code RAG evidence follow-up detail queryAreas={} queries={} selectedFiles={}",
+                    followUpPlan.queryAreas(),
+                    followUpPlan.followUpQueries(),
+                    selectedPathSummary(results));
+        }
+        return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, followUpPlan, followUpQueriesUsed, followUpCandidateCount, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
     }
 
     private CodeQueryPlan codeQueryPlan(String question, CodeQuestionMode questionMode) {
@@ -856,15 +894,169 @@ public class CodeRagService {
         }
     }
 
+    private int collectFollowUpEvidenceForQuery(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String originalQuestion,
+            String query,
+            String queryArea,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        int before = merged.size();
+        for (String groundedQuery : groundedFollowUpQueries(originalQuestion, query, queryArea)) {
+            List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, groundedQuery, questionMode, limit);
+            for (CodeSearchResult result : results) {
+                merge(merged, markLlmFollowUpEvidence(result, groundedQuery));
+            }
+        }
+        String normalizedArea = normalizeQuestionText(queryArea + " " + query + " " + originalQuestion);
+        if (isRetrievalContextOrAnswerArea(normalizedArea)) {
+            for (CodeSearchResult result : runtimeRoleFollowUpEvidence(repositoryId, selectedSpaceId, spaceIds, normalizedArea, limit)) {
+                merge(merged, markLlmFollowUpEvidence(result, "runtime role grounded follow-up"));
+            }
+        }
+        return Math.max(0, merged.size() - before);
+    }
+
+    private List<CodeSearchResult> runtimeRoleFollowUpEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String normalizedArea,
+            int limit
+    ) {
+        String domainPattern = runtimeDomainPattern(normalizedArea);
+        String behaviorPattern = runtimeBehaviorPattern(normalizedArea);
+        if (domainPattern.isBlank() || behaviorPattern.isBlank()) {
+            return List.of();
+        }
+        return searchService.runtimeRoleSearch(
+                repositoryId,
+                domainPattern,
+                behaviorPattern,
+                Math.max(12, Math.min(24, limit * 3)),
+                spaceIds,
+                selectedSpaceId
+        );
+    }
+
+    private String runtimeDomainPattern(String normalizedArea) {
+        if (normalizedArea.contains("rag")) {
+            return "(rag|retriev|context|evidence|citation|answer|model|llm)";
+        }
+        if (normalizedArea.contains("index") || normalizedArea.contains("chunk") || normalizedArea.contains("embedding")) {
+            return "(index|chunk|embed|repository|source)";
+        }
+        return "";
+    }
+
+    private String runtimeBehaviorPattern(String normalizedArea) {
+        List<String> terms = new ArrayList<>();
+        if (containsAny(normalizedArea, "retrieval", "retrieve", "search", "query", "evidence")) {
+            terms.add("retriev");
+            terms.add("search");
+            terms.add("query");
+            terms.add("evidence");
+        }
+        if (containsAny(normalizedArea, "context", "prompt", "citation")) {
+            terms.add("context");
+            terms.add("prompt");
+            terms.add("citation");
+        }
+        if (containsAny(normalizedArea, "answer", "response", "generation", "model", "llm", "chat")) {
+            terms.add("answer");
+            terms.add("response");
+            terms.add("generation");
+            terms.add("model");
+            terms.add("llm");
+            terms.add("chat");
+        }
+        if (containsAny(normalizedArea, "flow", "pipeline", "route", "planner")) {
+            terms.add("flow");
+            terms.add("pipeline");
+            terms.add("route");
+            terms.add("planner");
+        }
+        return terms.isEmpty() ? "" : "(" + terms.stream().distinct().collect(Collectors.joining("|")) + ")";
+    }
+
+    private List<String> groundedFollowUpQueries(String originalQuestion, String query, String queryArea) {
+        String sanitized = sanitizeFollowUpQuery(query);
+        if (sanitized.isBlank()) {
+            return List.of();
+        }
+        List<String> queries = new ArrayList<>();
+        queries.add(sanitized);
+        String normalizedArea = normalizeQuestionText(queryArea + " " + sanitized + " " + originalQuestion);
+        if (isRetrievalContextOrAnswerArea(normalizedArea)) {
+            queries.add(sanitized + " rag retrieval evidence context answer generation model llm");
+            queries.add("code rag retrieval evidence context answer generation model llm");
+            queries.addAll(synthesizedRagRuntimeSymbolQueries(normalizedArea));
+        }
+        if (normalizedArea.contains("chunk") || normalizedArea.contains("index") || normalizedArea.contains("embedding")) {
+            queries.add(sanitized + " code indexing chunk embedding metadata storage");
+        }
+        return queries.stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(8)
+                .toList();
+    }
+
+    private List<String> synthesizedRagRuntimeSymbolQueries(String normalizedArea) {
+        List<String> queries = new ArrayList<>();
+        boolean retrieval = containsAny(normalizedArea, "retrieval", "retrieve", "search", "evidence");
+        boolean context = normalizedArea.contains("context");
+        boolean answer = containsAny(normalizedArea, "answer", "response", "generation", "model", "llm", "citation");
+        boolean pipeline = containsAny(normalizedArea, "flow", "pipeline", "route", "planner");
+        boolean ragRuntime = normalizedArea.contains("rag") && (retrieval || context || answer || pipeline);
+        if (ragRuntime) {
+            queries.add("rag service answer retrieval context");
+        }
+        if (retrieval) {
+            queries.add("service search retrieve evidence chunks");
+        }
+        if (context || answer || pipeline) {
+            queries.add("service pipeline route context answer evidence");
+        }
+        if (answer) {
+            queries.add("chat model answer generation service");
+        }
+        return queries;
+    }
+
+    private String sanitizeFollowUpQuery(String query) {
+        String safeQuery = safe(query, "").trim();
+        if (safeQuery.isBlank()) {
+            return "";
+        }
+        String withoutLeadingFile = LEADING_FILE_QUERY_PATTERN.matcher(safeQuery).replaceAll("");
+        return withoutLeadingFile
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private boolean isRetrievalContextOrAnswerArea(String normalized) {
+        return containsAny(normalized,
+                "retrieval", "retrieve", "search", "context", "answer", "response", "generation",
+                "model", "llm", "citation", "evidence", "rag");
+    }
+
     private List<CodeSearchResult> rankedCodeEvidence(
             String question,
             CodeQuestionMode questionMode,
             Map<UUID, CodeSearchResult> merged,
             int limit
     ) {
-        return evidenceRanker.rank(question, questionMode, List.copyOf(merged.values())).stream()
+        List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
+        List<CodeSearchResult> selected = ranked.stream()
                 .limit(limit)
                 .toList();
+        return ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
     }
 
     private int minCodeEvidence(CodeQuestionMode questionMode) {
@@ -921,14 +1113,292 @@ public class CodeRagService {
                             .thenComparingInt(this::flowRank))
                     .limit(limit)
                     .toList();
-            return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
+            selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
+            selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
-            return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
+            selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
+            selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
         }
         selected = ranked.stream().limit(limit).toList();
-        return preservePinnedEvidence(ranked, sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit), limit);
+        selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
+        selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+        return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
+    }
+
+    private List<CodeSearchResult> orderRagFlowEvidence(String question, List<CodeSearchResult> selected) {
+        if (!isRagAnswerFlowQuestion(question) || selected == null || selected.size() <= 1) {
+            return selected == null ? List.of() : selected;
+        }
+        if (selected.stream().anyMatch(result -> isConversationPinned(result) || isRequiredConversationPinned(result))) {
+            return selected;
+        }
+        Map<UUID, Integer> originalOrder = new LinkedHashMap<>();
+        for (int index = 0; index < selected.size(); index++) {
+            originalOrder.putIfAbsent(selected.get(index).chunkId(), index);
+        }
+        return selected.stream()
+                .sorted(Comparator
+                        .comparingInt((CodeSearchResult result) -> isRequiredConversationPinned(result) ? -1 : ragFlowEvidenceOrder(result))
+                        .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result))
+                        .thenComparingInt(result -> originalOrder.getOrDefault(result.chunkId(), Integer.MAX_VALUE)))
+                .toList();
+    }
+
+    private int ragFlowEvidenceOrder(CodeSearchResult result) {
+        RagFlowEvidenceRole role = ragFlowEvidenceRole(result);
+        return switch (role) {
+            case ENTRYPOINT -> 0;
+            case INDEXING -> 1;
+            case RETRIEVAL_CONTEXT -> 2;
+            case ANSWER_GENERATION -> 3;
+            case PERSISTENCE -> 4;
+            case SUPPORT -> 5;
+            case OTHER -> 6;
+        };
+    }
+
+    private RagFlowEvidenceRole ragFlowEvidenceRole(CodeSearchResult result) {
+        if (result == null) {
+            return RagFlowEvidenceRole.OTHER;
+        }
+        String target = normalizeQuestionText(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.content(), "")
+        ));
+        if (isRagSupportOnlyEvidence(result)) {
+            return RagFlowEvidenceRole.SUPPORT;
+        }
+        if (containsAny(target, "controller", "route", "endpoint", "requestmapping", "postmapping", "getmapping", "handler")) {
+            return RagFlowEvidenceRole.ENTRYPOINT;
+        }
+        RagRuntimeCoverageRole runtimeRole = ragRuntimeCoverageRole(result);
+        if (runtimeRole == RagRuntimeCoverageRole.RETRIEVAL_CONTEXT) {
+            return RagFlowEvidenceRole.RETRIEVAL_CONTEXT;
+        }
+        if (runtimeRole == RagRuntimeCoverageRole.ANSWER_GENERATION) {
+            return RagFlowEvidenceRole.ANSWER_GENERATION;
+        }
+        if (containsAny(target, "index", "indexing", "chunk", "embedding", "scan", "parse", "repository sync", "git")) {
+            return RagFlowEvidenceRole.INDEXING;
+        }
+        if (containsAny(target, "repository", "save", "store", "insert", "update", "select", "conversation", "turn")) {
+            return RagFlowEvidenceRole.PERSISTENCE;
+        }
+        return RagFlowEvidenceRole.OTHER;
+    }
+
+    private List<CodeSearchResult> ensureRagRuntimeServiceEvidence(
+            String question,
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
+        if (!isRagAnswerFlowQuestion(question) || ranked == null || ranked.isEmpty() || adjusted.isEmpty()) {
+            return adjusted;
+        }
+        List<RagRuntimeCoverageRole> requiredRoles = ragRuntimeCoverageRoles(question);
+        for (RagRuntimeCoverageRole role : requiredRoles) {
+            adjusted = ensureRagRuntimeCoverageRole(ranked, adjusted, limit, role);
+        }
+        if (adjusted.stream().anyMatch(this::isRagRuntimeServiceEvidence)) {
+            return adjusted.stream().limit(limit).toList();
+        }
+        List<CodeSearchResult> currentAdjusted = adjusted;
+        CodeSearchResult replacement = ranked.stream()
+                .filter(result -> !isRagSupportOnlyEvidence(result))
+                .filter(this::isRagRuntimeServiceEvidence)
+                .filter(result -> !containsChunk(currentAdjusted, result))
+                .findFirst()
+                .orElse(null);
+        if (replacement == null) {
+            return adjusted;
+        }
+        int replaceIndex = weakestRagFlowSupportIndex(adjusted);
+        if (replaceIndex >= 0) {
+            adjusted.set(replaceIndex, replacement);
+        } else if (adjusted.size() < limit) {
+            adjusted.add(replacement);
+        }
+        return adjusted.stream().limit(limit).toList();
+    }
+
+    private List<CodeSearchResult> ensureRagRuntimeCoverageRole(
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit,
+            RagRuntimeCoverageRole role
+    ) {
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
+        if (adjusted.stream().anyMatch(result -> ragRuntimeCoverageRole(result) == role)) {
+            return adjusted;
+        }
+        CodeSearchResult replacement = ranked.stream()
+                .filter(result -> ragRuntimeCoverageRole(result) == role)
+                .filter(result -> !containsChunk(adjusted, result))
+                .findFirst()
+                .orElse(null);
+        if (replacement == null) {
+            return adjusted;
+        }
+        int replaceIndex = weakestRagFlowSupportIndex(adjusted);
+        if (replaceIndex >= 0) {
+            adjusted.set(replaceIndex, replacement);
+        } else if (adjusted.size() < limit) {
+            adjusted.add(replacement);
+        }
+        return adjusted.stream().limit(limit).toList();
+    }
+
+    private List<RagRuntimeCoverageRole> ragRuntimeCoverageRoles(String question) {
+        String normalized = normalizeQuestionText(question);
+        List<RagRuntimeCoverageRole> roles = new ArrayList<>();
+        if (containsAny(normalized, "retrieval", "retrieve", "search", "context", "rag", "answer", "response", "flow")) {
+            roles.add(RagRuntimeCoverageRole.RETRIEVAL_CONTEXT);
+        }
+        if (containsAny(normalized, "answer", "response", "generation", "model", "llm", "chat", "rag", "flow")) {
+            roles.add(RagRuntimeCoverageRole.ANSWER_GENERATION);
+        }
+        return roles.stream().distinct().toList();
+    }
+
+    private boolean isRagAnswerFlowQuestion(String question) {
+        String normalized = normalizeQuestionText(question);
+        return normalized.contains("rag") && containsAny(normalized,
+                "answer", "response", "retrieval", "retrieve", "search", "context", "generation", "model", "llm", "flow");
+    }
+
+    private boolean isRagRuntimeServiceEvidence(CodeSearchResult result) {
+        if (!isMainImplementationEvidence(result, false)) {
+            return false;
+        }
+        if (!"service".equals(CodeSourceClassifier.runtimeRole(result))) {
+            return false;
+        }
+        String target = normalizeQuestionText(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.content(), "")
+        ));
+        return target.contains("rag") && containsAny(target,
+                "retrieval", "retrieve", "search", "context", "evidence", "answer", "response", "model", "llm", "citation");
+    }
+
+    private RagRuntimeCoverageRole ragRuntimeCoverageRole(CodeSearchResult result) {
+        if (!isMainImplementationEvidence(result, false) || isRagSupportOnlyEvidence(result)) {
+            return RagRuntimeCoverageRole.NONE;
+        }
+        String identity = normalizeQuestionText(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), "")
+        ));
+        String content = normalizeQuestionText(safe(result.content(), ""));
+        String target = identity + " " + content;
+        boolean runtimeIdentity = containsAny(identity,
+                "rag", "retriev", "search", "context", "evidence", "citation", "answer", "response",
+                "generation", "model", "llm", "chat", "prompt", "pipeline");
+        boolean indexingIdentity = containsAny(identity,
+                "index", "indexing", "scanner", "scan", "parser", "parse", "embedding", "chunk");
+        if (indexingIdentity && !runtimeIdentity) {
+            return RagRuntimeCoverageRole.NONE;
+        }
+        boolean ragRelated = runtimeIdentity
+                || target.contains("rag")
+                || containsAny(target, "retrieval", "retrieve", "context", "evidence", "citation", "answer", "model", "llm");
+        if (!ragRelated) {
+            return RagRuntimeCoverageRole.NONE;
+        }
+        boolean answerIdentity = containsAny(identity,
+                "answer", "response", "generation", "model", "llm", "chat", "prompt", "stream", "rag", "pipeline");
+        boolean retrievalIdentity = containsAny(identity,
+                "retrieval", "retrieve", "search", "context", "evidence", "citation", "query", "rag", "pipeline");
+        boolean answerGeneration = (answerIdentity || target.contains("rag"))
+                && containsAny(content, "answer", "response", "generation", "model", "llm", "chat", "prompt", "stream");
+        boolean retrievalContext = (retrievalIdentity || target.contains("rag"))
+                && containsAny(content, "retrieval", "retrieve", "search", "query", "context", "evidence", "citation", "chunk", "budget");
+        if (answerGeneration) {
+            return RagRuntimeCoverageRole.ANSWER_GENERATION;
+        }
+        if (retrievalContext) {
+            return RagRuntimeCoverageRole.RETRIEVAL_CONTEXT;
+        }
+        if (runtimeIdentity && containsAny(target,
+                "retrieval", "retrieve", "search", "query", "context", "evidence", "citation", "answer", "response",
+                "generation", "model", "llm", "chat", "prompt", "stream")) {
+            return containsAny(target, "retrieval", "retrieve", "search", "query", "context", "evidence", "citation")
+                    ? RagRuntimeCoverageRole.RETRIEVAL_CONTEXT
+                    : RagRuntimeCoverageRole.ANSWER_GENERATION;
+        }
+        return RagRuntimeCoverageRole.NONE;
+    }
+
+    private boolean isRagSupportOnlyEvidence(CodeSearchResult result) {
+        if (result == null) {
+            return true;
+        }
+        String target = normalizeQuestionText(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), "")
+        ));
+        return containsAny(target,
+                "conversation", "history", "savedanswer", "metrics", "tuning", "handoff", "gate",
+                "verification", "summary", "schema", "profile", "dto", "jobsummary", "failure");
+    }
+
+    private int weakestRagFlowSupportIndex(List<CodeSearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result) && isRagSupportOnlyEvidence(result)) {
+                return index;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (isRequiredConversationPinned(result) || ragRuntimeCoverageRole(result) != RagRuntimeCoverageRole.NONE) {
+                continue;
+            }
+            String runtimeRole = CodeSourceClassifier.runtimeRole(result);
+            if ("controller".equals(runtimeRole) || "repository".equals(runtimeRole)
+                    || "model".equals(runtimeRole) || CodeSourceClassifier.SOURCE_CONFIG.equals(runtimeRole)
+                    || "unknown".equals(runtimeRole)) {
+                return index;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            if (!isRequiredConversationPinned(selected.get(index)) && !isRagRuntimeServiceEvidence(selected.get(index))) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private enum RagRuntimeCoverageRole {
+        NONE,
+        RETRIEVAL_CONTEXT,
+        ANSWER_GENERATION
+    }
+
+    private enum RagFlowEvidenceRole {
+        ENTRYPOINT,
+        INDEXING,
+        RETRIEVAL_CONTEXT,
+        ANSWER_GENERATION,
+        PERSISTENCE,
+        SUPPORT,
+        OTHER
     }
 
     private List<CodeSearchResult> sourceAwareEvidenceSelection(
@@ -1798,6 +2268,7 @@ public class CodeRagService {
             boolean answerRetried,
             boolean answerContinued,
             boolean answerKeptAfterStreamValidation,
+            AnswerQualityTrace answerQualityTrace,
             CodeRetrieval retrieval,
             int contextBudgetDropped
     ) {
@@ -1811,6 +2282,9 @@ public class CodeRagService {
                 + ", retry=" + answerRetried
                 + ", continuation=" + answerContinued
                 + ", doneReason=" + safe(doneReason, "none") + ".");
+        if (answerQualityTrace != null && answerQualityTrace.observed()) {
+            notes.add(answerQualityTrace.summary());
+        }
         if (!citationQuality.summary().isBlank()) {
             notes.add("Citation support: " + citationQuality.summary());
         }
@@ -1830,7 +2304,18 @@ public class CodeRagService {
                     + distinctFiles + " distinct files.");
         }
         if (retrieval != null && retrieval.iteration() > 1) {
-            notes.add("RAG pipeline retried code retrieval once because the first evidence set was weak.");
+            notes.add("RAG pipeline ran one LLM-planned follow-up retrieval and merged it with the initial evidence.");
+        }
+        if (retrieval != null && retrieval.followUpPlan() != null) {
+            RagPipelineService.CodeEvidenceFollowUpPlan plan = retrieval.followUpPlan();
+            notes.add("Code evidence follow-up planner: attempted=" + plan.attempted()
+                    + ", enough=" + plan.enough()
+                    + ", followUpQueriesUsed=" + retrieval.followUpQueriesUsed()
+                    + ", followUpCandidatesAdded=" + retrieval.followUpCandidateCount()
+                    + ", followUpSelected=" + answerResults.stream().filter(this::isLlmFollowUpEvidence).count()
+                    + ", missingAreas=" + plan.missingAreas()
+                    + ", queryAreas=" + plan.queryAreas()
+                    + ", reason=" + safe(plan.reason(), "") + ".");
         }
         if (retrieval != null && retrieval.queryPlan() != null) {
             RagPipelineService.QueryPlan plan = retrieval.queryPlan();
@@ -1841,7 +2326,7 @@ public class CodeRagService {
                     + ", queryCount=" + plan.queries().size() + ".");
         }
         if (retrieval != null && retrieval.queryPlan().rewriteUsed()) {
-            notes.add("RAG pipeline used query rewrite as an auxiliary code retrieval signal.");
+            notes.add("RAG pipeline used LLM-planned query expansion as an auxiliary code retrieval signal.");
         }
         if (retrieval != null && retrieval.queryPlan().rewriteFailed()) {
             notes.add("RAG query rewrite failed, so deterministic hybrid code search was used.");
@@ -1903,6 +2388,7 @@ public class CodeRagService {
         long llmAdjudicated = safeResults.stream()
                 .filter(result -> result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("llmEvidenceAdjudicationSelected")))
                 .count();
+        long llmFollowUp = safeResults.stream().filter(this::isLlmFollowUpEvidence).count();
         return "Evidence selection: selected=" + safeResults.size()
                 + ", budgetDropped=" + Math.max(0, contextBudgetDropped)
                 + ", chunkTypes=" + typeCounts
@@ -1910,7 +2396,8 @@ public class CodeRagService {
                 + ", runtimeRoles=" + runtimeRoles
                 + ", graphExpanded=" + graphExpanded
                 + ", requiredPinned=" + required
-                + ", llmAdjudicated=" + llmAdjudicated + ".";
+                + ", llmAdjudicated=" + llmAdjudicated
+                + ", llmFollowUp=" + llmFollowUp + ".";
     }
 
     private List<String> diagnostics(
@@ -2334,6 +2821,50 @@ public class CodeRagService {
         }
     }
 
+    private CodeSearchResult markLlmFollowUpEvidence(CodeSearchResult result, String query) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("llmFollowUpEvidence", true);
+        metadata.put("llmFollowUpQuery", safe(query, ""));
+        metadata.put("evidenceRankReason", String.valueOf(metadata.getOrDefault("evidenceRankReason", ""))
+                + (metadata.containsKey("evidenceRankReason") ? "; " : "")
+                + "Selected by LLM-planned follow-up retrieval");
+        return new CodeSearchResult(
+                result.chunkId(),
+                result.repositoryId(),
+                result.fileId(),
+                result.repositoryName(),
+                result.filePath(),
+                result.chunkType(),
+                result.symbolName(),
+                result.className(),
+                result.methodName(),
+                result.namespaceName(),
+                result.controlName(),
+                result.eventName(),
+                result.chunkIndex(),
+                result.lineStart(),
+                result.lineEnd(),
+                result.content(),
+                result.score() + 0.12,
+                Map.copyOf(metadata)
+        );
+    }
+
+    private boolean isLlmFollowUpEvidence(CodeSearchResult result) {
+        return result != null
+                && result.metadata() != null
+                && Boolean.TRUE.equals(result.metadata().get("llmFollowUpEvidence"));
+    }
+
+    private String selectedPathSummary(List<CodeSearchResult> results) {
+        return (results == null ? List.<CodeSearchResult>of() : results).stream()
+                .limit(12)
+                .map(result -> safe(result.filePath(), "")
+                        + (safe(result.methodName(), "").isBlank() ? "" : "#" + result.methodName())
+                        + (isLlmFollowUpEvidence(result) ? "[follow-up]" : ""))
+                .collect(Collectors.joining("; "));
+    }
+
     private CodeSearchResult boost(CodeSearchResult result, double value) {
         return new CodeSearchResult(
                 result.chunkId(),
@@ -2529,11 +3060,166 @@ public class CodeRagService {
             RagPipelineService.EvidenceAssessment assessment,
             RagPipelineService.QueryPlan queryPlan,
             CodeQueryPlan deterministicPlan,
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
+            int followUpQueriesUsed,
+            int followUpCandidateCount,
             int iteration,
             int candidateCount,
             int pinnedCandidateCount,
             int pinnedUsedCount
     ) {
+    }
+
+    private record AnswerQualityTrace(
+            boolean observed,
+            String initialFailureReason,
+            int initialChars,
+            int initialCitationRefs,
+            int initialInvalidCitationRefs,
+            int initialCitationCoverage,
+            String initialDoneReason,
+            String initialPreview,
+            boolean retryAttempted,
+            String retryFailureReason,
+            int retryChars,
+            int retryCitationRefs,
+            int retryInvalidCitationRefs,
+            int retryCitationCoverage,
+            String retryDoneReason,
+            String retryPreview,
+            String finalFailureReason,
+            boolean unavailable,
+            String unavailableReason
+    ) {
+        static AnswerQualityTrace empty() {
+            return new AnswerQualityTrace(false, "", 0, 0, 0, 0, "", "", false, "", 0, 0, 0, 0, "", "", "", false, "");
+        }
+
+        static AnswerQualityTrace unavailable(RuntimeException ex) {
+            return new AnswerQualityTrace(true, "", 0, 0, 0, 0, "", "", false, "", 0, 0, 0, 0, "", "", "", true,
+                    ex == null ? "unknown" : ex.getClass().getSimpleName());
+        }
+
+        static AnswerQualityTrace fromInitial(String answer, String doneReason, List<CodeSearchResult> evidence, String failureReason) {
+            CitationSnapshot snapshot = CitationSnapshot.from(answer, evidence);
+            return new AnswerQualityTrace(true, safeReason(failureReason), safeValue(answer, "").length(), snapshot.references(), snapshot.invalid(), snapshot.coverage(),
+                    safeValue(doneReason, "none"), preview(answer), false, "", 0, 0, 0, 0, "", "", "", false, "");
+        }
+
+        AnswerQualityTrace withRetry(String answer, String doneReason, List<CodeSearchResult> evidence, String failureReason) {
+            CitationSnapshot snapshot = CitationSnapshot.from(answer, evidence);
+            return new AnswerQualityTrace(true, initialFailureReason, initialChars, initialCitationRefs, initialInvalidCitationRefs, initialCitationCoverage,
+                    initialDoneReason, initialPreview, true, safeReason(failureReason), safeValue(answer, "").length(), snapshot.references(), snapshot.invalid(),
+                    snapshot.coverage(), safeValue(doneReason, "none"), preview(answer), finalFailureReason, unavailable, unavailableReason);
+        }
+
+        AnswerQualityTrace withFinalFailure(String answer, String doneReason, List<CodeSearchResult> evidence, String failureReason) {
+            if (!observed) {
+                AnswerQualityTrace trace = fromInitial(answer, doneReason, evidence, failureReason);
+                return trace.withFinalFailure(answer, doneReason, evidence, failureReason);
+            }
+            return new AnswerQualityTrace(true, initialFailureReason, initialChars, initialCitationRefs, initialInvalidCitationRefs, initialCitationCoverage,
+                    initialDoneReason, initialPreview, retryAttempted, retryFailureReason, retryChars, retryCitationRefs, retryInvalidCitationRefs,
+                    retryCitationCoverage, retryDoneReason, retryPreview, safeReason(failureReason), unavailable, unavailableReason);
+        }
+
+        String summary() {
+            if (unavailable) {
+                return "LLM answer quality trace: unavailable=true, reason=" + unavailableReason + ".";
+            }
+            StringBuilder builder = new StringBuilder("LLM answer quality trace: initialFailureReason=")
+                    .append(initialFailureReason.isBlank() ? "none" : initialFailureReason)
+                    .append(", initialChars=").append(initialChars)
+                    .append(", initialCitedReferences=").append(initialCitationRefs)
+                    .append(", initialInvalidCitationRefs=").append(initialInvalidCitationRefs)
+                    .append(", initialCitationCoverage=").append(initialCitationCoverage).append("%")
+                    .append(", initialDoneReason=").append(initialDoneReason);
+            if (retryAttempted) {
+                builder.append(", retryFailureReason=").append(retryFailureReason.isBlank() ? "none" : retryFailureReason)
+                        .append(", retryChars=").append(retryChars)
+                        .append(", retryCitedReferences=").append(retryCitationRefs)
+                        .append(", retryInvalidCitationRefs=").append(retryInvalidCitationRefs)
+                        .append(", retryCitationCoverage=").append(retryCitationCoverage).append("%")
+                        .append(", retryDoneReason=").append(retryDoneReason);
+            }
+            if (!finalFailureReason.isBlank()) {
+                builder.append(", finalFailureReason=").append(finalFailureReason);
+            }
+            if (!initialPreview.isBlank()) {
+                builder.append(", initialPreview=\"").append(initialPreview).append("\"");
+            }
+            if (retryAttempted && !retryPreview.isBlank()) {
+                builder.append(", retryPreview=\"").append(retryPreview).append("\"");
+            }
+            return builder.append(".").toString();
+        }
+
+        private static String safeReason(String value) {
+            return safeValue(value, "").replaceAll("[\\r\\n]+", " ").trim();
+        }
+
+        private static String preview(String answer) {
+            String compact = safeValue(answer, "").replaceAll("\\s+", " ").trim();
+            if (compact.length() <= 220) {
+                return compact.replace("\"", "'");
+            }
+            return compact.substring(0, 220).trim().replace("\"", "'") + "...";
+        }
+
+        private static String safeValue(String value, String fallback) {
+            return value == null || value.isBlank() ? fallback : value;
+        }
+    }
+
+    private record CitationSnapshot(int references, int invalid, int coverage) {
+        static CitationSnapshot from(String answer, List<CodeSearchResult> evidence) {
+            String safeAnswer = answer == null ? "" : answer;
+            List<CodeSearchResult> safeEvidence = evidence == null ? List.of() : evidence;
+            Set<Integer> referenced = citationReferencesStatic(safeAnswer);
+            long invalid = referenced.stream()
+                    .filter(index -> index < 1 || index > safeEvidence.size())
+                    .count();
+            List<String> claims = claimSegmentsStatic(safeAnswer);
+            long citedClaims = claims.stream().filter(CitationSnapshot::containsCitationStatic).count();
+            int coverage = claims.isEmpty() ? 0 : (int) Math.round((citedClaims * 100.0) / claims.size());
+            return new CitationSnapshot(referenced.size(), (int) invalid, coverage);
+        }
+
+        private static Set<Integer> citationReferencesStatic(String answer) {
+            Set<Integer> values = new HashSet<>();
+            Matcher matcher = Pattern.compile("\\[(\\d+)]").matcher(answer == null ? "" : answer);
+            while (matcher.find()) {
+                try {
+                    values.add(Integer.parseInt(matcher.group(1)));
+                } catch (NumberFormatException ignored) {
+                    // Regex keeps this numeric, but keep parsing defensive.
+                }
+            }
+            return values;
+        }
+
+        private static List<String> claimSegmentsStatic(String answer) {
+            String normalized = (answer == null ? "" : answer).replace('\r', '\n');
+            return Pattern.compile("[\\n.!?]+")
+                    .splitAsStream(normalized)
+                    .map(String::trim)
+                    .filter(segment -> segment.length() >= 18)
+                    .filter(segment -> segment.matches("(?s).*[\\p{L}\\p{N}].*"))
+                    .limit(40)
+                    .toList();
+        }
+
+        private static boolean containsCitationStatic(String answer) {
+            return answer != null && answer.matches("(?s).*\\[\\d+].*");
+        }
+    }
+
+    private String abbreviate(String value, int maxChars) {
+        String text = safe(value, "");
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, Math.max(0, maxChars - 3)) + "...";
     }
 
     private record CodeQueryPlan(String intent, List<String> queries, boolean originalOnlyFallback) {

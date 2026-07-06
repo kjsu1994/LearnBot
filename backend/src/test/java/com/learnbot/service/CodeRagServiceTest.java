@@ -195,6 +195,70 @@ class CodeRagServiceTest {
     }
 
     @Test
+    void llmPlannedFollowUpSearchMergesAdditionalEvidenceBeforeAnswering() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult indexing = result(
+                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                "method",
+                "runIndex",
+                0.84,
+                "runIndex scans files, parses chunks, embeds content, and stores chunks"
+        );
+        CodeSearchResult answering = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.80,
+                "askPrioritized retrieves evidence, builds context, and calls the LLM"
+        );
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"followUpQueries\":[\"runtime RAG retrieval context construction model answer generation\"],\"queryAreas\":[\"answer generation\"],\"reason\":\"initial evidence lacks answer generation\"}")
+                );
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(1);
+                    if (query.contains("runtime RAG retrieval context construction model answer generation")) {
+                        return List.of(answering);
+                    }
+                    return List.of(indexing);
+                });
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Indexing is handled by CodeIndexingService and answer generation by CodeRagService [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "내 서비스의 인덱싱부터 RAG 답변까지 흐름을 설명해줘",
+                "overview",
+                4
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .contains(
+                        "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                        "backend/src/main/java/com/learnbot/service/CodeRagService.java"
+                );
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("LLM-planned follow-up retrieval"));
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("followUpQueriesUsed=1").contains("answer generation"));
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("queryAreas=[answer generation]"));
+        verify(searchService, atLeastOnce()).search(isNull(), argThat(query -> query.contains("runtime RAG retrieval context construction model answer generation")), anyInt(), anyList(), isNull());
+    }
+
+    @Test
     void overviewKeepsEvidenceWhenChatModelFails() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -959,7 +1023,7 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void streamingKeepsVisibleAnswerWhenSelfCheckWouldFallback() {
+    void streamingReplacesVisibleAnswerWhenSelfCheckWouldFallback() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -1002,9 +1066,43 @@ class CodeRagServiceTest {
                 }
         );
 
-        assertThat(visible.toString()).isEqualTo("The streamed code answer is useful but lacks a citation.");
-        assertThat(response.answer()).isEqualTo("The streamed code answer is useful but lacks a citation.");
-        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Streaming answer was kept"));
+        assertThat(visible.toString()).contains("[1]");
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.answer()).doesNotContain("lacks a citation");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("fallback=true"));
+    }
+
+    @Test
+    void diagnosticsIncludeOriginalQualityFailureReasonWhenAnswerFallsBack() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString()))
+                .thenReturn(chat("This answer has enough words but no citation."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does login work?",
+                "overview",
+                4
+        );
+
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("fallback=true"));
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note)
+                .contains("LLM answer quality trace")
+                .contains("initialFailureReason=missing citation")
+                .contains("initialCitedReferences=0")
+                .contains("initialPreview=\"This answer has enough words but no citation.\""));
     }
 
     @Test
@@ -1179,9 +1277,9 @@ class CodeRagServiceTest {
                 }
         );
 
-        assertThat(response.answer()).contains("[2]");
-        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("RAG quality trace").contains("invalidCitationRefs=1"));
-        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("Citation support").contains("outside returned evidence"));
+        assertThat(response.answer()).contains("[1]");
+        assertThat(response.answer()).doesNotContain("[2]");
+        assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("RAG quality trace").contains("invalidCitationRefs=0"));
     }
 
     @Test
@@ -1429,6 +1527,163 @@ class CodeRagServiceTest {
                 .containsExactly("backend/src/main/java/com/learnbot/service/CodeRagService.java");
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("llmAdjudicated=0"));
+    }
+
+    @Test
+    void followUpRetrievalGroundsInventedServiceFileNamesToRuntimeRagEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult indexing = result(
+                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                "file_section",
+                null,
+                0.86,
+                "CodeIndexingService scans files and creates chunks for indexing"
+        );
+        CodeSearchResult conversationStore = result(
+                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
+                "file_section",
+                null,
+                0.82,
+                "RagConversationRepository stores conversation turns and evidence JSON"
+        );
+        CodeSearchResult finalGate = result(
+                "frontend/src/components/code/mutationFinalResponseHandoffGate.js",
+                "method",
+                "buildMutationFinalResponseHandoffGateView",
+                0.80,
+                "Frontend gate renders final response handoff status"
+        );
+        CodeSearchResult runtimeRag = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.20,
+                "CodeRagService retrieves code evidence, builds context, calls the LLM model, validates citations, and returns the RAG answer response"
+        );
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"context construction\",\"answer generation flow\"],\"followUpQueries\":[\"backend/src/main/java/com/learnbot/service/RetrievalService.java: how does retrieval query indexed chunks?\",\"backend/src/main/java/com/learnbot/service/ContextConstructionService.java: how is retrieved context merged?\",\"backend/src/main/java/com/learnbot/service/AnswerGenerationService.java: how does the model generate answers from context?\"],\"queryAreas\":[\"retrieval pipeline\",\"context construction\",\"answer generation with context\"],\"reason\":\"initial evidence lacks runtime RAG answer flow\"}")
+                );
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    return List.of(indexing, conversationStore, finalGate);
+                });
+        when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(runtimeRag));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The runtime RAG answer flow is handled by CodeRagService after indexing evidence is available [1]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain indexing to RAG response flow",
+                "overview",
+                3
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .contains("backend/src/main/java/com/learnbot/service/CodeRagService.java");
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("followUpQueriesUsed=3"));
+        verify(searchService, atLeastOnce()).runtimeRoleSearch(
+                isNull(),
+                argThat(pattern -> pattern.contains("rag") && pattern.contains("context")),
+                argThat(pattern -> pattern.contains("answer") || pattern.contains("retriev")),
+                anyInt(),
+                anyList(),
+                isNull()
+        );
+    }
+
+    @Test
+    void ragFlowQuestionsKeepRuntimeRetrievalAndAnswerEvidenceOverSupportEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult indexing = result(
+                "backend/src/main/java/app/service/RepositoryIndexingService.java",
+                "file_section",
+                null,
+                0.90,
+                "RepositoryIndexingService scans source files, computes content hashes, creates chunks, and tracks indexing progress"
+        );
+        CodeSearchResult supportGate = result(
+                "frontend/src/components/code/finalResponseGate.js",
+                "method",
+                "finalResponseGateView",
+                0.88,
+                "Frontend gate renders final response status and disabled text"
+        );
+        CodeSearchResult turnStore = result(
+                "backend/src/main/java/app/repository/ConversationTurnRepository.java",
+                "file_section",
+                null,
+                0.84,
+                "ConversationTurnRepository stores conversation turns, citations, evidence, diagnostics, and metadata"
+        );
+        CodeSearchResult retrieval = result(
+                "backend/src/main/java/app/service/RagRetrievalPipeline.java",
+                "method",
+                "retrieveContext",
+                0.35,
+                "RagRetrievalPipeline searches indexed chunks, ranks evidence, and builds retrieved context for the query"
+        );
+        CodeSearchResult answer = result(
+                "backend/src/main/java/app/service/RagAnswerPipeline.java",
+                "method",
+                "generateAnswer",
+                0.34,
+                "RagAnswerPipeline builds the prompt from retrieved context, calls the chat model, validates citations, and returns the answer response"
+        );
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to rag answer flow\"],\"reason\":\"broad flow question\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"answer generation flow\"],\"followUpQueries\":[\"RAG retrieval pipeline context construction\",\"RAG answer generation model response\"],\"queryAreas\":[\"retrieval pipeline\",\"answer generation\"],\"reason\":\"initial evidence lacks runtime retrieval and answer generation\"}")
+                );
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(indexing, supportGate, turnStore));
+        when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(retrieval, answer));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The RAG flow retrieves indexed context and then generates the answer from that context [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain indexing to RAG response flow",
+                "overview",
+                5
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .contains(
+                        "backend/src/main/java/app/service/RagRetrievalPipeline.java",
+                        "backend/src/main/java/app/service/RagAnswerPipeline.java"
+                );
+        List<String> filePaths = response.evidence().stream()
+                .map(CodeEvidence::filePath)
+                .toList();
+        assertThat(filePaths.indexOf("backend/src/main/java/app/service/RagRetrievalPipeline.java"))
+                .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
+        assertThat(filePaths.indexOf("backend/src/main/java/app/service/RagAnswerPipeline.java"))
+                .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
     }
 
     private static OllamaClient.ChatResult chat(String content) {

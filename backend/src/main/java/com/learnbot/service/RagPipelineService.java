@@ -270,6 +270,26 @@ public class RagPipelineService {
         }
     }
 
+    public CodeEvidenceFollowUpPlan planCodeEvidenceFollowUp(String question, String mode, List<CodeSearchResult> candidates, int maxQueries) {
+        if (candidates == null || candidates.isEmpty()) {
+            return new CodeEvidenceFollowUpPlan(false, true, "no initial evidence", List.of(), List.of(), List.of());
+        }
+        try {
+            String response = ollamaClient.chatResult(
+                    codeEvidenceCoverageSystemPrompt(),
+                    codeEvidenceCoverageUserPrompt(question, mode, candidates),
+                    OllamaClient.ChatRole.AUXILIARY,
+                    520,
+                    Duration.ofSeconds(12)
+            ).content();
+            return parseCodeEvidenceFollowUp(response, maxQueries);
+        } catch (RuntimeException ex) {
+            log.info("RAG code evidence follow-up planning skipped reason={} message={} question={}",
+                    ex.getClass().getSimpleName(), safeMessage(ex), abbreviate(question));
+            return new CodeEvidenceFollowUpPlan(true, true, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of());
+        }
+    }
+
     private LearnBotProperties.Rag.Pipeline pipeline() {
         return properties.getRag().getPipeline();
     }
@@ -415,6 +435,72 @@ public class RagPipelineService {
                 - Prefer direct evidence over indirect summaries when both are available.
                 - Select only indexes from the candidate list.
                 """;
+    }
+
+    private String codeEvidenceCoverageSystemPrompt() {
+        return """
+                You judge whether current code RAG evidence is enough before answer generation.
+                Return strict JSON only. No Markdown.
+                Do not answer the user.
+                If key implementation evidence is missing or the evidence is off-topic, request a small number of concrete follow-up search queries.
+                This must work across programming languages and frameworks. Use file paths, symbols, services, controllers, repositories, routes, handlers, hooks, jobs, tasks, and database/query terms from the evidence when useful.
+                JSON schema: {"enough":true,"missingAreas":["area"],"followUpQueries":["query"],"queryAreas":["area for query"],"reason":"short reason"}
+                Rules:
+                - Set enough=false when evidence is mostly tests, frontend gates, history storage, retention, docs, generated, or vendor code but the question asks about runtime behavior.
+                - Conversation history repositories, UI gate/status helpers, retention/cleanup services, and verification summaries are supporting evidence only. They are not enough for runtime flow or answer-generation questions unless the user explicitly asks about them.
+                - If the current evidence would force the final answer to say that implementation details are not visible, set enough=false and request follow-up queries for the missing implementation path.
+                - For broad flow questions, spread follow-up queries across distinct missing areas such as entrypoint, processing/chunking, persistence/index storage, retrieval/search, context construction, and answer/model generation.
+                - Do not spend all follow-up queries on indexing or storage if retrieval/search or answer/model generation is missing.
+                - For RAG answer-generation questions, require direct runtime evidence for retrieval/search, context construction, and model/answer generation, not only stored conversation turns.
+                - queryAreas must align one-to-one with followUpQueries when possible.
+                - Keep follow-up queries short, concrete, and source-code oriented.
+                """;
+    }
+
+    private String codeEvidenceCoverageUserPrompt(String question, String mode, List<CodeSearchResult> candidates) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Question:\n").append(safe(question)).append("\n\n");
+        prompt.append("Question mode: ").append(safe(mode)).append("\n\n");
+        prompt.append("Current evidence candidates:\n");
+        for (int index = 0; index < Math.min(10, candidates.size()); index++) {
+            CodeSearchResult result = candidates.get(index);
+            CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(result);
+            prompt.append(index + 1).append(". file=").append(safe(result.filePath()))
+                    .append(" lines=").append(result.lineStart()).append("-").append(result.lineEnd())
+                    .append(" chunkType=").append(safe(result.chunkType()))
+                    .append(" sourceRole=").append(profile.sourceRole())
+                    .append(" runtimeRole=").append(profile.runtimeRole())
+                    .append(" domainRole=").append(profile.domainRole())
+                    .append("\nSymbols: ")
+                    .append(safe(result.className())).append(" ")
+                    .append(safe(result.methodName())).append(" ")
+                    .append(safe(result.symbolName())).append("\n")
+                    .append("Excerpt:\n")
+                    .append(trimForPrompt(result.content(), 520))
+                    .append("\n\n");
+        }
+        prompt.append("Return JSON only.");
+        return prompt.toString();
+    }
+
+    private CodeEvidenceFollowUpPlan parseCodeEvidenceFollowUp(String response, int maxQueries) {
+        String json = extractJsonObject(response);
+        if (json.isBlank()) {
+            throw new IllegalArgumentException("Code evidence follow-up response did not contain JSON");
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(json, new TypeReference<>() {
+            });
+            boolean enough = Boolean.parseBoolean(String.valueOf(parsed.getOrDefault("enough", "true")));
+            List<String> missingAreas = parsedStrings(parsed.get("missingAreas")).stream().limit(5).toList();
+            int queryLimit = Math.max(0, Math.min(4, maxQueries));
+            List<String> queries = parsedStrings(parsed.get("followUpQueries")).stream().limit(queryLimit).toList();
+            List<String> queryAreas = parsedStrings(parsed.get("queryAreas")).stream().limit(queryLimit).toList();
+            String reason = stringValue(parsed.get("reason"));
+            return new CodeEvidenceFollowUpPlan(true, enough, reason, missingAreas, enough ? List.of() : queries, enough ? List.of() : queryAreas);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid code evidence follow-up JSON", ex);
+        }
     }
 
     private String codeAdjudicationUserPrompt(String question, String mode, List<CodeSearchResult> candidates, int limit) {
@@ -809,6 +895,22 @@ public class RagPipelineService {
             String reason,
             List<CodeSearchResult> results
     ) {
+    }
+
+    public record CodeEvidenceFollowUpPlan(
+            boolean attempted,
+            boolean enough,
+            String reason,
+            List<String> missingAreas,
+            List<String> followUpQueries,
+            List<String> queryAreas
+    ) {
+        public CodeEvidenceFollowUpPlan {
+            reason = reason == null ? "" : reason;
+            missingAreas = missingAreas == null ? List.of() : List.copyOf(missingAreas);
+            followUpQueries = followUpQueries == null ? List.of() : List.copyOf(followUpQueries);
+            queryAreas = queryAreas == null ? List.of() : List.copyOf(queryAreas);
+        }
     }
 
     public enum CodeRagRoute {

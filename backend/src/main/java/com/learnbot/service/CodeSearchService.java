@@ -112,6 +112,35 @@ public class CodeSearchService {
                 .toList();
     }
 
+    public List<CodeSearchResult> runtimeRoleSearch(
+            UUID repositoryId,
+            String domainPattern,
+            String behaviorPattern,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        String safeDomainPattern = domainPattern == null ? "" : domainPattern.trim();
+        String safeBehaviorPattern = behaviorPattern == null ? "" : behaviorPattern.trim();
+        if (safeDomainPattern.isBlank() || safeBehaviorPattern.isBlank()) {
+            return List.of();
+        }
+        try {
+            return repository.runtimeRoleSearch(
+                    repositoryId,
+                    safeDomainPattern,
+                    safeBehaviorPattern,
+                    Math.max(1, Math.min(limit, 30)),
+                    spaceIds == null || spaceIds.isEmpty()
+                            ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
+                            : spaceIds,
+                    selectedSpaceId
+            );
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
+    }
+
     public List<String> expandedQueries(String query) {
         if (query == null || query.isBlank()) {
             return List.of();
