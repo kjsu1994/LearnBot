@@ -37,8 +37,8 @@ import java.util.concurrent.Future;
 @Service
 public class CodeIndexingService {
     private static final Logger log = LoggerFactory.getLogger(CodeIndexingService.class);
-    static final String CODE_PARSER_SIGNATURE = "code-symbol-v3";
-    static final String CODE_CHUNK_PROFILE = "symbolic-main-v3";
+    static final String CODE_PARSER_SIGNATURE = "code-symbol-v4";
+    static final String CODE_CHUNK_PROFILE = "symbolic-main-v4";
     static final String PROJECT_CONTEXT_PARSER_SIGNATURE = "project-context-v2";
     static final String PROJECT_CONTEXT_CHUNK_PROFILE = "project-context-v2";
 

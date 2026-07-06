@@ -1115,18 +1115,96 @@ public class CodeRagService {
                     .toList();
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
             selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
             return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
             selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
             return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
         }
         selected = ranked.stream().limit(limit).toList();
         selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
         selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+        selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
         return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
+    }
+
+    private List<CodeSearchResult> preferStructuredEvidence(
+            CodeQuestionMode questionMode,
+            String question,
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
+        if (ranked == null || ranked.isEmpty() || adjusted.isEmpty()) {
+            return adjusted;
+        }
+        int targetStructured = structuredEvidenceTarget(questionMode, question, limit);
+        while (structuredEvidenceCount(adjusted) < targetStructured) {
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> isStructuredEvidenceCandidate(result, question))
+                    .findFirst()
+                    .orElse(null);
+            if (replacement == null) {
+                break;
+            }
+            int replaceIndex = weakestLineWindowIndex(adjusted);
+            if (replaceIndex < 0 && isRagAnswerFlowQuestion(question)) {
+                replaceIndex = weakestRagFlowSupportIndex(adjusted);
+            }
+            if (replaceIndex < 0) {
+                if (adjusted.size() < limit) {
+                    adjusted.add(replacement);
+                    continue;
+                }
+                break;
+            }
+            adjusted.set(replaceIndex, replacement);
+        }
+        return adjusted.stream().limit(limit).toList();
+    }
+
+    private int structuredEvidenceTarget(CodeQuestionMode questionMode, String question, int limit) {
+        int safeLimit = Math.max(1, limit);
+        if (isRagAnswerFlowQuestion(question)) {
+            return Math.min(safeLimit, Math.max(4, safeLimit / 2));
+        }
+        return switch (questionMode) {
+            case OVERVIEW, CALL_FLOW, REASONING, IMPACT -> Math.min(safeLimit, Math.max(2, safeLimit / 3));
+            default -> Math.min(safeLimit, 1);
+        };
+    }
+
+    private long structuredEvidenceCount(List<CodeSearchResult> results) {
+        return results == null ? 0 : results.stream().filter(result -> isStructuredEvidenceCandidate(result, "")).count();
+    }
+
+    private boolean isStructuredEvidenceCandidate(CodeSearchResult result, String question) {
+        if (result == null || isProjectContext(result.chunkType()) || isLineWindowEvidence(result)) {
+            return false;
+        }
+        if (!isMainImplementationEvidence(result, asksForLocalAgent(question))) {
+            return false;
+        }
+        return isStructured(result.chunkType())
+                || notBlank(result.methodName())
+                || notBlank(result.className())
+                || notBlank(result.symbolName());
+    }
+
+    private int weakestLineWindowIndex(List<CodeSearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result) && isLineWindowEvidence(result)) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     private List<CodeSearchResult> orderRagFlowEvidence(String question, List<CodeSearchResult> selected) {
@@ -2912,9 +2990,16 @@ public class CodeRagService {
     private boolean isStructured(String chunkType) {
         return "class".equals(chunkType)
                 || "method".equals(chunkType)
+                || "function".equals(chunkType)
+                || "constructor".equals(chunkType)
+                || "record".equals(chunkType)
+                || "enum".equals(chunkType)
+                || "component".equals(chunkType)
                 || "event_handler".equals(chunkType)
                 || "xaml_event".equals(chunkType)
                 || "xaml_view".equals(chunkType)
+                || "xaml_binding".equals(chunkType)
+                || "xaml_control".equals(chunkType)
                 || isProjectContext(chunkType);
     }
 

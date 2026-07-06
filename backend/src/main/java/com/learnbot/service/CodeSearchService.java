@@ -426,9 +426,16 @@ public class CodeSearchService {
     private boolean isStructured(String chunkType) {
         return "class".equals(chunkType)
                 || "method".equals(chunkType)
+                || "function".equals(chunkType)
+                || "constructor".equals(chunkType)
+                || "record".equals(chunkType)
+                || "enum".equals(chunkType)
+                || "component".equals(chunkType)
                 || "event_handler".equals(chunkType)
                 || "xaml_event".equals(chunkType)
                 || "xaml_view".equals(chunkType)
+                || "xaml_binding".equals(chunkType)
+                || "xaml_control".equals(chunkType)
                 || isProjectContext(chunkType);
     }
 

@@ -300,10 +300,17 @@ public class CodeEvidenceRanker {
         double score = isStructured(result.chunkType()) ? 0.10 : 0;
         if (notBlank(result.methodName())) score += 0.05;
         if (notBlank(result.className())) score += 0.04;
+        if (notBlank(result.symbolName())) score += 0.03;
+        String parser = parserName(result);
+        if ("javaparser".equals(parser) || "roslyn_semantic_model".equals(parser)) {
+            score += 0.08;
+        } else if ("line_window".equals(parser)) {
+            score -= 0.16;
+        }
         if ((mode == CodeRagService.CodeQuestionMode.OVERVIEW || mode == CodeRagService.CodeQuestionMode.IMPACT) && isProjectContext(result.chunkType())) {
             score += 0.10;
         }
-        return Math.min(0.24, score);
+        return Math.max(-0.16, Math.min(0.34, score));
     }
 
     private String reason(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double flow, double sourcePolicy) {
@@ -471,10 +478,25 @@ public class CodeEvidenceRanker {
     private boolean isStructured(String chunkType) {
         return "class".equals(chunkType)
                 || "method".equals(chunkType)
+                || "function".equals(chunkType)
+                || "constructor".equals(chunkType)
+                || "record".equals(chunkType)
+                || "enum".equals(chunkType)
+                || "component".equals(chunkType)
                 || "event_handler".equals(chunkType)
                 || "xaml_event".equals(chunkType)
                 || "xaml_view".equals(chunkType)
+                || "xaml_binding".equals(chunkType)
+                || "xaml_control".equals(chunkType)
                 || isProjectContext(chunkType);
+    }
+
+    private String parserName(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return "";
+        }
+        Object parser = result.metadata().getOrDefault("parser", result.metadata().get("strategy"));
+        return parser == null ? "" : String.valueOf(parser);
     }
 
     private boolean isProjectContext(String chunkType) {

@@ -1686,6 +1686,92 @@ class CodeRagServiceTest {
                 .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
     }
 
+    @Test
+    void ragFlowSelectionReplacesLineWindowsWithStructuredEvidenceWhenAvailable() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult indexingWindow = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                "file_section",
+                null,
+                0.96,
+                "CodeIndexingService indexing chunk storage line window",
+                "line_window"
+        );
+        CodeSearchResult conversationWindow = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
+                "file_section",
+                null,
+                0.92,
+                "RagConversationRepository conversation storage line window",
+                "line_window"
+        );
+        CodeSearchResult askPrioritized = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.42,
+                "askPrioritized retrieves code evidence, builds context, calls the model, validates citations, and returns a RAG answer",
+                "javaparser"
+        );
+        CodeSearchResult retrieveEvidence = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "retrieveCodeEvidence",
+                0.41,
+                "retrieveCodeEvidence searches indexed chunks and merges follow-up evidence for the RAG answer flow",
+                "javaparser"
+        );
+        CodeSearchResult search = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "search",
+                0.40,
+                "search combines keyword and embedding retrieval for indexed code chunks",
+                "javaparser"
+        );
+        CodeSearchResult pipeline = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/RagPipelineService.java",
+                "method",
+                "generateCodeAnswer",
+                0.39,
+                "generateCodeAnswer builds the prompt and asks the chat model to answer with citations",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(indexingWindow, conversationWindow, askPrioritized, retrieveEvidence, search, pipeline));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain indexing to RAG response flow",
+                "overview",
+                6
+        );
+
+        long lineWindows = response.evidence().stream()
+                .filter(evidence -> "line_window".equals(String.valueOf(evidence.metadata().get("parser"))))
+                .count();
+        long structured = response.evidence().stream()
+                .filter(evidence -> List.of("method", "function", "class", "record", "constructor").contains(evidence.chunkType()))
+                .count();
+        assertThat(structured).isGreaterThanOrEqualTo(4);
+        assertThat(lineWindows).isLessThanOrEqualTo(2);
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("askPrioritized", "retrieveCodeEvidence");
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
@@ -1722,6 +1808,29 @@ class CodeRagServiceTest {
                 content,
                 score,
                 Map.of("language", "java")
+        );
+    }
+
+    private CodeSearchResult resultWithParser(String filePath, String chunkType, String methodName, double score, String content, String parser) {
+        return new CodeSearchResult(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "LearnBot",
+                filePath,
+                chunkType,
+                methodName == null ? filePath : methodName,
+                methodName == null ? null : "RagFlow",
+                methodName,
+                "com.learnbot.service",
+                null,
+                null,
+                1,
+                10,
+                24,
+                "File: " + filePath + "\n" + content,
+                score,
+                Map.of("language", "java", "parser", parser)
         );
     }
 
