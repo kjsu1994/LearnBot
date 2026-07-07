@@ -9,6 +9,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
@@ -126,17 +128,21 @@ public class CodeEvidenceRanker {
         double base = clamp(result.score(), 0, 1);
         double text = textMatchScore(question, result);
         double graph = graphEvidenceScore(mode, result);
+        double literal = literalEvidenceScore(question, result);
         double intent = intentEvidenceScore(mode, result);
         double structure = structureEvidenceScore(mode, result);
         double legacy = Math.max(0, legacyRelevance(question, mode, result) - result.score()) * 0.20;
         double flow = mode == CodeRagService.CodeQuestionMode.CALL_FLOW ? Math.max(0, 0.025 * (5 - flowRank(result))) : 0;
         double conversation = isConversationPinned(result) ? 0.18 : 0;
         double sourcePolicy = sourcePolicyScore(question, mode, result);
-        double total = base + text + graph + intent + structure + legacy + flow + conversation + sourcePolicy;
+        double total = base + text + graph + literal + intent + structure + legacy + flow + conversation + sourcePolicy;
         Map<String, Object> parts = new LinkedHashMap<>();
         parts.put("baseSearch", round(base));
         parts.put("textMatch", round(text));
         parts.put("graph", round(graph));
+        if (literal > 0) {
+            parts.put("literal", round(literal));
+        }
         parts.put("intent", round(intent));
         parts.put("structure", round(structure));
         parts.put("legacyRerank", round(legacy));
@@ -205,6 +211,53 @@ public class CodeEvidenceRanker {
             if (content.contains(term)) score += 0.03;
         }
         return Math.min(0.55, score);
+    }
+
+    private double literalEvidenceScore(String question, CodeSearchResult result) {
+        List<String> literals = literalTerms(question);
+        if (literals.isEmpty()) {
+            return 0;
+        }
+        String path = normalize(result.filePath());
+        String symbol = normalize(String.join(" ",
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), "")
+        ));
+        String content = normalize(result.content());
+        double score = 0;
+        for (String literal : literals) {
+            String term = normalize(literal);
+            if (term.isBlank()) {
+                continue;
+            }
+            if (path.contains(term)) score += 0.16;
+            if (symbol.contains(term)) score += 0.18;
+            if (content.contains(term)) score += literal.length() >= 8 ? 0.16 : 0.08;
+        }
+        return Math.min(0.45, score);
+    }
+
+    private List<String> literalTerms(String question) {
+        if (question == null || question.isBlank()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        Matcher quoted = Pattern.compile("[\"'`](.{3,120}?)[\"'`]").matcher(question);
+        while (quoted.find()) {
+            values.add(quoted.group(1));
+        }
+        Matcher indexed = Pattern.compile("\\b[A-Za-z_][A-Za-z0-9_]*\\[[0-9]+]\\b").matcher(question);
+        while (indexed.find()) {
+            values.add(indexed.group());
+        }
+        Matcher codeToken = Pattern.compile("\\b[A-Z][A-Z0-9_]{2,}\\b").matcher(question);
+        while (codeToken.find()) {
+            values.add(codeToken.group());
+        }
+        return values.stream().distinct().limit(8).toList();
     }
 
     private double graphEvidenceScore(CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {
@@ -316,6 +369,7 @@ public class CodeEvidenceRanker {
     private String reason(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double flow, double sourcePolicy) {
         List<String> reasons = new ArrayList<>();
         if (graph > 0) reasons.add("graph " + String.valueOf(result.metadata().getOrDefault("graphEdgeType", "RELATED")));
+        if (literalEvidenceScore(question, result) > 0) reasons.add("literal code/log term match");
         if (intent >= 0.18) reasons.add(mode.value() + " intent match");
         if (structure >= 0.10) reasons.add("structured code evidence");
         if (flow > 0) reasons.add("flow order hint");

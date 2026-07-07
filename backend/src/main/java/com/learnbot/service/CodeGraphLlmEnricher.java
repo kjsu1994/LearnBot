@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -20,9 +18,6 @@ public class CodeGraphLlmEnricher {
     private static final Set<String> ALLOWED_TYPES = Set.of("CALLS", "INJECTS", "USES_ENTITY");
     private static final int MAX_CANDIDATES = 160;
     private static final int MAX_CODE_CHARS_PER_CANDIDATE = 360;
-    private static final int MAX_BATCH_JSON_CHARS = 8_000;
-    private static final int MAX_LLM_BATCHES = 6;
-    private static final int MAX_OUTPUT_TOKENS = 1024;
 
     private final LearnBotProperties properties;
     private final OllamaClient ollamaClient;
@@ -83,9 +78,9 @@ public class CodeGraphLlmEnricher {
                     "code", truncate(evidence.content(), MAX_CODE_CHARS_PER_CANDIDATE)
             );
             int nextInputJsonChars = inputJsonChars + estimatedJsonChars(item) + 1;
-            if (nextInputJsonChars > MAX_BATCH_JSON_CHARS && !currentBatch.isEmpty()) {
+            if (nextInputJsonChars > maxBatchJsonChars() && !currentBatch.isEmpty()) {
                 batches.add(currentBatch);
-                if (batches.size() >= MAX_LLM_BATCHES) {
+                if (batches.size() >= maxLlmBatches()) {
                     break;
                 }
                 currentBatch = new ArrayList<>();
@@ -95,7 +90,7 @@ public class CodeGraphLlmEnricher {
             currentBatch.add(item);
             inputJsonChars = nextInputJsonChars;
         }
-        if (!currentBatch.isEmpty() && batches.size() < MAX_LLM_BATCHES) {
+        if (!currentBatch.isEmpty() && batches.size() < maxLlmBatches()) {
             batches.add(currentBatch);
         }
         if (batches.isEmpty()) {
@@ -103,50 +98,82 @@ public class CodeGraphLlmEnricher {
                     "LLM_ENRICHMENT", "Ollama auxiliary", "ASYNC", "No eligible evidence files found."
             ));
         }
-        try {
-            List<LlmRelation> relations = new ArrayList<>();
-            int attempted = 0;
-            for (List<Map<String, Object>> batch : batches) {
-                attempted += batch.size();
-                String response = ollamaClient.chatResult(
-                        "Classify unresolved source-code graph candidates. Return JSON only as {\"relations\":[{\"sourceKey\":\"...\",\"targetKey\":\"...\",\"type\":\"CALLS|INJECTS|USES_ENTITY\"}]}. "
-                                + "Use only supplied keys. Omit uncertain relations.",
-                        objectMapper.writeValueAsString(batch),
-                        OllamaClient.ChatRole.AUXILIARY,
-                        MAX_OUTPUT_TOKENS,
-                        Duration.ofSeconds(properties.getCode().getGraph().getLlmTimeoutSeconds())
-                ).content();
-                LlmOutput output = objectMapper.readValue(jsonObject(response), LlmOutput.class);
-                if (output != null && output.relations() != null) {
-                    relations.addAll(output.relations());
+        List<LlmRelation> relations = new ArrayList<>();
+        int attempted = 0;
+        int failed = 0;
+        for (List<Map<String, Object>> batch : batches) {
+            attempted += batch.size();
+            try {
+                relations.addAll(classifyBatch(batch));
+            } catch (RuntimeException | java.io.IOException ex) {
+                if (batch.size() <= 1) {
+                    failed += batch.size();
+                    continue;
+                }
+                for (List<Map<String, Object>> retryBatch : splitBatch(batch)) {
+                    try {
+                        relations.addAll(classifyBatch(retryBatch));
+                    } catch (RuntimeException | java.io.IOException retryEx) {
+                        failed += retryBatch.size();
+                    }
                 }
             }
-            CodeGraph enriched = mergeValidated(graph, candidates, new LlmOutput(relations));
-            int added = Math.max(0, enriched.edges().size() - graph.edges().size());
-            return new CodeGraphAnalysisResult(enriched, new CodeAnalysisDiagnostic(
-                    "LLM_ENRICHMENT", "Ollama auxiliary", "SUCCESS", "ASYNC",
-                    attempted, attempted, 0, added, Math.max(0, attempted - added),
-                    enriched.nodes().size(), added,
-                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
-                    "LLM relationship enrichment completed.", Map.of("candidateCount", attempted, "batchCount", batches.size())
-            ));
-        } catch (RuntimeException | java.io.IOException ex) {
-            int attempted = batches.stream().mapToInt(List::size).sum();
-            return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
-                    "LLM_ENRICHMENT", "Ollama auxiliary", "FAILED", "ASYNC",
-                    attempted, 0, attempted, 0, attempted, graph.nodes().size(), 0,
-                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
-                    "LLM enrichment failed: " + failureMessage(ex), Map.of()
-            ));
         }
+        CodeGraph enriched = mergeValidated(graph, candidates, new LlmOutput(relations));
+        int added = Math.max(0, enriched.edges().size() - graph.edges().size());
+        String status = failed == 0 ? "SUCCESS" : added > 0 ? "PARTIAL" : "FAILED";
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("candidateCount", attempted);
+        metadata.put("batchCount", batches.size());
+        metadata.put("failedCandidates", failed);
+        metadata.put("maxOutputTokens", maxOutputTokens());
+        metadata.put("maxBatchJsonChars", maxBatchJsonChars());
+        return new CodeGraphAnalysisResult(enriched, new CodeAnalysisDiagnostic(
+                "LLM_ENRICHMENT", "Ollama auxiliary", status, "ASYNC",
+                attempted, Math.max(0, attempted - failed), failed, added, Math.max(0, attempted - added),
+                enriched.nodes().size(), added,
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                failed == 0 ? "LLM relationship enrichment completed." : "LLM relationship enrichment completed partially.",
+                Map.copyOf(metadata)
+        ));
     }
 
-    private String failureMessage(Exception ex) {
-        if (ex instanceof WebClientResponseException responseException) {
-            String body = truncate(responseException.getResponseBodyAsString(), 240);
-            return responseException.getStatusCode() + (body.isBlank() ? "" : ": " + body);
+    private List<LlmRelation> classifyBatch(List<Map<String, Object>> batch) throws java.io.IOException {
+        OllamaClient.ChatResult result = ollamaClient.chatResult(
+                "Classify unresolved source-code graph candidates. Return JSON only as {\"relations\":[{\"sourceKey\":\"...\",\"targetKey\":\"...\",\"type\":\"CALLS|INJECTS|USES_ENTITY\"}]}. "
+                        + "Use only supplied keys. Omit uncertain relations.",
+                objectMapper.writeValueAsString(batch),
+                OllamaClient.ChatRole.AUXILIARY,
+                maxOutputTokens(),
+                Duration.ofSeconds(Math.max(1, properties.getCode().getGraph().getLlmTimeoutSeconds()))
+        );
+        if (result.stoppedByLength()) {
+            throw new IllegalStateException("LLM enrichment response stopped by length");
         }
-        return ex.getClass().getSimpleName();
+        LlmOutput output = objectMapper.readValue(jsonObject(result.content()), LlmOutput.class);
+        return output == null || output.relations() == null ? List.of() : output.relations();
+    }
+
+    private List<List<Map<String, Object>>> splitBatch(List<Map<String, Object>> batch) {
+        int midpoint = Math.max(1, batch.size() / 2);
+        List<List<Map<String, Object>>> split = new ArrayList<>();
+        split.add(batch.subList(0, midpoint));
+        if (midpoint < batch.size()) {
+            split.add(batch.subList(midpoint, batch.size()));
+        }
+        return split;
+    }
+
+    private int maxOutputTokens() {
+        return Math.max(1, properties.getCode().getGraph().getLlmMaxOutputTokens());
+    }
+
+    private int maxBatchJsonChars() {
+        return Math.max(512, properties.getCode().getGraph().getLlmMaxBatchJsonChars());
+    }
+
+    private int maxLlmBatches() {
+        return Math.max(1, properties.getCode().getGraph().getLlmMaxBatches());
     }
 
     private int estimatedJsonChars(Map<String, Object> item) {
