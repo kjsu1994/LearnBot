@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -237,6 +238,23 @@ public class CodeRagService {
         if (streamSink != null) {
             streamSink.onStatus("evidence_ready", "답변에 사용할 코드 근거를 정리했습니다.");
             streamSink.onEvidence(buildEvidence(answerResults));
+        }
+        if (shouldUseEvidenceFallback(retrieval)) {
+            String answer = fallbackAnswer(questionMode, originalQuestion, answerResults);
+            recordMetrics(questionMode.value(), retrieval, retrievalMs, contextMs, 0, answerResults.size(), 0, 0, true, false, elapsedMs(askStarted));
+            return new CodeAskResponse(
+                    questionMode.value(),
+                    answer,
+                    buildEvidence(answerResults),
+                    confidence(answerResults, retrieval.assessment()),
+                    conversationDiagnostics(
+                            routeDiagnostics(diagnostics(questionMode, results, answerResults, answer, null, false, false, false, false, false, AnswerQualityTrace.empty(), retrieval, contextBudgetDropped), routeDecision, commitFallbackUsed),
+                            originalQuestion,
+                            effectiveQuestion,
+                            conversationContext,
+                            retrieval
+                    )
+            );
         }
         String answer;
         boolean llmUnavailable = false;
@@ -590,6 +608,9 @@ public class CodeRagService {
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
         CodeQueryPlan deterministicPlan = codeQueryPlan(question, questionMode);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        for (String query : literalEvidenceQueries(question)) {
+            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+        }
         for (String query : conversationAnchorQueries(question, conversationContext)) {
             collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
         }
@@ -671,6 +692,38 @@ public class CodeRagService {
                     selectedPathSummary(results));
         }
         return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, followUpPlan, followUpQueriesUsed, followUpCandidateCount, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private boolean shouldUseEvidenceFallback(CodeRetrieval retrieval) {
+        if (retrieval == null || retrieval.assessment() == null || retrieval.assessment().sufficient()) {
+            return false;
+        }
+        RagPipelineService.CodeEvidenceFollowUpPlan plan = retrieval.followUpPlan();
+        return plan != null && plan.attempted() && !plan.enough()
+                && (retrieval.followUpQueriesUsed() == 0 || retrieval.iteration() > 1);
+    }
+
+    private List<String> literalEvidenceQueries(String question) {
+        if (question == null || question.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        Matcher quoted = Pattern.compile("[\"'`](.{3,120}?)[\"'`]").matcher(question);
+        while (quoted.find() && queries.size() < 4) {
+            String value = quoted.group(1).trim();
+            if (!value.isBlank()) {
+                queries.add(value);
+            }
+        }
+        Matcher indexed = Pattern.compile("\\b[A-Za-z_][A-Za-z0-9_]*\\[[0-9]+]\\b").matcher(question);
+        while (indexed.find() && queries.size() < 4) {
+            queries.add(indexed.group());
+        }
+        Matcher codeToken = Pattern.compile("\\b[A-Z][A-Z0-9_]{2,}\\b").matcher(question);
+        while (codeToken.find() && queries.size() < 4) {
+            queries.add(codeToken.group());
+        }
+        return queries.stream().limit(4).toList();
     }
 
     private CodeQueryPlan codeQueryPlan(String question, CodeQuestionMode questionMode) {

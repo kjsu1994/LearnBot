@@ -31,7 +31,6 @@ public class RagPipelineService {
     private static final Pattern CITATION_PATTERN = Pattern.compile("\\[(\\d+)]");
     private static final int MAX_REWRITE_QUERIES = 6;
     private static final int MAX_QUERY_CHARS = 180;
-    private static final int CODE_RAG_ROUTE_TIMEOUT_SECONDS = 20;
 
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
@@ -228,7 +227,7 @@ public class RagPipelineService {
                     codeRagRouterUserPrompt(question, requestedMode, conversationContext, commitInsightAvailable),
                     OllamaClient.ChatRole.AUXILIARY,
                     420,
-                    Duration.ofSeconds(CODE_RAG_ROUTE_TIMEOUT_SECONDS)
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeRouteTimeoutSeconds()))
             ).content();
             CodeRagRouteDecision decision = parseCodeRagRoute(response);
             if (decision.route() == CodeRagRoute.UNKNOWN) {
@@ -279,14 +278,14 @@ public class RagPipelineService {
                     codeEvidenceCoverageSystemPrompt(),
                     codeEvidenceCoverageUserPrompt(question, mode, candidates),
                     OllamaClient.ChatRole.AUXILIARY,
-                    520,
-                    Duration.ofSeconds(12)
+                    Math.max(1, pipeline().getCodeEvidenceFollowUpMaxOutputTokens()),
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceFollowUpTimeoutSeconds()))
             ).content();
             return parseCodeEvidenceFollowUp(response, maxQueries);
         } catch (RuntimeException ex) {
             log.info("RAG code evidence follow-up planning skipped reason={} message={} question={}",
                     ex.getClass().getSimpleName(), safeMessage(ex), abbreviate(question));
-            return new CodeEvidenceFollowUpPlan(true, true, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of());
+            return new CodeEvidenceFollowUpPlan(true, false, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of());
         }
     }
 

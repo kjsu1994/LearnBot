@@ -612,6 +612,15 @@ public class LearnBotProperties {
             private boolean codeEvidenceAdjudicationEnabled = true;
 
             @Min(1)
+            private int codeRouteTimeoutSeconds = 20;
+
+            @Min(1)
+            private int codeEvidenceFollowUpMaxOutputTokens = 520;
+
+            @Min(1)
+            private int codeEvidenceFollowUpTimeoutSeconds = 12;
+
+            @Min(1)
             private int queryEmbeddingCacheMaxEntries = 1024;
 
             @Min(1)
@@ -774,6 +783,30 @@ public class LearnBotProperties {
 
             public void setCodeEvidenceAdjudicationEnabled(boolean codeEvidenceAdjudicationEnabled) {
                 this.codeEvidenceAdjudicationEnabled = codeEvidenceAdjudicationEnabled;
+            }
+
+            public int getCodeRouteTimeoutSeconds() {
+                return codeRouteTimeoutSeconds;
+            }
+
+            public void setCodeRouteTimeoutSeconds(int codeRouteTimeoutSeconds) {
+                this.codeRouteTimeoutSeconds = codeRouteTimeoutSeconds;
+            }
+
+            public int getCodeEvidenceFollowUpMaxOutputTokens() {
+                return codeEvidenceFollowUpMaxOutputTokens;
+            }
+
+            public void setCodeEvidenceFollowUpMaxOutputTokens(int codeEvidenceFollowUpMaxOutputTokens) {
+                this.codeEvidenceFollowUpMaxOutputTokens = codeEvidenceFollowUpMaxOutputTokens;
+            }
+
+            public int getCodeEvidenceFollowUpTimeoutSeconds() {
+                return codeEvidenceFollowUpTimeoutSeconds;
+            }
+
+            public void setCodeEvidenceFollowUpTimeoutSeconds(int codeEvidenceFollowUpTimeoutSeconds) {
+                this.codeEvidenceFollowUpTimeoutSeconds = codeEvidenceFollowUpTimeoutSeconds;
             }
 
             public int getQueryEmbeddingCacheMaxEntries() {
@@ -1375,6 +1408,11 @@ public class LearnBotProperties {
             @Min(1)
             private int roslynTimeoutSeconds = 120;
 
+            private boolean roslynFallbackSimpleEnabled = true;
+
+            @Min(0)
+            private int roslynDiagnosticStderrChars = 1200;
+
             private boolean dependencyResolutionEnabled = true;
             private List<String> dependencyAllowedRepositories = new ArrayList<>(List.of("https://repo.maven.apache.org/maven2"));
 
@@ -1410,6 +1448,15 @@ public class LearnBotProperties {
 
             @Min(1)
             private int llmTimeoutSeconds = 60;
+
+            @Min(1)
+            private int llmMaxOutputTokens = 1024;
+
+            @Min(1)
+            private int llmMaxBatchJsonChars = 8000;
+
+            @Min(1)
+            private int llmMaxBatches = 6;
 
             @Min(1)
             private int enrichmentLeaseSeconds = 300;
@@ -1469,6 +1516,10 @@ public class LearnBotProperties {
             public void setRoslynMode(String roslynMode) { this.roslynMode = roslynMode; }
             public int getRoslynTimeoutSeconds() { return roslynTimeoutSeconds; }
             public void setRoslynTimeoutSeconds(int roslynTimeoutSeconds) { this.roslynTimeoutSeconds = roslynTimeoutSeconds; }
+            public boolean isRoslynFallbackSimpleEnabled() { return roslynFallbackSimpleEnabled; }
+            public void setRoslynFallbackSimpleEnabled(boolean roslynFallbackSimpleEnabled) { this.roslynFallbackSimpleEnabled = roslynFallbackSimpleEnabled; }
+            public int getRoslynDiagnosticStderrChars() { return roslynDiagnosticStderrChars; }
+            public void setRoslynDiagnosticStderrChars(int roslynDiagnosticStderrChars) { this.roslynDiagnosticStderrChars = roslynDiagnosticStderrChars; }
             public boolean isDependencyResolutionEnabled() { return dependencyResolutionEnabled; }
             public void setDependencyResolutionEnabled(boolean dependencyResolutionEnabled) { this.dependencyResolutionEnabled = dependencyResolutionEnabled; }
             public List<String> getDependencyAllowedRepositories() { return dependencyAllowedRepositories; }
@@ -1515,6 +1566,12 @@ public class LearnBotProperties {
 
             public int getLlmTimeoutSeconds() { return llmTimeoutSeconds; }
             public void setLlmTimeoutSeconds(int llmTimeoutSeconds) { this.llmTimeoutSeconds = llmTimeoutSeconds; }
+            public int getLlmMaxOutputTokens() { return llmMaxOutputTokens; }
+            public void setLlmMaxOutputTokens(int llmMaxOutputTokens) { this.llmMaxOutputTokens = llmMaxOutputTokens; }
+            public int getLlmMaxBatchJsonChars() { return llmMaxBatchJsonChars; }
+            public void setLlmMaxBatchJsonChars(int llmMaxBatchJsonChars) { this.llmMaxBatchJsonChars = llmMaxBatchJsonChars; }
+            public int getLlmMaxBatches() { return llmMaxBatches; }
+            public void setLlmMaxBatches(int llmMaxBatches) { this.llmMaxBatches = llmMaxBatches; }
 
             public int getEnrichmentLeaseSeconds() { return enrichmentLeaseSeconds; }
             public void setEnrichmentLeaseSeconds(int enrichmentLeaseSeconds) { this.enrichmentLeaseSeconds = enrichmentLeaseSeconds; }

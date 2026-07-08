@@ -48,6 +48,25 @@ public class RoslynSemanticGraphAnalyzer {
                 || !Files.isDirectory(repositoryRoot) || !Files.isRegularFile(Path.of(analyzerPath))) {
             return failed(mode, attemptedFiles, started, "Roslyn analyzer is unavailable.");
         }
+        CodeGraphAnalysisResult result = analyzeMode(repositoryRoot, chunks, analyzerPath, mode, attemptedFiles, started, "");
+        if (shouldFallbackSimple(mode, result)) {
+            CodeGraphAnalysisResult fallback = analyzeMode(repositoryRoot, chunks, analyzerPath, "SIMPLE", attemptedFiles, started, mode);
+            if (!"FAILED".equals(fallback.diagnostic().status())) {
+                return fallback;
+            }
+        }
+        return result;
+    }
+
+    private CodeGraphAnalysisResult analyzeMode(
+            Path repositoryRoot,
+            List<CodeSearchResult> chunks,
+            String analyzerPath,
+            String mode,
+            int attemptedFiles,
+            long started,
+            String fallbackFrom
+    ) {
         Process process = null;
         try {
             String dotnetUiEnabled = String.valueOf(properties.getCode().getGraph().isFrameworkAnalysisEnabled()
@@ -58,12 +77,19 @@ public class RoslynSemanticGraphAnalyzer {
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> read(running.getErrorStream()));
             if (!process.waitFor(Math.max(1, properties.getCode().getGraph().getRoslynTimeoutSeconds()), TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                return failed(mode, attemptedFiles, started, "Roslyn analyzer timed out.");
+                return failed(mode, attemptedFiles, started, "Roslyn analyzer timed out.", fallbackMetadata(fallbackFrom));
             }
             String json = stdout.join();
-            stderr.join();
-            if (process.exitValue() != 0 || json.isBlank()) {
-                return failed(mode, attemptedFiles, started, "Roslyn analyzer returned no usable output.");
+            String stderrText = stderr.join();
+            int exitCode = process.exitValue();
+            if (exitCode != 0 || json.isBlank()) {
+                Map<String, Object> metadata = fallbackMetadata(fallbackFrom);
+                metadata.put("exitCode", exitCode);
+                String diagnosticStderr = truncateDiagnostic(stderrText);
+                if (!diagnosticStderr.isBlank()) {
+                    metadata.put("stderr", diagnosticStderr);
+                }
+                return failed(mode, attemptedFiles, started, "Roslyn analyzer returned no usable output.", metadata);
             }
             AnalyzerOutput output = objectMapper.readValue(json, AnalyzerOutput.class);
             CodeGraph graph = map(output, chunks);
@@ -78,7 +104,13 @@ public class RoslynSemanticGraphAnalyzer {
             metadata.put("fallbackFiles", fallbackFiles);
             metadata.put("safeMode", isSafeMode(output.mode() == null ? mode : output.mode()));
             metadata.put("deprecatedModeAlias", usesDeprecatedModeAlias());
+            if (fallbackFrom != null && !fallbackFrom.isBlank()) {
+                metadata.put("fallbackFrom", fallbackFrom);
+            }
             String message = diagnosticMessage(failedFiles, failedProjects, fallbackFiles);
+            if (fallbackFrom != null && !fallbackFrom.isBlank()) {
+                message = "Roslyn safe semantic analysis fell back to SIMPLE mode. " + message;
+            }
             return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
                     "CSHARP_ROSLYN", "Roslyn",
                     failedFiles == 0 && failedProjects == 0 && fallbackFiles == 0 ? "SUCCESS" : "PARTIAL",
@@ -91,20 +123,54 @@ public class RoslynSemanticGraphAnalyzer {
             if (process != null) {
                 process.destroyForcibly();
             }
-            return failed(mode, attemptedFiles, started, "Roslyn analyzer was interrupted.");
+            return failed(mode, attemptedFiles, started, "Roslyn analyzer was interrupted.", fallbackMetadata(fallbackFrom));
         } catch (RuntimeException | IOException ex) {
             if (process != null) {
                 process.destroyForcibly();
             }
-            return failed(mode, attemptedFiles, started, "Roslyn analyzer failed: " + ex.getClass().getSimpleName());
+            Map<String, Object> metadata = fallbackMetadata(fallbackFrom);
+            metadata.put("exception", ex.getClass().getSimpleName());
+            return failed(mode, attemptedFiles, started, "Roslyn analyzer failed: " + ex.getClass().getSimpleName(), metadata);
         }
     }
 
     private CodeGraphAnalysisResult failed(String mode, int attemptedFiles, long started, String message) {
+        return failed(mode, attemptedFiles, started, message, Map.of());
+    }
+
+    private CodeGraphAnalysisResult failed(String mode, int attemptedFiles, long started, String message, Map<String, Object> metadata) {
         return new CodeGraphAnalysisResult(empty(), new CodeAnalysisDiagnostic(
                 "CSHARP_ROSLYN", "Roslyn", "FAILED", mode, attemptedFiles, 0, attemptedFiles,
-                0, 0, 0, 0, elapsedMillis(started), message, Map.of()
+                0, 0, 0, 0, elapsedMillis(started), message, metadata == null ? Map.of() : Map.copyOf(metadata)
         ));
+    }
+
+    private boolean shouldFallbackSimple(String mode, CodeGraphAnalysisResult result) {
+        return properties.getCode().getGraph().isRoslynFallbackSimpleEnabled()
+                && isSafeMode(mode)
+                && result != null
+                && result.diagnostic() != null
+                && "FAILED".equals(result.diagnostic().status());
+    }
+
+    private Map<String, Object> fallbackMetadata(String fallbackFrom) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (fallbackFrom != null && !fallbackFrom.isBlank()) {
+            metadata.put("fallbackFrom", fallbackFrom);
+        }
+        return metadata;
+    }
+
+    private String truncateDiagnostic(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        int max = Math.max(0, properties.getCode().getGraph().getRoslynDiagnosticStderrChars());
+        if (max == 0 || compact.length() <= max) {
+            return compact;
+        }
+        return compact.substring(0, max) + "...";
     }
 
     private String determineMode(Path root) {
