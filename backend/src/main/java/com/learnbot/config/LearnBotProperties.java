@@ -1463,6 +1463,7 @@ public class LearnBotProperties {
 
             private boolean evidenceRankingEnabled = true;
             private boolean evidenceRankingDebug = false;
+            private boolean llmEvidenceCoverageEnabled = true;
 
             public boolean isEnabled() {
                 return enabled;
@@ -1579,6 +1580,12 @@ public class LearnBotProperties {
             public void setEvidenceRankingEnabled(boolean evidenceRankingEnabled) { this.evidenceRankingEnabled = evidenceRankingEnabled; }
             public boolean isEvidenceRankingDebug() { return evidenceRankingDebug; }
             public void setEvidenceRankingDebug(boolean evidenceRankingDebug) { this.evidenceRankingDebug = evidenceRankingDebug; }
+            public boolean isLlmEvidenceCoverageEnabled() { return llmEvidenceCoverageEnabled; }
+            public void setLlmEvidenceCoverageEnabled(boolean llmEvidenceCoverageEnabled) { this.llmEvidenceCoverageEnabled = llmEvidenceCoverageEnabled; }
+            @Deprecated
+            public boolean isFlowStageCoverageEnabled() { return llmEvidenceCoverageEnabled; }
+            @Deprecated
+            public void setFlowStageCoverageEnabled(boolean flowStageCoverageEnabled) { this.llmEvidenceCoverageEnabled = flowStageCoverageEnabled; }
         }
     }
 

@@ -470,6 +470,310 @@ class CodeRagServiceTest {
     }
 
     @Test
+    void answerContextLabelsGenericEvidenceResponsibilities() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult retrieval = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/SearchPipeline.java",
+                "method",
+                "expandRelatedEvidence",
+                0.86,
+                "expandRelatedEvidence retrieves query seeds and expands related chunks for source-code context",
+                "javaparser"
+        );
+        CodeSearchResult traversal = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/GraphTraversalStore.java",
+                "method",
+                "loadRelatedChunks",
+                0.84,
+                "loadRelatedChunks traverses graph neighbors by edge types, direction, max hop, and graph path score",
+                "javaparser"
+        );
+        CodeSearchResult ranking = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/EvidenceScoringService.java",
+                "method",
+                "scoreEvidence",
+                0.82,
+                "scoreEvidence applies evidence score, edge weight, intent evidence score, and ranking reason",
+                "javaparser"
+        );
+        CodeSearchResult answerContext = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/AnswerContextBuilder.java",
+                "method",
+                "buildPromptContext",
+                0.80,
+                "buildPromptContext formats source code context, citations, excerpts, and answer generation prompt",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(retrieval, traversal, ranking, answerContext));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Search expansion, traversal, ranking, and answer context are separate responsibilities [1][2][3][4]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain how graph edges affect retrieval expansion, evidence ranking, and answer context",
+                "overview",
+                4
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, atLeastOnce()).chatResult(anyString(), promptCaptor.capture(), anyInt());
+        String prompt = promptCaptor.getAllValues().get(0);
+        assertThat(prompt)
+                .contains("evidenceRole=retrieval/search-expansion")
+                .contains("graph-traversal/expansion")
+                .contains("evidence-ranking")
+                .contains("answer-context/generation")
+                .contains("evidencePhase=SEARCH_EXPANSION")
+                .contains("evidencePhase=RANKING")
+                .contains("evidencePhase=ANSWER_GENERATION")
+                .contains("executionOrder=SEARCH_EXPANSION.happensAfter=INDEXING.happensBefore=RANKING")
+                .contains("citationKind=direct_code")
+                .contains("evidenceResponsibility=implementation_flow");
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("evidencePhase", "SEARCH_EXPANSION")
+                        .containsEntry("citationKind", "direct_code")
+                        .containsEntry("evidenceResponsibility", "implementation_flow"));
+    }
+
+    @Test
+    void answerContextSeparatesGenericFallbackScopes() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult routingFallback = resultWithParser(
+                "backend/src/main/java/app/service/RouteDecisionService.java",
+                "method",
+                "fallback",
+                0.86,
+                "fallback returns CODE_SEARCH route when router returned unknown route",
+                "javaparser"
+        );
+        CodeSearchResult graphAnalysisFallback = resultWithParser(
+                "backend/src/main/java/app/service/GraphBuildService.java",
+                "method",
+                "buildWithDiagnostics",
+                0.84,
+                "buildWithDiagnostics catches RuntimeException and records failed semantic graph analyzer diagnostic",
+                "javaparser"
+        );
+        CodeSearchResult searchExpansionFallback = resultWithParser(
+                "backend/src/main/java/app/service/SearchExpansionService.java",
+                "method",
+                "expandGraph",
+                0.82,
+                "expandGraph catches RuntimeException from graphRelatedChunks and returns ranked search results",
+                "javaparser"
+        );
+        CodeSearchResult answerFallback = resultWithParser(
+                "backend/src/main/java/app/service/AnswerFallbackService.java",
+                "method",
+                "fallbackAnswer",
+                0.80,
+                "fallbackAnswer builds evidence-based answer when LLM unavailable, missing citation, or low quality answer occurs",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(routingFallback, graphAnalysisFallback, searchExpansionFallback, answerFallback));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Fallback mechanisms are separate [1][2][3][4]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain fallback mechanisms for graph analysis, search expansion, and answer generation",
+                "overview",
+                4
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, atLeastOnce()).chatResult(anyString(), promptCaptor.capture(), anyInt());
+        String prompt = promptCaptor.getAllValues().get(0);
+        assertThat(prompt)
+                .contains("Evidence validation:")
+                .contains("fallbackScope=ROUTING")
+                .contains("fallbackScope=GRAPH_ANALYSIS")
+                .contains("fallbackScope=SEARCH_EXPANSION")
+                .contains("fallbackScope=ANSWER_GENERATION")
+                .contains("analysisDiagnosticStatus=FAILED")
+                .contains("evidenceResponsibility=route_decision")
+                .contains("evidenceResponsibility=analysis_diagnostic")
+                .contains("evidenceResponsibility=search_fallback")
+                .contains("evidenceResponsibility=answer_fallback");
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("evidenceResponsibility", "analysis_diagnostic")
+                        .containsEntry("analysisDiagnosticStatus", "FAILED")
+                        .containsEntry("analysisDiagnosticScope", "GRAPH_ANALYSIS"));
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("fallbackScope", "SEARCH_EXPANSION")
+                        .containsEntry("evidenceResponsibility", "search_fallback"));
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("fallbackScope", "ANSWER_GENERATION")
+                        .containsEntry("evidenceResponsibility", "answer_fallback"));
+    }
+
+    @Test
+    void llmPlannedCoverageSelectsRequiredGenericFallbackScope() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult answerFallback = resultWithParser(
+                "backend/src/main/java/app/service/AnswerFallbackService.java",
+                "method",
+                "fallbackAnswer",
+                0.97,
+                "fallbackAnswer repairs the final response when LLM unavailable or citation validation failed",
+                "parser"
+        );
+        CodeSearchResult routingFallback = resultWithParser(
+                "backend/src/main/java/app/service/RouteDecisionService.java",
+                "method",
+                "fallback",
+                0.94,
+                "fallback chooses CODE_SEARCH when route decision is unavailable",
+                "parser"
+        );
+        CodeSearchResult graphAnalysisFallback = resultWithParser(
+                "backend/src/main/java/app/service/GraphBuildService.java",
+                "method",
+                "buildWithDiagnostics",
+                0.42,
+                "buildWithDiagnostics catches exception, records failed semantic graph analyzer diagnostic, and continues with base graph",
+                "parser"
+        );
+        CodeSearchResult searchExpansionFallback = resultWithParser(
+                "backend/src/main/java/app/service/SearchExpansionService.java",
+                "method",
+                "expandGraph",
+                0.40,
+                "expandGraph catches exception from graph related chunks and returns ranked search results",
+                "parser"
+        );
+
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_SEARCH\",\"mode\":\"overview\",\"confidence\":0.88,\"queries\":[],\"reason\":\"fallback behavior question\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"semantic graph analysis failed diagnostics\"],\"followUpQueries\":[],\"queryAreas\":[\"graph analysis fallback diagnostics\"],\"reason\":\"need analysis diagnostic evidence\"}")
+                );
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(answerFallback, routingFallback, graphAnalysisFallback, searchExpansionFallback));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Graph analysis fallback is separate from answer fallback [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does semantic graph analysis failure fallback work?",
+                "overview",
+                2
+        );
+
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("llmCoverageFallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("analysisDiagnosticStatus", "FAILED"));
+    }
+
+    @Test
+    void javaGraphFailureQuestionPrefersMatchingDiagnosticStageOverRoslynDiagnostic() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult answerFallback = resultWithParserAndMetadata(
+                "backend/src/main/java/app/service/AnswerFallbackService.java",
+                "method",
+                "fallbackAnswer",
+                0.98,
+                "fallbackAnswer repairs final answer generation when model output is unavailable",
+                "parser",
+                Map.of("language", "java")
+        );
+        CodeSearchResult roslynDiagnostic = resultWithParserAndMetadata(
+                "backend/src/main/java/app/service/RoslynSemanticGraphAnalyzer.java",
+                "method",
+                "failed",
+                0.94,
+                "failed records failed semantic graph analyzer diagnostic for Roslyn analysis",
+                "roslyn_semantic_model",
+                Map.of(
+                        "language", "csharp",
+                        "analysisDiagnosticStage", "CSHARP_ROSLYN",
+                        "analysisDiagnosticAnalyzer", "Roslyn",
+                        "analysisDiagnosticStatus", "FAILED"
+                )
+        );
+        CodeSearchResult javaDiagnostic = resultWithParserAndMetadata(
+                "backend/src/main/java/app/service/JavaSemanticGraphAnalyzer.java",
+                "method",
+                "analyzeWithDiagnostics",
+                0.31,
+                "analyzeWithDiagnostics records failed semantic graph analyzer diagnostic for JavaParser Symbol Solver",
+                "javaparser",
+                Map.of(
+                        "language", "java",
+                        "analysisDiagnosticStage", "JAVA_SEMANTIC",
+                        "analysisDiagnosticAnalyzer", "JavaParser Symbol Solver",
+                        "analysisDiagnosticStatus", "FAILED"
+                )
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(answerFallback, roslynDiagnostic, javaDiagnostic));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Java semantic diagnostics should be the primary graph-analysis evidence [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does Java semantic graph analysis failure fallback work?",
+                "overview",
+                2
+        );
+
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("analysisDiagnosticStage", "JAVA_SEMANTIC")
+                        .containsEntry("analysisDiagnosticLanguage", "java")
+                        .containsEntry("analysisDiagnosticAnalyzer", "JavaParser Symbol Solver"));
+    }
+
+    @Test
     void confidenceUsesGraphEvidenceScoreWhenRawSearchScoreIsLow() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -1597,7 +1901,7 @@ class CodeRagServiceTest {
                 assertThat(note).contains("followUpQueriesUsed=3"));
         verify(searchService, atLeastOnce()).runtimeRoleSearch(
                 isNull(),
-                argThat(pattern -> pattern.contains("rag") && pattern.contains("context")),
+                argThat(pattern -> pattern.contains("retriev") || pattern.contains("generation") || pattern.contains("answer")),
                 argThat(pattern -> pattern.contains("answer") || pattern.contains("retriev")),
                 anyInt(),
                 anyList(),
@@ -1772,6 +2076,338 @@ class CodeRagServiceTest {
                 .contains("askPrioritized", "retrieveCodeEvidence");
     }
 
+    @Test
+    void llmCoveragePlanCanReplaceMultipleSupportEvidenceWithoutImmutableListFailure() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult conversationStore = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
+                "method",
+                "saveTurn",
+                0.99,
+                "RagConversationRepository stores previous answer and conversation metadata",
+                "javaparser"
+        );
+        CodeSearchResult finalGate = resultWithParser(
+                "frontend/src/components/code/finalResponseGate.js",
+                "function",
+                "finalResponseGateView",
+                0.98,
+                "final response gate view support component",
+                "regex_symbol"
+        );
+        CodeSearchResult retrieval = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "search",
+                0.20,
+                "search retrieves indexed code chunks and returns query context evidence with citations",
+                "javaparser"
+        );
+        CodeSearchResult answer = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/RagPipelineService.java",
+                "method",
+                "generateCodeAnswer",
+                0.19,
+                "generateCodeAnswer builds the prompt and calls the LLM model for answer generation",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(conversationStore, finalGate, retrieval, answer));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"reason\":\"flow question\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"search evidence chunks\",\"answer generation model\"],\"followUpQueries\":[\"search evidence chunks\",\"answer generation model\"],\"queryAreas\":[\"search evidence chunks\",\"answer generation model\"],\"reason\":\"runtime areas missing\"}")
+                );
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain RAG retrieval context and answer generation flow",
+                "overview",
+                2
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("search", "generateCodeAnswer");
+    }
+
+    @Test
+    void llmCoveragePlanSelectsApiRequestSearchRankingAndGenerationEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult dto = resultWithParser(
+                "backend/src/main/java/com/learnbot/dto/CodeAskResponse.java",
+                "record",
+                null,
+                0.99,
+                "CodeAskResponse DTO contains answer fields",
+                "javaparser"
+        );
+        CodeSearchResult history = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
+                "method",
+                "saveTurn",
+                0.98,
+                "conversation history storage support evidence",
+                "javaparser"
+        );
+        CodeSearchResult controller = resultWithParser(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "method",
+                "ask",
+                0.30,
+                "POST /api/code/ask controller validates request and calls codeRagService.askConversational",
+                "javaparser"
+        );
+        CodeSearchResult orchestration = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                0.29,
+                "askPrioritized orchestrates retrieveCodeEvidence, rankedCodeEvidence, and answer generation",
+                "javaparser"
+        );
+        CodeSearchResult retrieval = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "search",
+                0.28,
+                "search retrieves query context evidence chunks from indexed code",
+                "javaparser"
+        );
+        CodeSearchResult ranking = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
+                "method",
+                "rank",
+                0.27,
+                "rank scores and reranks code evidence for the answer",
+                "javaparser"
+        );
+        CodeSearchResult generation = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/RagPipelineService.java",
+                "method",
+                "generateCodeAnswer",
+                0.26,
+                "generateCodeAnswer builds prompt context and returns answer response citations from the model",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(dto, history, controller, orchestration, retrieval, ranking, generation));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"api flow\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"followUpQueries\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"queryAreas\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"reason\":\"need full runtime path\"}")
+                );
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain /api/code/ask request flow from Controller through Service search evidence ranking and answer generation",
+                "flow",
+                5
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("ask", "askPrioritized", "search", "rank", "generateCodeAnswer");
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRequired", true));
+    }
+
+    @Test
+    void llmCoveragePlanSelectsIndexingPersistenceAndGraphStorageEvidence() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult graphSearchSupport = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/DocumentRepository.java",
+                "method",
+                "graphExpandedChunks",
+                0.99,
+                "support query for graph expanded chunks",
+                "javaparser"
+        );
+        CodeSearchResult overviewSupport = resultWithParser(
+                "backend/src/main/java/com/learnbot/dto/IndexingJobSummary.java",
+                "record",
+                null,
+                0.98,
+                "indexing job summary DTO",
+                "javaparser"
+        );
+        CodeSearchResult indexing = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
+                "method",
+                "runIndexing",
+                0.30,
+                "runIndexing orchestrates file scan, parser chunk generation, embedding, repository addChunks, and graph build",
+                "javaparser"
+        );
+        CodeSearchResult chunkPersistence = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                "method",
+                "addChunks",
+                0.29,
+                "addChunks persists generated code chunks with JDBC batch insert into code_chunks table",
+                "javaparser"
+        );
+        CodeSearchResult graphBuild = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeGraphBuilder.java",
+                "method",
+                "buildWithDiagnostics",
+                0.28,
+                "buildWithDiagnostics builds graph nodes and edges from class method call reference relationships",
+                "javaparser"
+        );
+        CodeSearchResult graphPersistence = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                "method",
+                "replaceGraph",
+                0.27,
+                "replaceGraph stores code_graph_nodes and code_graph_edges rows with insert statements",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(graphSearchSupport, overviewSupport, indexing, chunkPersistence, graphBuild, graphPersistence));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"indexing graph flow\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"indexing chunk generation\",\"graph build diagnostics\",\"code graph storage\"],\"followUpQueries\":[\"indexing chunk generation\",\"graph build diagnostics\",\"code graph storage\"],\"queryAreas\":[\"indexing chunk generation\",\"graph build diagnostics\",\"code graph storage\"],\"reason\":\"need graph build and storage\"}")
+                );
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain code repository indexing flow from file chunk generation to code_graph_nodes and code_graph_edges storage",
+                "flow",
+                4
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("runIndexing", "buildWithDiagnostics", "replaceGraph");
+    }
+
+    @Test
+    void llmCoveragePlanSelectsDistinctRetrievalTraversalAndRankingRoles() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult helper = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
+                "method",
+                "isGraphEdge",
+                0.99,
+                "isGraphEdge checks graphExpanded metadata and graphEdgeType for ranking intent matching",
+                "javaparser"
+        );
+        CodeSearchResult dto = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeGraphEdge.java",
+                "record",
+                null,
+                0.98,
+                "CodeGraphEdge carries source target type confidence evidenceChunkId metadata",
+                "javaparser"
+        );
+        CodeSearchResult expandGraph = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "expandGraph",
+                0.25,
+                "expandGraph performs retrieval search expansion from seed chunks, calls repository graphRelatedChunks, and passes graph edge types",
+                "javaparser"
+        );
+        CodeSearchResult graphTraversal = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                "method",
+                "graphNeighbors",
+                0.24,
+                "graphNeighbors traverses code_graph_edges by edge types, direction, confidence, max hop, and graph path score",
+                "javaparser"
+        );
+        CodeSearchResult graphChunks = resultWithParser(
+                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                "method",
+                "graphChunksForPaths",
+                0.23,
+                "graphChunksForPaths attaches graphPathScore graphDepth graphEdgeType graphExpanded metadata to expanded chunks",
+                "javaparser"
+        );
+        CodeSearchResult ranking = resultWithParser(
+                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
+                "method",
+                "graphEvidenceScore",
+                0.22,
+                "graphEvidenceScore ranks graph evidence using graphPathScore graphDepth edgeWeight and ranking score",
+                "javaparser"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(helper, dto, expandGraph, graphTraversal, graphChunks, ranking));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"reason\":\"graph rag flow\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"search expansion logic based on graph edges\",\"graph traversal path score calculation\",\"evidence ranking using graph edge metadata\"],\"followUpQueries\":[\"search expansion graph edges\",\"graph traversal path score\",\"evidence ranking graph edge metadata\"],\"queryAreas\":[\"search expansion logic based on graph edges\",\"graph traversal path score calculation\",\"evidence ranking using graph edge metadata\"],\"reason\":\"need distinct responsibilities\"}")
+                );
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenThrow(new RuntimeException("model unavailable"));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain how graph edges affect retrieval expansion, graph traversal, and evidence ranking",
+                "overview",
+                4
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("expandGraph", "graphNeighbors", "graphEvidenceScore");
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "retrieval/search-expansion"));
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "graph-traversal/expansion"));
+        assertThat(response.evidence())
+                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "evidence-ranking"));
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
@@ -1812,6 +2448,24 @@ class CodeRagServiceTest {
     }
 
     private CodeSearchResult resultWithParser(String filePath, String chunkType, String methodName, double score, String content, String parser) {
+        return resultWithParserAndMetadata(filePath, chunkType, methodName, score, content, parser, Map.of("language", "java"));
+    }
+
+    private CodeSearchResult resultWithParserAndMetadata(
+            String filePath,
+            String chunkType,
+            String methodName,
+            double score,
+            String content,
+            String parser,
+            Map<String, Object> extraMetadata
+    ) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("language", "java");
+        metadata.put("parser", parser);
+        if (extraMetadata != null) {
+            metadata.putAll(extraMetadata);
+        }
         return new CodeSearchResult(
                 UUID.randomUUID(),
                 UUID.randomUUID(),
@@ -1830,7 +2484,7 @@ class CodeRagServiceTest {
                 24,
                 "File: " + filePath + "\n" + content,
                 score,
-                Map.of("language", "java", "parser", parser)
+                Map.copyOf(metadata)
         );
     }
 

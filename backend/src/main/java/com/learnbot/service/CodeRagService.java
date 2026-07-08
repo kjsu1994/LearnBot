@@ -42,6 +42,13 @@ public class CodeRagService {
     private static final int FALLBACK_EXCERPT_CHARS = 180;
     private static final double CONVERSATION_PINNED_BOOST = 0.18;
     private static final Pattern LEADING_FILE_QUERY_PATTERN = Pattern.compile("(?i)\\b[\\w./\\\\-]+\\.(?:java|kt|cs|js|jsx|ts|tsx|py|go|rs|php|rb|scala|swift)\\s*:\\s*");
+    private static final Set<String> COVERAGE_STOP_WORDS = Set.of(
+            "the", "and", "for", "from", "with", "that", "this", "into", "onto", "where", "what", "when", "how",
+            "does", "code", "source", "file", "files", "class", "method", "implementation", "implements", "logic",
+            "flow", "pipeline", "service", "services", "request", "response", "result", "results", "objects",
+            "locate", "find", "based", "current", "related", "using", "used", "user"
+            , "backend", "frontend", "main", "java", "learnbot", "src"
+    );
 
     private final CodeSearchService searchService;
     private final CodeRepository codeRepository;
@@ -208,6 +215,18 @@ public class CodeRagService {
                 Include a short reliability note when evidence is weak or indirect.
                 When the user asks why code exists or whether an implementation makes sense, separate direct code evidence from inferred design intent.
                 When a context item has graphEvidence=inferred, explain it as relationship-based graph evidence, not as a direct code statement.
+                When context items include evidenceRole, separate retrieval/search expansion, graph traversal/storage, evidence ranking, and answer context/rendering responsibilities.
+                When context items include evidencePhase, keep INDEXING, SEARCH_EXPANSION, RANKING, and ANSWER_GENERATION in that chronological order unless direct code evidence proves otherwise.
+                Treat citationKind=direct_code as direct source evidence and citationKind containing graph_relationship as relationship evidence; do not cite relationship evidence as if it were a direct method call.
+                Use evidenceResponsibility to distinguish implementation_flow evidence from helper_check or data_structure evidence.
+                When context items include fallbackScope, keep routing fallback, graph/index analysis fallback, search expansion fallback, and answer-generation fallback as separate mechanisms.
+                fallbackScope=GRAPH_ANALYSIS is indexing or graph-build diagnostic evidence; it does not by itself prove answer generation fallback was used.
+                fallbackScope=SEARCH_EXPANSION is retrieval or graph traversal fallback evidence; it does not by itself prove indexing analysis failed.
+                fallbackScope=ANSWER_GENERATION is final answer generation or answer repair fallback evidence; only connect it to earlier phases when direct cited code shows that call or condition.
+                When the question names a language or framework, prefer matching analysisDiagnosticLanguage, analysisDiagnosticStage, and analysisDiagnosticAnalyzer; mention non-matching diagnostics only as separate cross-language evidence.
+                Treat rank, evidenceScore, and phase-level executionOrder as relevance/ordering hints, not as method call order.
+                Treat guard clauses and early returns as failure handling only when the cited code or diagnostic metadata says failed, partial, skipped, unavailable, or exception.
+                Do not describe a helper/metadata-check method as the component that performs retrieval or ranking unless the code evidence directly shows that responsibility.
                 For code explanations, structure the answer as follows when applicable:
                 1. Summary
                 2. Detailed explanation
@@ -228,7 +247,7 @@ public class CodeRagService {
                 questionMode,
                 systemPrompt,
                 promptPrefix,
-                answerContextResults(questionMode, effectiveQuestion, results),
+                answerContextResults(questionMode, effectiveQuestion, results, retrieval.followUpPlan()),
                 streamSink != null
         );
         List<CodeSearchResult> answerResults = contextBundle.results();
@@ -622,7 +641,7 @@ public class CodeRagService {
                 collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
             }
         }
-        List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit);
+        List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit, null);
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
                 question,
                 results,
@@ -657,7 +676,7 @@ public class CodeRagService {
                 followUpQueriesUsed++;
             }
             iteration = 2;
-            results = rankedCodeEvidence(question, questionMode, merged, limit);
+            results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
             assessment = pipelineService.assessCode(
                     question,
                     results,
@@ -966,24 +985,24 @@ public class CodeRagService {
                 merge(merged, markLlmFollowUpEvidence(result, groundedQuery));
             }
         }
-        String normalizedArea = normalizeQuestionText(queryArea + " " + query + " " + originalQuestion);
-        if (isRetrievalContextOrAnswerArea(normalizedArea)) {
-            for (CodeSearchResult result : runtimeRoleFollowUpEvidence(repositoryId, selectedSpaceId, spaceIds, normalizedArea, limit)) {
-                merge(merged, markLlmFollowUpEvidence(result, "runtime role grounded follow-up"));
+        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + query + " " + originalQuestion));
+        if (!normalizedArea.isBlank()) {
+            for (CodeSearchResult result : llmAreaFollowUpEvidence(repositoryId, selectedSpaceId, spaceIds, normalizedArea, limit)) {
+                merge(merged, markLlmFollowUpEvidence(result, "llm coverage area grounded follow-up"));
             }
         }
         return Math.max(0, merged.size() - before);
     }
 
-    private List<CodeSearchResult> runtimeRoleFollowUpEvidence(
+    private List<CodeSearchResult> llmAreaFollowUpEvidence(
             UUID repositoryId,
             UUID selectedSpaceId,
             List<UUID> spaceIds,
             String normalizedArea,
             int limit
     ) {
-        String domainPattern = runtimeDomainPattern(normalizedArea);
-        String behaviorPattern = runtimeBehaviorPattern(normalizedArea);
+        String domainPattern = llmAreaPattern(normalizedArea);
+        String behaviorPattern = llmAreaPattern(normalizedArea + " flow pipeline process");
         if (domainPattern.isBlank() || behaviorPattern.isBlank()) {
             return List.of();
         }
@@ -997,44 +1016,12 @@ public class CodeRagService {
         );
     }
 
-    private String runtimeDomainPattern(String normalizedArea) {
-        if (normalizedArea.contains("rag")) {
-            return "(rag|retriev|context|evidence|citation|answer|model|llm)";
-        }
-        if (normalizedArea.contains("index") || normalizedArea.contains("chunk") || normalizedArea.contains("embedding")) {
-            return "(index|chunk|embed|repository|source)";
-        }
-        return "";
-    }
-
-    private String runtimeBehaviorPattern(String normalizedArea) {
-        List<String> terms = new ArrayList<>();
-        if (containsAny(normalizedArea, "retrieval", "retrieve", "search", "query", "evidence")) {
-            terms.add("retriev");
-            terms.add("search");
-            terms.add("query");
-            terms.add("evidence");
-        }
-        if (containsAny(normalizedArea, "context", "prompt", "citation")) {
-            terms.add("context");
-            terms.add("prompt");
-            terms.add("citation");
-        }
-        if (containsAny(normalizedArea, "answer", "response", "generation", "model", "llm", "chat")) {
-            terms.add("answer");
-            terms.add("response");
-            terms.add("generation");
-            terms.add("model");
-            terms.add("llm");
-            terms.add("chat");
-        }
-        if (containsAny(normalizedArea, "flow", "pipeline", "route", "planner")) {
-            terms.add("flow");
-            terms.add("pipeline");
-            terms.add("route");
-            terms.add("planner");
-        }
-        return terms.isEmpty() ? "" : "(" + terms.stream().distinct().collect(Collectors.joining("|")) + ")";
+    private String llmAreaPattern(String normalizedArea) {
+        List<String> terms = coverageTerms(normalizedArea).stream()
+                .filter(term -> term.length() >= 4)
+                .limit(12)
+                .toList();
+        return terms.isEmpty() ? "" : "(" + String.join("|", terms) + ")";
     }
 
     private List<String> groundedFollowUpQueries(String originalQuestion, String query, String queryArea) {
@@ -1044,14 +1031,11 @@ public class CodeRagService {
         }
         List<String> queries = new ArrayList<>();
         queries.add(sanitized);
-        String normalizedArea = normalizeQuestionText(queryArea + " " + sanitized + " " + originalQuestion);
-        if (isRetrievalContextOrAnswerArea(normalizedArea)) {
-            queries.add(sanitized + " rag retrieval evidence context answer generation model llm");
-            queries.add("code rag retrieval evidence context answer generation model llm");
-            queries.addAll(synthesizedRagRuntimeSymbolQueries(normalizedArea));
-        }
-        if (normalizedArea.contains("chunk") || normalizedArea.contains("index") || normalizedArea.contains("embedding")) {
-            queries.add(sanitized + " code indexing chunk embedding metadata storage");
+        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + sanitized + " " + originalQuestion));
+        String areaTerms = String.join(" ", coverageTerms(normalizedArea));
+        if (!areaTerms.isBlank()) {
+            queries.add(sanitized + " " + areaTerms);
+            queries.add("code implementation " + areaTerms);
         }
         return queries.stream()
                 .map(String::trim)
@@ -1059,28 +1043,6 @@ public class CodeRagService {
                 .distinct()
                 .limit(8)
                 .toList();
-    }
-
-    private List<String> synthesizedRagRuntimeSymbolQueries(String normalizedArea) {
-        List<String> queries = new ArrayList<>();
-        boolean retrieval = containsAny(normalizedArea, "retrieval", "retrieve", "search", "evidence");
-        boolean context = normalizedArea.contains("context");
-        boolean answer = containsAny(normalizedArea, "answer", "response", "generation", "model", "llm", "citation");
-        boolean pipeline = containsAny(normalizedArea, "flow", "pipeline", "route", "planner");
-        boolean ragRuntime = normalizedArea.contains("rag") && (retrieval || context || answer || pipeline);
-        if (ragRuntime) {
-            queries.add("rag service answer retrieval context");
-        }
-        if (retrieval) {
-            queries.add("service search retrieve evidence chunks");
-        }
-        if (context || answer || pipeline) {
-            queries.add("service pipeline route context answer evidence");
-        }
-        if (answer) {
-            queries.add("chat model answer generation service");
-        }
-        return queries;
     }
 
     private String sanitizeFollowUpQuery(String query) {
@@ -1094,23 +1056,19 @@ public class CodeRagService {
                 .trim();
     }
 
-    private boolean isRetrievalContextOrAnswerArea(String normalized) {
-        return containsAny(normalized,
-                "retrieval", "retrieve", "search", "context", "answer", "response", "generation",
-                "model", "llm", "citation", "evidence", "rag");
-    }
-
     private List<CodeSearchResult> rankedCodeEvidence(
             String question,
             CodeQuestionMode questionMode,
             Map<UUID, CodeSearchResult> merged,
-            int limit
+            int limit,
+        RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan
     ) {
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
+        ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
         List<CodeSearchResult> selected = ranked.stream()
                 .limit(limit)
                 .toList();
-        return ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+        return ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
     }
 
     private int minCodeEvidence(CodeQuestionMode questionMode) {
@@ -1148,14 +1106,23 @@ public class CodeRagService {
                 // Invalid symbol candidates should not block a natural-language code answer.
             }
         }
-        return evidenceRanker.rank(question, questionMode, List.copyOf(merged.values())).stream()
+        List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
+        ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
+        List<CodeSearchResult> selected = ranked.stream()
                 .limit(limit)
                 .toList();
+        return limitedMutable(selected, limit);
     }
 
-    private List<CodeSearchResult> answerContextResults(CodeQuestionMode questionMode, String question, List<CodeSearchResult> results) {
+    private List<CodeSearchResult> answerContextResults(
+            CodeQuestionMode questionMode,
+            String question,
+            List<CodeSearchResult> results,
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan
+    ) {
         int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
+        ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
         RagPipelineService.CodeEvidenceAdjudication adjudication = pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit);
         if (adjudication.attempted()) {
             ranked = adjudication.results();
@@ -1168,22 +1135,22 @@ public class CodeRagService {
                     .limit(limit)
                     .toList();
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
-            selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
             selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-            return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
+            return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
-            selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+            selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
             selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-            return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
+            return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
         }
         selected = ranked.stream().limit(limit).toList();
         selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
-        selected = ensureRagRuntimeServiceEvidence(question, ranked, selected, limit);
+        selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
         selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-        return orderRagFlowEvidence(question, preservePinnedEvidence(ranked, selected, limit));
+        return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
     }
 
     private List<CodeSearchResult> preferStructuredEvidence(
@@ -1208,8 +1175,8 @@ public class CodeRagService {
                 break;
             }
             int replaceIndex = weakestLineWindowIndex(adjusted);
-            if (replaceIndex < 0 && isRagAnswerFlowQuestion(question)) {
-                replaceIndex = weakestRagFlowSupportIndex(adjusted);
+            if (replaceIndex < 0 && (questionMode == CodeQuestionMode.CALL_FLOW || isFlowIntent(normalizeQuestionText(question)))) {
+                replaceIndex = weakestAuxiliaryIndex(adjusted);
             }
             if (replaceIndex < 0) {
                 if (adjusted.size() < limit) {
@@ -1220,12 +1187,12 @@ public class CodeRagService {
             }
             adjusted.set(replaceIndex, replacement);
         }
-        return adjusted.stream().limit(limit).toList();
+        return limitedMutable(adjusted, limit);
     }
 
     private int structuredEvidenceTarget(CodeQuestionMode questionMode, String question, int limit) {
         int safeLimit = Math.max(1, limit);
-        if (isRagAnswerFlowQuestion(question)) {
+        if (questionMode == CodeQuestionMode.CALL_FLOW || isFlowIntent(normalizeQuestionText(question))) {
             return Math.min(safeLimit, Math.max(4, safeLimit / 2));
         }
         return switch (questionMode) {
@@ -1261,8 +1228,9 @@ public class CodeRagService {
         return -1;
     }
 
-    private List<CodeSearchResult> orderRagFlowEvidence(String question, List<CodeSearchResult> selected) {
-        if (!isRagAnswerFlowQuestion(question) || selected == null || selected.size() <= 1) {
+    private List<CodeSearchResult> orderLlmPlannedEvidence(RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan, List<CodeSearchResult> selected) {
+        List<String> areas = llmCoverageAreas(followUpPlan);
+        if (areas.isEmpty() || selected == null || selected.size() <= 1) {
             return selected == null ? List.of() : selected;
         }
         if (selected.stream().anyMatch(result -> isConversationPinned(result) || isRequiredConversationPinned(result))) {
@@ -1274,263 +1242,693 @@ public class CodeRagService {
         }
         return selected.stream()
                 .sorted(Comparator
-                        .comparingInt((CodeSearchResult result) -> isRequiredConversationPinned(result) ? -1 : ragFlowEvidenceOrder(result))
+                        .comparingDouble((CodeSearchResult result) -> isRequiredConversationPinned(result) ? -1 : -bestAreaCoverageScore(areas, result))
                         .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result))
                         .thenComparingInt(result -> originalOrder.getOrDefault(result.chunkId(), Integer.MAX_VALUE)))
                 .toList();
     }
 
-    private int ragFlowEvidenceOrder(CodeSearchResult result) {
-        RagFlowEvidenceRole role = ragFlowEvidenceRole(result);
-        return switch (role) {
-            case ENTRYPOINT -> 0;
-            case INDEXING -> 1;
-            case RETRIEVAL_CONTEXT -> 2;
-            case ANSWER_GENERATION -> 3;
-            case PERSISTENCE -> 4;
-            case SUPPORT -> 5;
-            case OTHER -> 6;
-        };
+    private double bestAreaCoverageScore(List<String> areas, CodeSearchResult result) {
+        return areas.stream().mapToDouble(area -> areaCoverageScore(area, result)).max().orElse(0);
     }
 
-    private RagFlowEvidenceRole ragFlowEvidenceRole(CodeSearchResult result) {
-        if (result == null) {
-            return RagFlowEvidenceRole.OTHER;
+    private List<CodeSearchResult> applyAnalysisDiagnosticAffinityRanking(String question, List<CodeSearchResult> ranked) {
+        Set<String> requiredLanguages = requiredAnalysisDiagnosticLanguages(question);
+        if (requiredLanguages.isEmpty() || ranked == null || ranked.size() <= 1) {
+            return ranked == null ? List.of() : ranked;
         }
-        String target = normalizeQuestionText(String.join(" ",
-                safe(result.filePath(), ""),
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), ""),
-                safe(result.content(), "")
-        ));
-        if (isRagSupportOnlyEvidence(result)) {
-            return RagFlowEvidenceRole.SUPPORT;
+        Map<UUID, Integer> originalOrder = new LinkedHashMap<>();
+        for (int index = 0; index < ranked.size(); index++) {
+            originalOrder.putIfAbsent(ranked.get(index).chunkId(), index);
         }
-        if (containsAny(target, "controller", "route", "endpoint", "requestmapping", "postmapping", "getmapping", "handler")) {
-            return RagFlowEvidenceRole.ENTRYPOINT;
-        }
-        RagRuntimeCoverageRole runtimeRole = ragRuntimeCoverageRole(result);
-        if (runtimeRole == RagRuntimeCoverageRole.RETRIEVAL_CONTEXT) {
-            return RagFlowEvidenceRole.RETRIEVAL_CONTEXT;
-        }
-        if (runtimeRole == RagRuntimeCoverageRole.ANSWER_GENERATION) {
-            return RagFlowEvidenceRole.ANSWER_GENERATION;
-        }
-        if (containsAny(target, "index", "indexing", "chunk", "embedding", "scan", "parse", "repository sync", "git")) {
-            return RagFlowEvidenceRole.INDEXING;
-        }
-        if (containsAny(target, "repository", "save", "store", "insert", "update", "select", "conversation", "turn")) {
-            return RagFlowEvidenceRole.PERSISTENCE;
-        }
-        return RagFlowEvidenceRole.OTHER;
+        return ranked.stream()
+                .sorted(Comparator
+                        .comparingDouble((CodeSearchResult result) -> -analysisDiagnosticSelectionScore(question, requiredLanguages, result))
+                        .thenComparingInt(result -> originalOrder.getOrDefault(result.chunkId(), Integer.MAX_VALUE)))
+                .toList();
     }
 
-    private List<CodeSearchResult> ensureRagRuntimeServiceEvidence(
+    private double analysisDiagnosticSelectionScore(String question, Set<String> requiredLanguages, CodeSearchResult result) {
+        double score = evidenceRanker.score(result);
+        if (requiredLanguages == null || requiredLanguages.isEmpty() || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return score;
+        }
+        String language = analysisDiagnosticLanguage(result);
+        if (requiredLanguages.contains(language)) {
+            return score + 0.75 + Math.max(0, areaCoverageScore(question, result) * 0.05);
+        }
+        if (!language.isBlank()) {
+            return score - 0.25;
+        }
+        return score;
+    }
+
+    private List<CodeSearchResult> ensureLlmPlannedCoverage(
             String question,
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
             List<CodeSearchResult> ranked,
             List<CodeSearchResult> selected,
             int limit
     ) {
         List<CodeSearchResult> adjusted = new ArrayList<>(selected == null ? List.of() : selected);
-        if (!isRagAnswerFlowQuestion(question) || ranked == null || ranked.isEmpty() || adjusted.isEmpty()) {
+        List<String> areas = llmCoverageAreas(followUpPlan);
+        LinkedHashSet<String> requiredFallbackScopes = new LinkedHashSet<>(requiredFallbackScopes(question, areas));
+        boolean analysisAffinityRequired = suggestsAnalysisDiagnosticFallback(question, areas);
+        if (requiredFallbackScopes.isEmpty() && analysisAffinityRequired) {
+            requiredFallbackScopes.add("GRAPH_ANALYSIS");
+        }
+        if (!llmEvidenceCoverageEnabled() || ranked == null || ranked.isEmpty() || adjusted.isEmpty()
+                || (areas.isEmpty() && requiredFallbackScopes.isEmpty() && !analysisAffinityRequired)) {
             return adjusted;
         }
-        List<RagRuntimeCoverageRole> requiredRoles = ragRuntimeCoverageRoles(question);
-        for (RagRuntimeCoverageRole role : requiredRoles) {
-            adjusted = ensureRagRuntimeCoverageRole(ranked, adjusted, limit, role);
+        LinkedHashSet<String> requiredRoles = new LinkedHashSet<>();
+        for (String area : areas) {
+            requiredRoles.addAll(requiredEvidenceRoles(area));
         }
-        if (adjusted.stream().anyMatch(this::isRagRuntimeServiceEvidence)) {
-            return adjusted.stream().limit(limit).toList();
-        }
-        List<CodeSearchResult> currentAdjusted = adjusted;
-        CodeSearchResult replacement = ranked.stream()
-                .filter(result -> !isRagSupportOnlyEvidence(result))
-                .filter(this::isRagRuntimeServiceEvidence)
-                .filter(result -> !containsChunk(currentAdjusted, result))
-                .findFirst()
-                .orElse(null);
-        if (replacement == null) {
-            return adjusted;
-        }
-        int replaceIndex = weakestRagFlowSupportIndex(adjusted);
-        if (replaceIndex >= 0) {
-            adjusted.set(replaceIndex, replacement);
-        } else if (adjusted.size() < limit) {
-            adjusted.add(replacement);
-        }
-        return adjusted.stream().limit(limit).toList();
-    }
-
-    private List<CodeSearchResult> ensureRagRuntimeCoverageRole(
-            List<CodeSearchResult> ranked,
-            List<CodeSearchResult> selected,
-            int limit,
-            RagRuntimeCoverageRole role
-    ) {
-        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
-        if (adjusted.stream().anyMatch(result -> ragRuntimeCoverageRole(result) == role)) {
-            return adjusted;
-        }
-        CodeSearchResult replacement = ranked.stream()
-                .filter(result -> ragRuntimeCoverageRole(result) == role)
-                .filter(result -> !containsChunk(adjusted, result))
-                .findFirst()
-                .orElse(null);
-        if (replacement == null) {
-            return adjusted;
-        }
-        int replaceIndex = weakestRagFlowSupportIndex(adjusted);
-        if (replaceIndex >= 0) {
-            adjusted.set(replaceIndex, replacement);
-        } else if (adjusted.size() < limit) {
-            adjusted.add(replacement);
-        }
-        return adjusted.stream().limit(limit).toList();
-    }
-
-    private List<RagRuntimeCoverageRole> ragRuntimeCoverageRoles(String question) {
-        String normalized = normalizeQuestionText(question);
-        List<RagRuntimeCoverageRole> roles = new ArrayList<>();
-        if (containsAny(normalized, "retrieval", "retrieve", "search", "context", "rag", "answer", "response", "flow")) {
-            roles.add(RagRuntimeCoverageRole.RETRIEVAL_CONTEXT);
-        }
-        if (containsAny(normalized, "answer", "response", "generation", "model", "llm", "chat", "rag", "flow")) {
-            roles.add(RagRuntimeCoverageRole.ANSWER_GENERATION);
-        }
-        return roles.stream().distinct().toList();
-    }
-
-    private boolean isRagAnswerFlowQuestion(String question) {
-        String normalized = normalizeQuestionText(question);
-        return normalized.contains("rag") && containsAny(normalized,
-                "answer", "response", "retrieval", "retrieve", "search", "context", "generation", "model", "llm", "flow");
-    }
-
-    private boolean isRagRuntimeServiceEvidence(CodeSearchResult result) {
-        if (!isMainImplementationEvidence(result, false)) {
-            return false;
-        }
-        if (!"service".equals(CodeSourceClassifier.runtimeRole(result))) {
-            return false;
-        }
-        String target = normalizeQuestionText(String.join(" ",
-                safe(result.filePath(), ""),
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), ""),
-                safe(result.content(), "")
-        ));
-        return target.contains("rag") && containsAny(target,
-                "retrieval", "retrieve", "search", "context", "evidence", "answer", "response", "model", "llm", "citation");
-    }
-
-    private RagRuntimeCoverageRole ragRuntimeCoverageRole(CodeSearchResult result) {
-        if (!isMainImplementationEvidence(result, false) || isRagSupportOnlyEvidence(result)) {
-            return RagRuntimeCoverageRole.NONE;
-        }
-        String identity = normalizeQuestionText(String.join(" ",
-                safe(result.filePath(), ""),
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), "")
-        ));
-        String content = normalizeQuestionText(safe(result.content(), ""));
-        String target = identity + " " + content;
-        boolean runtimeIdentity = containsAny(identity,
-                "rag", "retriev", "search", "context", "evidence", "citation", "answer", "response",
-                "generation", "model", "llm", "chat", "prompt", "pipeline");
-        boolean indexingIdentity = containsAny(identity,
-                "index", "indexing", "scanner", "scan", "parser", "parse", "embedding", "chunk");
-        if (indexingIdentity && !runtimeIdentity) {
-            return RagRuntimeCoverageRole.NONE;
-        }
-        boolean ragRelated = runtimeIdentity
-                || target.contains("rag")
-                || containsAny(target, "retrieval", "retrieve", "context", "evidence", "citation", "answer", "model", "llm");
-        if (!ragRelated) {
-            return RagRuntimeCoverageRole.NONE;
-        }
-        boolean answerIdentity = containsAny(identity,
-                "answer", "response", "generation", "model", "llm", "chat", "prompt", "stream", "rag", "pipeline");
-        boolean retrievalIdentity = containsAny(identity,
-                "retrieval", "retrieve", "search", "context", "evidence", "citation", "query", "rag", "pipeline");
-        boolean answerGeneration = (answerIdentity || target.contains("rag"))
-                && containsAny(content, "answer", "response", "generation", "model", "llm", "chat", "prompt", "stream");
-        boolean retrievalContext = (retrievalIdentity || target.contains("rag"))
-                && containsAny(content, "retrieval", "retrieve", "search", "query", "context", "evidence", "citation", "chunk", "budget");
-        if (answerGeneration) {
-            return RagRuntimeCoverageRole.ANSWER_GENERATION;
-        }
-        if (retrievalContext) {
-            return RagRuntimeCoverageRole.RETRIEVAL_CONTEXT;
-        }
-        if (runtimeIdentity && containsAny(target,
-                "retrieval", "retrieve", "search", "query", "context", "evidence", "citation", "answer", "response",
-                "generation", "model", "llm", "chat", "prompt", "stream")) {
-            return containsAny(target, "retrieval", "retrieve", "search", "query", "context", "evidence", "citation")
-                    ? RagRuntimeCoverageRole.RETRIEVAL_CONTEXT
-                    : RagRuntimeCoverageRole.ANSWER_GENERATION;
-        }
-        return RagRuntimeCoverageRole.NONE;
-    }
-
-    private boolean isRagSupportOnlyEvidence(CodeSearchResult result) {
-        if (result == null) {
-            return true;
-        }
-        String target = normalizeQuestionText(String.join(" ",
-                safe(result.filePath(), ""),
-                safe(result.symbolName(), ""),
-                safe(result.className(), ""),
-                safe(result.methodName(), "")
-        ));
-        return containsAny(target,
-                "conversation", "history", "savedanswer", "metrics", "tuning", "handoff", "gate",
-                "verification", "summary", "schema", "profile", "dto", "jobsummary", "failure");
-    }
-
-    private int weakestRagFlowSupportIndex(List<CodeSearchResult> selected) {
-        for (int index = selected.size() - 1; index >= 0; index--) {
-            CodeSearchResult result = selected.get(index);
-            if (!isRequiredConversationPinned(result) && isRagSupportOnlyEvidence(result)) {
-                return index;
+        Set<String> requiredFallbackScopesForSelection = Set.copyOf(requiredFallbackScopes);
+        for (String area : areas) {
+            for (String role : requiredEvidenceRoles(area)) {
+                if (selectedHasRoleCoverage(role, adjusted)) {
+                    continue;
+                }
+                int existingRoleIndex = existingRoleCoverageIndex(role, adjusted);
+                if (existingRoleIndex >= 0) {
+                    adjusted.set(existingRoleIndex, markLlmPlannedCoverage(adjusted.get(existingRoleIndex), area, role));
+                    continue;
+                }
+                CodeSearchResult replacement = ranked.stream()
+                        .filter(result -> !containsChunk(adjusted, result))
+                        .filter(result -> evidenceRoles(result).contains(role))
+                        .max(Comparator
+                                .comparingDouble((CodeSearchResult result) -> roleCoverageScore(area, role, result))
+                                .thenComparingDouble(evidenceRanker::score))
+                        .orElse(null);
+                if (replacement == null) {
+                    continue;
+                }
+                int replaceIndex = weakestRequiredCoverageIndex(requiredRoles, requiredFallbackScopesForSelection, areas, adjusted);
+                if (replaceIndex >= 0) {
+                    adjusted.set(replaceIndex, markLlmPlannedCoverage(replacement, area, role));
+                } else if (adjusted.size() < limit) {
+                    adjusted.add(markLlmPlannedCoverage(replacement, area, role));
+                }
             }
-        }
-        for (int index = selected.size() - 1; index >= 0; index--) {
-            CodeSearchResult result = selected.get(index);
-            if (isRequiredConversationPinned(result) || ragRuntimeCoverageRole(result) != RagRuntimeCoverageRole.NONE) {
+            if (selectedHasAreaCoverage(area, adjusted)) {
                 continue;
             }
-            String runtimeRole = CodeSourceClassifier.runtimeRole(result);
-            if ("controller".equals(runtimeRole) || "repository".equals(runtimeRole)
-                    || "model".equals(runtimeRole) || CodeSourceClassifier.SOURCE_CONFIG.equals(runtimeRole)
-                    || "unknown".equals(runtimeRole)) {
-                return index;
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> areaCoverageScore(area, result) > 0)
+                    .max(Comparator
+                            .comparingDouble((CodeSearchResult result) -> areaCoverageScore(area, result))
+                            .thenComparingDouble(evidenceRanker::score))
+                    .orElse(null);
+            if (replacement == null) {
+                continue;
+            }
+            int replaceIndex = weakestLlmCoverageIndex(areas, requiredFallbackScopesForSelection, adjusted);
+            if (replaceIndex >= 0) {
+                adjusted.set(replaceIndex, markLlmPlannedCoverage(replacement, area));
+            } else if (adjusted.size() < limit) {
+                adjusted.add(markLlmPlannedCoverage(replacement, area));
             }
         }
+        for (String scope : requiredFallbackScopes) {
+            if (selectedHasFallbackScopeCoverage(scope, question + " " + String.join(" ", areas), adjusted)) {
+                continue;
+            }
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> scope.equals(fallbackScope(result)))
+                    .max(Comparator
+                            .comparingDouble((CodeSearchResult result) -> fallbackScopeCoverageScore(String.join(" ", areas), scope, result))
+                            .thenComparingDouble(evidenceRanker::score))
+                    .orElse(null);
+            if (replacement == null) {
+                continue;
+            }
+            int replaceIndex = weakestRequiredCoverageIndex(requiredRoles, requiredFallbackScopesForSelection, areas, adjusted);
+            if (replaceIndex >= 0) {
+                adjusted.set(replaceIndex, markLlmPlannedFallbackScopeCoverage(replacement, String.join(" ", areas), scope));
+            } else if (adjusted.size() < limit) {
+                adjusted.add(markLlmPlannedFallbackScopeCoverage(replacement, String.join(" ", areas), scope));
+            }
+        }
+        for (String role : requiredRoles) {
+            if (selectedHasAnyRoleCoverage(role, adjusted)) {
+                continue;
+            }
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> evidenceRoles(result).contains(role))
+                    .max(Comparator
+                            .comparingDouble((CodeSearchResult result) -> roleCoverageScore(String.join(" ", areas), role, result))
+                            .thenComparingDouble(evidenceRanker::score))
+                    .orElse(null);
+            if (replacement == null) {
+                continue;
+            }
+            int replaceIndex = weakestRequiredCoverageIndex(requiredRoles, requiredFallbackScopesForSelection, areas, adjusted);
+            if (replaceIndex >= 0) {
+                adjusted.set(replaceIndex, markLlmPlannedCoverage(replacement, String.join(" ", areas), role));
+            } else if (adjusted.size() < limit) {
+                adjusted.add(markLlmPlannedCoverage(replacement, String.join(" ", areas), role));
+            }
+        }
+        List<CodeSearchResult> affinityAdjusted = ensureAnalysisDiagnosticAffinityCoverage(question + " " + String.join(" ", areas), ranked, adjusted, limit);
+        return limitedMutable(affinityAdjusted, limit);
+    }
+
+    private List<CodeSearchResult> ensureAnalysisDiagnosticAffinityCoverage(
+            String question,
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        Set<String> requiredLanguages = requiredAnalysisDiagnosticLanguages(question);
+        if (requiredLanguages.isEmpty() || ranked == null || ranked.isEmpty() || selected == null || selected.isEmpty()) {
+            return selected == null ? List.of() : selected;
+        }
+        boolean hasMatchingDiagnostic = selected.stream().anyMatch(result ->
+                "GRAPH_ANALYSIS".equals(fallbackScope(result))
+                        && requiredLanguages.contains(analysisDiagnosticLanguage(result)));
+        if (hasMatchingDiagnostic) {
+            return selected;
+        }
+        CodeSearchResult replacement = ranked.stream()
+                .filter(result -> !containsChunk(selected, result))
+                .filter(result -> "GRAPH_ANALYSIS".equals(fallbackScope(result)))
+                .filter(result -> requiredLanguages.contains(analysisDiagnosticLanguage(result)))
+                .max(Comparator
+                        .comparingDouble((CodeSearchResult result) -> fallbackScopeCoverageScore(question, "GRAPH_ANALYSIS", result))
+                        .thenComparingDouble(evidenceRanker::score))
+                .orElse(null);
+        if (replacement == null) {
+            return selected;
+        }
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
+        int replaceIndex = nonMatchingAnalysisDiagnosticIndex(requiredLanguages, adjusted);
+        if (replaceIndex < 0) {
+            replaceIndex = weakestLlmCoverageIndex(List.of(question), Set.of("GRAPH_ANALYSIS"), adjusted);
+        }
+        CodeSearchResult marked = markLlmPlannedFallbackScopeCoverage(replacement, question, "GRAPH_ANALYSIS");
+        if (replaceIndex >= 0) {
+            adjusted.set(replaceIndex, marked);
+        } else if (adjusted.size() < limit) {
+            adjusted.add(marked);
+        }
+        return limitedMutable(adjusted, limit);
+    }
+
+    private int nonMatchingAnalysisDiagnosticIndex(Set<String> requiredLanguages, List<CodeSearchResult> selected) {
         for (int index = selected.size() - 1; index >= 0; index--) {
-            if (!isRequiredConversationPinned(selected.get(index)) && !isRagRuntimeServiceEvidence(selected.get(index))) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result)
+                    && "GRAPH_ANALYSIS".equals(fallbackScope(result))
+                    && !requiredLanguages.contains(analysisDiagnosticLanguage(result))) {
                 return index;
             }
         }
         return -1;
     }
 
-    private enum RagRuntimeCoverageRole {
-        NONE,
-        RETRIEVAL_CONTEXT,
-        ANSWER_GENERATION
+    private List<String> llmCoverageAreas(RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan) {
+        if (followUpPlan == null || !followUpPlan.attempted() || followUpPlan.enough()) {
+            return List.of();
+        }
+        LinkedHashSet<String> areas = new LinkedHashSet<>();
+        addCoverageAreas(areas, followUpPlan.queryAreas());
+        addCoverageAreas(areas, followUpPlan.missingAreas());
+        addCoverageAreas(areas, followUpPlan.followUpQueries());
+        return areas.stream().limit(6).toList();
     }
 
-    private enum RagFlowEvidenceRole {
-        ENTRYPOINT,
-        INDEXING,
-        RETRIEVAL_CONTEXT,
-        ANSWER_GENERATION,
-        PERSISTENCE,
-        SUPPORT,
-        OTHER
+    private void addCoverageAreas(Set<String> areas, List<String> values) {
+        for (String value : values == null ? List.<String>of() : values) {
+            String normalized = normalizeQuestionText(splitIdentifierTerms(value));
+            if (!normalized.isBlank()) {
+                areas.add(normalized);
+            }
+        }
+    }
+
+    private boolean selectedHasAreaCoverage(String area, List<CodeSearchResult> selected) {
+        List<String> requiredRoles = requiredEvidenceRoles(area);
+        if (!requiredRoles.isEmpty()) {
+            return requiredRoles.stream().allMatch(role -> selectedHasRoleCoverage(role, selected));
+        }
+        return selected.stream().anyMatch(result -> hasAreaCoverage(area, result));
+    }
+
+    private boolean selectedHasRoleCoverage(String role, List<CodeSearchResult> selected) {
+        return selected.stream().anyMatch(result -> hasLlmPlannedCoverageRole(role, result));
+    }
+
+    private boolean selectedHasAnyRoleCoverage(String role, List<CodeSearchResult> selected) {
+        return selected.stream().anyMatch(result ->
+                hasLlmPlannedCoverageRole(role, result) || evidenceRoles(result).contains(role));
+    }
+
+    private int existingRoleCoverageIndex(String role, List<CodeSearchResult> selected) {
+        for (int index = 0; index < selected.size(); index++) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result) && evidenceRoles(result).contains(role)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private boolean hasAreaCoverage(String area, CodeSearchResult result) {
+        if (hasLlmPlannedCoverageArea(area, result)) {
+            return true;
+        }
+        Set<String> areaTerms = coverageTerms(area);
+        int requiredMatches = Math.max(1, Math.min(2, areaTerms.size()));
+        return areaMatchedTermCount(area, result) >= requiredMatches && areaCoverageScore(area, result) >= 5.0;
+    }
+
+    private boolean hasLlmPlannedCoverageArea(String area, CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return false;
+        }
+        Object plannedArea = result.metadata().get("llmCoverageArea");
+        if (plannedArea == null) {
+            return false;
+        }
+        Set<String> requestedTerms = coverageTerms(area);
+        Set<String> plannedTerms = coverageTerms(String.valueOf(plannedArea));
+        if (requestedTerms.isEmpty() || plannedTerms.isEmpty()) {
+            return false;
+        }
+        long overlap = requestedTerms.stream().filter(plannedTerms::contains).count();
+        int requiredMatches = Math.max(1, Math.min(2, requestedTerms.size()));
+        return overlap >= requiredMatches;
+    }
+
+    private boolean hasLlmPlannedCoverageRole(String role, CodeSearchResult result) {
+        if (role == null || role.isBlank() || result == null || result.metadata() == null) {
+            return false;
+        }
+        Object plannedRole = result.metadata().get("llmCoverageRole");
+        return role.equals(String.valueOf(plannedRole));
+    }
+
+    private int areaMatchedTermCount(String area, CodeSearchResult result) {
+        if (result == null || area == null || area.isBlank()) {
+            return 0;
+        }
+        Set<String> areaTerms = coverageTerms(area);
+        Set<String> identityTerms = coverageTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), "")
+        ));
+        Set<String> contentTerms = coverageTerms(safe(result.content(), ""));
+        int matched = 0;
+        for (String term : areaTerms) {
+            if (identityTerms.contains(term) || contentTerms.contains(term)) {
+                matched++;
+            }
+        }
+        return matched;
+    }
+
+    private double areaCoverageScore(String area, CodeSearchResult result) {
+        if (result == null || area == null || area.isBlank()) {
+            return 0;
+        }
+        Set<String> areaTerms = coverageTerms(area);
+        if (areaTerms.isEmpty()) {
+            return 0;
+        }
+        Set<String> identityTerms = coverageTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), "")
+        ));
+        Set<String> contentTerms = coverageTerms(safe(result.content(), ""));
+        double score = 0;
+        for (String term : areaTerms) {
+            if (identityTerms.contains(term)) {
+                score += 3.0;
+            } else if (contentTerms.contains(term)) {
+                score += 1.0;
+            }
+        }
+        if (score <= 0) {
+            return 0;
+        }
+        if (isMainImplementationEvidence(result, false)) {
+            score += 1.5;
+        }
+        if (isStructuredEvidenceCandidate(result, "")) {
+            score += 1.0;
+        }
+        String sourceRole = CodeSourceClassifier.sourceRole(result);
+        if (CodeSourceClassifier.SOURCE_TEST.equals(sourceRole)
+                || CodeSourceClassifier.SOURCE_DOCS.equals(sourceRole)
+                || CodeSourceClassifier.SOURCE_GENERATED.equals(sourceRole)) {
+            score -= 2.0;
+        }
+        return Math.max(0, score);
+    }
+
+    private double roleCoverageScore(String area, String role, CodeSearchResult result) {
+        if (result == null || role == null || role.isBlank() || !evidenceRoles(result).contains(role)) {
+            return 0;
+        }
+        double score = 8.0 + areaCoverageScore(area, result);
+        if (isMainImplementationEvidence(result, false)) {
+            score += 1.5;
+        }
+        if (isStructuredEvidenceCandidate(result, "")) {
+            score += 1.0;
+        }
+        return score;
+    }
+
+    private List<String> requiredFallbackScopes(String question, List<String> areas) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(question, ""),
+                String.join(" ", areas == null ? List.of() : areas)
+        )));
+        if (normalized.isBlank()) {
+            return List.of();
+        }
+        boolean fallbackOrFailure = containsRoleTerms(normalized,
+                "fallback", "fallbacks", "fail", "failed", "failure", "partial", "partially",
+                "skip", "skipped", "unavailable", "exception", "catch", "recover", "degrade", "degraded");
+        if (!fallbackOrFailure) {
+            return List.of();
+        }
+        LinkedHashSet<String> scopes = new LinkedHashSet<>();
+        if (containsRoleTerms(normalized, "route", "routing", "router", "intent", "classify", "decision", "clarify")) {
+            scopes.add("ROUTING");
+        }
+        if (containsRoleTerms(normalized, "graph", "semantic", "analysis", "analyzer", "diagnostic", "diagnostics", "indexing", "index", "build", "parser", "parse")) {
+            scopes.add("GRAPH_ANALYSIS");
+        }
+        if (containsRoleTerms(normalized, "search", "retrieve", "retrieval", "expand", "expansion", "traversal", "related", "ranked results", "query")) {
+            scopes.add("SEARCH_EXPANSION");
+        }
+        if (containsRoleTerms(normalized, "answer", "generation", "response", "citation", "prompt", "model", "llm", "repair", "rewrite")) {
+            scopes.add("ANSWER_GENERATION");
+        }
+        return scopes.stream().limit(4).toList();
+    }
+
+    private boolean suggestsAnalysisDiagnosticFallback(String question, List<String> areas) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(question, ""),
+                String.join(" ", areas == null ? List.of() : areas)
+        )));
+        if (normalized.isBlank() || requiredAnalysisDiagnosticLanguages(normalized).isEmpty()) {
+            return false;
+        }
+        boolean analysisTerm = containsRoleTerms(normalized,
+                "graph", "semantic", "analysis", "analyzer", "diagnostic", "diagnostics", "parser", "parse");
+        boolean fallbackTerm = containsRoleTerms(normalized,
+                "fallback", "fallbacks", "fail", "failed", "failure", "partial", "skipped", "unavailable", "exception");
+        return analysisTerm && fallbackTerm;
+    }
+
+    private boolean selectedHasFallbackScopeCoverage(String scope, String area, List<CodeSearchResult> selected) {
+        Set<String> requiredLanguages = requiredAnalysisDiagnosticLanguages(area);
+        return selected.stream().anyMatch(result -> {
+            boolean scopeMatches = scope.equals(fallbackScope(result)) || hasLlmPlannedFallbackScope(scope, result);
+            if (!scopeMatches) {
+                return false;
+            }
+            if (!"GRAPH_ANALYSIS".equals(scope) || requiredLanguages.isEmpty()) {
+                return true;
+            }
+            return requiredLanguages.contains(analysisDiagnosticLanguage(result));
+        });
+    }
+
+    private boolean hasLlmPlannedFallbackScope(String scope, CodeSearchResult result) {
+        if (scope == null || scope.isBlank() || result == null || result.metadata() == null) {
+            return false;
+        }
+        Object plannedScope = result.metadata().get("llmCoverageFallbackScope");
+        return scope.equals(String.valueOf(plannedScope));
+    }
+
+    private boolean hasAnyRequiredFallbackScope(CodeSearchResult result, Set<String> requiredFallbackScopes) {
+        if (requiredFallbackScopes == null || requiredFallbackScopes.isEmpty()) {
+            return false;
+        }
+        String scope = fallbackScope(result);
+        return requiredFallbackScopes.contains(scope)
+                || requiredFallbackScopes.stream().anyMatch(requiredScope -> hasLlmPlannedFallbackScope(requiredScope, result));
+    }
+
+    private double fallbackScopeCoverageScore(String area, String scope, CodeSearchResult result) {
+        if (result == null || scope == null || scope.isBlank() || !scope.equals(fallbackScope(result))) {
+            return 0;
+        }
+        double score = 10.0 + areaCoverageScore(area, result);
+        if (isMainImplementationEvidence(result, false)) {
+            score += 1.5;
+        }
+        if (isStructuredEvidenceCandidate(result, "")) {
+            score += 1.0;
+        }
+        String status = analysisDiagnosticStatus(result);
+        if ("FAILED".equals(status) || "PARTIAL".equals(status) || "SKIPPED".equals(status)) {
+            score += 1.0;
+        }
+        score += analysisDiagnosticAffinityScore(area, result);
+        return score;
+    }
+
+    private double analysisDiagnosticAffinityScore(String area, CodeSearchResult result) {
+        Set<String> requiredLanguages = requiredAnalysisDiagnosticLanguages(area);
+        if (requiredLanguages.isEmpty() || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return 0;
+        }
+        String language = analysisDiagnosticLanguage(result);
+        if (language.isBlank()) {
+            return 0;
+        }
+        return requiredLanguages.contains(language) ? 3.0 : -0.75;
+    }
+
+    private Set<String> requiredAnalysisDiagnosticLanguages(String text) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(text));
+        if (normalized.isBlank()) {
+            return Set.of();
+        }
+        Set<String> terms = java.util.Arrays.stream(normalized.split("\\s+"))
+                .map(String::trim)
+                .filter(term -> !term.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        boolean javascript = terms.contains("javascript")
+                || containsRoleTerms(normalized, "java script", "typescript", "node js", "nodejs");
+        LinkedHashSet<String> languages = new LinkedHashSet<>();
+        if (!javascript && (terms.contains("java")
+                || containsRoleTerms(normalized, "spring", "javaparser", "java parser", "jpa", "hibernate"))) {
+            languages.add("java");
+        }
+        if (terms.contains("csharp")
+                || terms.contains("dotnet")
+                || containsRoleTerms(normalized, "c#", "c sharp", "roslyn", "wpf", "winforms", "windows forms", "xaml", "designer cs")) {
+            languages.add("csharp");
+        }
+        return languages;
+    }
+
+    private List<String> requiredEvidenceRoles(String area) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(area));
+        if (normalized.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<String> roles = new LinkedHashSet<>();
+        if (containsRoleTerms(normalized, "indexing", "index", "chunk generation", "chunks", "file scan", "scan", "parser", "parse", "embedding")) {
+            roles.add("indexing/pipeline");
+        }
+        if (containsRoleTerms(normalized, "search", "retrieval", "retrieve", "query", "expand", "expansion", "related chunks")) {
+            roles.add("retrieval/search-expansion");
+        }
+        boolean graphTerm = containsRoleTerms(normalized, "graph");
+        boolean edgeTraversalTerm = containsRoleTerms(normalized, "path", "depth", "traversal", "neighbor", "neighbors", "hop", "direction");
+        if ((graphTerm && edgeTraversalTerm) || containsRoleTerms(normalized, "graph traversal", "graph path", "path score", "graph depth")) {
+            roles.add("graph-traversal/expansion");
+        }
+        if (containsRoleTerms(normalized, "storage", "persist", "merge", "save", "table", "graph storage", "code graph storage")) {
+            roles.add("graph-storage");
+        }
+        if (graphTerm && containsRoleTerms(normalized, "build", "builder", "analyze", "analysis", "diagnostic", "diagnostics", "parser", "parse")) {
+            roles.add("graph-build/analysis");
+        }
+        if (containsRoleTerms(normalized, "ranking", "rank", "rerank", "score", "scoring", "weight", "evidence ranking")) {
+            roles.add("evidence-ranking");
+        }
+        if (containsRoleTerms(normalized, "answer", "context", "generation", "citation", "prompt", "response")) {
+            roles.add("answer-context/generation");
+        }
+        return roles.stream().limit(3).toList();
+    }
+
+    private Set<String> coverageTerms(String text) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(text));
+        if (normalized.isBlank()) {
+            return Set.of();
+        }
+        return java.util.Arrays.stream(normalized.split("\\s+"))
+                .map(String::trim)
+                .filter(term -> term.length() >= 3)
+                .filter(term -> !COVERAGE_STOP_WORDS.contains(term))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private String splitIdentifierTerms(String value) {
+        return safe(value, "")
+                .replaceAll("([a-z])([A-Z])", "$1 $2")
+                .replace('_', ' ')
+                .replace('-', ' ')
+                .replace('/', ' ')
+                .replace('.', ' ');
+    }
+
+    private int weakestLlmCoverageIndex(List<String> areas, List<CodeSearchResult> selected) {
+        return weakestLlmCoverageIndex(areas, Set.of(), selected);
+    }
+
+    private int weakestLlmCoverageIndex(List<String> areas, Set<String> requiredFallbackScopes, List<CodeSearchResult> selected) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result)
+                    && !hasAnyRequiredFallbackScope(result, requiredFallbackScopes)
+                    && isLowValueLlmCoverageEvidence(areas, result)) {
+                return index;
+            }
+        }
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result)
+                    && !hasAnyRequiredFallbackScope(result, requiredFallbackScopes)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private int weakestRequiredRoleCoverageIndex(Set<String> requiredRoles, List<String> areas, List<CodeSearchResult> selected) {
+        return weakestRequiredCoverageIndex(requiredRoles, Set.of(), areas, selected);
+    }
+
+    private int weakestRequiredCoverageIndex(
+            Set<String> requiredRoles,
+            Set<String> requiredFallbackScopes,
+            List<String> areas,
+            List<CodeSearchResult> selected
+    ) {
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (!isRequiredConversationPinned(result)
+                    && !hasAnyLlmCoverageRole(result)
+                    && !hasAnyRequiredFallbackScope(result, requiredFallbackScopes)
+                    && evidenceRoles(result).stream().noneMatch(requiredRoles::contains)) {
+                return index;
+            }
+        }
+        return weakestLlmCoverageIndex(areas, requiredFallbackScopes, selected);
+    }
+
+    private boolean hasAnyLlmCoverageRole(CodeSearchResult result) {
+        return result != null && result.metadata() != null && result.metadata().containsKey("llmCoverageRole");
+    }
+
+    private boolean isLowValueLlmCoverageEvidence(List<String> areas, CodeSearchResult result) {
+        if (result == null) {
+            return true;
+        }
+        String sourceRole = CodeSourceClassifier.sourceRole(result);
+        if (CodeSourceClassifier.SOURCE_TEST.equals(sourceRole)
+                || CodeSourceClassifier.SOURCE_DOCS.equals(sourceRole)
+                || CodeSourceClassifier.SOURCE_GENERATED.equals(sourceRole)
+                || CodeSourceClassifier.isLocalAgentEvidence(result)) {
+            return true;
+        }
+        if (areas.stream().anyMatch(area -> hasLlmPlannedCoverageArea(area, result))) {
+            return false;
+        }
+        if (result.metadata() != null && result.metadata().containsKey("llmCoverageRole")) {
+            return false;
+        }
+        return areas.stream().noneMatch(area -> hasAreaCoverage(area, result));
+    }
+
+    private CodeSearchResult markLlmPlannedCoverage(CodeSearchResult result, String area) {
+        return markLlmPlannedCoverage(result, area, null);
+    }
+
+    private CodeSearchResult markLlmPlannedCoverage(CodeSearchResult result, String area, String role) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("llmCoverageArea", area);
+        metadata.put("llmCoverageRequired", true);
+        metadata.put("llmCoverageReason", "llm evidence coverage plan");
+        if (role != null && !role.isBlank()) {
+            metadata.put("llmCoverageRole", role);
+        }
+        return new CodeSearchResult(
+                result.chunkId(),
+                result.repositoryId(),
+                result.fileId(),
+                result.repositoryName(),
+                result.filePath(),
+                result.chunkType(),
+                result.symbolName(),
+                result.className(),
+                result.methodName(),
+                result.namespaceName(),
+                result.controlName(),
+                result.eventName(),
+                result.chunkIndex(),
+                result.lineStart(),
+                result.lineEnd(),
+                result.content(),
+                result.score(),
+                metadata
+        );
+    }
+
+    private CodeSearchResult markLlmPlannedFallbackScopeCoverage(CodeSearchResult result, String area, String scope) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("llmCoverageArea", area);
+        metadata.put("llmCoverageRequired", true);
+        metadata.put("llmCoverageReason", "llm evidence coverage plan");
+        metadata.put("llmCoverageFallbackScope", scope);
+        return new CodeSearchResult(
+                result.chunkId(),
+                result.repositoryId(),
+                result.fileId(),
+                result.repositoryName(),
+                result.filePath(),
+                result.chunkType(),
+                result.symbolName(),
+                result.className(),
+                result.methodName(),
+                result.namespaceName(),
+                result.controlName(),
+                result.eventName(),
+                result.chunkIndex(),
+                result.lineStart(),
+                result.lineEnd(),
+                result.content(),
+                result.score(),
+                metadata
+        );
+    }
+
+    private boolean llmEvidenceCoverageEnabled() {
+        return properties.getCode().getGraph().isLlmEvidenceCoverageEnabled();
     }
 
     private List<CodeSearchResult> sourceAwareEvidenceSelection(
@@ -1573,7 +1971,11 @@ public class CodeRagService {
             }
             adjusted.set(replaceIndex, replacement);
         }
-        return adjusted.stream().limit(limit).toList();
+        return limitedMutable(adjusted, limit);
+    }
+
+    private List<CodeSearchResult> limitedMutable(List<CodeSearchResult> results, int limit) {
+        return results.stream().limit(limit).collect(Collectors.toCollection(ArrayList::new));
     }
 
     private boolean replacementAvailable(List<CodeSearchResult> ranked, List<CodeSearchResult> selected, String question, boolean localAgentQuestion) {
@@ -1764,7 +2166,8 @@ public class CodeRagService {
         int maxChars = questionMode == CodeQuestionMode.OVERVIEW
                 ? OVERVIEW_CONTEXT_CHARS
                 : questionMode == CodeQuestionMode.REASONING ? REASONING_CONTEXT_CHARS : DEFAULT_CONTEXT_CHARS;
-        return IntStream.range(0, results.size())
+        String evidenceValidation = evidenceValidationContext(results);
+        String context = IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
                     return "[" + (index + 1) + "] "
@@ -1774,11 +2177,19 @@ public class CodeRagService {
                             + nullable(" method=", result.methodName())
                             + nullable(" control=", result.controlName())
                             + nullable(" event=", result.eventName())
+                            + evidenceRoleContext(result)
+                            + evidencePhaseContext(result)
+                            + evidenceResponsibilityContext(result)
+                            + fallbackScopeContext(result)
+                            + citationKindContext(result)
+                            + executionOrderContext(result)
+                            + analysisDiagnosticContext(result)
                             + graphContext(result)
                             + evidenceRankingContext(result)
                             + "\n" + codeExcerpt(question, result, maxChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+        return evidenceValidation.isBlank() ? context : evidenceValidation + "\n\n" + context;
     }
 
     private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
@@ -2073,7 +2484,8 @@ public class CodeRagService {
         int detailedLimit = Math.min(results.size(), detailedStreamingContextLimit(questionMode, results));
         int detailedChars = streamingDetailedContextChars(questionMode);
         int compactChars = streamingCompactContextChars(questionMode);
-        return IntStream.range(0, results.size())
+        String evidenceValidation = evidenceValidationContext(results);
+        String context = IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
                     boolean detailed = index < detailedLimit || isRequiredConversationPinned(result);
@@ -2082,6 +2494,7 @@ public class CodeRagService {
                             : streamingCompactContextLine(question, result, index + 1, compactChars);
                 })
                 .collect(Collectors.joining("\n\n"));
+        return evidenceValidation.isBlank() ? context : evidenceValidation + "\n\n" + context;
     }
 
     private int detailedStreamingContextLimit(CodeQuestionMode questionMode, List<CodeSearchResult> results) {
@@ -2114,6 +2527,13 @@ public class CodeRagService {
 
     private String streamingDetailedContextLine(String question, CodeSearchResult result, int citationNumber, int maxChars) {
         return "[" + citationNumber + "] " + compactCodeHeader(result)
+                + evidenceRoleContext(result)
+                + evidencePhaseContext(result)
+                + evidenceResponsibilityContext(result)
+                + fallbackScopeContext(result)
+                + citationKindContext(result)
+                + executionOrderContext(result)
+                + analysisDiagnosticContext(result)
                 + graphContext(result)
                 + evidenceRankingContext(result)
                 + "\n" + codeExcerpt(question, result, maxChars);
@@ -2346,10 +2766,47 @@ public class CodeRagService {
                             result.lineEnd(),
                             preview(result.content()),
                             result.score(),
-                            evidenceRanker.responseMetadata(result.metadata())
+                            responseEvidenceMetadata(result)
                     );
                 })
                 .toList();
+    }
+
+    private Map<String, Object> responseEvidenceMetadata(CodeSearchResult result) {
+        Map<String, Object> metadata = new LinkedHashMap<>(evidenceRanker.responseMetadata(result.metadata()));
+        List<String> roles = evidenceRoles(result);
+        if (!roles.isEmpty()) {
+            metadata.put("evidenceRole", String.join("|", roles));
+        }
+        List<String> phases = evidencePhases(result);
+        if (!phases.isEmpty()) {
+            metadata.put("evidencePhase", String.join("|", phases));
+            metadata.put("executionOrder", executionOrder(phases));
+        }
+        metadata.put("citationKind", citationKind(result));
+        metadata.put("evidenceResponsibility", evidenceResponsibility(result));
+        String fallbackScope = fallbackScope(result);
+        if (!fallbackScope.isBlank()) {
+            metadata.put("fallbackScope", fallbackScope);
+        }
+        String analysisDiagnosticStatus = analysisDiagnosticStatus(result);
+        if (!analysisDiagnosticStatus.isBlank()) {
+            metadata.put("analysisDiagnosticStatus", analysisDiagnosticStatus);
+            metadata.put("analysisDiagnosticScope", analysisDiagnosticScope(result));
+            String stage = analysisDiagnosticStage(result);
+            if (!stage.isBlank()) {
+                metadata.put("analysisDiagnosticStage", stage);
+            }
+            String language = analysisDiagnosticLanguage(result);
+            if (!language.isBlank()) {
+                metadata.put("analysisDiagnosticLanguage", language);
+            }
+            String analyzer = analysisDiagnosticAnalyzer(result);
+            if (!analyzer.isBlank()) {
+                metadata.put("analysisDiagnosticAnalyzer", analyzer);
+            }
+        }
+        return Map.copyOf(metadata);
     }
 
     private String preview(String content) {
@@ -3088,6 +3545,492 @@ public class CodeRagService {
                 + nullable(" depth=", depth == null ? null : String.valueOf(depth))
                 + nullable(" confidence=", graphConfidence == null ? null : String.valueOf(graphConfidence))
                 + nullable(" path=", graphPath == null ? null : String.valueOf(graphPath));
+    }
+
+    private String evidenceRoleContext(CodeSearchResult result) {
+        List<String> roles = evidenceRoles(result);
+        return roles.isEmpty() ? "" : " evidenceRole=" + String.join("|", roles);
+    }
+
+    private String evidencePhaseContext(CodeSearchResult result) {
+        List<String> phases = evidencePhases(result);
+        return phases.isEmpty() ? "" : " evidencePhase=" + String.join("|", phases);
+    }
+
+    private String evidenceResponsibilityContext(CodeSearchResult result) {
+        if (evidenceRoles(result).isEmpty() && !isGraphExpanded(result) && fallbackScope(result).isBlank()) {
+            return "";
+        }
+        return " evidenceResponsibility=" + evidenceResponsibility(result);
+    }
+
+    private String fallbackScopeContext(CodeSearchResult result) {
+        String scope = fallbackScope(result);
+        return scope.isBlank() ? "" : " fallbackScope=" + scope;
+    }
+
+    private String citationKindContext(CodeSearchResult result) {
+        if (evidenceRoles(result).isEmpty() && !isGraphExpanded(result) && fallbackScope(result).isBlank()) {
+            return "";
+        }
+        return " citationKind=" + citationKind(result);
+    }
+
+    private String executionOrderContext(CodeSearchResult result) {
+        List<String> phases = evidencePhases(result);
+        return phases.isEmpty() ? "" : " executionOrder=" + executionOrder(phases);
+    }
+
+    private String analysisDiagnosticContext(CodeSearchResult result) {
+        String status = analysisDiagnosticStatus(result);
+        if (status.isBlank()) {
+            return "";
+        }
+        return " analysisDiagnosticStatus=" + status
+                + " analysisDiagnosticScope=" + analysisDiagnosticScope(result)
+                + nullable(" analysisDiagnosticStage=", analysisDiagnosticStage(result))
+                + nullable(" analysisDiagnosticLanguage=", analysisDiagnosticLanguage(result))
+                + nullable(" analysisDiagnosticAnalyzer=", analysisDiagnosticAnalyzer(result));
+    }
+
+    private String evidenceValidationContext(List<CodeSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "";
+        }
+        LinkedHashSet<String> scopes = results.stream()
+                .map(this::fallbackScope)
+                .filter(scope -> !scope.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        boolean hasDiagnostics = results.stream().anyMatch(result -> !analysisDiagnosticStatus(result).isBlank());
+        if (scopes.isEmpty() && !hasDiagnostics) {
+            return "";
+        }
+        List<String> checks = new ArrayList<>();
+        checks.add("Evidence validation: fallbackScope values describe separate mechanisms; do not chain them unless cited code directly shows the call or condition.");
+        checks.add("rank/evidenceScore are relevance signals, not execution order.");
+        checks.add("Guard clauses and early returns are failure handling only when cited code or diagnostic metadata reports failed, partial, skipped, unavailable, or exception.");
+        if (scopes.contains("GRAPH_ANALYSIS") && scopes.contains("ANSWER_GENERATION")) {
+            checks.add("GRAPH_ANALYSIS fallback and ANSWER_GENERATION fallback are distinct; do not say graph analysis failure triggers answer fallback without direct call evidence.");
+        }
+        if (scopes.contains("GRAPH_ANALYSIS") && scopes.contains("SEARCH_EXPANSION")) {
+            checks.add("GRAPH_ANALYSIS fallback is indexing/analysis evidence; SEARCH_EXPANSION fallback is retrieval/traversal evidence.");
+        }
+        if (hasDiagnostics) {
+            checks.add("analysisDiagnosticStatus is diagnostic metadata for graph/index analysis evidence, not proof of runtime answer-generation fallback.");
+            checks.add("If analysisDiagnosticLanguage or analysisDiagnosticStage does not match a language/framework named in the question, treat it as cross-language supporting evidence rather than the primary answer basis.");
+        }
+        return String.join(" ", checks);
+    }
+
+    private List<String> evidencePhases(CodeSearchResult result) {
+        if (result == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> phases = new LinkedHashSet<>();
+        List<String> roles = evidenceRoles(result);
+        if (roles.contains("indexing/pipeline")
+                || roles.contains("graph-build/analysis")
+                || roles.contains("graph-storage")
+                || isIndexingChunk(result)) {
+            phases.add("INDEXING");
+        }
+        if (roles.contains("retrieval/search-expansion")
+                || roles.contains("graph-traversal/expansion")
+                || roles.contains("graph-expanded-result")) {
+            phases.add("SEARCH_EXPANSION");
+        }
+        if (roles.contains("evidence-ranking")) {
+            phases.add("RANKING");
+        }
+        if (roles.contains("answer-context/generation")) {
+            phases.add("ANSWER_GENERATION");
+        }
+        if (phases.isEmpty() && isGraphExpanded(result)) {
+            phases.add("SEARCH_EXPANSION");
+        }
+        return phases.stream()
+                .sorted(Comparator.comparingInt(this::phaseOrder))
+                .limit(4)
+                .toList();
+    }
+
+    private String evidenceResponsibility(CodeSearchResult result) {
+        if (result == null) {
+            return "unknown";
+        }
+        String type = safe(result.chunkType(), "");
+        String text = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                type,
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.content(), "")
+        )));
+        String fallbackScope = fallbackScope(result);
+        if ("ROUTING".equals(fallbackScope)) {
+            return "route_decision";
+        }
+        if ("GRAPH_ANALYSIS".equals(fallbackScope)) {
+            return "analysis_diagnostic";
+        }
+        if ("SEARCH_EXPANSION".equals(fallbackScope)) {
+            return "search_fallback";
+        }
+        if ("ANSWER_GENERATION".equals(fallbackScope)) {
+            return "answer_fallback";
+        }
+        if ("record".equals(type) || "enum".equals(type) || type.endsWith("_summary")
+                || containsRoleTerms(text, "dto", "record", "response object", "request object", "data carrier")) {
+            return "data_structure";
+        }
+        if (containsRoleTerms(text, "is graph", "is expanded", "is enabled", "has ", "check", "validate", "predicate", "filter", "helper")
+                && !containsRoleTerms(text, "retrieves", "searches", "persists", "stores", "calls", "builds", "generates", "executes")) {
+            return "helper_check";
+        }
+        List<String> roles = evidenceRoles(result);
+        if (!roles.isEmpty()) {
+            return "implementation_flow";
+        }
+        if (isStructured(type) || notBlank(result.methodName()) || notBlank(result.className()) || notBlank(result.symbolName())) {
+            return "implementation_code";
+        }
+        return "supporting_context";
+    }
+
+    private String fallbackScope(CodeSearchResult result) {
+        if (result == null) {
+            return "";
+        }
+        String text = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.chunkType(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                safe(result.content(), "")
+        )));
+        boolean fallbackTerm = containsRoleTerms(text, "fallback", "failed", "failure", "skipped", "partial", "unavailable", "catch runtime exception", "catches runtime exception", "catch exception", "catches exception");
+        if (!fallbackTerm) {
+            return "";
+        }
+        if (containsRoleTerms(text, "route", "router", "route decision", "unknown route", "code search route", "clarify")) {
+            return "ROUTING";
+        }
+        if (containsRoleTerms(text, "semantic graph", "symbol solver", "analyzer", "analysis diagnostic", "code analysis diagnostics", "base graph", "chunk graph", "classpath", "build with diagnostics", "parse files", "parsed files")) {
+            return "GRAPH_ANALYSIS";
+        }
+        if (containsRoleTerms(text, "expand graph", "graph related chunks", "keyword search remain", "embedding unavailable", "return ranked", "search expansion", "related chunks")) {
+            return "SEARCH_EXPANSION";
+        }
+        if (containsRoleTerms(text, "fallback answer", "reasoning fallback", "method fallback", "locate fallback", "answer rewritten", "missing citation", "llm unavailable", "model unavailable", "low quality answer")) {
+            return "ANSWER_GENERATION";
+        }
+        return "";
+    }
+
+    private String analysisDiagnosticStatus(CodeSearchResult result) {
+        if (result == null || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return "";
+        }
+        if (result.metadata() != null) {
+            for (String key : List.of("analysisDiagnosticStatus", "diagnosticStatus", "analysisStatus", "status")) {
+                Object value = result.metadata().get(key);
+                String normalized = normalizeDiagnosticStatus(value == null ? "" : String.valueOf(value));
+                if (!normalized.isBlank()) {
+                    return normalized;
+                }
+            }
+        }
+        String text = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.chunkType(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                safe(result.content(), "")
+        )));
+        if (containsRoleTerms(text, "failed", "failure", "error", "exception")) {
+            return "FAILED";
+        }
+        if (containsRoleTerms(text, "partial", "partially", "incomplete")) {
+            return "PARTIAL";
+        }
+        if (containsRoleTerms(text, "skipped", "skip", "unavailable", "disabled")) {
+            return "SKIPPED";
+        }
+        if (containsRoleTerms(text, "success", "succeeded", "complete", "completed")) {
+            return "SUCCESS";
+        }
+        return "";
+    }
+
+    private String normalizeDiagnosticStatus(String value) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(value));
+        if (normalized.isBlank()) {
+            return "";
+        }
+        if (containsRoleTerms(normalized, "failed", "failure", "error", "exception")) {
+            return "FAILED";
+        }
+        if (containsRoleTerms(normalized, "partial", "partially", "incomplete")) {
+            return "PARTIAL";
+        }
+        if (containsRoleTerms(normalized, "skipped", "skip", "unavailable", "disabled")) {
+            return "SKIPPED";
+        }
+        if (containsRoleTerms(normalized, "success", "succeeded", "complete", "completed")) {
+            return "SUCCESS";
+        }
+        return "";
+    }
+
+    private String analysisDiagnosticScope(CodeSearchResult result) {
+        return analysisDiagnosticStatus(result).isBlank() ? "" : "GRAPH_ANALYSIS";
+    }
+
+    private String analysisDiagnosticStage(CodeSearchResult result) {
+        if (result == null || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return "";
+        }
+        String metadataStage = metadataString(result, "analysisDiagnosticStage", "diagnosticStage", "stage");
+        if (!metadataStage.isBlank()) {
+            return metadataStage.toUpperCase(Locale.ROOT);
+        }
+        String text = diagnosticIdentityText(result);
+        if (containsRoleTerms(text, "java semantic", "javaparser", "java parser", "symbol solver")) {
+            return "JAVA_SEMANTIC";
+        }
+        if (containsRoleTerms(text, "csharp roslyn", "c sharp roslyn", "roslyn", "wpf", "winforms", "xaml")) {
+            return "CSHARP_ROSLYN";
+        }
+        return "";
+    }
+
+    private String analysisDiagnosticLanguage(CodeSearchResult result) {
+        if (result == null || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return "";
+        }
+        String metadataLanguage = normalizeDiagnosticLanguage(metadataString(result,
+                "analysisDiagnosticLanguage", "diagnosticLanguage", "language"));
+        if (!metadataLanguage.isBlank()) {
+            return metadataLanguage;
+        }
+        String stage = analysisDiagnosticStage(result);
+        if ("JAVA_SEMANTIC".equals(stage)) {
+            return "java";
+        }
+        if ("CSHARP_ROSLYN".equals(stage)) {
+            return "csharp";
+        }
+        String parser = normalizeQuestionText(splitIdentifierTerms(metadataString(result, "parser", "strategy")));
+        if (containsRoleTerms(parser, "javaparser", "java parser")) {
+            return "java";
+        }
+        if (containsRoleTerms(parser, "roslyn", "semantic model")) {
+            return "csharp";
+        }
+        String text = diagnosticIdentityText(result);
+        if (containsRoleTerms(text, "javaparser", "java parser", "java semantic") || safe(result.filePath(), "").endsWith(".java")) {
+            return "java";
+        }
+        if (containsRoleTerms(text, "roslyn", "csharp", "c sharp", "wpf", "winforms", "xaml") || safe(result.filePath(), "").endsWith(".cs")) {
+            return "csharp";
+        }
+        return "";
+    }
+
+    private String analysisDiagnosticAnalyzer(CodeSearchResult result) {
+        if (result == null || !"GRAPH_ANALYSIS".equals(fallbackScope(result))) {
+            return "";
+        }
+        String metadataAnalyzer = metadataString(result, "analysisDiagnosticAnalyzer", "diagnosticAnalyzer", "analyzer");
+        if (!metadataAnalyzer.isBlank()) {
+            return metadataAnalyzer;
+        }
+        String stage = analysisDiagnosticStage(result);
+        if ("JAVA_SEMANTIC".equals(stage)) {
+            return "JavaParser Symbol Solver";
+        }
+        if ("CSHARP_ROSLYN".equals(stage)) {
+            return "Roslyn";
+        }
+        String parser = metadataString(result, "parser", "strategy");
+        return parser.isBlank() ? "" : parser;
+    }
+
+    private String metadataString(CodeSearchResult result, String... keys) {
+        if (result == null || result.metadata() == null) {
+            return "";
+        }
+        for (String key : keys) {
+            Object value = result.metadata().get(key);
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return String.valueOf(value);
+            }
+        }
+        return "";
+    }
+
+    private String normalizeDiagnosticLanguage(String value) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(value));
+        if (normalized.isBlank()) {
+            return "";
+        }
+        if (containsRoleTerms(normalized, "java") && !containsRoleTerms(normalized, "javascript", "java script")) {
+            return "java";
+        }
+        if (containsRoleTerms(normalized, "csharp", "c sharp", "c#", "dotnet", "roslyn")) {
+            return "csharp";
+        }
+        return "";
+    }
+
+    private String diagnosticIdentityText(CodeSearchResult result) {
+        return normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.chunkType(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                metadataString(result, "analysisDiagnosticStage", "diagnosticStage", "stage"),
+                metadataString(result, "analysisDiagnosticAnalyzer", "diagnosticAnalyzer", "analyzer"),
+                metadataString(result, "analysisDiagnosticLanguage", "diagnosticLanguage", "language"),
+                metadataString(result, "parser", "strategy"),
+                safe(result.content(), "")
+        )));
+    }
+
+    private boolean isIndexingChunk(CodeSearchResult result) {
+        String text = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.chunkType(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.content(), "")
+        )));
+        return containsRoleTerms(text, "index", "indexing", "chunk parser", "parse", "embedding", "graph build");
+    }
+
+    private String citationKind(CodeSearchResult result) {
+        if (result == null) {
+            return "unknown";
+        }
+        if (isGraphExpanded(result)) {
+            Object kind = result.metadata().get("graphEvidenceKind");
+            String graphKind = safe(kind == null ? null : String.valueOf(kind), "inferred");
+            return "direct_code+graph_relationship:" + graphKind;
+        }
+        List<String> roles = evidenceRoles(result);
+        if (roles.contains("graph-build/analysis") || roles.contains("graph-storage")) {
+            return "direct_code";
+        }
+        if ("record".equals(result.chunkType()) || result.chunkType() != null && result.chunkType().endsWith("_summary")) {
+            return "direct_code_support";
+        }
+        return "direct_code";
+    }
+
+    private String executionOrder(List<String> phases) {
+        if (phases == null || phases.isEmpty()) {
+            return "unknown";
+        }
+        return phases.stream()
+                .map(phase -> {
+                    int order = phaseOrder(phase);
+                    String previous = phaseByOrder(order - 1);
+                    String next = phaseByOrder(order + 1);
+                    return phase
+                            + (previous.isBlank() ? "" : ".happensAfter=" + previous)
+                            + (next.isBlank() ? "" : ".happensBefore=" + next);
+                })
+                .collect(Collectors.joining("|"));
+    }
+
+    private int phaseOrder(String phase) {
+        return switch (safe(phase, "")) {
+            case "INDEXING" -> 0;
+            case "SEARCH_EXPANSION" -> 1;
+            case "RANKING" -> 2;
+            case "ANSWER_GENERATION" -> 3;
+            default -> 99;
+        };
+    }
+
+    private String phaseByOrder(int order) {
+        return switch (order) {
+            case 0 -> "INDEXING";
+            case 1 -> "SEARCH_EXPANSION";
+            case 2 -> "RANKING";
+            case 3 -> "ANSWER_GENERATION";
+            default -> "";
+        };
+    }
+
+    private List<String> evidenceRoles(CodeSearchResult result) {
+        if (result == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> roles = new LinkedHashSet<>();
+        String nameText = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.chunkType(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), "")
+        )));
+        String contentText = normalizeQuestionText(splitIdentifierTerms(safe(result.content(), "")));
+        String combined = nameText + " " + contentText;
+        boolean rankingIdentity = containsRoleTerms(nameText, "evidence score", "evidence rank", "ranking", "ranker", "rerank", "score", "edge weight", "intent evidence", "rank");
+        if (containsRoleTerms(nameText, "indexing", "indexer", "index", "run index", "run indexing", "repository indexing")
+                || containsRoleTerms(contentText, "orchestrates file scan", "file scan", "parser chunk generation", "chunk generation", "generated code chunks", "embedding", "add chunks")) {
+            roles.add("indexing/pipeline");
+        }
+        if (containsRoleTerms(nameText, "search", "retrieval", "retrieve", "query", "expand", "expansion", "related chunks")
+                || containsRoleTerms(contentText, "retrieves query", "search expansion", "expands related chunks", "seed chunks", "search result")) {
+            roles.add("retrieval/search-expansion");
+        }
+        if (!rankingIdentity && (isGraphExpanded(result)
+                || containsRoleTerms(nameText, "graph related chunks", "graph neighbors", "graph chunks for paths", "traversal", "graph path")
+                || containsRoleTerms(contentText, "graph neighbors", "traverses", "traversal", "graph path", "path score", "graph depth", "max hop", "direction"))) {
+            roles.add("graph-traversal/expansion");
+        }
+        if (containsRoleTerms(nameText, "merge graph", "replace graph", "save graph", "graph storage", "code graph storage")
+                || containsRoleTerms(contentText, "merge graph", "replace graph", "save graph", "stores code graph", "stores code_graph", "insert statements", "code_graph_nodes", "code_graph_edges", "graph storage", "code graph storage")) {
+            roles.add("graph-storage");
+        }
+        if (containsRoleTerms(nameText, "graph builder", "build diagnostics", "build with diagnostics", "graph build", "graph analyzer", "graph analysis")
+                || containsRoleTerms(contentText, "builds graph", "graph builder", "analyzes graph", "graph diagnostics", "parser graph", "nodes and edges from", "relationships")) {
+            roles.add("graph-build/analysis");
+        }
+        if (rankingIdentity || containsRoleTerms(contentText, "scores", "reranks", "evidence score", "ranking reason", "edge weight", "intent evidence score")) {
+            roles.add("evidence-ranking");
+        }
+        if (containsRoleTerms(nameText, "generate answer", "generate code answer", "build prompt", "build context", "prompt context", "answer context")
+                || containsRoleTerms(contentText, "builds prompt", "calls the llm", "model for answer generation", "returns answer response citations", "source code context", "prompt context")) {
+            roles.add("answer-context/generation");
+        }
+        if (isGraphExpanded(result) && !roles.contains("graph-traversal/expansion")) {
+            roles.add("graph-expanded-result");
+        }
+        return roles.stream().limit(4).toList();
+    }
+
+    private boolean containsRoleTerms(String value, String... terms) {
+        String safeValue = safe(value, "");
+        for (String term : terms) {
+            if (safeValue.contains(normalizeQuestionText(splitIdentifierTerms(term)))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String evidenceRankingContext(CodeSearchResult result) {
