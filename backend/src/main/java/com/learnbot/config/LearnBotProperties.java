@@ -432,7 +432,7 @@ public class LearnBotProperties {
         private double temperature = 0.2;
 
         @Min(512)
-        private int contextWindow = 4096;
+        private int contextWindow = 12288;
 
         @Min(0)
         private int maxOutputTokens = 0;
@@ -605,7 +605,7 @@ public class LearnBotProperties {
             private int maxQueryCountBalanced = 2;
 
             @Min(512)
-            private int promptTokenBudgetBalanced = 3500;
+            private int promptTokenBudgetBalanced = 9000;
 
             private boolean answerRepairEnabled = true;
             private boolean queryEmbeddingCacheEnabled = true;

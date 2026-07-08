@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 @Service
 public class CodeSearchService {
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}(?:\\.[A-Za-z0-9_]+)?");
+    private static final Pattern SQL_ACCESS_PATTERN = Pattern.compile("\\b(insert\\s+into|update|delete\\s+from|merge\\s+into|select\\s+.+?\\s+from|create\\s+table|alter\\s+table|drop\\s+table)\\b", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Map<String, List<String>> QUERY_ALIASES = Map.ofEntries(
             Map.entry("로그인", List.of("login", "signin", "sign in", "auth", "authentication", "session", "token", "credential")),
             Map.entry("login", List.of("로그인", "signin", "sign in", "auth", "authentication", "session", "token", "credential")),
@@ -299,7 +300,39 @@ public class CodeSearchService {
         if (!isOverviewQuestion(query) && isProjectContext(result.chunkType())) {
             boost -= "file_summary".equals(result.chunkType()) ? 0.05 : 0.18;
         }
+        boost += resourceAccessBoost(query, result, content, symbolText, path);
         return boost;
+    }
+
+    private double resourceAccessBoost(String query, CodeSearchResult result, String content, String symbolText, String path) {
+        List<String> resources = resourceIdentifiers(query);
+        if (resources.isEmpty()) {
+            return 0;
+        }
+        String combined = path + " " + symbolText + " " + content;
+        long matched = resources.stream()
+                .filter(resource -> combined.contains(normalizeCodeText(resource)))
+                .count();
+        if (matched == 0) {
+            return 0;
+        }
+        boolean accessIntent = hasResourceAccessIntent(query);
+        boolean sqlAccess = hasSqlAccess(result.content());
+        if (!accessIntent && !sqlAccess) {
+            return 0;
+        }
+        boolean structured = isStructured(result.chunkType());
+        double score = Math.min(0.42, matched * 0.12);
+        if (sqlAccess) {
+            score += 0.34;
+        }
+        if (accessIntent) {
+            score += 0.18;
+        }
+        if (structured) {
+            score += 0.08;
+        }
+        return Math.min(0.78, score);
     }
 
     private List<String> queryTerms(String query) {
@@ -327,6 +360,35 @@ public class CodeSearchService {
                 .filter(term -> term.length() >= 2 && !isQuestionStopWord(term))
                 .distinct()
                 .toList();
+    }
+
+    private List<String> resourceIdentifiers(String query) {
+        return identifiersFrom(query).stream()
+                .filter(identifier -> identifier.contains("_")
+                        || identifier.contains(".")
+                        || identifier.length() >= 12)
+                .distinct()
+                .limit(8)
+                .toList();
+    }
+
+    private boolean hasResourceAccessIntent(String query) {
+        String normalized = normalizeCodeText(query);
+        return normalized.contains("storage")
+                || normalized.contains("store")
+                || normalized.contains("persist")
+                || normalized.contains("save")
+                || normalized.contains("insert")
+                || normalized.contains("update")
+                || normalized.contains("delete")
+                || normalized.contains("write")
+                || normalized.contains("table")
+                || normalized.contains("database")
+                || normalized.contains("db");
+    }
+
+    private boolean hasSqlAccess(String content) {
+        return content != null && SQL_ACCESS_PATTERN.matcher(content).find();
     }
 
     private boolean isLoginQuestion(String query) {

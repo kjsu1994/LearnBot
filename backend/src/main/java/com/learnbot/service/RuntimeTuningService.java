@@ -81,6 +81,7 @@ public class RuntimeTuningService {
 
         Map<String, Integer> nextValues = new LinkedHashMap<>();
         if ("custom".equalsIgnoreCase(request.preset())) {
+            nextValues.putAll(currentTuningValues());
             settingsRepository.upsertValue(ACTIVE_PRESET_KEY, "custom", actor.id());
         } else if (request.preset() != null && !request.preset().isBlank()) {
             AdminTuningPreset preset = presets().stream()
@@ -91,6 +92,9 @@ public class RuntimeTuningService {
             settingsRepository.upsertValue(ACTIVE_PRESET_KEY, preset.id(), actor.id());
         }
         if (request.values() != null) {
+            if (nextValues.isEmpty()) {
+                nextValues.putAll(currentTuningValues());
+            }
             nextValues.putAll(request.values());
             settingsRepository.upsertValue(ACTIVE_PRESET_KEY, "custom", actor.id());
         }
@@ -109,6 +113,14 @@ public class RuntimeTuningService {
                 Map.of("preset", request.preset() == null ? "custom" : request.preset(), "values", nextValues)
         );
         return current();
+    }
+
+    private Map<String, Integer> currentTuningValues() {
+        Map<String, Integer> values = new LinkedHashMap<>();
+        for (TuningDefinition definition : definitions()) {
+            values.put(definition.key(), value(definition.key()));
+        }
+        return values;
     }
 
     public int llmContextWindow() {
@@ -223,9 +235,9 @@ public class RuntimeTuningService {
         slightlyHigh.put(OLLAMA_NUM_PARALLEL, 1);
 
         Map<String, Integer> performance = new LinkedHashMap<>(slightlyHigh);
-        performance.put(LLM_CONTEXT_WINDOW, 8192);
-        performance.put(OLLAMA_CONTEXT_LENGTH, 8192);
-        performance.put(PROMPT_TOKEN_BUDGET_BALANCED, 6500);
+        performance.put(LLM_CONTEXT_WINDOW, 12288);
+        performance.put(OLLAMA_CONTEXT_LENGTH, 12288);
+        performance.put(PROMPT_TOKEN_BUDGET_BALANCED, 9000);
         performance.put(DOCUMENT_CONTEXT_LIMIT, 14);
         performance.put(CODE_CONTEXT_LIMIT, 20);
         performance.put(OVERVIEW_MAX_DOCUMENTS, 24);

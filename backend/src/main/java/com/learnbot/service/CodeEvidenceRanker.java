@@ -15,6 +15,10 @@ import java.util.stream.Collectors;
 
 @Component
 public class CodeEvidenceRanker {
+    private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}(?:\\.[A-Za-z0-9_]+)?");
+    private static final Pattern SQL_ACCESS_PATTERN = Pattern.compile("\\b(insert\\s+into|update|delete\\s+from|merge\\s+into|select\\s+.+?\\s+from|create\\s+table|alter\\s+table|drop\\s+table)\\b", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern API_PATH_PATTERN = Pattern.compile("/api/[A-Za-z0-9_./{}-]*");
+    private static final Pattern SPRING_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\\s*\\((?:[^\"']*[\"']([^\"']+)[\"'])?", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private final LearnBotProperties properties;
 
     public CodeEvidenceRanker(LearnBotProperties properties) {
@@ -131,11 +135,13 @@ public class CodeEvidenceRanker {
         double literal = literalEvidenceScore(question, result);
         double intent = intentEvidenceScore(mode, result);
         double structure = structureEvidenceScore(mode, result);
+        double resourceAccess = resourceAccessEvidenceScore(question, result);
         double legacy = Math.max(0, legacyRelevance(question, mode, result) - result.score()) * 0.20;
         double flow = mode == CodeRagService.CodeQuestionMode.CALL_FLOW ? Math.max(0, 0.025 * (5 - flowRank(result))) : 0;
         double conversation = isConversationPinned(result) ? 0.18 : 0;
         double sourcePolicy = sourcePolicyScore(question, mode, result);
-        double total = base + text + graph + literal + intent + structure + legacy + flow + conversation + sourcePolicy;
+        double flowGuard = flowGuardScore(question, mode, result);
+        double total = base + text + graph + literal + intent + structure + resourceAccess + legacy + flow + conversation + sourcePolicy + flowGuard;
         Map<String, Object> parts = new LinkedHashMap<>();
         parts.put("baseSearch", round(base));
         parts.put("textMatch", round(text));
@@ -145,6 +151,9 @@ public class CodeEvidenceRanker {
         }
         parts.put("intent", round(intent));
         parts.put("structure", round(structure));
+        if (resourceAccess > 0) {
+            parts.put("resourceAccess", round(resourceAccess));
+        }
         parts.put("legacyRerank", round(legacy));
         if (flow > 0) {
             parts.put("flowOrder", round(flow));
@@ -155,7 +164,10 @@ public class CodeEvidenceRanker {
         if (sourcePolicy != 0) {
             parts.put("sourcePolicy", round(sourcePolicy));
         }
-        return withMetadata(result, total, parts, reason(question, mode, result, graph, intent, structure, flow, sourcePolicy));
+        if (flowGuard != 0) {
+            parts.put("flowGuard", round(flowGuard));
+        }
+        return withMetadata(result, total, parts, reason(question, mode, result, graph, intent, structure, resourceAccess, flow, sourcePolicy, flowGuard));
     }
 
     private CodeSearchResult adjust(CodeSearchResult result, double adjustment, String reason) {
@@ -378,14 +390,75 @@ public class CodeEvidenceRanker {
         return Math.max(-0.16, Math.min(0.34, score));
     }
 
-    private String reason(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double flow, double sourcePolicy) {
+    private double resourceAccessEvidenceScore(String question, CodeSearchResult result) {
+        List<String> resources = resourceIdentifiers(question);
+        if (resources.isEmpty()) {
+            return 0;
+        }
+        String haystack = normalize(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), ""),
+                safe(result.content(), "")
+        ));
+        long matched = resources.stream()
+                .filter(resource -> haystack.contains(normalize(resource)))
+                .count();
+        if (matched == 0) {
+            return 0;
+        }
+        boolean accessIntent = hasResourceAccessIntent(question);
+        boolean sqlAccess = hasSqlAccess(result.content());
+        if (!accessIntent && !sqlAccess) {
+            return 0;
+        }
+        double score = Math.min(0.24, matched * 0.08);
+        if (sqlAccess) {
+            score += 0.30;
+        }
+        if (accessIntent) {
+            score += 0.12;
+        }
+        if (isStructured(result.chunkType())) {
+            score += 0.06;
+        }
+        return Math.min(0.56, score);
+    }
+
+    private double flowGuardScore(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {
+        String requestedPath = requestedApiPath(question);
+        boolean flowQuestion = isRuntimeFlowQuestion(question, mode) || !requestedPath.isBlank();
+        if (!flowQuestion) {
+            return 0;
+        }
+        double score = 0;
+        if (!requestedPath.isBlank()) {
+            String candidatePath = candidateApiPath(result);
+            if (!candidatePath.isBlank()) {
+                score += endpointPathMatches(requestedPath, candidatePath) ? 0.70 : -0.85;
+            }
+        }
+        if (isAuxiliaryFlowEvidence(result) && !asksForAuxiliaryEvidence(question)) {
+            score -= 0.72;
+        }
+        return score;
+    }
+
+    private String reason(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result, double graph, double intent, double structure, double resourceAccess, double flow, double sourcePolicy, double flowGuard) {
         List<String> reasons = new ArrayList<>();
         if (graph > 0) reasons.add("graph " + String.valueOf(result.metadata().getOrDefault("graphEdgeType", "RELATED")));
         if (literalEvidenceScore(question, result) > 0) reasons.add("literal code/log term match");
         if (intent >= 0.18) reasons.add(mode.value() + " intent match");
         if (structure >= 0.10) reasons.add("structured code evidence");
+        if (resourceAccess > 0) reasons.add("resource/table access evidence");
         if (flow > 0) reasons.add("flow order hint");
         if (sourcePolicy > 0) reasons.add("implementation source policy");
+        if (flowGuard > 0) reasons.add("endpoint path aligns with question");
+        if (flowGuard < 0) reasons.add("flow helper or endpoint mismatch deprioritized");
         if (sourcePolicy < 0 && CodeSourceClassifier.SOURCE_TEST.equals(CodeSourceClassifier.sourceRole(result)) && !asksForTests(question)) {
             reasons.add("test evidence deprioritized");
         }
@@ -394,6 +467,161 @@ public class CodeEvidenceRanker {
         }
         if (reasons.isEmpty()) reasons.add("hybrid search relevance");
         return String.join(", ", reasons);
+    }
+
+    private String requestedApiPath(String question) {
+        if (question == null || question.isBlank()) {
+            return "";
+        }
+        Matcher matcher = API_PATH_PATTERN.matcher(question);
+        return matcher.find() ? normalizeApiPath(matcher.group()) : "";
+    }
+
+    private String candidateApiPath(CodeSearchResult result) {
+        if (result == null) {
+            return "";
+        }
+        String text = safe(result.content(), "");
+        List<String> mappings = new ArrayList<>();
+        Matcher matcher = SPRING_MAPPING_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String value = matcher.group(1);
+            if (value != null && !value.isBlank()) {
+                mappings.add(value.trim());
+            }
+        }
+        if (mappings.isEmpty()) {
+            Matcher apiPath = API_PATH_PATTERN.matcher(text);
+            if (apiPath.find()) {
+                return normalizeApiPath(apiPath.group());
+            }
+            return "";
+        }
+        String root = "";
+        String leaf = "";
+        for (String mapping : mappings) {
+            if (mapping.startsWith("/api/") || mapping.equals("/api")) {
+                root = mapping;
+            } else if (leaf.isBlank()) {
+                leaf = mapping;
+            }
+        }
+        if (root.isBlank()) {
+            return normalizeApiPath(mappings.get(0));
+        }
+        return normalizeApiPath(root + "/" + leaf);
+    }
+
+    private boolean endpointPathMatches(String requestedPath, String candidatePath) {
+        String requested = normalizeApiPath(requestedPath);
+        String candidate = normalizeApiPath(candidatePath);
+        return !requested.isBlank() && !candidate.isBlank()
+                && (requested.equals(candidate)
+                || requested.startsWith(candidate + "/")
+                || candidate.startsWith(requested + "/"));
+    }
+
+    private String normalizeApiPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String normalized = path.trim().replace('\\', '/').replaceAll("/+", "/");
+        if (normalized.endsWith("/") && normalized.length() > 1) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private boolean isRuntimeFlowQuestion(String question, CodeRagService.CodeQuestionMode mode) {
+        String normalized = normalize(question);
+        return mode == CodeRagService.CodeQuestionMode.CALL_FLOW
+                || normalized.contains("flow")
+                || normalized.contains("through")
+                || normalized.contains("controller")
+                || normalized.contains("service")
+                || normalized.contains("repository")
+                || normalized.contains("request")
+                || normalized.contains("endpoint")
+                || normalized.contains("호출")
+                || normalized.contains("흐름");
+    }
+
+    private boolean isAuxiliaryFlowEvidence(CodeSearchResult result) {
+        if (result == null) {
+            return false;
+        }
+        String type = safe(result.chunkType(), "");
+        String path = normalize(result.filePath());
+        String rawSymbol = String.join(" ",
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), "")
+        );
+        String symbol = normalize(String.join(" ",
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.controlName(), ""),
+                safe(result.eventName(), "")
+        ));
+        String content = normalize(result.content());
+        return "record".equals(type)
+                || type.endsWith("_summary")
+                || path.contains("/dto/")
+                || rawSymbol.matches("(?i).*\\b(add|get|set|record)[A-Za-z0-9_]*(ms|millis|metric|metrics|timing|duration)\\b.*")
+                || symbol.matches(".*\\b(add|get|set|record)\\s+.*\\b(ms|millis|metric|metrics|timing|duration)\\b.*")
+                || content.contains("timing accumulator")
+                || content.contains("durationms")
+                || (symbol.contains(" response") && content.contains("record"));
+    }
+
+    private boolean asksForAuxiliaryEvidence(String question) {
+        String normalized = normalize(question);
+        return normalized.contains("metric")
+                || normalized.contains("metrics")
+                || normalized.contains("timing")
+                || normalized.contains("duration")
+                || normalized.contains("latency")
+                || normalized.contains("dto")
+                || normalized.contains("response object")
+                || normalized.contains("응답 dto")
+                || normalized.contains("메트릭");
+    }
+
+    private List<String> resourceIdentifiers(String question) {
+        if (question == null || question.isBlank()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        Matcher matcher = IDENTIFIER_PATTERN.matcher(question);
+        while (matcher.find()) {
+            String value = matcher.group().trim();
+            if (value.contains("_") || value.contains(".") || value.length() >= 12) {
+                values.add(value);
+            }
+        }
+        return values.stream().distinct().limit(8).toList();
+    }
+
+    private boolean hasResourceAccessIntent(String question) {
+        String normalized = normalize(question);
+        return normalized.contains("storage")
+                || normalized.contains("store")
+                || normalized.contains("persist")
+                || normalized.contains("save")
+                || normalized.contains("insert")
+                || normalized.contains("update")
+                || normalized.contains("delete")
+                || normalized.contains("write")
+                || normalized.contains("table")
+                || normalized.contains("database")
+                || normalized.contains("db");
+    }
+
+    private boolean hasSqlAccess(String content) {
+        return content != null && SQL_ACCESS_PATTERN.matcher(content).find();
     }
 
     private double legacyRelevance(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {

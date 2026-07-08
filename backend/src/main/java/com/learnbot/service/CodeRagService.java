@@ -42,6 +42,7 @@ public class CodeRagService {
     private static final int FALLBACK_EXCERPT_CHARS = 180;
     private static final double CONVERSATION_PINNED_BOOST = 0.18;
     private static final Pattern LEADING_FILE_QUERY_PATTERN = Pattern.compile("(?i)\\b[\\w./\\\\-]+\\.(?:java|kt|cs|js|jsx|ts|tsx|py|go|rs|php|rb|scala|swift)\\s*:\\s*");
+    private static final Pattern RESOURCE_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}(?:\\.[A-Za-z0-9_]+)?");
     private static final Set<String> COVERAGE_STOP_WORDS = Set.of(
             "the", "and", "for", "from", "with", "that", "this", "into", "onto", "where", "what", "when", "how",
             "does", "code", "source", "file", "files", "class", "method", "implementation", "implements", "logic",
@@ -227,6 +228,9 @@ public class CodeRagService {
                 Treat rank, evidenceScore, and phase-level executionOrder as relevance/ordering hints, not as method call order.
                 Treat guard clauses and early returns as failure handling only when the cited code or diagnostic metadata says failed, partial, skipped, unavailable, or exception.
                 Do not describe a helper/metadata-check method as the component that performs retrieval or ranking unless the code evidence directly shows that responsibility.
+                When context items include excerptKind/contentComplete/omittedByBudget, distinguish prompt excerpt compression from missing source code.
+                If contentComplete=false or omittedByBudget=true, say "provided excerpt" when discussing limits; do not claim the real implementation is absent unless direct cited evidence proves absence.
+                Prefer FULL_CHUNK direct evidence for method-level flow; use FOCUSED_EXCERPT/TRUNCATED_CHUNK as partial prompt evidence and avoid conclusions that require omitted lines.
                 For code explanations, structure the answer as follows when applicable:
                 1. Summary
                 2. Detailed explanation
@@ -692,6 +696,39 @@ public class CodeRagService {
                     "llm evidence follow-up: " + safe(followUpPlan.reason(), "")
             );
         }
+        List<String> completenessQueries = contextCompletenessFollowUpQueries(question, questionMode, results);
+        if (!completenessQueries.isEmpty() && pipelineService.maxIterations() > 1) {
+            for (String query : completenessQueries) {
+                followUpCandidateCount += collectFollowUpEvidenceForQuery(
+                        repositoryId,
+                        selectedSpaceId,
+                        spaceIds,
+                        question,
+                        query,
+                        query,
+                        questionMode,
+                        searchLimit,
+                        merged
+                );
+                followUpQueriesUsed++;
+            }
+            iteration = Math.max(iteration, 2);
+            results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
+            assessment = pipelineService.assessCode(
+                    question,
+                    results,
+                    minCodeEvidence(questionMode),
+                    iteration
+            );
+            queryPlan = new RagPipelineService.QueryPlan(
+                    RagPipelineService.Domain.CODE,
+                    java.util.stream.Stream.concat(queryPlan.queries().stream(), completenessQueries.stream()).distinct().toList(),
+                    true,
+                    queryPlan.rewriteUsed(),
+                    false,
+                    appendReason(queryPlan.reason(), "context completeness follow-up")
+            );
+        }
 
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
         long followUpSelectedCount = results.stream().filter(this::isLlmFollowUpEvidence).count();
@@ -720,6 +757,78 @@ public class CodeRagService {
         RagPipelineService.CodeEvidenceFollowUpPlan plan = retrieval.followUpPlan();
         return plan != null && plan.attempted() && !plan.enough()
                 && (retrieval.followUpQueriesUsed() == 0 || retrieval.iteration() > 1);
+    }
+
+    private List<String> contextCompletenessFollowUpQueries(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
+        if (!isImplementationFlowQuestion(question, questionMode) || results == null || results.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        for (CodeSearchResult result : results.stream().limit(4).toList()) {
+            if (!isDirectCodeEvidence(result) || !isLikelyLongChunk(result)) {
+                continue;
+            }
+            String identity = compactIdentity(result);
+            if (!identity.isBlank()) {
+                queries.add(identity + " implementation flow full method");
+            }
+            String symbol = firstNonBlank(result.methodName(), result.symbolName(), result.className(), result.controlName(), result.eventName());
+            if (!symbol.isBlank()) {
+                queries.add(symbol + " calls references implementation");
+            }
+            if (queries.size() >= 3) {
+                break;
+            }
+        }
+        return queries.stream().limit(3).toList();
+    }
+
+    private boolean isImplementationFlowQuestion(String question, CodeQuestionMode questionMode) {
+        if (questionMode == CodeQuestionMode.CALL_FLOW || questionMode == CodeQuestionMode.REASONING
+                || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.UI_EVENT) {
+            return true;
+        }
+        String normalized = normalizeCodeText(question);
+        return containsRoleTerms(normalized,
+                "flow", "pipeline", "process", "through", "calls", "call", "ranking", "expansion",
+                "generation", "handler", "binding", "transaction", "fallback", "complete", "entire");
+    }
+
+    private boolean isLikelyLongChunk(CodeSearchResult result) {
+        String content = safe(result == null ? "" : result.content(), "");
+        int lineSpan = result == null ? 0 : Math.max(0, result.lineEnd() - result.lineStart());
+        return content.length() > DEFAULT_CONTEXT_CHARS || lineSpan > 35;
+    }
+
+    private String compactIdentity(CodeSearchResult result) {
+        if (result == null) {
+            return "";
+        }
+        return String.join(" ",
+                safe(result.filePath(), ""),
+                safe(firstNonBlank(result.methodName(), result.symbolName(), result.className(), result.controlName(), result.eventName()), "")
+        ).trim();
+    }
+
+    private String appendReason(String existing, String addition) {
+        String left = safe(existing, "").trim();
+        String right = safe(addition, "").trim();
+        if (left.isBlank()) {
+            return right;
+        }
+        if (right.isBlank()) {
+            return left;
+        }
+        return left + "; " + right;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values == null ? new String[0] : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private List<String> literalEvidenceQueries(String question) {
@@ -1037,12 +1146,30 @@ public class CodeRagService {
             queries.add(sanitized + " " + areaTerms);
             queries.add("code implementation " + areaTerms);
         }
+        List<String> resources = resourceIdentifierQueries(queryArea + " " + sanitized + " " + originalQuestion);
+        if (!resources.isEmpty()) {
+            String resourceQuery = String.join(" ", resources);
+            queries.add(resourceQuery);
+            queries.add("insert update delete merge select " + resourceQuery);
+        }
         return queries.stream()
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .distinct()
                 .limit(8)
                 .toList();
+    }
+
+    private List<String> resourceIdentifierQueries(String text) {
+        List<String> values = new ArrayList<>();
+        Matcher matcher = RESOURCE_IDENTIFIER_PATTERN.matcher(safe(text, ""));
+        while (matcher.find()) {
+            String value = matcher.group().trim();
+            if (value.contains("_") || value.contains(".") || value.length() >= 12) {
+                values.add(value);
+            }
+        }
+        return values.stream().distinct().limit(6).toList();
     }
 
     private String sanitizeFollowUpQuery(String query) {
@@ -2160,6 +2287,10 @@ public class CodeRagService {
     }
 
     private String buildContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
+        return buildContext(question, questionMode, results, true);
+    }
+
+    private String buildContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results, boolean allowFullCoreEvidence) {
         if (results.isEmpty()) {
             return "No source-code context retrieved.";
         }
@@ -2170,6 +2301,7 @@ public class CodeRagService {
         String context = IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
+                    CodeExcerpt excerpt = codeExcerptInfo(question, result, contextCharsFor(question, questionMode, result, index, maxChars, allowFullCoreEvidence));
                     return "[" + (index + 1) + "] "
                             + result.filePath() + ":" + result.lineStart() + "-" + result.lineEnd()
                             + " type=" + result.chunkType()
@@ -2186,7 +2318,8 @@ public class CodeRagService {
                             + analysisDiagnosticContext(result)
                             + graphContext(result)
                             + evidenceRankingContext(result)
-                            + "\n" + codeExcerpt(question, result, maxChars);
+                            + excerptContext(result, excerpt)
+                            + "\n" + excerpt.text();
                 })
                 .collect(Collectors.joining("\n\n"));
         return evidenceValidation.isBlank() ? context : evidenceValidation + "\n\n" + context;
@@ -2464,20 +2597,32 @@ public class CodeRagService {
             boolean compactForStreaming
     ) {
         List<CodeSearchResult> selected = new ArrayList<>(results == null ? List.of() : results);
-        String context = compactForStreaming ? buildStreamingContext(question, questionMode, selected) : buildContext(question, questionMode, selected);
+        boolean allowFullCoreEvidence = true;
+        String context = compactForStreaming
+                ? buildStreamingContext(question, questionMode, selected, allowFullCoreEvidence)
+                : buildContext(question, questionMode, selected, allowFullCoreEvidence);
         int budget = promptTokenBudget();
         int requiredCount = (int) selected.stream().filter(this::isRequiredConversationPinned).count();
         int minResults = Math.min(selected.size(), Math.max(requiredCount, isConversationPinned(selected) ? 1 : Math.min(2, selected.size())));
+        if (allowFullCoreEvidence
+                && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
+            allowFullCoreEvidence = false;
+            context = compactForStreaming ? buildStreamingContext(question, questionMode, selected, false) : buildContext(question, questionMode, selected, false);
+        }
         while (selected.size() > minResults
                 && estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context) > budget) {
             removeBudgetCandidate(selected);
-            context = compactForStreaming ? buildStreamingContext(question, questionMode, selected) : buildContext(question, questionMode, selected);
+            context = compactForStreaming ? buildStreamingContext(question, questionMode, selected, false) : buildContext(question, questionMode, selected, false);
         }
         int droppedCount = Math.max(0, (results == null ? 0 : results.size()) - selected.size());
         return new CodeContextBundle(List.copyOf(selected), context, droppedCount);
     }
 
     private String buildStreamingContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results) {
+        return buildStreamingContext(question, questionMode, results, true);
+    }
+
+    private String buildStreamingContext(String question, CodeQuestionMode questionMode, List<CodeSearchResult> results, boolean allowFullCoreEvidence) {
         if (results.isEmpty()) {
             return "No source-code context retrieved.";
         }
@@ -2490,7 +2635,7 @@ public class CodeRagService {
                     CodeSearchResult result = results.get(index);
                     boolean detailed = index < detailedLimit || isRequiredConversationPinned(result);
                     return detailed
-                            ? streamingDetailedContextLine(question, result, index + 1, detailedChars)
+                            ? streamingDetailedContextLine(question, questionMode, result, index, detailedChars, allowFullCoreEvidence)
                             : streamingCompactContextLine(question, result, index + 1, compactChars);
                 })
                 .collect(Collectors.joining("\n\n"));
@@ -2525,8 +2670,9 @@ public class CodeRagService {
         };
     }
 
-    private String streamingDetailedContextLine(String question, CodeSearchResult result, int citationNumber, int maxChars) {
-        return "[" + citationNumber + "] " + compactCodeHeader(result)
+    private String streamingDetailedContextLine(String question, CodeQuestionMode questionMode, CodeSearchResult result, int index, int maxChars, boolean allowFullCoreEvidence) {
+        CodeExcerpt excerpt = codeExcerptInfo(question, result, contextCharsFor(question, questionMode, result, index, maxChars, allowFullCoreEvidence));
+        return "[" + (index + 1) + "] " + compactCodeHeader(result)
                 + evidenceRoleContext(result)
                 + evidencePhaseContext(result)
                 + evidenceResponsibilityContext(result)
@@ -2536,12 +2682,15 @@ public class CodeRagService {
                 + analysisDiagnosticContext(result)
                 + graphContext(result)
                 + evidenceRankingContext(result)
-                + "\n" + codeExcerpt(question, result, maxChars);
+                + excerptContext(result, excerpt)
+                + "\n" + excerpt.text();
     }
 
     private String streamingCompactContextLine(String question, CodeSearchResult result, int citationNumber, int maxChars) {
+        CodeExcerpt excerpt = codeExcerptInfo(question, result, maxChars);
         return "[" + citationNumber + "] " + compactCodeHeader(result)
-                + "\nKey excerpt: " + codeExcerpt(question, result, maxChars);
+                + excerptContext(result, excerpt)
+                + "\nKey excerpt: " + excerpt.text();
     }
 
     private String compactCodeHeader(CodeSearchResult result) {
@@ -3200,11 +3349,52 @@ public class CodeRagService {
         return List.of("관련", "파일", "어디", "있어", "있나요", "어떻게", "동작", "설명", "위치", "찾아", "찾기", "코드").contains(term);
     }
 
+    private int contextCharsFor(String question, CodeQuestionMode questionMode, CodeSearchResult result, int index, int defaultMaxChars, boolean allowFullCoreEvidence) {
+        if (!allowFullCoreEvidence || index > 0 || !isCoreFullContextCandidate(question, questionMode, result)) {
+            return defaultMaxChars;
+        }
+        String content = safe(result == null ? "" : result.content(), "");
+        if (content.isBlank()) {
+            return defaultMaxChars;
+        }
+        return Math.min(Math.max(defaultMaxChars, content.length()), 3600);
+    }
+
+    private boolean isCoreFullContextCandidate(String question, CodeQuestionMode questionMode, CodeSearchResult result) {
+        if (result == null || !isDirectCodeEvidence(result) || !isImplementationFlowQuestion(question, questionMode)) {
+            return false;
+        }
+        String symbol = firstNonBlank(result.methodName(), result.symbolName(), result.className(), result.controlName(), result.eventName());
+        if (symbol.isBlank()) {
+            return false;
+        }
+        String identity = normalizeCodeText(splitIdentifierTerms(String.join(" ", symbol, safe(result.filePath(), ""))));
+        String query = normalizeCodeText(splitIdentifierTerms(question));
+        Set<String> identityTerms = coverageTerms(identity);
+        Set<String> queryTerms = coverageTerms(query);
+        return identityTerms.stream().anyMatch(query::contains) || queryTerms.stream().anyMatch(identity::contains);
+    }
+
+    private String excerptContext(CodeSearchResult result, CodeExcerpt excerpt) {
+        if (excerpt == null) {
+            return "";
+        }
+        return " excerptKind=" + excerpt.kind()
+                + " contentComplete=" + excerpt.contentComplete()
+                + " omittedByBudget=" + excerpt.omittedByBudget()
+                + " sourceLines=" + resultLineStart(result) + "-" + resultLineEnd(result)
+                + " excerptLines=" + excerpt.excerptLineStart() + "-" + excerpt.excerptLineEnd();
+    }
+
     private String codeExcerpt(String question, CodeSearchResult result, int maxChars) {
+        return codeExcerptInfo(question, result, maxChars).text();
+    }
+
+    private CodeExcerpt codeExcerptInfo(String question, CodeSearchResult result, int maxChars) {
         String content = result == null ? "" : result.content();
         String compact = content == null ? "" : content.replaceAll("\\R{3,}", "\n\n").trim();
         if (compact.length() <= maxChars) {
-            return compact;
+            return new CodeExcerpt(compact, "FULL_CHUNK", true, false, resultLineStart(result), resultLineEnd(result));
         }
 
         List<String> lines = compact.lines()
@@ -3230,13 +3420,29 @@ public class CodeRagService {
             }
         }
 
-        String excerpt = selected.isEmpty()
-                ? compact.substring(0, Math.min(compact.length(), maxChars))
-                : selected.values().stream().collect(Collectors.joining("\n"));
+        boolean focused = !selected.isEmpty();
+        String excerpt = focused
+                ? selected.values().stream().collect(Collectors.joining("\n"))
+                : compact.substring(0, Math.min(compact.length(), maxChars));
         if (excerpt.length() > maxChars) {
             excerpt = excerpt.substring(0, maxChars);
         }
-        return excerpt.stripTrailing() + (excerpt.length() < compact.length() ? "\n..." : "");
+        int startLine = focused
+                ? resultLineStart(result) + selected.keySet().stream().mapToInt(Integer::intValue).min().orElse(0)
+                : resultLineStart(result);
+        int endLine = focused
+                ? resultLineStart(result) + selected.keySet().stream().mapToInt(Integer::intValue).max().orElse(0)
+                : resultLineStart(result) + Math.max(0, (int) excerpt.lines().count() - 1);
+        String text = excerpt.stripTrailing() + (excerpt.length() < compact.length() ? "\n..." : "");
+        return new CodeExcerpt(text, focused ? "FOCUSED_EXCERPT" : "TRUNCATED_CHUNK", false, true, startLine, endLine);
+    }
+
+    private int resultLineStart(CodeSearchResult result) {
+        return result == null ? 0 : Math.max(0, result.lineStart());
+    }
+
+    private int resultLineEnd(CodeSearchResult result) {
+        return result == null ? 0 : Math.max(resultLineStart(result), result.lineEnd());
     }
 
     private List<String> codeQueryTerms(String question, CodeSearchResult result) {
@@ -3935,6 +4141,10 @@ public class CodeRagService {
         return "direct_code";
     }
 
+    private boolean isDirectCodeEvidence(CodeSearchResult result) {
+        return citationKind(result).startsWith("direct_code");
+    }
+
     private String executionOrder(List<String> phases) {
         if (phases == null || phases.isEmpty()) {
             return "unknown";
@@ -4343,6 +4553,16 @@ public class CodeRagService {
     }
 
     private record CodeContextBundle(List<CodeSearchResult> results, String context, int droppedCount) {
+    }
+
+    private record CodeExcerpt(
+            String text,
+            String kind,
+            boolean contentComplete,
+            boolean omittedByBudget,
+            int excerptLineStart,
+            int excerptLineEnd
+    ) {
     }
 
     private record CitationQuality(int referencedCount, int invalidCount, int coveragePercent, String summary) {

@@ -11,7 +11,7 @@ import { DocumentSourcePanel } from '../documents/DocumentWorkspace.jsx';
 const tuningText = {
   LLM_CONTEXT_WINDOW: ['LLM 문맥 길이', '질문, 근거, 답변 지시문을 모델에 넣을 수 있는 최대 토큰 수입니다.', '높을수록 긴 문서를 더 잘 보지만 메모리 사용량이 증가합니다.'],
   OLLAMA_CONTEXT_LENGTH: ['Ollama 컨텍스트 길이', 'Ollama 요청에 전달하는 num_ctx 값입니다.', '저장 즉시 새 질문부터 적용됩니다. LLM 문맥 길이와 맞추는 것을 권장합니다.'],
-  RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED: ['문서 답변 프롬프트 예산', '문서 답변에서 근거 청크와 질문에 배정할 토큰 예산입니다.', '높을수록 근거를 많이 넣지만 응답 속도가 느려질 수 있습니다.'],
+  RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED: ['문서/코드 답변 프롬프트 예산', '문서 답변에서 근거 청크와 질문에 배정할 토큰 예산입니다.', '높을수록 근거를 많이 넣지만 응답 속도가 느려질 수 있습니다.'],
   RAG_PIPELINE_CODE_CONTEXT_LIMIT: ['코드 답변에 넣을 청크 수', '코드 질문 답변에 사용할 코드 근거 청크 개수입니다.', '높을수록 관련 파일과 메서드를 더 많이 봅니다.'],
   RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT: ['문서 답변에 넣을 청크 수', '문서 질문 답변에 사용할 문서 근거 청크 개수입니다.', '높을수록 답변 근거가 늘고 속도는 느려질 수 있습니다.'],
   LEARNBOT_RAG_OVERVIEW_MAX_DOCUMENTS: ['전체 요약 탐색 문서 수', '개요/요약형 질문에서 서로 다른 문서를 최대 몇 개까지 포함할지 정합니다.', '높을수록 전체 맥락은 좋아지고 답변 시간이 늘어납니다.'],
@@ -327,7 +327,13 @@ function AdminWorkspace({
       values: nextPreset === 'custom' ? tuningValues : null,
     });
     if (saved) {
-      setTuningPreset(nextPreset);
+      const savedValues = {};
+      (saved.settings || []).forEach((setting) => {
+        savedValues[setting.key] = setting.value;
+      });
+      setTuningValues(savedValues);
+      setTuningPreset(saved.activePreset || nextPreset);
+      setRecommendedTuningKeys([]);
     }
   }
 
@@ -830,6 +836,7 @@ function AdminWorkspace({
   if (activeAdminTab === 'tuning') {
     const tuningSettings = adminTuning?.settings || [];
     const tuningPresets = adminTuning?.presets || [];
+    const visibleTuningPresets = tuningPresets.filter((preset) => preset.id === 'default');
     const appliedPresetId = adminTuning?.activePreset || tuningPreset || 'custom';
     const appliedPresetLabel = presetText[appliedPresetId]?.[0] || (appliedPresetId === 'custom' ? '사용자 지정' : appliedPresetId);
     const editingPresetLabel = presetText[tuningPreset]?.[0] || (tuningPreset === 'custom' ? '사용자 지정' : tuningPreset);
@@ -884,7 +891,7 @@ function AdminWorkspace({
           ))}
 
           <div className="tuning-preset-row" role="radiogroup" aria-label="튜닝 프리셋">
-            {tuningPresets.map((preset) => (
+            {visibleTuningPresets.map((preset) => (
               <button
                 key={preset.id}
                 className={tuningPreset === preset.id ? 'mode-button active' : 'mode-button'}
@@ -902,7 +909,7 @@ function AdminWorkspace({
 
           <div className="tuning-active-profile">
             <span>
-              <strong>현재 적용 중</strong>
+              <strong>저장된 구성</strong>
               <em>{appliedPresetLabel}</em>
             </span>
             <small>
@@ -1106,6 +1113,8 @@ function AdminWorkspace({
               <div className="tuning-grid">
                 {items.map((setting) => {
                   const value = tuningValues[setting.key] ?? setting.value ?? setting.defaultValue;
+                  const dirty = Number(value) !== Number(setting.value);
+                  const effectiveDifferent = Number(setting.value) !== Number(setting.effectiveValue);
                   const restartPending = setting.restartRequired && Number(setting.value) !== Number(setting.effectiveValue);
                   const isSelect = setting.control === 'select';
                   const inputStep = setting.key === 'RAG_PIPELINE_PROMPT_TOKEN_BUDGET_BALANCED' ? 1 : setting.step;
@@ -1118,8 +1127,14 @@ function AdminWorkspace({
                         {restartPending ? <em>적용 대기</em> : setting.restartRequired && <em>재시작 항목</em>}
                       </span>
                       <small>{text[2]}</small>
+                      {dirty && (
+                        <small className="field-help">저장 전 변경: 현재 저장값 {setting.value}</small>
+                      )}
                       {restartPending && (
                         <small className="field-help">저장값 {setting.value} · 현재 적용값 {setting.effectiveValue}</small>
+                      )}
+                      {!restartPending && effectiveDifferent && (
+                        <small className="field-help">요청값 {setting.value} · 실제 적용값 {setting.effectiveValue}</small>
                       )}
                       {isSelect ? (
                         <select value={value} onChange={(event) => updateTuningValue(setting.key, event.target.value)}>

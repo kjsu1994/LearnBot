@@ -371,7 +371,59 @@ class CodeRagServiceTest {
         verify(ollamaClient).chatResult(anyString(), promptCaptor.capture());
         assertThat(promptCaptor.getValue()).contains("login0");
         assertThat(promptCaptor.getValue()).doesNotContain("[9]");
-        assertThat(promptCaptor.getValue().length()).isLessThan(6500);
+        assertThat(promptCaptor.getValue().length()).isLessThan(9000);
+    }
+
+    @Test
+    void marksExcerptCompletenessAndKeepsCoreFlowMethodFullWhenBudgetAllows() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        String expandGraphContent = """
+                private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked,
+                                                           int limit, GraphSearchIntent intent) {
+                    Map<UUID, CodeSearchResult> expanded = new LinkedHashMap<>();
+                    for (CodeSearchResult result : ranked) {
+                        merge(expanded, result);
+                    }
+                    List<UUID> seeds = ranked.stream().map(CodeSearchResult::chunkId).toList();
+                    for (CodeSearchResult related : repository.graphRelatedChunks(repositoryId, seeds, graphEdgeTypes(query, intent), 2, "BOTH", limit)) {
+                        merge(expanded, boost(related, graphBoost(query, related)));
+                    }
+                    return expanded.values().stream().sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed()).toList();
+                }
+                """;
+        CodeSearchResult result = result(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "expandGraph",
+                0.92,
+                expandGraphContent
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of(result));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("expandGraph expands graph-related chunks [1]."));
+
+        service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain the expandGraph search expansion flow",
+                "flow",
+                4
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture());
+        assertThat(promptCaptor.getValue())
+                .contains("excerptKind=FULL_CHUNK")
+                .contains("contentComplete=true")
+                .contains("repository.graphRelatedChunks")
+                .contains("return expanded.values()");
     }
 
     @Test
