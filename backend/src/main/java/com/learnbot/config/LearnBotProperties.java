@@ -1365,6 +1365,9 @@ public class LearnBotProperties {
 
         public static class Graph {
             private boolean enabled = true;
+            private boolean frameworkAnalysisEnabled = true;
+            private boolean javaSpringEnabled = true;
+            private boolean dotnetUiEnabled = true;
             private boolean llmRelationEnabled = true;
             private String roslynAnalyzerPath = "/app/roslyn/LearnBot.RoslynAnalyzer.dll";
             private String roslynMode = "AUTO";
@@ -1420,6 +1423,30 @@ public class LearnBotProperties {
 
             public void setEnabled(boolean enabled) {
                 this.enabled = enabled;
+            }
+
+            public boolean isFrameworkAnalysisEnabled() {
+                return frameworkAnalysisEnabled;
+            }
+
+            public void setFrameworkAnalysisEnabled(boolean frameworkAnalysisEnabled) {
+                this.frameworkAnalysisEnabled = frameworkAnalysisEnabled;
+            }
+
+            public boolean isJavaSpringEnabled() {
+                return javaSpringEnabled;
+            }
+
+            public void setJavaSpringEnabled(boolean javaSpringEnabled) {
+                this.javaSpringEnabled = javaSpringEnabled;
+            }
+
+            public boolean isDotnetUiEnabled() {
+                return dotnetUiEnabled;
+            }
+
+            public void setDotnetUiEnabled(boolean dotnetUiEnabled) {
+                this.dotnetUiEnabled = dotnetUiEnabled;
             }
 
             public boolean isLlmRelationEnabled() {

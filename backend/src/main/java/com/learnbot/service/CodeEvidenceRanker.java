@@ -230,8 +230,19 @@ public class CodeEvidenceRanker {
             return 0.65;
         }
         if ("REFERENCES".equals(edgeType)) return 0.45;
-        if ("CALLS".equals(edgeType) || "HANDLES_EVENT".equals(edgeType) || "EXPOSES_ENDPOINT".equals(edgeType)) {
+        if ("CALLS".equals(edgeType) || "HANDLES_EVENT".equals(edgeType) || "EXPOSES_ENDPOINT".equals(edgeType)
+                || "USES_COMMAND".equals(edgeType) || "COMMAND_EXECUTES".equals(edgeType)) {
             return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.UI_EVENT ? 1.15 : 1.0;
+        }
+        if ("DECLARES_BEAN".equals(edgeType) || "TRANSACTION_BOUNDARY".equals(edgeType)) {
+            return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.IMPACT ? 1.08 : 0.92;
+        }
+        if ("REPOSITORY_FOR".equals(edgeType) || "QUERIES_ENTITY".equals(edgeType)) {
+            return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.IMPACT ? 1.02 : 0.88;
+        }
+        if ("DECLARES_CONTROL".equals(edgeType) || "CODE_BEHIND".equals(edgeType) || "PARTIAL_OF".equals(edgeType)
+                || "DATA_CONTEXT".equals(edgeType)) {
+            return mode == CodeRagService.CodeQuestionMode.UI_EVENT || mode == CodeRagService.CodeQuestionMode.OVERVIEW ? 1.08 : 0.82;
         }
         if ("IMPLEMENTS".equals(edgeType) || "OVERRIDES".equals(edgeType) || "EXTENDS".equals(edgeType)) {
             return mode == CodeRagService.CodeQuestionMode.IMPACT || mode == CodeRagService.CodeQuestionMode.OVERVIEW ? 1.05 : 0.85;
@@ -249,11 +260,12 @@ public class CodeEvidenceRanker {
         String type = result.chunkType() == null ? "" : result.chunkType();
         String path = result.filePath() == null ? "" : result.filePath().toLowerCase(java.util.Locale.ROOT);
         return switch (mode) {
-            case CALL_FLOW -> (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT") ? 0.18 : 0);
-            case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY") ? 0.22 : 0.04;
+            case CALL_FLOW -> (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "COMMAND_EXECUTES") ? 0.18 : 0);
+            case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "TRANSACTION_BOUNDARY", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY") ? 0.22 : 0.04;
             case REASONING -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "CONTAINS", "DEFINES") || isStructured(type) ? 0.20 : 0.04;
             case UI_EVENT -> ("event_handler".equals(type) || "xaml_event".equals(type) || "xaml_view".equals(type)
-                    || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO")) ? 0.25 : 0.02;
+                    || "xaml_control".equals(type) || "winforms_control".equals(type) || "view_model".equals(type) || "command".equals(type)
+                    || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF")) ? 0.25 : 0.02;
             case OVERVIEW -> isProjectContext(type) || path.contains("/config/") || path.contains("/web/") || path.contains("/service/") ? 0.18 : 0.04;
             case EXPLAIN_METHOD -> "method".equals(type) || notBlank(result.methodName()) ? 0.22 : 0.02;
             case LOCATE -> notBlank(result.methodName()) || notBlank(result.className()) || notBlank(result.symbolName()) ? 0.18 : 0.03;
@@ -488,6 +500,9 @@ public class CodeEvidenceRanker {
                 || "xaml_view".equals(chunkType)
                 || "xaml_binding".equals(chunkType)
                 || "xaml_control".equals(chunkType)
+                || "winforms_control".equals(chunkType)
+                || "view_model".equals(chunkType)
+                || "command".equals(chunkType)
                 || isProjectContext(chunkType);
     }
 

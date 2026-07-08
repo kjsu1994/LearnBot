@@ -351,26 +351,26 @@ public class CodeSearchService {
 
     private List<String> graphEdgeTypes(String query, GraphSearchIntent intent) {
         if (intent == GraphSearchIntent.FLOW) {
-            return List.of("EXPOSES_ENDPOINT", "CALLS", "INJECTS", "RETURNS", "HANDLES_EVENT");
+            return List.of("EXPOSES_ENDPOINT", "CALLS", "INJECTS", "RETURNS", "HANDLES_EVENT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "COMMAND_EXECUTES", "DATA_CONTEXT");
         }
         if (intent == GraphSearchIntent.IMPACT) {
-            return List.of("CALLS", "OVERRIDES", "IMPLEMENTS", "EXTENDS", "INJECTS", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY");
+            return List.of("CALLS", "OVERRIDES", "IMPLEMENTS", "EXTENDS", "INJECTS", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "TRANSACTION_BOUNDARY", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY", "COMMAND_EXECUTES");
         }
         if (intent == GraphSearchIntent.UI_EVENT) {
-            return List.of("HANDLES_EVENT", "BINDS_TO", "EXPOSES_ENDPOINT", "CALLS", "READS_FIELD", "WRITES_FIELD");
+            return List.of("HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "EXPOSES_ENDPOINT", "CALLS", "READS_FIELD", "WRITES_FIELD");
         }
         if (intent == GraphSearchIntent.OVERVIEW) {
-            return List.of("CONTAINS", "DEFINES", "EXTENDS", "IMPLEMENTS", "INJECTS", "ANNOTATED_BY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT");
+            return List.of("CONTAINS", "DEFINES", "EXTENDS", "IMPLEMENTS", "INJECTS", "ANNOTATED_BY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DATA_CONTEXT");
         }
         String normalized = normalizeCodeText(query);
         if (normalized.contains("flow") || normalized.contains("impact") || normalized.contains("call")
                 || normalized.contains("흐름") || normalized.contains("호출")) {
-            return List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
+            return List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "TRANSACTION_BOUNDARY");
         }
         if (isOverviewQuestion(query)) {
-            return List.of("CONTAINS", "DEFINES", "REFERENCES", "DEPENDS_ON", "RELATED_TO");
+            return List.of("CONTAINS", "DEFINES", "REFERENCES", "DEPENDS_ON", "RELATED_TO", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DATA_CONTEXT");
         }
-        return List.of("DEFINES", "CONTAINS", "CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO");
+        return List.of("DEFINES", "CONTAINS", "CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY");
     }
 
     private int graphMaxHop(GraphSearchIntent intent) {
@@ -391,10 +391,10 @@ public class CodeSearchService {
 
     private List<String> graphSeedNodeTypes(GraphSearchIntent intent) {
         return switch (intent) {
-            case FLOW -> List.of("method", "endpoint", "event_handler", "class", "file");
-            case IMPACT -> List.of("method", "class", "field", "type", "file");
-            case UI_EVENT -> List.of("event_handler", "xaml_control", "method", "class", "file");
-            case OVERVIEW -> List.of("directory", "file", "class", "type", "method");
+            case FLOW -> List.of("method", "endpoint", "event_handler", "command", "class", "type", "file");
+            case IMPACT -> List.of("method", "class", "field", "type", "command", "file");
+            case UI_EVENT -> List.of("event_handler", "xaml_view", "xaml_control", "winforms_control", "view_model", "command", "method", "class", "file");
+            case OVERVIEW -> List.of("directory", "file", "class", "type", "view_model", "method", "xaml_view", "xaml_control", "winforms_control");
             default -> List.of("method", "class", "type", "file");
         };
     }
@@ -414,8 +414,11 @@ public class CodeSearchService {
     private double graphBoost(String query, CodeSearchResult result) {
         Object edgeType = result.metadata() == null ? null : result.metadata().get("graphEdgeType");
         String type = edgeType == null ? "" : String.valueOf(edgeType);
-        if ("CALLS".equals(type) || "HANDLES_EVENT".equals(type)) {
+        if ("CALLS".equals(type) || "HANDLES_EVENT".equals(type) || "USES_COMMAND".equals(type) || "COMMAND_EXECUTES".equals(type)) {
             return 0.16;
+        }
+        if ("DATA_CONTEXT".equals(type) || "REPOSITORY_FOR".equals(type) || "QUERIES_ENTITY".equals(type)) {
+            return 0.12;
         }
         if ("DEFINES".equals(type) || "CONTAINS".equals(type)) {
             return isOverviewQuestion(query) ? 0.14 : 0.08;
@@ -436,6 +439,9 @@ public class CodeSearchService {
                 || "xaml_view".equals(chunkType)
                 || "xaml_binding".equals(chunkType)
                 || "xaml_control".equals(chunkType)
+                || "winforms_control".equals(chunkType)
+                || "view_model".equals(chunkType)
+                || "command".equals(chunkType)
                 || isProjectContext(chunkType);
     }
 

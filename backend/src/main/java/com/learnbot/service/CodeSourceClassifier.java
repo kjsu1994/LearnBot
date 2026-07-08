@@ -70,6 +70,9 @@ public final class CodeSourceClassifier {
                 || path.contains("/third_party/") || path.contains("/external/")) {
             return SOURCE_VENDOR;
         }
+        if (path.endsWith(".designer.cs") && !path.contains("/bin/") && !path.contains("/obj/")) {
+            return SOURCE_MAIN;
+        }
         if (path.contains("/generated/") || path.contains("/gen/") || path.contains("/build/") || path.contains("/dist/")
                 || path.contains("/target/") || path.contains("/bin/") || path.contains("/obj/")
                 || path.endsWith(".g.cs") || path.endsWith(".designer.cs") || path.endsWith(".min.js")) {

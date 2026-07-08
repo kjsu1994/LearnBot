@@ -206,6 +206,7 @@ public class CodeRagService {
                 If evidence is insufficient, say what is missing and list the closest files found.
                 Include a short reliability note when evidence is weak or indirect.
                 When the user asks why code exists or whether an implementation makes sense, separate direct code evidence from inferred design intent.
+                When a context item has graphEvidence=inferred, explain it as relationship-based graph evidence, not as a direct code statement.
                 For code explanations, structure the answer as follows when applicable:
                 1. Summary
                 2. Detailed explanation
@@ -3000,6 +3001,9 @@ public class CodeRagService {
                 || "xaml_view".equals(chunkType)
                 || "xaml_binding".equals(chunkType)
                 || "xaml_control".equals(chunkType)
+                || "winforms_control".equals(chunkType)
+                || "view_model".equals(chunkType)
+                || "command".equals(chunkType)
                 || isProjectContext(chunkType);
     }
 
@@ -3022,9 +3026,14 @@ public class CodeRagService {
         Object graphPath = result.metadata().get("graphPath");
         Object edgeTypes = result.metadata().get("graphEdgeTypes");
         Object depth = result.metadata().get("graphDepth");
-        return " graph=" + safe(edgeType == null ? null : String.valueOf(edgeType), "RELATED")
+        Object evidenceKind = result.metadata().get("graphEvidenceKind");
+        Object graphConfidence = result.metadata().get("graphConfidence");
+        String kind = safe(evidenceKind == null ? null : String.valueOf(evidenceKind), "direct");
+        return " graphEvidence=" + kind
+                + " graphEdge=" + safe(edgeType == null ? null : String.valueOf(edgeType), "RELATED")
                 + nullable(" edges=", edgeTypes == null ? null : String.valueOf(edgeTypes))
                 + nullable(" depth=", depth == null ? null : String.valueOf(depth))
+                + nullable(" confidence=", graphConfidence == null ? null : String.valueOf(graphConfidence))
                 + nullable(" path=", graphPath == null ? null : String.valueOf(graphPath));
     }
 

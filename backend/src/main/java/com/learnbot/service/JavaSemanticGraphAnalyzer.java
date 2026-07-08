@@ -25,7 +25,9 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSol
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
+import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -46,9 +48,26 @@ import java.util.UUID;
 public class JavaSemanticGraphAnalyzer {
     private static final Set<String> INJECTION_ANNOTATIONS = Set.of("Autowired", "Inject", "Resource");
     private static final Set<String> ENTITY_ANNOTATIONS = Set.of("Entity", "MappedSuperclass", "Embeddable");
+    private static final Set<String> SPRING_DATA_REPOSITORIES = Set.of(
+            "Repository", "CrudRepository", "PagingAndSortingRepository", "JpaRepository", "JpaSpecificationExecutor"
+    );
+    private static final Set<String> SPRING_COMPONENT_ANNOTATIONS = Set.of(
+            "Component", "Service", "Repository", "Controller", "RestController", "Configuration"
+    );
+    private static final Set<String> TRANSACTION_ANNOTATIONS = Set.of("Transactional");
     private static final Set<String> ENDPOINT_ANNOTATIONS = Set.of(
             "RequestMapping", "GetMapping", "PostMapping", "PutMapping", "PatchMapping", "DeleteMapping"
     );
+    private final LearnBotProperties properties;
+
+    public JavaSemanticGraphAnalyzer() {
+        this(null);
+    }
+
+    @Autowired
+    public JavaSemanticGraphAnalyzer(LearnBotProperties properties) {
+        this.properties = properties;
+    }
 
     public CodeGraph analyze(Path repositoryRoot, List<CodeSearchResult> chunks) {
         return analyzeWithDiagnostics(repositoryRoot, chunks).graph();
@@ -100,7 +119,7 @@ public class JavaSemanticGraphAnalyzer {
                     continue;
                 }
                 UUID chunkId = chunkLookup.forNode(file.relativePath(), line(declaration), declaration.getNameAsString());
-                addNode(nodes, typeNode(qualifiedName, file.relativePath(), chunkId));
+                addNode(nodes, typeNode(qualifiedName, file.relativePath(), chunkId, springRole(declaration)));
                 addEdge(edges, fileKey(file.relativePath()), typeKey(qualifiedName), "DEFINES", 1.0, chunkId, "java_symbol_solver");
                 if (hasAnnotation(declaration, ENTITY_ANNOTATIONS)) {
                     entityTypes.add(qualifiedName);
@@ -111,6 +130,13 @@ public class JavaSemanticGraphAnalyzer {
                     String tableKey = "table:" + table.toLowerCase(Locale.ROOT);
                     addNode(nodes, new CodeGraphNode(tableKey, "table", table, table, file.relativePath(), chunkId, Map.of("language", "java")));
                     addEdge(edges, typeKey(qualifiedName), tableKey, "MAPS_TO_TABLE", 0.98, chunkId, "java_ast");
+                }
+                if (springAnalysisEnabled() && hasAnnotation(declaration, TRANSACTION_ANNOTATIONS)) {
+                    addTransactionBoundary(nodes, edges, typeKey(qualifiedName), qualifiedName,
+                            file.relativePath(), chunkId, declaration.getAnnotations(), "java_ast");
+                }
+                if (springAnalysisEnabled()) {
+                    addSpringRepositoryRelations(nodes, edges, file, declaration, qualifiedName, chunkId);
                 }
                 addTypeRelations(nodes, edges, file, declaration, qualifiedName, chunkId);
             }
@@ -169,8 +195,9 @@ public class JavaSemanticGraphAnalyzer {
                 String fieldKey = "field:java:" + qualifiedName + "#" + variable.getNameAsString();
                 addNode(nodes, new CodeGraphNode(fieldKey, "field", variable.getNameAsString(), qualifiedName + "#" + variable.getNameAsString(), file.relativePath(), chunkId, Map.of("language", "java")));
                 addEdge(edges, typeKey(qualifiedName), fieldKey, "CONTAINS", 1.0, chunkId, "java_ast");
-                if (hasAnnotation(field, INJECTION_ANNOTATIONS)) {
-                    addTypeEdge(nodes, edges, typeKey(qualifiedName), variable.getType(), "INJECTS", file.relativePath(), chunkId);
+                if (springAnalysisEnabled() && hasAnnotation(field, INJECTION_ANNOTATIONS)) {
+                    addTypeEdge(nodes, edges, typeKey(qualifiedName), variable.getType(), "INJECTS", file.relativePath(), chunkId,
+                            injectionConfidence(field.getAnnotations()), injectionMetadata(field.getAnnotations(), "field"));
                 }
                 field.getAnnotations().forEach(annotation -> addAnnotation(nodes, edges, fieldKey, annotation, file.relativePath(), chunkId));
             }
@@ -200,11 +227,18 @@ public class JavaSemanticGraphAnalyzer {
         addEdge(edges, fileKey(file.relativePath()), key, "DEFINES", 1.0, chunkId, "java_symbol_solver");
 
         callable.getAnnotations().forEach(annotation -> addAnnotation(nodes, edges, key, annotation, file.relativePath(), chunkId));
+        if (springAnalysisEnabled() && hasAnnotation(callable, TRANSACTION_ANNOTATIONS)) {
+            addTransactionBoundary(nodes, edges, key, signature, file.relativePath(), chunkId, callable.getAnnotations(), "java_ast");
+        }
+        if (springAnalysisEnabled() && callable instanceof MethodDeclaration method && method.getAnnotationByName("Bean").isPresent()) {
+            addBean(nodes, edges, key, method, file.relativePath(), chunkId);
+        }
         for (var parameter : callable.getParameters()) {
             addTypeEdge(nodes, edges, key, parameter.getType(), "ACCEPTS", file.relativePath(), chunkId);
-            if (callable instanceof ConstructorDeclaration && (hasAnnotation(callable, INJECTION_ANNOTATIONS)
+            if (springAnalysisEnabled() && callable instanceof ConstructorDeclaration && (hasAnnotation(callable, INJECTION_ANNOTATIONS)
                     || constructorCount(callable) == 1)) {
-                addTypeEdge(nodes, edges, typeKey(owner), parameter.getType(), "INJECTS", file.relativePath(), chunkId);
+                addTypeEdge(nodes, edges, typeKey(owner), parameter.getType(), "INJECTS", file.relativePath(), chunkId,
+                        injectionConfidence(parameter.getAnnotations()), injectionMetadata(parameter.getAnnotations(), "constructor"));
             }
         }
         for (ReferenceType thrown : callable.getThrownExceptions()) {
@@ -215,7 +249,9 @@ public class JavaSemanticGraphAnalyzer {
             if (method.getAnnotationByName("Override").isPresent()) {
                 addOverrideEdge(nodes, edges, key, method, file.relativePath(), chunkId);
             }
-            addEndpoint(nodes, edges, key, method, file.relativePath(), chunkId);
+            if (springAnalysisEnabled()) {
+                addEndpoint(nodes, edges, key, method, file.relativePath(), chunkId);
+            }
         }
 
         for (MethodCallExpr call : callable.findAll(MethodCallExpr.class)) {
@@ -235,6 +271,32 @@ public class JavaSemanticGraphAnalyzer {
             }
         }
         addFieldAccesses(nodes, edges, key, owner, callable, file.relativePath(), chunkId);
+    }
+
+    private void addSpringRepositoryRelations(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges,
+                                              ParsedFile file, TypeDeclaration<?> declaration, String qualifiedName, UUID chunkId) {
+        if (!(declaration instanceof ClassOrInterfaceDeclaration type)) {
+            return;
+        }
+        boolean repository = hasAnnotation(declaration, Set.of("Repository"))
+                || type.getExtendedTypes().stream().anyMatch(parent -> SPRING_DATA_REPOSITORIES.contains(parent.getNameAsString()));
+        if (!repository) {
+            return;
+        }
+        addNode(nodes, new CodeGraphNode(typeKey(qualifiedName), "type", declaration.getNameAsString(), qualifiedName, file.relativePath(), chunkId,
+                Map.of("language", "java", "framework", "spring", "springRole", "repository")));
+        for (var parent : type.getExtendedTypes()) {
+            parent.getTypeArguments().ifPresent(arguments -> {
+                if (!arguments.isEmpty()) {
+                    String entityName = resolvedTypeName(arguments.get(0));
+                    addNode(nodes, typeNode(entityName, file.relativePath(), null));
+                    addEdge(edges, typeKey(qualifiedName), typeKey(entityName), "REPOSITORY_FOR", 0.86, chunkId,
+                            Map.of("source", "spring_data_repository", "repositoryBase", parent.getNameAsString()));
+                    addEdge(edges, typeKey(qualifiedName), typeKey(entityName), "QUERIES_ENTITY", 0.78, chunkId,
+                            Map.of("source", "spring_data_repository", "repositoryBase", parent.getNameAsString(), "confidenceReason", "generic_entity_type"));
+                }
+            });
+        }
     }
 
     private void addFieldAccesses(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, String methodKey,
@@ -306,12 +368,43 @@ public class JavaSemanticGraphAnalyzer {
         method.getAnnotations().stream()
                 .filter(annotation -> ENDPOINT_ANNOTATIONS.contains(annotation.getName().getIdentifier()))
                 .forEach(annotation -> {
-                    String route = annotationValue(List.of(annotation), annotation.getName().getIdentifier(), "value");
-                    String endpointName = annotation.getName().getIdentifier() + ":" + (route == null ? "" : route);
+                    String route = joinedRoute(classRoute(method), annotationValue(List.of(annotation), annotation.getName().getIdentifier(), "value", "path"));
+                    String methodName = annotation.getName().getIdentifier();
+                    String endpointName = methodName + ":" + (route == null ? "" : route);
                     String endpointKey = "endpoint:java:" + endpointName + ":" + methodKey;
-                    addNode(nodes, new CodeGraphNode(endpointKey, "endpoint", endpointName, endpointName, path, chunkId, Map.of("language", "java")));
+                    addNode(nodes, new CodeGraphNode(endpointKey, "endpoint", endpointName, endpointName, path, chunkId, Map.of(
+                            "language", "java",
+                            "framework", "spring",
+                            "httpMapping", methodName,
+                            "route", route == null ? "" : route
+                    )));
                     addEdge(edges, methodKey, endpointKey, "EXPOSES_ENDPOINT", 0.99, chunkId, "java_ast");
                 });
+    }
+
+    private void addBean(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, String methodKey,
+                         MethodDeclaration method, String path, UUID chunkId) {
+        String beanName = annotationValue(method.getAnnotations(), "Bean", "name", "value");
+        if (beanName == null || beanName.isBlank()) {
+            beanName = method.getNameAsString();
+        }
+        String beanKey = "bean:java:" + beanName + ":" + methodKey;
+        addNode(nodes, new CodeGraphNode(beanKey, "bean", beanName, beanName, path, chunkId,
+                beanMetadata(method, beanName)));
+        addEdge(edges, methodKey, beanKey, "DECLARES_BEAN", 0.99, chunkId, "java_ast");
+    }
+
+    private void addTransactionBoundary(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges,
+                                        String sourceKey, String name, String path, UUID chunkId, String sourceName) {
+        addTransactionBoundary(nodes, edges, sourceKey, name, path, chunkId, List.of(), sourceName);
+    }
+
+    private void addTransactionBoundary(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges,
+                                        String sourceKey, String name, String path, UUID chunkId,
+                                        List<AnnotationExpr> annotations, String sourceName) {
+        String key = "transaction:java:" + sourceKey;
+        addNode(nodes, new CodeGraphNode(key, "transaction_boundary", name, name, path, chunkId, transactionMetadata(annotations)));
+        addEdge(edges, sourceKey, key, "TRANSACTION_BOUNDARY", 0.99, chunkId, sourceName);
     }
 
     private void addAnnotation(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, String sourceKey,
@@ -329,6 +422,11 @@ public class JavaSemanticGraphAnalyzer {
 
     private void addTypeEdge(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, String sourceKey,
                              Type type, String relation, String path, UUID chunkId) {
+        addTypeEdge(nodes, edges, sourceKey, type, relation, path, chunkId, 0.97, Map.of("source", "java_symbol_solver"));
+    }
+
+    private void addTypeEdge(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, String sourceKey,
+                             Type type, String relation, String path, UUID chunkId, double confidence, Map<String, Object> metadata) {
         String qualified;
         try {
             qualified = type.resolve().describe();
@@ -340,7 +438,7 @@ public class JavaSemanticGraphAnalyzer {
             return;
         }
         addNode(nodes, typeNode(qualified, path, null));
-        addEdge(edges, sourceKey, typeKey(qualified), relation, 0.97, chunkId, "java_symbol_solver");
+        addEdge(edges, sourceKey, typeKey(qualified), relation, confidence, chunkId, metadata);
     }
 
     private String callableSignature(String owner, CallableDeclaration<?> callable) {
@@ -419,22 +517,178 @@ public class JavaSemanticGraphAnalyzer {
         return annotated.getAnnotations().stream().anyMatch(annotation -> names.contains(annotation.getName().getIdentifier()));
     }
 
+    private String springRole(TypeDeclaration<?> declaration) {
+        if (!springAnalysisEnabled()) {
+            return "";
+        }
+        for (AnnotationExpr annotation : declaration.getAnnotations()) {
+            String name = annotation.getName().getIdentifier();
+            if (SPRING_COMPONENT_ANNOTATIONS.contains(name)) {
+                return switch (name) {
+                    case "RestController", "Controller" -> "controller";
+                    case "Service" -> "service";
+                    case "Repository" -> "repository";
+                    case "Configuration" -> "configuration";
+                    default -> "component";
+                };
+            }
+        }
+        if (declaration instanceof ClassOrInterfaceDeclaration type
+                && type.getExtendedTypes().stream().anyMatch(parent -> SPRING_DATA_REPOSITORIES.contains(parent.getNameAsString()))) {
+            return "repository";
+        }
+        return "";
+    }
+
+    private String resolvedTypeName(Type type) {
+        try {
+            return eraseGeneric(type.resolve().describe());
+        } catch (RuntimeException ignored) {
+            return eraseGeneric(type.asString());
+        }
+    }
+
+    private String classRoute(MethodDeclaration method) {
+        TypeDeclaration<?> owner = ownerType(method);
+        if (owner == null) return null;
+        for (AnnotationExpr annotation : owner.getAnnotations()) {
+            if (ENDPOINT_ANNOTATIONS.contains(annotation.getName().getIdentifier())) {
+                return annotationValue(List.of(annotation), annotation.getName().getIdentifier(), "value", "path");
+            }
+        }
+        return null;
+    }
+
+    private TypeDeclaration<?> ownerType(Node node) {
+        Node current = node.getParentNode().orElse(null);
+        while (current != null) {
+            if (current instanceof TypeDeclaration<?> type) {
+                return type;
+            }
+            current = current.getParentNode().orElse(null);
+        }
+        return null;
+    }
+
+    private String joinedRoute(String prefix, String route) {
+        String left = prefix == null ? "" : prefix.trim();
+        String right = route == null ? "" : route.trim();
+        if (left.isBlank()) {
+            return right;
+        }
+        if (right.isBlank()) {
+            return left;
+        }
+        return ("/" + left + "/" + right).replaceAll("/+", "/");
+    }
+
+    private boolean springAnalysisEnabled() {
+        return properties == null
+                || (properties.getCode().getGraph().isFrameworkAnalysisEnabled()
+                && properties.getCode().getGraph().isJavaSpringEnabled());
+    }
+
     private String annotationValue(List<AnnotationExpr> annotations, String annotationName, String member) {
+        return annotationValue(annotations, annotationName, member, member);
+    }
+
+    private String annotationValue(List<AnnotationExpr> annotations, String annotationName, String primaryMember, String fallbackMember) {
         return annotations.stream()
                 .filter(annotation -> annotation.getName().getIdentifier().equals(annotationName))
                 .findFirst()
                 .flatMap(annotation -> {
                     if (annotation.isSingleMemberAnnotationExpr()) {
-                        return java.util.Optional.of(annotation.asSingleMemberAnnotationExpr().getMemberValue().toString().replace("\"", ""));
+                        return java.util.Optional.of(cleanAnnotationValue(annotation.asSingleMemberAnnotationExpr().getMemberValue().toString()));
                     }
                     if (annotation.isNormalAnnotationExpr()) {
-                        return annotation.asNormalAnnotationExpr().getPairs().stream()
-                                .filter(pair -> pair.getNameAsString().equals(member))
-                                .map(pair -> pair.getValue().toString().replace("\"", ""))
-                                .findFirst();
+                        var pairs = annotation.asNormalAnnotationExpr().getPairs();
+                        return pairs.stream()
+                                .filter(pair -> pair.getNameAsString().equals(primaryMember))
+                                .map(pair -> cleanAnnotationValue(pair.getValue().toString()))
+                                .findFirst()
+                                .or(() -> pairs.stream()
+                                        .filter(pair -> pair.getNameAsString().equals(fallbackMember))
+                                        .map(pair -> cleanAnnotationValue(pair.getValue().toString()))
+                                        .findFirst());
                     }
                     return java.util.Optional.empty();
                 }).orElse(null);
+    }
+
+    private String cleanAnnotationValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String cleaned = value.trim();
+        if (cleaned.startsWith("{") && cleaned.endsWith("}")) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+            int comma = cleaned.indexOf(',');
+            if (comma >= 0) {
+                cleaned = cleaned.substring(0, comma).trim();
+            }
+        }
+        return cleaned.replace("\"", "").trim();
+    }
+
+    private double injectionConfidence(List<AnnotationExpr> annotations) {
+        if (!springAnalysisEnabled()) {
+            return 0.97;
+        }
+        boolean qualified = annotations.stream().anyMatch(annotation ->
+                Set.of("Qualifier", "Resource", "Primary").contains(annotation.getName().getIdentifier()));
+        return qualified ? 0.99 : 0.92;
+    }
+
+    private Map<String, Object> injectionMetadata(List<AnnotationExpr> annotations, String injectionPoint) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("source", "java_symbol_solver");
+        metadata.put("framework", "spring");
+        metadata.put("injectionPoint", injectionPoint);
+        String qualifier = qualifierValue(annotations);
+        if (qualifier != null && !qualifier.isBlank()) {
+            metadata.put("qualifier", qualifier);
+        }
+        if (annotations.stream().anyMatch(annotation -> "Primary".equals(annotation.getName().getIdentifier()))) {
+            metadata.put("primary", true);
+        }
+        return Map.copyOf(metadata);
+    }
+
+    private String qualifierValue(List<AnnotationExpr> annotations) {
+        String qualifier = annotationValue(annotations, "Qualifier", "value");
+        if (qualifier != null && !qualifier.isBlank()) {
+            return qualifier;
+        }
+        String resource = annotationValue(annotations, "Resource", "name");
+        return resource == null || resource.isBlank() ? null : resource;
+    }
+
+    private Map<String, Object> beanMetadata(MethodDeclaration method, String beanName) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("language", "java");
+        metadata.put("framework", "spring");
+        metadata.put("beanName", beanName);
+        metadata.put("returnType", method.getType().asString());
+        if (method.getAnnotationByName("Primary").isPresent()) {
+            metadata.put("primary", true);
+        }
+        return Map.copyOf(metadata);
+    }
+
+    private Map<String, Object> transactionMetadata(List<AnnotationExpr> annotations) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("language", "java");
+        metadata.put("framework", "spring");
+        putIfPresent(metadata, "readOnly", annotationValue(annotations, "Transactional", "readOnly"));
+        putIfPresent(metadata, "propagation", annotationValue(annotations, "Transactional", "propagation"));
+        putIfPresent(metadata, "rollbackFor", annotationValue(annotations, "Transactional", "rollbackFor"));
+        return Map.copyOf(metadata);
+    }
+
+    private void putIfPresent(Map<String, Object> metadata, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            metadata.put(key, value);
+        }
     }
 
     private int constructorCount(CallableDeclaration<?> callable) {
@@ -454,8 +708,15 @@ public class JavaSemanticGraphAnalyzer {
     }
 
     private CodeGraphNode typeNode(String qualified, String path, UUID chunkId) {
+        return typeNode(qualified, path, chunkId, "");
+    }
+
+    private CodeGraphNode typeNode(String qualified, String path, UUID chunkId, String springRole) {
         String name = qualified.contains(".") ? qualified.substring(qualified.lastIndexOf('.') + 1) : qualified;
-        return new CodeGraphNode(typeKey(qualified), "type", name, qualified, path, chunkId, Map.of("language", "java"));
+        Map<String, Object> metadata = springRole == null || springRole.isBlank()
+                ? Map.of("language", "java")
+                : Map.of("language", "java", "framework", "spring", "springRole", springRole);
+        return new CodeGraphNode(typeKey(qualified), "type", name, qualified, path, chunkId, metadata);
     }
 
     private String fileKey(String path) { return "file:" + path; }
@@ -468,11 +729,16 @@ public class JavaSemanticGraphAnalyzer {
 
     private void addEdge(Map<String, CodeGraphEdge> edges, String source, String target, String type,
                          double confidence, UUID chunkId, String sourceName) {
+        addEdge(edges, source, target, type, confidence, chunkId, Map.of("source", sourceName));
+    }
+
+    private void addEdge(Map<String, CodeGraphEdge> edges, String source, String target, String type,
+                         double confidence, UUID chunkId, Map<String, Object> metadata) {
         if (source == null || target == null || source.equals(target)) {
             return;
         }
         edges.putIfAbsent(source + "|" + type + "|" + target,
-                new CodeGraphEdge(source, target, type, confidence, chunkId, Map.of("source", sourceName)));
+                new CodeGraphEdge(source, target, type, confidence, chunkId, metadata == null ? Map.of() : metadata));
     }
 
     private CodeGraph empty() { return new CodeGraph(List.of(), List.of()); }

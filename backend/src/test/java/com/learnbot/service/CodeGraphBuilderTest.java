@@ -114,6 +114,122 @@ class CodeGraphBuilderTest {
     }
 
     @Test
+    void javaSpringAnalyzerAddsEndpointBeanAndTransactionEdges(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderController.java"), """
+                package sample;
+                import org.springframework.web.bind.annotation.*;
+                import org.springframework.stereotype.Service;
+                import org.springframework.context.annotation.*;
+                import org.springframework.transaction.annotation.Transactional;
+
+                @RestController
+                @RequestMapping(path = "/api/orders")
+                class OrderController {
+                    private final OrderService service;
+                    OrderController(OrderService service) { this.service = service; }
+                    @PostMapping(path = "/{id}")
+                    String submit() { return service.submit(); }
+                }
+
+                @Service
+                class OrderService {
+                    @Transactional
+                    String submit() { return "ok"; }
+                }
+
+                @Configuration
+                class OrderConfig {
+                    @Bean(value = "primaryOrderService")
+                    OrderService orderService() { return new OrderService(); }
+                }
+                """);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult source = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/OrderController.java",
+                "method", "OrderController", "submit", null, null, "String submit() { return service.submit(); }");
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer(new LearnBotProperties()).analyze(root, java.util.List.of(source));
+
+        assertThat(graph.edges()).anySatisfy(edge -> assertThat(edge.type()).isEqualTo("EXPOSES_ENDPOINT"));
+        assertThat(graph.edges()).anySatisfy(edge -> assertThat(edge.type()).isEqualTo("TRANSACTION_BOUNDARY"));
+        assertThat(graph.edges()).anySatisfy(edge -> assertThat(edge.type()).isEqualTo("DECLARES_BEAN"));
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.type()).isEqualTo("endpoint");
+            assertThat(node.metadata()).containsEntry("route", "/api/orders/{id}");
+        });
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.type()).isEqualTo("bean");
+            assertThat(node.metadata()).containsEntry("beanName", "primaryOrderService");
+        });
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.type()).isEqualTo("type");
+            assertThat(node.metadata()).containsEntry("springRole", "controller");
+        });
+    }
+
+    @Test
+    void javaSpringAnalyzerAddsRepositoryInjectionAndTransactionMetadata(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderService.java"), """
+                package sample;
+                import jakarta.persistence.Entity;
+                import org.springframework.beans.factory.annotation.Qualifier;
+                import org.springframework.data.jpa.repository.JpaRepository;
+                import org.springframework.stereotype.Service;
+                import org.springframework.transaction.annotation.Propagation;
+                import org.springframework.transaction.annotation.Transactional;
+
+                @Entity
+                class Order {}
+
+                interface OrderRepository extends JpaRepository<Order, Long> {}
+
+                @Service
+                class OrderService {
+                    private final OrderRepository repository;
+                    OrderService(@Qualifier("primaryOrderRepository") OrderRepository repository) {
+                        this.repository = repository;
+                    }
+                    @Transactional(readOnly = true, propagation = Propagation.REQUIRED, rollbackFor = IllegalStateException.class)
+                    Order submit() { return repository.getReferenceById(1L); }
+                }
+                """);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult source = result(repositoryId, UUID.randomUUID(), "src/main/java/sample/OrderService.java",
+                "method", "OrderService", "submit", null, null, "Order submit() { return repository.getReferenceById(1L); }");
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer(new LearnBotProperties()).analyze(root, java.util.List.of(source));
+
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("REPOSITORY_FOR");
+            assertThat(edge.sourceKey()).contains("OrderRepository");
+            assertThat(edge.targetKey()).contains("Order");
+            assertThat(edge.metadata()).containsEntry("repositoryBase", "JpaRepository");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("QUERIES_ENTITY");
+            assertThat(edge.confidence()).isLessThan(0.8);
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("INJECTS");
+            assertThat(edge.metadata()).containsEntry("qualifier", "primaryOrderRepository");
+        });
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.type()).isEqualTo("transaction_boundary");
+            assertThat(node.metadata()).containsEntry("readOnly", "true");
+            assertThat(node.metadata()).containsEntry("propagation", "Propagation.REQUIRED");
+            assertThat(node.metadata()).containsEntry("rollbackFor", "IllegalStateException.class");
+        });
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.type()).isEqualTo("type");
+            assertThat(node.name()).isEqualTo("OrderRepository");
+            assertThat(node.metadata()).containsEntry("springRole", "repository");
+        });
+    }
+
+    @Test
     void onlyUsesCallsWhenMethodAppearsAsCallExpression() {
         CodeGraphBuilder builder = new CodeGraphBuilder(new LearnBotProperties());
         UUID repositoryId = UUID.randomUUID();
@@ -155,6 +271,13 @@ class CodeGraphBuilderTest {
     }
 
     @Test
+    void sourceClassifierKeepsWinFormsDesignerAsMainEvidence() {
+        CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify("src/OrdersForm.Designer.cs", "method", "regex");
+
+        assertThat(profile.sourceRole()).isEqualTo(CodeSourceClassifier.SOURCE_MAIN);
+    }
+
+    @Test
     void returnsEmptyGraphWhenDisabled() {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getCode().getGraph().setEnabled(false);
@@ -166,6 +289,57 @@ class CodeGraphBuilderTest {
 
         assertThat(graph.nodes()).isEmpty();
         assertThat(graph.edges()).isEmpty();
+    }
+
+    @Test
+    void javaSpringFrameworkFlagDisablesSpringSpecificEdges(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderController.java"), """
+                package sample;
+                import org.springframework.web.bind.annotation.*;
+
+                @RestController
+                @RequestMapping("/orders")
+                class OrderController {
+                    @GetMapping("/{id}")
+                    String get() { return "ok"; }
+                }
+                """);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getCode().getGraph().setJavaSpringEnabled(false);
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer(properties).analyze(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "src/main/java/sample/OrderController.java",
+                        "method", "OrderController", "get", null, null, "String get() { return \"ok\"; }")
+        ));
+
+        assertThat(graph.edges()).noneMatch(edge -> edge.type().equals("EXPOSES_ENDPOINT"));
+        assertThat(graph.nodes()).noneMatch(node -> "endpoint".equals(node.type()));
+    }
+
+    @Test
+    void buildKeepsBaseGraphWhenJavaSemanticAnalyzerFails(@TempDir Path root) {
+        LearnBotProperties properties = new LearnBotProperties();
+        JavaSemanticGraphAnalyzer failingAnalyzer = new JavaSemanticGraphAnalyzer(properties) {
+            @Override
+            public CodeGraphAnalysisResult analyzeWithDiagnostics(Path repositoryRoot, java.util.List<CodeSearchResult> chunks,
+                                                                  java.util.List<Path> dependencyJars) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        CodeGraphBuilder builder = new CodeGraphBuilder(properties, failingAnalyzer, null, null);
+
+        CodeGraphBuildResult result = builder.buildWithDiagnostics(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "src/main/java/sample/A.java",
+                        "class", "A", null, null, null, "class A {}")
+        ));
+
+        assertThat(result.graph().nodes()).anySatisfy(node -> assertThat(node.type()).isEqualTo("file"));
+        assertThat(result.diagnostics()).anySatisfy(diagnostic -> {
+            assertThat(diagnostic.stage()).isEqualTo("JAVA_SEMANTIC");
+            assertThat(diagnostic.status()).isEqualTo("FAILED");
+        });
     }
 
     private CodeSearchResult result(

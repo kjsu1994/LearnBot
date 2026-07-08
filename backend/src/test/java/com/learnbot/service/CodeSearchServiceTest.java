@@ -14,6 +14,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -88,6 +89,42 @@ class CodeSearchServiceTest {
         searchService.search(repositoryId, "login call flow", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.FLOW);
 
         verify(repository).graphRelatedChunks(eq(repositoryId), anyList(), anyList(), eq(2), eq("FORWARD"), anyInt(), anyList());
+    }
+
+    @Test
+    void uiEventIntentPassesBindingAndDesignerEdgesToGraphTraversal() {
+        CodeRepository repository = mock(CodeRepository.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        CodeSearchService searchService = new CodeSearchService(repository, ollamaClient, new LearnBotProperties());
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult seed = result("MainWindow.xaml", "xaml_event", "SaveButton_Click", 0.9);
+        when(repository.keywordSearch(eq(repositoryId), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(seed));
+        when(repository.relatedChunks(any(), anyList(), anyInt(), anyInt())).thenReturn(List.of());
+        when(repository.graphRelatedChunks(eq(repositoryId), anyList(), anyList(), anyInt(), eq("BOTH"), anyInt(), anyList()))
+                .thenReturn(List.of());
+        when(ollamaClient.embed(anyList())).thenThrow(new RuntimeException("embedding unavailable"));
+
+        searchService.search(repositoryId, "xaml event binding command", 4, List.of(UUID.randomUUID()), null, GraphSearchIntent.UI_EVENT);
+
+        verify(repository).graphRelatedChunks(
+                eq(repositoryId),
+                anyList(),
+                argThat((List<String> edges) -> edges.contains("HANDLES_EVENT")
+                        && edges.contains("BINDS_TO")
+                        && edges.contains("USES_COMMAND")
+                        && edges.contains("COMMAND_EXECUTES")
+                        && edges.contains("DATA_CONTEXT")
+                        && edges.contains("DECLARES_CONTROL")
+                        && edges.contains("CODE_BEHIND")),
+                anyInt(),
+                eq("BOTH"),
+                anyInt(),
+                argThat((List<String> types) -> types.contains("xaml_view")
+                        && types.contains("winforms_control")
+                        && types.contains("view_model")
+                        && types.contains("command"))
+        );
     }
 
     @Test

@@ -137,6 +137,9 @@ learnbot:
       max-tree-depth: ${LEARNBOT_CODE_CONTEXT_MAX_TREE_DEPTH:4}
     graph:
       enabled: ${LEARNBOT_CODE_GRAPH_ENABLED:true}
+      framework-analysis-enabled: ${LEARNBOT_CODE_GRAPH_FRAMEWORK_ANALYSIS_ENABLED:true}
+      java-spring-enabled: ${LEARNBOT_CODE_GRAPH_JAVA_SPRING_ENABLED:true}
+      dotnet-ui-enabled: ${LEARNBOT_CODE_GRAPH_DOTNET_UI_ENABLED:true}
       llm-relation-enabled: ${LEARNBOT_CODE_GRAPH_LLM_RELATION_ENABLED:true}
       roslyn-analyzer-path: ${LEARNBOT_CODE_GRAPH_ROSLYN_ANALYZER_PATH:/app/roslyn/LearnBot.RoslynAnalyzer.dll}
       roslyn-mode: ${LEARNBOT_CODE_GRAPH_ROSLYN_MODE:AUTO}

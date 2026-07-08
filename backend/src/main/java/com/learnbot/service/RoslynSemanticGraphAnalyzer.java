@@ -50,7 +50,9 @@ public class RoslynSemanticGraphAnalyzer {
         }
         Process process = null;
         try {
-            process = new ProcessBuilder("dotnet", analyzerPath, repositoryRoot.toAbsolutePath().normalize().toString(), mode).start();
+            String dotnetUiEnabled = String.valueOf(properties.getCode().getGraph().isFrameworkAnalysisEnabled()
+                    && properties.getCode().getGraph().isDotnetUiEnabled());
+            process = new ProcessBuilder("dotnet", analyzerPath, repositoryRoot.toAbsolutePath().normalize().toString(), mode, dotnetUiEnabled).start();
             Process running = process;
             CompletableFuture<String> stdout = CompletableFuture.supplyAsync(() -> read(running.getInputStream()));
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> read(running.getErrorStream()));

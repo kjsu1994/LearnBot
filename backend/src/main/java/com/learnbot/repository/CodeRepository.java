@@ -1546,7 +1546,9 @@ public class CodeRepository {
         List<String> safeEdgeTypes = edgeTypes == null || edgeTypes.isEmpty()
                 ? List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "CONTAINS", "DEFINES",
                         "EXTENDS", "IMPLEMENTS", "OVERRIDES", "INJECTS", "RETURNS", "ACCEPTS", "THROWS",
-                        "ANNOTATED_BY", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT")
+                        "ANNOTATED_BY", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT",
+                        "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY",
+                        "DECLARES_CONTROL", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "CODE_BEHIND", "PARTIAL_OF")
                 : edgeTypes;
         String safeDirection = Set.of("FORWARD", "REVERSE", "BOTH").contains(direction) ? direction : "BOTH";
         int safeMaxHop = Math.max(1, Math.min(maxHop, 4));
@@ -1772,6 +1774,8 @@ public class CodeRepository {
             metadata.put("graphDepth", path.depth());
             metadata.put("graphPathScore", path.pathScore());
             metadata.put("graphExpanded", true);
+            metadata.put("graphEvidenceKind", graphEvidenceKind(path));
+            metadata.put("graphConfidence", path.pathScore());
             metadata.put("graphTraversalRows", traversalRows);
             metadata.put("graphTraversalReachedHop", reachedHop);
             metadata.put("graphTraversalTruncated", truncated);
@@ -1796,6 +1800,17 @@ public class CodeRepository {
     private record TraversalNeighbor(UUID fromNodeId, UUID toNodeId, String toNodeName,
                                      String edgeType, double confidence) {}
     private record TraversalChunk(UUID nodeId, CodeSearchResult result) {}
+
+    private String graphEvidenceKind(TraversalPath path) {
+        if (path == null || path.pathEdges() == null || path.pathEdges().isEmpty()) {
+            return "direct";
+        }
+        boolean inferred = path.pathEdges().stream().anyMatch(edge ->
+                "REFERENCES".equals(edge) || "BINDS_TO".equals(edge) || "USES_COMMAND".equals(edge)
+                        || "DATA_CONTEXT".equals(edge) || "CODE_BEHIND".equals(edge) || "PARTIAL_OF".equals(edge)
+                        || "REPOSITORY_FOR".equals(edge) || "QUERIES_ENTITY".equals(edge));
+        return inferred || path.pathScore() < 0.80 ? "inferred" : "direct";
+    }
 
     private CodeRepositoryRecord mapRepositoryRecord(ResultSet rs, int rowNum) throws SQLException {
         return new CodeRepositoryRecord(
