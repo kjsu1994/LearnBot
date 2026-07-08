@@ -1,7 +1,8 @@
 package com.learnbot.service;
 
-import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -30,6 +31,16 @@ public class CodeChunkParser {
     private static final Pattern CONSTRUCTOR_PATTERN = Pattern.compile(
             "^\\s*(?:public|private|protected|internal)\\s+([A-Z][A-Za-z0-9_]*)\\s*\\([^;]*\\)\\s*(?:\\{|=>)?"
     );
+    private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([A-Za-z_][A-Za-z0-9_.]*)\\s*;");
+    private static final Pattern JAVA_TYPE_PATTERN = Pattern.compile(
+            "^\\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\\([^)]*\\))?\\s*)*(?:(?:public|private|protected|abstract|final|static|sealed|non-sealed|strictfp)\\s+)*(class|interface|enum|record)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"
+    );
+    private static final Pattern JAVA_METHOD_PATTERN = Pattern.compile(
+            "^\\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\\([^)]*\\))?\\s*)*(?:(?:public|private|protected|abstract|final|static|synchronized|native|strictfp|default)\\s+)*(?:<[^>{};]+>\\s*)?[A-Za-z_][A-Za-z0-9_.$<>\\[\\],?\\s]*\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^;{}]*\\)\\s*(?:throws\\s+[A-Za-z_][A-Za-z0-9_.$<>\\[\\],?\\s]*)?(?:\\{|$)"
+    );
+    private static final Pattern JAVA_CONSTRUCTOR_PATTERN = Pattern.compile(
+            "^\\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\\([^)]*\\))?\\s*)*(?:(?:public|private|protected)\\s+)*([A-Z][A-Za-z0-9_]*)\\s*\\([^;{}]*\\)\\s*(?:throws\\s+[A-Za-z_][A-Za-z0-9_.$<>\\[\\],?\\s]*)?(?:\\{|$)"
+    );
     private static final Pattern XAML_CLASS_PATTERN = Pattern.compile("x:Class\\s*=\\s*\"([^\"]+)\"");
     private static final Pattern XAML_NAME_PATTERN = Pattern.compile("(?:x:Name|Name)\\s*=\\s*\"([^\"]+)\"");
     private static final Pattern XAML_EVENT_PATTERN = Pattern.compile("\\b(Click|Loaded|SelectionChanged|TextChanged|Checked|Unchecked|MouseDown|MouseUp|KeyDown|KeyUp|Command)\\s*=\\s*\"([^\"]+)\"");
@@ -53,9 +64,8 @@ public class CodeChunkParser {
     private static final Pattern XML_TAG_PATTERN = Pattern.compile("^\\s*<([A-Za-z_][A-Za-z0-9_.:-]*)(\\s|>|/>)");
     private static final Pattern QML_COMPONENT_PATTERN = Pattern.compile("^\\s*([A-Z][A-Za-z0-9_]*)\\s*\\{\\s*$");
 
-    static {
-        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-    }
+    private static final ParserConfiguration JAVA_PARSER_CONFIGURATION =
+            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
 
     public List<ParsedCodeChunk> parse(String relativePath, String language, String content) {
         String lowerPath = relativePath.toLowerCase(Locale.ROOT);
@@ -121,13 +131,22 @@ public class CodeChunkParser {
                 return parseMarkdown(relativePath, language, content);
             }
         } catch (RuntimeException ex) {
+            if (lowerPath.endsWith(".java")) {
+                return parseJavaRegexFallback(relativePath, content, ex);
+            }
             return fallbackChunks(relativePath, language, content, 90, parserNameForPath(lowerPath), ex);
         }
         return fallbackChunks(relativePath, language, content, 90);
     }
 
     private List<ParsedCodeChunk> parseJava(String relativePath, String content) {
-        CompilationUnit unit = StaticJavaParser.parse(content == null ? "" : content);
+        ParseResult<CompilationUnit> result = new JavaParser(JAVA_PARSER_CONFIGURATION)
+                .parse(content == null ? "" : content);
+        if (!result.isSuccessful()) {
+            throw new IllegalArgumentException("JavaParser failed: " + result.getProblems());
+        }
+        CompilationUnit unit = result.getResult()
+                .orElseThrow(() -> new IllegalArgumentException("JavaParser failed: " + result.getProblems()));
         String[] lines = splitLines(content);
         String packageName = unit.getPackageDeclaration().map(declaration -> declaration.getNameAsString()).orElse(null);
         List<ParsedCodeChunk> chunks = new ArrayList<>();
@@ -162,6 +181,93 @@ public class CodeChunkParser {
         }
 
         return chunks.isEmpty() ? fallbackChunks(relativePath, "java", content, 90) : chunks;
+    }
+
+    private List<ParsedCodeChunk> parseJavaRegexFallback(String relativePath, String content, RuntimeException failure) {
+        String[] lines = splitLines(content);
+        List<ParsedCodeChunk> chunks = new ArrayList<>();
+        String packageName = null;
+        String currentClass = null;
+        int index = 0;
+
+        for (int i = 0; i < lines.length; i++) {
+            Matcher packageMatcher = JAVA_PACKAGE_PATTERN.matcher(lines[i]);
+            if (packageMatcher.find()) {
+                packageName = packageMatcher.group(1);
+            }
+
+            Matcher typeMatcher = JAVA_TYPE_PATTERN.matcher(lines[i]);
+            if (typeMatcher.find()) {
+                String typeKind = typeMatcher.group(1);
+                currentClass = typeMatcher.group(2);
+                int end = Math.min(findBraceBlockEnd(lines, i), i + 80);
+                chunks.add(buildChunk(
+                        index++,
+                        javaTypeChunkType(typeKind),
+                        currentClass,
+                        currentClass,
+                        null,
+                        packageName,
+                        null,
+                        null,
+                        i + 1,
+                        end + 1,
+                        relativePath,
+                        slice(lines, i, end),
+                        javaRegexFallbackMetadata(currentClass, null, failure)
+                ));
+            }
+
+            String constructorName = javaConstructorName(lines[i]);
+            if (constructorName != null && constructorName.equals(firstNonBlank(currentClass, nearestJavaClass(lines, i)))) {
+                String className = currentClass == null ? nearestJavaClass(lines, i) : currentClass;
+                int end = findMethodEnd(lines, i);
+                chunks.add(buildChunk(
+                        index++,
+                        "constructor",
+                        constructorName,
+                        className,
+                        constructorName,
+                        packageName,
+                        null,
+                        null,
+                        i + 1,
+                        end + 1,
+                        relativePath,
+                        slice(lines, i, end),
+                        javaRegexFallbackMetadata(className, constructorName, failure)
+                ));
+                i = Math.max(i, end);
+                continue;
+            }
+
+            String methodName = javaMethodName(lines[i]);
+            if (methodName != null && !isControlKeyword(methodName) && !isStatementLine(lines[i])) {
+                String className = currentClass == null ? nearestJavaClass(lines, i) : currentClass;
+                int end = findMethodEnd(lines, i);
+                chunks.add(buildChunk(
+                        index++,
+                        "method",
+                        methodName,
+                        className,
+                        methodName,
+                        packageName,
+                        null,
+                        null,
+                        i + 1,
+                        end + 1,
+                        relativePath,
+                        slice(lines, i, end),
+                        javaRegexFallbackMetadata(className, methodName, failure)
+                ));
+                i = Math.max(i, end);
+            }
+        }
+
+        if (chunks.isEmpty()) {
+            return fallbackChunks(relativePath, "java", content, 90, "javaparser", failure);
+        }
+        return chunks;
     }
 
     private void addJavaCallable(
@@ -660,6 +766,16 @@ public class CodeChunkParser {
         return metadata;
     }
 
+    private Map<String, Object> javaRegexFallbackMetadata(String className, String methodName, RuntimeException failure) {
+        return metadata("java", "java_regex", metadataValues(
+                "class", className,
+                "method", methodName,
+                "fallbackFrom", "javaparser",
+                "fallbackReason", failure == null ? null : failure.getClass().getSimpleName(),
+                "fallbackMessage", failure == null ? null : abbreviate(failure.getMessage(), 220)
+        ));
+    }
+
     private Map<String, Object> metadata(String language, String parser, Map<String, Object> values) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("language", language);
@@ -775,6 +891,36 @@ public class CodeChunkParser {
             }
         }
         return null;
+    }
+
+    private String nearestJavaClass(String[] lines, int index) {
+        for (int i = index; i >= 0; i--) {
+            Matcher matcher = JAVA_TYPE_PATTERN.matcher(lines[i]);
+            if (matcher.find()) {
+                return matcher.group(2);
+            }
+        }
+        return null;
+    }
+
+    private String javaMethodName(String line) {
+        Matcher methodMatcher = JAVA_METHOD_PATTERN.matcher(line);
+        return methodMatcher.find() ? methodMatcher.group(1) : null;
+    }
+
+    private String javaConstructorName(String line) {
+        Matcher constructorMatcher = JAVA_CONSTRUCTOR_PATTERN.matcher(line);
+        return constructorMatcher.find() ? constructorMatcher.group(1) : null;
+    }
+
+    private String javaTypeChunkType(String typeKind) {
+        if ("enum".equals(typeKind)) {
+            return "enum";
+        }
+        if ("record".equals(typeKind)) {
+            return "record";
+        }
+        return "class";
     }
 
     private Range range(Node node, int lineCount) {

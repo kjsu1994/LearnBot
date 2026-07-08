@@ -149,8 +149,7 @@ foreach (var tree in trees)
 
         foreach (var invocation in declaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
-            var target = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol
-                ?? model.GetSymbolInfo(invocation).CandidateSymbols.OfType<IMethodSymbol>().SingleOrDefault();
+            var target = ResolveMethodSymbol(model.GetSymbolInfo(invocation));
             if (target is null) continue;
             target = target.ReducedFrom ?? target;
             var targetSignature = MethodSignature(target);
@@ -265,7 +264,7 @@ void AddCommandExecutionEdge(SemanticModel model, ObjectCreationExpressionSyntax
         .FirstOrDefault(IsMethodGroupExpression);
     if (methodGroup is null) return;
     var execute = model.GetSymbolInfo(methodGroup).Symbol as IMethodSymbol
-        ?? model.GetSymbolInfo(methodGroup).CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+        ?? ResolveMethodSymbol(model.GetSymbolInfo(methodGroup));
     if (execute is null) return;
     if (string.IsNullOrWhiteSpace(commandName))
     {
@@ -280,6 +279,16 @@ void AddCommandExecutionEdge(SemanticModel model, ObjectCreationExpressionSyntax
 
 bool IsMethodGroupExpression(ExpressionSyntax expression) =>
     expression is IdentifierNameSyntax || expression is MemberAccessExpressionSyntax;
+
+IMethodSymbol? ResolveMethodSymbol(SymbolInfo symbolInfo)
+{
+    if (symbolInfo.Symbol is IMethodSymbol method) return method;
+    return symbolInfo.CandidateSymbols
+        .OfType<IMethodSymbol>()
+        .OrderBy(candidate => candidate.Parameters.Length)
+        .ThenBy(candidate => candidate.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), StringComparer.Ordinal)
+        .FirstOrDefault();
+}
 
 string MethodGroupName(ExpressionSyntax expression) => expression switch
 {

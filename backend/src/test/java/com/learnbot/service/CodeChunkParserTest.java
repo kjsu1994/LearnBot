@@ -74,6 +74,117 @@ class CodeChunkParserTest {
     }
 
     @Test
+    void parsesControllerAskMethodWithTextBlockAsJavaParserChunks() {
+        List<ParsedCodeChunk> chunks = parser.parse(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "java",
+                """
+                        package com.learnbot.web;
+
+                        import org.springframework.web.bind.annotation.PostMapping;
+                        import org.springframework.web.bind.annotation.RequestMapping;
+                        import org.springframework.web.bind.annotation.RestController;
+
+                        @RestController
+                        @RequestMapping("/api/code")
+                        public class CodeController {
+                            @PostMapping("/ask")
+                            CodeAskResponse ask(CodeAskRequest request) {
+                                return new CodeAskResponse(changeAssistInstruction("fix", "why", "because"));
+                            }
+
+                            private String changeAssistInstruction(String instruction, String question, String answer) {
+                                return \"""
+                                        User requested a code change proposal from a prior Code RAG answer.
+
+                                        Requested change:
+                                        %s
+
+                                        Original question:
+                                        %s
+
+                                        Prior RAG answer context:
+                                        %s
+                                        \""".formatted(instruction, question, answer);
+                            }
+                        }
+
+                        record CodeAskRequest(String question) {}
+                        record CodeAskResponse(String answer) {}
+                        """
+        );
+
+        assertThat(chunks).noneSatisfy(chunk ->
+                assertThat(chunk.metadata()).containsEntry("parser", "line_window"));
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("class");
+            assertThat(chunk.className()).isEqualTo("CodeController");
+            assertThat(chunk.metadata()).containsEntry("parser", "javaparser");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("method");
+            assertThat(chunk.methodName()).isEqualTo("ask");
+            assertThat(chunk.namespaceName()).isEqualTo("com.learnbot.web");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("record");
+            assertThat(chunk.className()).isEqualTo("CodeAskResponse");
+        });
+    }
+
+    @Test
+    void fallsBackToJavaRegexSymbolsWhenJavaParserRejectsFile() {
+        List<ParsedCodeChunk> chunks = parser.parse(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "java",
+                """
+                        package com.learnbot.web;
+
+                        import org.springframework.web.bind.annotation.PostMapping;
+
+                        public class CodeController {
+                            @PostMapping("/ask")
+                            CodeAskResponse ask(CodeAskRequest request) {
+                                return new CodeAskResponse(changeAssistInstruction("fix", "why", "because"));
+                            }
+
+                            private String changeAssistInstruction(String instruction, String question, String answer) {
+                                return \"""
+                                        User requested a code change proposal from a prior Code RAG answer.
+                                        Requested change: %s
+                                        Original question: %s
+                                        Prior RAG answer context: %s
+                                        \""".formatted(instruction, question, answer);
+                            }
+                        }
+
+                        record CodeAskResponse(String answer) {}
+
+                        this is not valid java
+                        """
+        );
+
+        assertThat(chunks).noneSatisfy(chunk ->
+                assertThat(chunk.metadata()).containsEntry("parser", "line_window"));
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("class");
+            assertThat(chunk.className()).isEqualTo("CodeController");
+            assertThat(chunk.metadata()).containsEntry("parser", "java_regex");
+            assertThat(chunk.metadata()).containsEntry("fallbackFrom", "javaparser");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("method");
+            assertThat(chunk.methodName()).isEqualTo("ask");
+            assertThat(chunk.namespaceName()).isEqualTo("com.learnbot.web");
+            assertThat(chunk.metadata()).containsEntry("parser", "java_regex");
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("record");
+            assertThat(chunk.className()).isEqualTo("CodeAskResponse");
+        });
+    }
+
+    @Test
     void parsesDartFlutterSymbols() {
         List<ParsedCodeChunk> chunks = parser.parse(
                 "lib/main.dart",

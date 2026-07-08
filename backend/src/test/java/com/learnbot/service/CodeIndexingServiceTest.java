@@ -37,6 +37,20 @@ class CodeIndexingServiceTest {
     }
 
     @Test
+    void contentHashMatchDoesNotReusePreviousParserVersionChunks() {
+        ActiveCodeFileSnapshot previousParser = new ActiveCodeFileSnapshot(
+                UUID.randomUUID(),
+                "backend/src/main/java/app/service/RagAnswerPipeline.java",
+                "same-hash",
+                12,
+                "code-symbol-v4",
+                CodeIndexingService.CODE_CHUNK_PROFILE
+        );
+
+        assertThat(CodeIndexingService.canReusePreviousSnapshot(previousParser, "same-hash")).isFalse();
+    }
+
+    @Test
     void currentParserSignatureDoesNotReuseWhenContentChanged() {
         ActiveCodeFileSnapshot current = new ActiveCodeFileSnapshot(
                 UUID.randomUUID(),
