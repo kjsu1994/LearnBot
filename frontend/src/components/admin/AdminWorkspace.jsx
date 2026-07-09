@@ -349,6 +349,22 @@ function AdminWorkspace({
     }
   }
 
+  async function restoreTuningLlmDefaults() {
+    const saved = await updateAdminTuning?.({
+      ollamaBaseUrl: '',
+      primaryChatModel: '',
+      auxiliaryChatModel: '',
+    });
+    if (saved) {
+      setTuningLlmForm({
+        ollamaBaseUrl: '',
+        primaryChatModel: '',
+        auxiliaryChatModel: '',
+      });
+      setTuningTestResult(null);
+    }
+  }
+
   async function toggleReranker(enabled) {
     await updateAdminTuningReranker?.(enabled);
   }
@@ -1091,6 +1107,18 @@ function AdminWorkspace({
               <small>주소: {adminTuning?.effectiveOllamaBaseUrl || '-'}</small>
               <small>메인: {adminTuning?.effectivePrimaryChatModel || '-'}</small>
               <small>보조: {adminTuning?.effectiveAuxiliaryChatModel || '-'}</small>
+            </div>
+            <div className="action-row compact-action-row">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={loading('admin-tuning') || !adminTuning}
+                onClick={restoreTuningLlmDefaults}
+                title="관리자 DB의 모델 연결 override를 비우고 서버 설정파일/env 기본값으로 돌아갑니다."
+              >
+                {loading('admin-tuning') ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                설정파일 기본값으로 복귀
+              </button>
             </div>
             {tuningTestResult && (
               <div className={tuningTestResult.success ? 'success-note llm-test-result' : 'danger-note llm-test-result'}>
