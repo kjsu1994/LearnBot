@@ -213,13 +213,13 @@ void AddTypeRelation(string source, ITypeSymbol type, string relation, string fi
     AddEdge(source, TypeKey(qualified), relation, .98, file, line, "roslyn_semantic_model");
 }
 
-void AddNode(string key, string type, string name, string qualified, string? file, int line)
-    => nodes.TryAdd(key, new GraphNode(key, type, name, qualified, file, line));
+void AddNode(string key, string type, string name, string qualified, string? file, int line, Dictionary<string, object>? metadata = null)
+    => nodes.TryAdd(key, new GraphNode(key, type, name, qualified, file, line, metadata));
 
-void AddEdge(string source, string target, string type, double confidence, string file, int line, string edgeSource)
+void AddEdge(string source, string target, string type, double confidence, string file, int line, string edgeSource, Dictionary<string, object>? metadata = null)
 {
     if (source == target) return;
-    var edge = new GraphEdge(source, target, type, confidence, file, line, edgeSource);
+    var edge = new GraphEdge(source, target, type, confidence, file, line, edgeSource, metadata);
     edges.TryAdd(source + "|" + type + "|" + target, edge);
 }
 
@@ -342,21 +342,23 @@ void AddWpfXamlGraph(string repositoryRoot)
                         AddNode(handlerKey, "method", value, xamlClass + "." + value, CodeBehindPath(relative), line);
                         AddEdge(sourceKey, handlerKey, "HANDLES_EVENT", .86, relative, line, "xaml_event");
                     }
-                    var bindingPath = BindingPath(value);
-                    if (bindingPath is null) continue;
-                    if (attribute.Name.LocalName.Equals("Command", StringComparison.OrdinalIgnoreCase) || bindingPath.EndsWith("Command", StringComparison.Ordinal))
+                    var binding = BindingInfo(value);
+                    if (binding is null) continue;
+                    var bindingMetadata = BindingMetadata(attribute.Name.LocalName, binding);
+                    if (attribute.Name.LocalName.Equals("Command", StringComparison.OrdinalIgnoreCase) || binding.Path.EndsWith("Command", StringComparison.Ordinal))
                     {
-                        var commandKey = CommandKey(xamlClass, bindingPath);
-                        AddNode(commandKey, "command", bindingPath, xamlClass + "#" + bindingPath, relative, line);
-                        AddEdge(sourceKey, commandKey, "USES_COMMAND", .68, relative, line, "xaml_binding");
-                        AddViewModelCommandCandidate(sourceKey, xamlClass, bindingPath, relative, line);
+                        var commandKey = CommandKey(xamlClass, binding.Path);
+                        AddNode(commandKey, "command", binding.Path, xamlClass + "#" + binding.Path, relative, line, bindingMetadata);
+                        AddEdge(sourceKey, commandKey, "USES_COMMAND", .68, relative, line, "xaml_binding", bindingMetadata);
+                        AddEdge(sourceKey, commandKey, "COMMAND_BINDING", .66, relative, line, "xaml_binding", bindingMetadata);
+                        AddViewModelCommandCandidate(sourceKey, xamlClass, binding.Path, relative, line, bindingMetadata);
                     }
                     else
                     {
-                        var propertyKey = PropertyKey(xamlClass, bindingPath);
-                        AddNode(propertyKey, "property", bindingPath, xamlClass + "#" + bindingPath, relative, line);
-                        AddEdge(sourceKey, propertyKey, "BINDS_TO", .62, relative, line, "xaml_binding");
-                        AddViewModelPropertyCandidate(sourceKey, xamlClass, bindingPath, relative, line);
+                        var propertyKey = PropertyKey(xamlClass, binding.Path);
+                        AddNode(propertyKey, "property", binding.Path, xamlClass + "#" + binding.Path, relative, line, bindingMetadata);
+                        AddEdge(sourceKey, propertyKey, "BINDS_TO", .62, relative, line, "xaml_binding", bindingMetadata);
+                        AddViewModelPropertyCandidate(sourceKey, xamlClass, binding.Path, relative, line, bindingMetadata);
                     }
                 }
                 if (element.Name.LocalName.EndsWith(".DataContext", StringComparison.OrdinalIgnoreCase)
@@ -367,7 +369,8 @@ void AddWpfXamlGraph(string repositoryRoot)
                     {
                         var viewModelType = viewModelElement.Name.LocalName;
                         AddNode(TypeKey(viewModelType), "view_model", ShortName(viewModelType), viewModelType, null, 0);
-                        AddEdge(sourceKey, TypeKey(viewModelType), "DATA_CONTEXT", .82, relative, line, "xaml_datacontext");
+                        AddEdge(sourceKey, TypeKey(viewModelType), "DATA_CONTEXT", .82, relative, line, "xaml_datacontext",
+                            new Dictionary<string, object> { ["evidenceKind"] = "direct", ["confidenceReason"] = "explicit_datacontext_element" });
                     }
                 }
             }
@@ -390,30 +393,48 @@ void AddWinFormsDesignerGraph(string repositoryRoot, Compilation compilation, Li
                      .Where(node => node.IsKind(SyntaxKind.AddAssignmentExpression)))
         {
             if (assignment.Left is not MemberAccessExpressionSyntax memberAccess) continue;
-            if (model.GetSymbolInfo(assignment.Right).Symbol is not IMethodSymbol handler) continue;
-            var owner = handler.ContainingType is null ? "" : TypeName(handler.ContainingType);
+            var handler = HandlerSymbol(model, assignment.Right);
+            var ownerType = syntaxRoot.DescendantNodes().OfType<TypeDeclarationSyntax>().FirstOrDefault();
+            var owner = handler?.ContainingType is null
+                ? ownerType is null ? "" : (model.GetDeclaredSymbol(ownerType) is INamedTypeSymbol ownerSymbol ? TypeName(ownerSymbol) : ownerType.Identifier.Text)
+                : TypeName(handler.ContainingType);
             if (string.IsNullOrWhiteSpace(owner)) continue;
             var controlName = memberAccess.Expression.ToString();
             var controlKey = ControlKey(owner, controlName);
-            var handlerSignature = MethodSignature(handler.ReducedFrom ?? handler);
             AddNode(controlKey, "winforms_control", controlName, owner + "#" + controlName, file, Line(assignment));
-            AddNode(MethodKey(handlerSignature), "method", handler.Name, handlerSignature, file.Replace(".Designer.cs", ".cs"), Line(assignment));
-            AddEdge(controlKey, MethodKey(handlerSignature), "HANDLES_EVENT", .93, file, Line(assignment), "winforms_designer");
+            if (handler is not null)
+            {
+                var handlerSignature = MethodSignature(handler.ReducedFrom ?? handler);
+                AddNode(MethodKey(handlerSignature), "method", handler.Name, handlerSignature, file.Replace(".Designer.cs", ".cs"), Line(assignment));
+                AddEdge(controlKey, MethodKey(handlerSignature), "HANDLES_EVENT", .93, file, Line(assignment), "winforms_designer",
+                    new Dictionary<string, object> { ["evidenceKind"] = "direct", ["confidenceReason"] = "resolved_event_handler_symbol" });
+            }
+            else
+            {
+                var handlerName = HandlerName(assignment.Right);
+                if (string.IsNullOrWhiteSpace(handlerName)) continue;
+                var handlerKey = MethodKey(owner + "." + handlerName + "(System.Object,System.EventArgs)");
+                AddNode(handlerKey, "method", handlerName, owner + "." + handlerName, file.Replace(".Designer.cs", ".cs"), Line(assignment));
+                AddEdge(controlKey, handlerKey, "HANDLES_EVENT", .58, file, Line(assignment), "winforms_designer",
+                    new Dictionary<string, object> { ["evidenceKind"] = "candidate", ["confidenceReason"] = "event_handler_name_match" });
+            }
         }
         foreach (var invocation in syntaxRoot.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess) continue;
             if (!memberAccess.Name.Identifier.Text.Equals("Add", StringComparison.Ordinal)) continue;
-            if (!memberAccess.Expression.ToString().EndsWith(".Controls", StringComparison.Ordinal)) continue;
+            var collectionExpression = memberAccess.Expression.ToString();
+            if (!IsWinFormsHierarchyCollection(collectionExpression)) continue;
             var ownerType = syntaxRoot.DescendantNodes().OfType<TypeDeclarationSyntax>().FirstOrDefault();
             if (ownerType is null) continue;
             var owner = model.GetDeclaredSymbol(ownerType) is INamedTypeSymbol ownerSymbol ? TypeName(ownerSymbol) : ownerType.Identifier.Text;
-            var parentControl = memberAccess.Expression.ToString().Replace(".Controls", "");
+            var parentControl = ParentControlName(collectionExpression);
             var childControl = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString();
             if (string.IsNullOrWhiteSpace(childControl)) continue;
             AddNode(ControlKey(owner, parentControl), "winforms_control", parentControl, owner + "#" + parentControl, file, Line(invocation));
             AddNode(ControlKey(owner, childControl), "winforms_control", childControl, owner + "#" + childControl, file, Line(invocation));
-            AddEdge(ControlKey(owner, parentControl), ControlKey(owner, childControl), "CONTAINS", .88, file, Line(invocation), "winforms_designer");
+            AddEdge(ControlKey(owner, parentControl), ControlKey(owner, childControl), "CONTAINS", .88, file, Line(invocation), "winforms_designer",
+                new Dictionary<string, object> { ["sourceDetail"] = collectionExpression, ["evidenceKind"] = "direct" });
         }
     }
 }
@@ -424,7 +445,8 @@ void AddDataContextEdges(string sourceKey, string xamlClass, string value, strin
     if (!string.IsNullOrWhiteSpace(explicitType))
     {
         AddNode(TypeKey(explicitType), "view_model", ShortName(explicitType), explicitType, null, 0);
-        AddEdge(sourceKey, TypeKey(explicitType), "DATA_CONTEXT", .82, file, line, "xaml_datacontext");
+        AddEdge(sourceKey, TypeKey(explicitType), "DATA_CONTEXT", .82, file, line, "xaml_datacontext",
+            new Dictionary<string, object> { ["evidenceKind"] = "direct", ["confidenceReason"] = "explicit_datacontext_attribute" });
         return;
     }
     AddViewModelCandidate(sourceKey, xamlClass, file, line);
@@ -436,25 +458,30 @@ void AddViewModelCandidate(string sourceKey, string xamlClass, string file, int 
         ? xamlClass + "Model"
         : xamlClass + "ViewModel";
     AddNode(TypeKey(candidate), "view_model", ShortName(candidate), candidate, null, 0);
-    AddEdge(sourceKey, TypeKey(candidate), "DATA_CONTEXT", .54, file, line, "xaml_naming_convention");
+    AddEdge(sourceKey, TypeKey(candidate), "DATA_CONTEXT", .54, file, line, "xaml_naming_convention",
+        new Dictionary<string, object> { ["evidenceKind"] = "candidate", ["confidenceReason"] = "viewmodel_naming_convention" });
 }
 
-void AddViewModelPropertyCandidate(string sourceKey, string xamlClass, string property, string file, int line)
+void AddViewModelPropertyCandidate(string sourceKey, string xamlClass, string property, string file, int line, Dictionary<string, object>? metadata)
 {
     var viewModel = xamlClass.EndsWith("View", StringComparison.Ordinal) ? xamlClass + "Model" : xamlClass + "ViewModel";
     var propertyKey = PropertyKey(viewModel, property);
     AddNode(TypeKey(viewModel), "view_model", ShortName(viewModel), viewModel, null, 0);
     AddNode(propertyKey, "property", property, viewModel + "#" + property, null, 0);
-    AddEdge(sourceKey, propertyKey, "BINDS_TO", .50, file, line, "xaml_viewmodel_candidate");
+    AddEdge(sourceKey, propertyKey, "BINDS_TO", .50, file, line, "xaml_viewmodel_candidate",
+        Merge(metadata, new Dictionary<string, object> { ["evidenceKind"] = "candidate", ["confidenceReason"] = "viewmodel_binding_candidate" }));
 }
 
-void AddViewModelCommandCandidate(string sourceKey, string xamlClass, string command, string file, int line)
+void AddViewModelCommandCandidate(string sourceKey, string xamlClass, string command, string file, int line, Dictionary<string, object>? metadata)
 {
     var viewModel = xamlClass.EndsWith("View", StringComparison.Ordinal) ? xamlClass + "Model" : xamlClass + "ViewModel";
     var commandKey = CommandKey(viewModel, command);
     AddNode(TypeKey(viewModel), "view_model", ShortName(viewModel), viewModel, null, 0);
     AddNode(commandKey, "command", command, viewModel + "#" + command, null, 0);
-    AddEdge(sourceKey, commandKey, "USES_COMMAND", .56, file, line, "xaml_viewmodel_candidate");
+    AddEdge(sourceKey, commandKey, "USES_COMMAND", .56, file, line, "xaml_viewmodel_candidate",
+        Merge(metadata, new Dictionary<string, object> { ["evidenceKind"] = "candidate", ["confidenceReason"] = "viewmodel_command_candidate" }));
+    AddEdge(sourceKey, commandKey, "COMMAND_TARGETS", .52, file, line, "xaml_viewmodel_candidate",
+        Merge(metadata, new Dictionary<string, object> { ["evidenceKind"] = "candidate", ["confidenceReason"] = "viewmodel_command_candidate" }));
 }
 
 string? ExplicitXamlType(string value)
@@ -465,16 +492,101 @@ string? ExplicitXamlType(string value)
     return null;
 }
 
-string? BindingPath(string value)
+BindingDescriptor? BindingInfo(string value)
 {
     if (!value.StartsWith("{Binding", StringComparison.Ordinal)) return null;
     var body = value.Trim('{', '}').Substring("Binding".Length).Trim();
-    if (body.StartsWith("Path=", StringComparison.OrdinalIgnoreCase)) body = body.Substring("Path=".Length);
-    var comma = body.IndexOf(',');
-    if (comma >= 0) body = body[..comma];
-    body = body.Trim();
-    return string.IsNullOrWhiteSpace(body) ? null : body;
+    var parts = body.Split(',', StringSplitOptions.TrimEntries);
+    var path = "";
+    var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var part in parts.Where(part => !string.IsNullOrWhiteSpace(part)))
+    {
+        var equals = part.IndexOf('=');
+        if (equals > 0)
+        {
+            values[part[..equals].Trim()] = part[(equals + 1)..].Trim();
+        }
+        else if (string.IsNullOrWhiteSpace(path))
+        {
+            path = part.Trim();
+        }
+    }
+    if (values.TryGetValue("Path", out var explicitPath)) path = explicitPath;
+    return string.IsNullOrWhiteSpace(path) ? null : new BindingDescriptor(
+        path,
+        values.GetValueOrDefault("Mode"),
+        values.GetValueOrDefault("UpdateSourceTrigger"),
+        values.GetValueOrDefault("ElementName"),
+        values.GetValueOrDefault("RelativeSource"),
+        values.GetValueOrDefault("StaticResource") ?? StaticResourceKey(value)
+    );
 }
+
+Dictionary<string, object> BindingMetadata(string targetProperty, BindingDescriptor binding)
+{
+    var metadata = new Dictionary<string, object>
+    {
+        ["targetProperty"] = targetProperty,
+        ["bindingPath"] = binding.Path,
+        ["evidenceKind"] = string.IsNullOrWhiteSpace(binding.ElementName) && string.IsNullOrWhiteSpace(binding.RelativeSource) ? "inferred" : "candidate",
+        ["confidenceReason"] = "xaml_binding_path"
+    };
+    Put(metadata, "bindingMode", binding.Mode);
+    Put(metadata, "updateSourceTrigger", binding.UpdateSourceTrigger);
+    Put(metadata, "elementName", binding.ElementName);
+    Put(metadata, "relativeSource", binding.RelativeSource);
+    Put(metadata, "staticResourceKey", binding.StaticResourceKey);
+    return metadata;
+}
+
+string? StaticResourceKey(string value)
+{
+    var match = Regex.Match(value, @"StaticResource\s+([^},]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    return match.Success ? match.Groups[1].Value.Trim() : null;
+}
+
+Dictionary<string, object> Merge(Dictionary<string, object>? left, Dictionary<string, object>? right)
+{
+    var merged = new Dictionary<string, object>();
+    if (left is not null) foreach (var entry in left) merged[entry.Key] = entry.Value;
+    if (right is not null) foreach (var entry in right) merged[entry.Key] = entry.Value;
+    return merged;
+}
+
+void Put(Dictionary<string, object> metadata, string key, string? value)
+{
+    if (!string.IsNullOrWhiteSpace(value)) metadata[key] = value;
+}
+
+IMethodSymbol? HandlerSymbol(SemanticModel model, ExpressionSyntax expression)
+{
+    if (model.GetSymbolInfo(expression).Symbol is IMethodSymbol direct) return direct;
+    if (expression is ObjectCreationExpressionSyntax creation)
+        return creation.ArgumentList?.Arguments.Select(argument => model.GetSymbolInfo(argument.Expression).Symbol).OfType<IMethodSymbol>().FirstOrDefault();
+    return ResolveMethodSymbol(model.GetSymbolInfo(expression));
+}
+
+string HandlerName(ExpressionSyntax expression) => expression switch
+{
+    IdentifierNameSyntax identifier => identifier.Identifier.Text,
+    MemberAccessExpressionSyntax member => member.Name.Identifier.Text,
+    ObjectCreationExpressionSyntax creation => creation.ArgumentList?.Arguments.FirstOrDefault()?.Expression switch
+    {
+        IdentifierNameSyntax identifier => identifier.Identifier.Text,
+        MemberAccessExpressionSyntax member => member.Name.Identifier.Text,
+        _ => ""
+    },
+    _ => ""
+};
+
+bool IsWinFormsHierarchyCollection(string expression) =>
+    expression.EndsWith(".Controls", StringComparison.Ordinal)
+    || expression.EndsWith(".TabPages", StringComparison.Ordinal)
+    || expression.EndsWith(".Items", StringComparison.Ordinal)
+    || expression.EndsWith(".DropDownItems", StringComparison.Ordinal);
+
+string ParentControlName(string collectionExpression) =>
+    Regex.Replace(collectionExpression, "\\.(Controls|TabPages|Items|DropDownItems)$", "");
 
 bool IsWpfEvent(string name) => new[]
 {
@@ -572,5 +684,6 @@ void RemoveGlob(HashSet<string> files, string directory, string glob)
 record AnalysisInputs(string[] Files, string Mode, int ProjectCount, int FailedProjects, string[] DefineConstants);
 record GraphOutput(IEnumerable<GraphNode> Nodes, IEnumerable<GraphEdge> Edges, string Mode,
     int ProjectCount, int AnalyzedFiles, int FailedProjects, int FailedFiles);
-record GraphNode(string Key, string Type, string Name, string QualifiedName, string? FilePath, int Line);
-record GraphEdge(string SourceKey, string TargetKey, string Type, double Confidence, string FilePath, int Line, string Source);
+record GraphNode(string Key, string Type, string Name, string QualifiedName, string? FilePath, int Line, Dictionary<string, object>? Metadata = null);
+record GraphEdge(string SourceKey, string TargetKey, string Type, double Confidence, string FilePath, int Line, string Source, Dictionary<string, object>? Metadata = null);
+record BindingDescriptor(string Path, string? Mode, string? UpdateSourceTrigger, string? ElementName, string? RelativeSource, string? StaticResourceKey);

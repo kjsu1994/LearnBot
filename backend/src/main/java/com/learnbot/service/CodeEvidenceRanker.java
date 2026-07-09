@@ -285,9 +285,22 @@ public class CodeEvidenceRanker {
             default -> 0.36;
         };
         double edgeFactor = edgeWeight(String.valueOf(result.metadata().getOrDefault("graphEdgeType", "")), mode);
+        double evidenceKindFactor = graphEvidenceKindFactor(result);
         double sourceFactor = "llm_fallback".equals(String.valueOf(result.metadata().get("source"))) ? 0.70 : 1.0;
         double truncationFactor = Boolean.TRUE.equals(result.metadata().get("graphTraversalTruncated")) ? 0.82 : 1.0;
-        return 0.45 * pathScore * depthFactor * edgeFactor * sourceFactor * truncationFactor;
+        return 0.45 * pathScore * depthFactor * edgeFactor * evidenceKindFactor * sourceFactor * truncationFactor;
+    }
+
+    private double graphEvidenceKindFactor(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return 1.0;
+        }
+        String kind = String.valueOf(result.metadata().getOrDefault("graphEvidenceKind", "direct"));
+        return switch (kind) {
+            case "candidate" -> 0.62;
+            case "inferred" -> 0.82;
+            default -> 1.0;
+        };
     }
 
     private double edgeWeight(String edgeType, CodeRagService.CodeQuestionMode mode) {
@@ -296,7 +309,8 @@ public class CodeEvidenceRanker {
         }
         if ("REFERENCES".equals(edgeType)) return 0.45;
         if ("CALLS".equals(edgeType) || "HANDLES_EVENT".equals(edgeType) || "EXPOSES_ENDPOINT".equals(edgeType)
-                || "USES_COMMAND".equals(edgeType) || "COMMAND_EXECUTES".equals(edgeType)) {
+                || "USES_COMMAND".equals(edgeType) || "COMMAND_BINDING".equals(edgeType)
+                || "COMMAND_TARGETS".equals(edgeType) || "COMMAND_EXECUTES".equals(edgeType)) {
             return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.UI_EVENT ? 1.15 : 1.0;
         }
         if ("DECLARES_BEAN".equals(edgeType) || "TRANSACTION_BOUNDARY".equals(edgeType)) {
@@ -304,6 +318,10 @@ public class CodeEvidenceRanker {
         }
         if ("REPOSITORY_FOR".equals(edgeType) || "QUERIES_ENTITY".equals(edgeType)) {
             return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.IMPACT ? 1.02 : 0.88;
+        }
+        if ("FILTERS_BY_PROPERTY".equals(edgeType)) {
+            return mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.IMPACT
+                    || mode == CodeRagService.CodeQuestionMode.REASONING ? 0.92 : 0.72;
         }
         if ("DECLARES_CONTROL".equals(edgeType) || "CODE_BEHIND".equals(edgeType) || "PARTIAL_OF".equals(edgeType)
                 || "DATA_CONTEXT".equals(edgeType)) {
@@ -325,12 +343,12 @@ public class CodeEvidenceRanker {
         String type = result.chunkType() == null ? "" : result.chunkType();
         String path = result.filePath() == null ? "" : result.filePath().toLowerCase(java.util.Locale.ROOT);
         return switch (mode) {
-            case CALL_FLOW -> (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "COMMAND_EXECUTES") ? 0.18 : 0);
-            case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "TRANSACTION_BOUNDARY", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY") ? 0.22 : 0.04;
+            case CALL_FLOW -> (isGraphEdge(result, "CALLS", "EXPOSES_ENDPOINT", "HANDLES_EVENT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY", "COMMAND_BINDING", "COMMAND_TARGETS", "COMMAND_EXECUTES") ? 0.18 : 0);
+            case IMPACT -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "TRANSACTION_BOUNDARY", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY", "COMMAND_BINDING", "COMMAND_TARGETS") ? 0.22 : 0.04;
             case REASONING -> isGraphEdge(result, "CALLS", "IMPLEMENTS", "OVERRIDES", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "CONTAINS", "DEFINES") || isStructured(type) ? 0.20 : 0.04;
             case UI_EVENT -> ("event_handler".equals(type) || "xaml_event".equals(type) || "xaml_view".equals(type)
                     || "xaml_control".equals(type) || "winforms_control".equals(type) || "view_model".equals(type) || "command".equals(type)
-                    || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF")) ? 0.25 : 0.02;
+                    || isGraphEdge(result, "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_BINDING", "COMMAND_TARGETS", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF")) ? 0.25 : 0.02;
             case OVERVIEW -> isProjectContext(type) || path.contains("/config/") || path.contains("/web/") || path.contains("/service/") ? 0.18 : 0.04;
             case EXPLAIN_METHOD -> "method".equals(type) || notBlank(result.methodName()) ? 0.22 : 0.02;
             case LOCATE -> notBlank(result.methodName()) || notBlank(result.className()) || notBlank(result.symbolName()) ? 0.18 : 0.03;

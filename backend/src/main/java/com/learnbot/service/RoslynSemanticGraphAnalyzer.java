@@ -250,18 +250,29 @@ public class RoslynSemanticGraphAnalyzer {
         if (output != null && output.nodes() != null) {
             for (AnalyzerNode node : output.nodes()) {
                 UUID chunkId = lookup.find(node.filePath(), node.line());
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("language", "csharp");
+                metadata.put("source", "roslyn_semantic_model");
+                if (node.metadata() != null) {
+                    metadata.putAll(node.metadata());
+                }
                 nodes.putIfAbsent(node.key(), new CodeGraphNode(
                         node.key(), node.type(), node.name(), node.qualifiedName(), node.filePath(), chunkId,
-                        Map.of("language", "csharp", "source", "roslyn_semantic_model")
+                        Map.copyOf(metadata)
                 ));
             }
         }
         if (output != null && output.edges() != null) {
             for (AnalyzerEdge edge : output.edges()) {
                 UUID chunkId = lookup.find(edge.filePath(), edge.line());
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("source", edge.source() == null ? "roslyn_semantic_model" : edge.source());
+                if (edge.metadata() != null) {
+                    metadata.putAll(edge.metadata());
+                }
                 edges.putIfAbsent(edge.sourceKey() + "|" + edge.type() + "|" + edge.targetKey(), new CodeGraphEdge(
                         edge.sourceKey(), edge.targetKey(), edge.type(), edge.confidence(), chunkId,
-                        Map.of("source", edge.source() == null ? "roslyn_semantic_model" : edge.source())
+                        Map.copyOf(metadata)
                 ));
             }
         }
@@ -282,9 +293,10 @@ public class RoslynSemanticGraphAnalyzer {
 
     private record AnalyzerOutput(List<AnalyzerNode> nodes, List<AnalyzerEdge> edges, String mode,
                                   int projectCount, int analyzedFiles, int failedProjects, int failedFiles) {}
-    private record AnalyzerNode(String key, String type, String name, String qualifiedName, String filePath, int line) {}
+    private record AnalyzerNode(String key, String type, String name, String qualifiedName, String filePath, int line,
+                                Map<String, Object> metadata) {}
     private record AnalyzerEdge(String sourceKey, String targetKey, String type, double confidence,
-                                String filePath, int line, String source) {}
+                                String filePath, int line, String source, Map<String, Object> metadata) {}
 
     private static final class ChunkLookup {
         private final Map<String, List<CodeSearchResult>> byPath = new HashMap<>();

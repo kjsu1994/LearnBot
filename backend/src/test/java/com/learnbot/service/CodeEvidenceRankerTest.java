@@ -158,6 +158,43 @@ class CodeEvidenceRankerTest {
         assertThat(metricRanked).first().extracting(CodeSearchResult::methodName).isEqualTo("addGraphExpansionMs");
     }
 
+    @Test
+    void candidateGraphEdgesHelpUiIntentWithoutOvertakingDirectEvidence() {
+        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
+        CodeSearchResult directHandler = graphResult(
+                "frontend/src/MainWindow.xaml.cs",
+                "event_handler",
+                "SaveCommandExecute",
+                0.42,
+                "void SaveCommandExecute(object sender, ExecutedRoutedEventArgs e) {}",
+                "COMMAND_EXECUTES",
+                "direct",
+                0.95
+        );
+        CodeSearchResult candidateBinding = graphResult(
+                "frontend/src/MainWindow.xaml",
+                "xaml_control",
+                "SaveButton",
+                0.44,
+                "<Button Command=\"{Binding SaveCommand}\" />",
+                "COMMAND_BINDING",
+                "candidate",
+                0.70
+        );
+
+        List<CodeSearchResult> ranked = ranker.rank(
+                "How does the WPF SaveCommand execute?",
+                CodeRagService.CodeQuestionMode.UI_EVENT,
+                List.of(candidateBinding, directHandler)
+        );
+
+        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("SaveCommandExecute");
+        assertThat(ranked.get(1).metadata().get("graphReliability")).isEqualTo("strong");
+        assertThat(ranked.get(1).metadata().get("evidenceRankReason"))
+                .asString()
+                .contains("graph COMMAND_BINDING");
+    }
+
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
         UUID chunkId = UUID.randomUUID();
         return new CodeSearchResult(
@@ -179,6 +216,37 @@ class CodeEvidenceRankerTest {
                 content,
                 score,
                 Map.of()
+        );
+    }
+
+    private CodeSearchResult graphResult(String filePath, String chunkType, String methodName, double score, String content,
+                                         String edgeType, String evidenceKind, double pathScore) {
+        UUID chunkId = UUID.randomUUID();
+        return new CodeSearchResult(
+                chunkId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "repo",
+                filePath,
+                chunkType,
+                methodName,
+                "Example",
+                methodName,
+                null,
+                null,
+                null,
+                0,
+                1,
+                20,
+                content,
+                score,
+                Map.of(
+                        "graphExpanded", true,
+                        "graphEdgeType", edgeType,
+                        "graphDepth", 1,
+                        "graphPathScore", pathScore,
+                        "graphEvidenceKind", evidenceKind
+                )
         );
     }
 }

@@ -3744,12 +3744,16 @@ public class CodeRagService {
         Object depth = result.metadata().get("graphDepth");
         Object evidenceKind = result.metadata().get("graphEvidenceKind");
         Object graphConfidence = result.metadata().get("graphConfidence");
+        Object confidenceReason = result.metadata().get("confidenceReason");
+        Object sourceDetail = result.metadata().get("sourceDetail");
         String kind = safe(evidenceKind == null ? null : String.valueOf(evidenceKind), "direct");
         return " graphEvidence=" + kind
                 + " graphEdge=" + safe(edgeType == null ? null : String.valueOf(edgeType), "RELATED")
                 + nullable(" edges=", edgeTypes == null ? null : String.valueOf(edgeTypes))
                 + nullable(" depth=", depth == null ? null : String.valueOf(depth))
                 + nullable(" confidence=", graphConfidence == null ? null : String.valueOf(graphConfidence))
+                + nullable(" confidenceReason=", confidenceReason == null ? null : String.valueOf(confidenceReason))
+                + nullable(" sourceDetail=", sourceDetail == null ? null : truncate(String.valueOf(sourceDetail), 120))
                 + nullable(" path=", graphPath == null ? null : String.valueOf(graphPath));
     }
 
@@ -4318,6 +4322,13 @@ public class CodeRagService {
 
     private String nullable(String prefix, String value) {
         return value == null || value.isBlank() ? "" : prefix + value;
+    }
+
+    private String truncate(String value, int maxChars) {
+        if (value == null || maxChars <= 0 || value.length() <= maxChars) {
+            return value;
+        }
+        return value.substring(0, maxChars) + "...";
     }
 
     private long elapsedMs(long startedNanos) {

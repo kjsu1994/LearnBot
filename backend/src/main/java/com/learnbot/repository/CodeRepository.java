@@ -1808,7 +1808,14 @@ public class CodeRepository {
         boolean inferred = path.pathEdges().stream().anyMatch(edge ->
                 "REFERENCES".equals(edge) || "BINDS_TO".equals(edge) || "USES_COMMAND".equals(edge)
                         || "DATA_CONTEXT".equals(edge) || "CODE_BEHIND".equals(edge) || "PARTIAL_OF".equals(edge)
-                        || "REPOSITORY_FOR".equals(edge) || "QUERIES_ENTITY".equals(edge));
+                        || "REPOSITORY_FOR".equals(edge) || "QUERIES_ENTITY".equals(edge)
+                        || "FILTERS_BY_PROPERTY".equals(edge) || "COMMAND_BINDING".equals(edge)
+                        || "COMMAND_TARGETS".equals(edge));
+        boolean candidate = path.pathEdges().stream().anyMatch(edge ->
+                "FILTERS_BY_PROPERTY".equals(edge) || "COMMAND_BINDING".equals(edge) || "COMMAND_TARGETS".equals(edge));
+        if (candidate || path.pathScore() < 0.65) {
+            return "candidate";
+        }
         return inferred || path.pathScore() < 0.80 ? "inferred" : "direct";
     }
 

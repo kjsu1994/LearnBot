@@ -342,6 +342,104 @@ class CodeGraphBuilderTest {
         });
     }
 
+    @Test
+    void javaSpringAnalyzerAddsRepositoryQueryMethodPropertyEdges(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderRepository.java"), """
+                package sample;
+                import java.time.Instant;
+                import jakarta.persistence.Entity;
+                import org.springframework.data.jpa.repository.JpaRepository;
+                import org.springframework.data.jpa.repository.Modifying;
+                import org.springframework.data.jpa.repository.Query;
+
+                @Entity
+                class Order {
+                    String status;
+                    Instant createdAt;
+                }
+
+                interface OrderRepository extends JpaRepository<Order, Long> {
+                    java.util.List<Order> findByStatusAndCreatedAtAfter(String status, Instant createdAt);
+
+                    @Modifying
+                    @Query("delete from Order o where o.status = ?1")
+                    int deleteByStatus(String status);
+                }
+                """);
+        CodeGraph graph = new JavaSemanticGraphAnalyzer(new LearnBotProperties()).analyze(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "src/main/java/sample/OrderRepository.java",
+                        "method", "OrderRepository", "findByStatusAndCreatedAtAfter", null, null,
+                        "java.util.List<Order> findByStatusAndCreatedAtAfter(String status, Instant createdAt);")
+        ));
+
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("FILTERS_BY_PROPERTY");
+            assertThat(edge.targetKey()).contains("#status");
+            assertThat(edge.metadata()).containsEntry("queryMethodKind", "find");
+            assertThat(edge.metadata()).containsEntry("evidenceKind", "candidate");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("FILTERS_BY_PROPERTY");
+            assertThat(edge.targetKey()).contains("#createdAt");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("QUERIES_ENTITY");
+            assertThat(edge.sourceKey()).contains("findByStatusAndCreatedAtAfter");
+            assertThat(edge.targetKey()).contains("Order");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.sourceKey()).contains("deleteByStatus");
+            assertThat(edge.metadata()).containsEntry("modifying", true);
+            assertThat(edge.metadata()).containsKey("declaredQuery");
+        });
+    }
+
+    @Test
+    void javaSpringAnalyzerMarksInheritedTransactionMetadata(@TempDir Path root) throws Exception {
+        Path sourceRoot = root.resolve("src/main/java/sample");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderService.java"), """
+                package sample;
+                import org.springframework.stereotype.Service;
+                import org.springframework.transaction.annotation.Transactional;
+
+                @Service
+                @Transactional(readOnly = true)
+                class OrderService {
+                    String list() { return "ok"; }
+
+                    @Transactional(readOnly = false)
+                    String update() { return "updated"; }
+                }
+                """);
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer(new LearnBotProperties()).analyze(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "src/main/java/sample/OrderService.java",
+                        "method", "OrderService", "list", null, null, "String list() { return \"ok\"; }")
+        ));
+
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("TRANSACTION_BOUNDARY");
+            assertThat(edge.sourceKey()).contains("list");
+            assertThat(edge.confidence()).isLessThan(0.90);
+            assertThat(edge.metadata()).containsEntry("transactionInherited", true);
+        });
+        assertThat(graph.nodes()).anySatisfy(node -> {
+            assertThat(node.key()).contains("list");
+            assertThat(node.type()).isEqualTo("transaction_boundary");
+            assertThat(node.metadata()).containsEntry("transactionInherited", true);
+            assertThat(node.metadata()).containsEntry("readOnly", "true");
+        });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("TRANSACTION_BOUNDARY");
+            assertThat(edge.sourceKey()).contains("update");
+            assertThat(edge.confidence()).isGreaterThan(0.95);
+            assertThat(edge.metadata()).doesNotContainKey("transactionInherited");
+        });
+    }
+
     private CodeSearchResult result(
             UUID repositoryId,
             UUID fileId,
