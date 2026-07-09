@@ -615,7 +615,7 @@ public class LearnBotProperties {
             private int codeRouteTimeoutSeconds = 20;
 
             @Min(1)
-            private int codeEvidenceFollowUpMaxOutputTokens = 520;
+            private int codeEvidenceFollowUpMaxOutputTokens = 512;
 
             @Min(1)
             private int codeEvidenceFollowUpTimeoutSeconds = 12;
@@ -628,7 +628,7 @@ public class LearnBotProperties {
             @Min(1)
             private int codeEvidenceAdjudicationMaxCandidates = 10;
             @Min(1)
-            private int codeEvidenceAdjudicationMaxOutputTokens = 384;
+            private int codeEvidenceAdjudicationMaxOutputTokens = 512;
             @Min(1)
             private int codeEvidenceAdjudicationTimeoutSeconds = 8;
             private Reranker reranker = new Reranker();

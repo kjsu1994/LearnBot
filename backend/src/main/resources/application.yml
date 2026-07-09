@@ -80,10 +80,10 @@ learnbot:
       answer-repair-enabled: ${RAG_PIPELINE_ANSWER_REPAIR_ENABLED:true}
       query-embedding-cache-enabled: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_ENABLED:true}
       code-route-timeout-seconds: ${RAG_PIPELINE_CODE_ROUTE_TIMEOUT_SECONDS:35}
-      code-evidence-follow-up-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_MAX_OUTPUT_TOKENS:520}
+      code-evidence-follow-up-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_MAX_OUTPUT_TOKENS:512}
       code-evidence-follow-up-timeout-seconds: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_TIMEOUT_SECONDS:30}
       code-evidence-adjudication-max-candidates: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_MAX_CANDIDATES:10}
-      code-evidence-adjudication-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_MAX_OUTPUT_TOKENS:384}
+      code-evidence-adjudication-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_MAX_OUTPUT_TOKENS:512}
       code-evidence-adjudication-timeout-seconds: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_TIMEOUT_SECONDS:20}
       query-embedding-cache-max-entries: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_MAX_ENTRIES:1024}
       query-embedding-cache-ttl-seconds: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_TTL_SECONDS:3600}
