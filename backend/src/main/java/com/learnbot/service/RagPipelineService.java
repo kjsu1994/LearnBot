@@ -641,7 +641,10 @@ public class RagPipelineService {
                 - Prefer source chunks that directly implement runtime behavior for architecture, flow, and reasoning questions.
                 - Order selected items by answer usefulness. The first selected item should be the strongest primary citation.
                 - When required evidence checklist items are provided, select evidence for each checklist item when candidates support it.
-                - Do not use one orchestrator method as proof for every checklist item unless its body directly shows every phase.
+                - Avoid using one orchestrator method as proof for every checklist item unless its excerpt directly shows those phases.
+                - Treat coordinator/orchestrator methods as orchestration evidence by default. For concrete phase claims, prefer the actual callee method or repository/model client when candidates provide it.
+                - For answer-generation claims, prefer evidence that builds the final context/prompt or calls the model/client when available; otherwise mark orchestration evidence as supporting context.
+                - For search, graph expansion, ranking, persistence, transport, or transaction claims, prefer the concrete implementation method for that phase when candidates provide it.
                 - Use tests only when the question asks about tests or when they are clearly supporting evidence.
                 - Use local-agent/tooling chunks only when the question asks about local agents, tools, patching, or agent execution.
                 - Prefer direct evidence over indirect summaries when both are available.
@@ -672,14 +675,15 @@ public class RagPipelineService {
                 Rules:
                 - Set enough=false when evidence is mostly tests, frontend gates, history storage, retention, docs, generated, or vendor code but the question asks about runtime behavior.
                 - When a required evidence checklist is provided, enough=true only if each checklist item is directly covered or clearly irrelevant.
-                - If a checklist item is only represented by a broad orchestrator, request a follow-up query for the concrete implementation method.
+                - If a checklist item is only represented by a broad orchestrator and a concrete phase method is needed, request a follow-up query for the concrete implementation method.
+                - For pipeline questions, separate coordinator/orchestrator evidence from concrete callee evidence when possible. A coordinator is useful flow evidence, but concrete phase claims are stronger when supported by their callee method.
                 - Conversation history repositories, UI gate/status helpers, retention/cleanup services, and verification summaries are supporting evidence only. They are not enough for runtime flow or answer-generation questions unless the user explicitly asks about them.
                 - If the current evidence would force the final answer to say that implementation details are not visible, set enough=false and request follow-up queries for the missing implementation path.
                 - For broad flow questions, spread follow-up queries across distinct missing areas such as entrypoint, processing/chunking, persistence/index storage, retrieval/search, context construction, and answer/model generation.
                 - Do not spend all follow-up queries on indexing or storage if retrieval/search or answer/model generation is missing.
                 - For RAG answer-generation questions, require direct runtime evidence for retrieval/search, context construction, and model/answer generation, not only stored conversation turns.
                 - queryAreas must align one-to-one with followUpQueries when possible.
-                - requiredEvidenceGroups must use only these values: entrypoint, request_intake, orchestration, queue_claim, response_intake, persistence_update, async_transport, graph_build, graph_persistence, graph_schema, graph_traversal, evidence_ranking, answer_context, framework_semantics, data_structure, unknown.
+                - requiredEvidenceGroups must use only these values: entrypoint, request_intake, orchestration, queue_claim, response_intake, persistence_update, async_transport, graph_build, graph_persistence, graph_schema, graph_traversal, evidence_ranking, answer_context, answer_generation, framework_semantics, data_structure, unknown.
                 - For questions asking how a request/job/task/tool/work item is fetched and how a response/result is stored, include queue_claim, response_intake, and persistence_update when those areas are missing.
                 - For Controller/Service/Repository flow questions, separate request_intake or entrypoint, orchestration, and persistence_update instead of treating one layer as enough.
                 - For WebSocket, SSE, queue, stream, message, worker, event, or callback flows, include async_transport when transport handling is missing.
@@ -703,6 +707,8 @@ public class RagPipelineService {
                 - Build the checklist from the user's requested phases, layers, and artifacts. For example, separate request intake, retrieval/search, graph traversal, ranking, answer context, and model answer generation when the question asks for them.
                 - Checklist evidenceGroup must use concise generic groups such as entrypoint, request_intake, orchestration, graph_traversal, evidence_ranking, answer_context, answer_generation, persistence_update, graph_persistence, graph_schema, framework_semantics, data_structure, or unknown.
                 - Keep checklist queries source-code oriented and specific enough to retrieve concrete implementation methods.
+                - For each checklist item, include likely concrete callee terms in queries when the question asks how a phase is implemented. Examples of generic callee terms include controller/handler, service/orchestrator, repository/storage, graph traversal/related chunks, rank/score, context/prompt builder, and model/client call.
+                - If the question asks for a multi-step pipeline, create separate checklist items for the coordinator and important concrete phases when evidence is needed for those phases.
                 - Do not generate broad generic queries like "code implementation" unless no specific clue exists.
                 - Do not include prose, bullets, or explanations outside JSON.
                 """;
@@ -887,7 +893,7 @@ public class RagPipelineService {
                 String implementationPhase = normalizeEnumValue(map.get("implementationPhase"), "UNKNOWN",
                         List.of("INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN"));
                 String responsibility = normalizeEnumValue(map.get("responsibility"), "unknown",
-                        List.of("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "framework_semantics", "data_structure", "helper_check", "unknown"));
+                        List.of("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "answer_generation", "framework_semantics", "data_structure", "helper_check", "unknown"));
                 String coverageGroup = normalizeEvidenceGroup(stringValue(map.get("coverageGroup")));
                 Object mustUseValue = map.get("mustUse");
                 boolean mustUse = mustUseValue != null && Boolean.parseBoolean(String.valueOf(mustUseValue));
@@ -1104,7 +1110,7 @@ public class RagPipelineService {
                 "missingAreas", arraySchema(stringSchema()),
                 "followUpQueries", arraySchema(stringSchema()),
                 "queryAreas", arraySchema(stringSchema()),
-                "requiredEvidenceGroups", arraySchema(enumSchema("entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake", "persistence_update", "async_transport", "graph_build", "graph_persistence", "graph_schema", "graph_traversal", "evidence_ranking", "answer_context", "framework_semantics", "data_structure", "unknown")),
+                "requiredEvidenceGroups", arraySchema(evidenceGroupSchema()),
                 "reason", stringSchema()
         ), List.of("enough", "missingAreas", "followUpQueries", "queryAreas", "requiredEvidenceGroups", "reason"));
     }
@@ -1114,8 +1120,14 @@ public class RagPipelineService {
                 "usable", booleanSchema(),
                 "confidence", numberSchema(),
                 "queries", arraySchema(stringSchema()),
+                "checklist", arraySchema(objectSchema(Map.of(
+                        "claimId", stringSchema(),
+                        "evidenceGroup", evidenceGroupSchema(),
+                        "goal", stringSchema(),
+                        "queries", arraySchema(stringSchema())
+                ), List.of("claimId", "evidenceGroup", "goal", "queries"))),
                 "reason", stringSchema()
-        ), List.of("usable", "confidence", "queries", "reason"));
+        ), List.of("usable", "confidence", "queries", "checklist", "reason"));
     }
 
     private Map<String, Object> codeAdjudicationSchema() {
@@ -1125,8 +1137,8 @@ public class RagPipelineService {
                         Map.entry("score", numberSchema()),
                         Map.entry("evidenceKind", enumSchema("direct_code", "graph_relationship", "supporting_context")),
                         Map.entry("implementationPhase", enumSchema("INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN")),
-                        Map.entry("responsibility", enumSchema("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "framework_semantics", "data_structure", "helper_check", "unknown")),
-                        Map.entry("coverageGroup", enumSchema("entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake", "persistence_update", "async_transport", "graph_build", "graph_persistence", "graph_schema", "graph_traversal", "evidence_ranking", "answer_context", "framework_semantics", "data_structure", "unknown")),
+                        Map.entry("responsibility", enumSchema("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "answer_generation", "framework_semantics", "data_structure", "helper_check", "unknown")),
+                        Map.entry("coverageGroup", evidenceGroupSchema()),
                         Map.entry("mustUse", booleanSchema()),
                         Map.entry("supportedClaims", arraySchema(stringSchema())),
                         Map.entry("notSupportedClaims", arraySchema(stringSchema())),
@@ -1135,6 +1147,13 @@ public class RagPipelineService {
                 ), List.of("index", "score", "evidenceKind", "implementationPhase", "responsibility", "coverageGroup", "mustUse", "supportedClaims", "notSupportedClaims", "rankReason", "reason"))),
                 "reason", stringSchema()
         ), List.of("selected", "reason"));
+    }
+
+    private Map<String, Object> evidenceGroupSchema() {
+        return enumSchema("entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake",
+                "persistence_update", "async_transport", "graph_build", "graph_persistence", "graph_schema",
+                "graph_traversal", "evidence_ranking", "answer_context", "answer_generation",
+                "framework_semantics", "data_structure", "unknown");
     }
 
     private Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) {

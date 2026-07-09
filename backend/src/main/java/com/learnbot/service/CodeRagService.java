@@ -760,6 +760,17 @@ public class CodeRagService {
             );
         }
 
+        int graphExpansionAdded = expandGraphEvidenceOnce(repositoryId, question, questionMode, limit, merged);
+        if (graphExpansionAdded > 0) {
+            results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
+            assessment = pipelineService.assessCode(
+                    question,
+                    results,
+                    minCodeEvidence(questionMode),
+                    iteration
+            );
+        }
+
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
         long followUpSelectedCount = results.stream().filter(this::isLlmFollowUpEvidence).count();
         log.info("Code RAG evidence follow-up attempted={} enough={} queriesUsed={} candidatesAdded={} selected={} earlyStop={} missingAreas={} groups={} reason={} question={}",
@@ -798,7 +809,7 @@ public class CodeRagService {
         int before = merged.size();
         int perQueryLimit = Math.max(6, Math.min(searchLimit, 18));
         for (String query : searchPlanQueries(searchPlan)) {
-            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, perQueryLimit, merged);
+            collectCheapEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, perQueryLimit, merged);
         }
         return Math.max(0, merged.size() - before);
     }
@@ -1178,6 +1189,24 @@ public class CodeRagService {
         }
     }
 
+    private void collectCheapEvidenceForQuery(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String query,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        List<CodeSearchResult> results = searchService.cheapSearch(repositoryId, query, limit, spaceIds, selectedSpaceId);
+        if (results == null) {
+            results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, query, questionMode, limit);
+        }
+        for (CodeSearchResult result : results) {
+            merge(merged, result);
+        }
+    }
+
     private int collectFollowUpEvidenceForQuery(
             UUID repositoryId,
             UUID selectedSpaceId,
@@ -1192,7 +1221,10 @@ public class CodeRagService {
     ) {
         int before = merged.size();
         for (String groundedQuery : groundedFollowUpQueries(originalQuestion, query, queryArea, evidenceGroup)) {
-            List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, groundedQuery, questionMode, limit);
+            List<CodeSearchResult> results = searchService.cheapSearch(repositoryId, groundedQuery, limit, spaceIds, selectedSpaceId);
+            if (results == null) {
+                results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, groundedQuery, questionMode, limit);
+            }
             for (CodeSearchResult result : results) {
                 merge(merged, markLlmFollowUpEvidence(result, groundedQuery));
             }
@@ -1204,6 +1236,43 @@ public class CodeRagService {
             }
         }
         return Math.max(0, merged.size() - before);
+    }
+
+    private int expandGraphEvidenceOnce(
+            UUID repositoryId,
+            String question,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        if (merged == null || merged.isEmpty()) {
+            return 0;
+        }
+        int before = merged.size();
+        List<CodeSearchResult> seeds = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()))
+                .stream()
+                .limit(Math.max(4, Math.min(12, limit)))
+                .toList();
+        List<CodeSearchResult> expanded = searchService.expandGraph(
+                repositoryId,
+                question,
+                seeds,
+                Math.max(limit, pipelineService.codeSearchLimit(limit)),
+                graphSearchIntent(questionMode)
+        );
+        for (CodeSearchResult result : expanded == null ? List.<CodeSearchResult>of() : expanded) {
+            merge(merged, result);
+        }
+        return Math.max(0, merged.size() - before);
+    }
+
+    private GraphSearchIntent graphSearchIntent(CodeQuestionMode questionMode) {
+        return switch (questionMode) {
+            case CALL_FLOW -> GraphSearchIntent.FLOW;
+            case IMPACT -> GraphSearchIntent.IMPACT;
+            case OVERVIEW -> GraphSearchIntent.OVERVIEW;
+            default -> GraphSearchIntent.LOCATE;
+        };
     }
 
     private List<CodeSearchResult> llmAreaFollowUpEvidence(
@@ -1479,7 +1548,11 @@ public class CodeRagService {
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int searchLimit = questionMode == CodeQuestionMode.OVERVIEW ? Math.min(24, limit + 6) : Math.min(20, limit + 4);
-        for (CodeSearchResult result : searchService.search(repositoryId, question, searchLimit, spaceIds, selectedSpaceId)) {
+        List<CodeSearchResult> searchResults = searchService.searchWithoutGraph(repositoryId, question, searchLimit, spaceIds, selectedSpaceId, graphSearchIntent(questionMode));
+        if (searchResults == null || searchResults.isEmpty()) {
+            searchResults = searchService.search(repositoryId, question, searchLimit, spaceIds, selectedSpaceId);
+        }
+        for (CodeSearchResult result : searchResults) {
             merge(merged, result);
         }
         List<String> identifiers = searchService.identifiersFrom(question);
@@ -1518,6 +1591,7 @@ public class CodeRagService {
         if (adjudication.used()) {
             ranked = adjudication.results();
             List<CodeSearchResult> selected = preservePinnedEvidence(ranked, llmEvidenceSlateSelection(ranked, limit), limit);
+            selected = ensureLlmChecklistGroupCoverage(followUpPlan, ranked, selected, limit);
             log.info("Code RAG LLM evidence slate selected={} final={} llmSelectedFiles={} finalFiles={} question={}",
                     ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).count(),
                     selected.size(),
@@ -1592,6 +1666,138 @@ public class CodeRagService {
                 .filter(result -> !isLlmEvidenceAdjudicationSelected(result))
                 .forEach(result -> addIfAbsent(selected, result, safeLimit));
         return limitedMutable(selected, safeLimit);
+    }
+
+    private List<CodeSearchResult> ensureLlmChecklistGroupCoverage(
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        List<String> requiredGroups = llmChecklistGroups(followUpPlan);
+        if (requiredGroups.isEmpty() || ranked == null || ranked.isEmpty() || selected == null || selected.isEmpty()) {
+            return selected == null ? List.of() : selected;
+        }
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
+        int coverageLimit = Math.max(Math.max(1, limit), requiredGroups.size());
+        for (String group : requiredGroups) {
+            if (selectedHasLlmCoverageGroup(adjusted, group)) {
+                continue;
+            }
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> group.equals(llmCoverageGroup(result)))
+                    .sorted(Comparator
+                            .comparing((CodeSearchResult result) -> isLlmEvidenceAdjudicationSelected(result) ? 0 : 1)
+                            .thenComparing((CodeSearchResult result) -> Boolean.TRUE.equals(metadataBoolean(result, "llmEvidenceSlateMustUse")) ? 0 : 1)
+                            .thenComparingInt(this::llmEvidenceSlateRank)
+                            .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result)))
+                    .findFirst()
+                    .orElse(null);
+            if (replacement == null) {
+                continue;
+            }
+            CodeSearchResult marked = markLlmChecklistGroupRequired(replacement, group);
+            if (adjusted.size() < coverageLimit) {
+                adjusted.add(marked);
+                continue;
+            }
+            int replaceIndex = weakestNonRequiredGroupIndex(adjusted, requiredGroups);
+            if (replaceIndex >= 0) {
+                adjusted.set(replaceIndex, marked);
+            }
+        }
+        return limitedMutable(orderLlmClassifiedEvidence(adjusted), coverageLimit);
+    }
+
+    private List<String> llmChecklistGroups(RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan) {
+        if (followUpPlan == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> groups = new LinkedHashSet<>();
+        addLlmChecklistGroups(groups, followUpPlan.requiredEvidenceGroups());
+        for (RagPipelineService.CodeEvidenceChecklistItem item : followUpPlan.checklist()) {
+            if (item != null) {
+                addLlmChecklistGroups(groups, List.of(item.evidenceGroup()));
+            }
+        }
+        return groups.stream().limit(8).toList();
+    }
+
+    private void addLlmChecklistGroups(Set<String> groups, List<String> values) {
+        for (String value : values == null ? List.<String>of() : values) {
+            String group = normalizeEvidenceGroupValue(value);
+            if (!group.isBlank() && !"unknown".equals(group)) {
+                groups.add(group);
+            }
+        }
+    }
+
+    private String normalizeEvidenceGroupValue(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
+    private boolean selectedHasLlmCoverageGroup(List<CodeSearchResult> selected, String group) {
+        return selected != null && selected.stream().anyMatch(result -> group.equals(llmCoverageGroup(result)));
+    }
+
+    private String llmCoverageGroup(CodeSearchResult result) {
+        return normalizeEvidenceGroupValue(metadataString(result, "llmEvidenceCoverageGroup", "llmChecklistGroup"));
+    }
+
+    private CodeSearchResult markLlmChecklistGroupRequired(CodeSearchResult result, String group) {
+        if (result == null || group == null || group.isBlank()) {
+            return result;
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("llmChecklistGroupRequired", true);
+        metadata.put("llmChecklistGroup", group);
+        metadata.putIfAbsent("llmEvidenceCoverageGroup", group);
+        return withMetadata(result, metadata);
+    }
+
+    private CodeSearchResult withMetadata(CodeSearchResult result, Map<String, Object> metadata) {
+        if (result == null) {
+            return null;
+        }
+        return new CodeSearchResult(
+                result.chunkId(),
+                result.repositoryId(),
+                result.fileId(),
+                result.repositoryName(),
+                result.filePath(),
+                result.chunkType(),
+                result.symbolName(),
+                result.className(),
+                result.methodName(),
+                result.namespaceName(),
+                result.controlName(),
+                result.eventName(),
+                result.chunkIndex(),
+                result.lineStart(),
+                result.lineEnd(),
+                result.content(),
+                result.score(),
+                metadata == null ? Map.of() : Map.copyOf(metadata)
+        );
+    }
+
+    private int weakestNonRequiredGroupIndex(List<CodeSearchResult> selected, List<String> requiredGroups) {
+        Set<String> groups = new LinkedHashSet<>(requiredGroups == null ? List.of() : requiredGroups);
+        for (int index = selected.size() - 1; index >= 0; index--) {
+            CodeSearchResult result = selected.get(index);
+            if (isRequiredConversationPinned(result)
+                    || Boolean.TRUE.equals(metadataBoolean(result, "llmEvidenceSlateMustUse"))
+                    || Boolean.TRUE.equals(metadataBoolean(result, "llmChecklistGroupRequired"))) {
+                continue;
+            }
+            String group = llmCoverageGroup(result);
+            if (groups.contains(group) && selected.stream().filter(item -> group.equals(llmCoverageGroup(item))).count() <= 1) {
+                continue;
+            }
+            return index;
+        }
+        return -1;
     }
 
     private void addIfAbsent(List<CodeSearchResult> results, CodeSearchResult candidate, int limit) {
@@ -3066,13 +3272,20 @@ public class CodeRagService {
 
     private void removeBudgetCandidate(List<CodeSearchResult> selected) {
         for (int index = selected.size() - 1; index >= 0; index--) {
-            if (!isConversationPinned(selected.get(index)) && !isRequiredConversationPinned(selected.get(index))) {
+            CodeSearchResult candidate = selected.get(index);
+            if (!isConversationPinned(candidate)
+                    && !isRequiredConversationPinned(candidate)
+                    && !Boolean.TRUE.equals(metadataBoolean(candidate, "llmEvidenceSlateMustUse"))
+                    && !Boolean.TRUE.equals(metadataBoolean(candidate, "llmChecklistGroupRequired"))) {
                 selected.remove(index);
                 return;
             }
         }
         for (int index = selected.size() - 1; index >= 0; index--) {
-            if (!isRequiredConversationPinned(selected.get(index))) {
+            CodeSearchResult candidate = selected.get(index);
+            if (!isRequiredConversationPinned(candidate)
+                    && !Boolean.TRUE.equals(metadataBoolean(candidate, "llmEvidenceSlateMustUse"))
+                    && !Boolean.TRUE.equals(metadataBoolean(candidate, "llmChecklistGroupRequired"))) {
                 selected.remove(index);
                 return;
             }

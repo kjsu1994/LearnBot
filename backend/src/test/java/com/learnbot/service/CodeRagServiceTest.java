@@ -225,10 +225,15 @@ class CodeRagServiceTest {
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
                     String query = invocation.getArgument(1);
+                    return List.of(indexing);
+                });
+        when(searchService.cheapSearch(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(1);
                     if (query.contains("runtime RAG retrieval context construction model answer generation")) {
                         return List.of(answering);
                     }
-                    return List.of(indexing);
+                    return List.of();
                 });
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
@@ -255,7 +260,7 @@ class CodeRagServiceTest {
                 assertThat(note).contains("followUpQueriesUsed=1").contains("answer generation"));
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("queryAreas=[answer generation]"));
-        verify(searchService, atLeastOnce()).search(isNull(), argThat(query -> query.contains("runtime RAG retrieval context construction model answer generation")), anyInt(), anyList(), isNull());
+        verify(searchService, atLeastOnce()).cheapSearch(isNull(), argThat(query -> query.contains("runtime RAG retrieval context construction model answer generation")), anyInt(), anyList(), isNull());
     }
 
     @Test
@@ -1952,6 +1957,99 @@ class CodeRagServiceTest {
     }
 
     @Test
+    void llmChecklistCoverageGroupsArePreservedBeyondContextLimit() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(3);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult controller = result(
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "method",
+                "ask",
+                0.80,
+                "POST /api/code/ask receives the request and delegates to CodeRagService"
+        );
+        CodeSearchResult search = result(
+                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
+                "method",
+                "expandGraph",
+                0.79,
+                "expandGraph performs graph expansion from retrieved seed chunks"
+        );
+        CodeSearchResult ranking = result(
+                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
+                "method",
+                "rank",
+                0.78,
+                "rank scores retrieved code evidence before answer context construction"
+        );
+        CodeSearchResult generation = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "chatWithLimit",
+                0.77,
+                "chatWithLimit calls the model client to generate the final answer"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(controller, search, ranking, generation));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        String groupedEvidenceDecision = """
+                {
+                  "usable":true,
+                  "confidence":0.9,
+                  "queries":[],
+                  "enough":false,
+                  "missingAreas":["request intake","graph expansion","ranking","answer generation"],
+                  "followUpQueries":[],
+                  "queryAreas":[],
+                  "requiredEvidenceGroups":["request_intake","graph_traversal","evidence_ranking","answer_generation"],
+                  "checklist":[
+                    {"claimId":"request","evidenceGroup":"request_intake","goal":"find request entrypoint","queries":[]},
+                    {"claimId":"graph","evidenceGroup":"graph_traversal","goal":"find graph expansion","queries":[]},
+                    {"claimId":"ranking","evidenceGroup":"evidence_ranking","goal":"find ranking","queries":[]},
+                    {"claimId":"generation","evidenceGroup":"answer_generation","goal":"find answer generation","queries":[]}
+                  ],
+                  "selected":[
+                    {"index":1,"score":0.95,"evidenceKind":"direct_code","implementationPhase":"SEARCH_EXPANSION","responsibility":"request_intake","coverageGroup":"request_intake","mustUse":true,"supportedClaims":["request entrypoint"],"notSupportedClaims":[],"rankReason":"controller endpoint","reason":"controller endpoint"},
+                    {"index":2,"score":0.94,"evidenceKind":"direct_code","implementationPhase":"SEARCH_EXPANSION","responsibility":"graph_traversal","coverageGroup":"graph_traversal","mustUse":true,"supportedClaims":["graph expansion"],"notSupportedClaims":[],"rankReason":"graph expansion method","reason":"graph expansion method"},
+                    {"index":3,"score":0.93,"evidenceKind":"direct_code","implementationPhase":"RANKING","responsibility":"evidence_ranking","coverageGroup":"evidence_ranking","mustUse":true,"supportedClaims":["evidence ranking"],"notSupportedClaims":[],"rankReason":"rank method","reason":"rank method"},
+                    {"index":4,"score":0.92,"evidenceKind":"direct_code","implementationPhase":"ANSWER_GENERATION","responsibility":"answer_generation","coverageGroup":"answer_generation","mustUse":true,"supportedClaims":["model call"],"notSupportedClaims":[],"rankReason":"model call method","reason":"model call method"}
+                  ],
+                  "reason":"each required group has direct evidence"
+                }
+                """;
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"api flow\"}"),
+                        chat(groupedEvidenceDecision),
+                        chat(groupedEvidenceDecision),
+                        chat(groupedEvidenceDecision));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The API request flows through request intake, graph expansion, ranking, and answer generation [1][2][3][4]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "Explain /api/code/ask request flow through Controller, graph expansion, evidence ranking, and answer generation",
+                "flow",
+                3
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::methodName)
+                .contains("ask", "expandGraph", "rank", "chatWithLimit");
+        assertThat(response.evidence())
+                .extracting(evidence -> evidence.metadata().get("llmEvidenceCoverageGroup"))
+                .contains("request_intake", "graph_traversal", "evidence_ranking", "answer_generation");
+    }
+
+    @Test
     void followUpRetrievalGroundsInventedServiceFileNamesToRuntimeRagEvidence() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -2147,11 +2245,15 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
+                    return List.of(seed);
+                });
+        when(searchService.cheapSearch(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
                     String query = invocation.getArgument(1, String.class);
                     if (query.contains("claim response persistence")) {
                         return List.of(claim, response, persistence);
                     }
-                    return List.of(seed);
+                    return List.of();
                 });
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))

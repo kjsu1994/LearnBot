@@ -66,6 +66,17 @@ public class CodeSearchService {
 
     public List<CodeSearchResult> search(UUID repositoryId, String query, int limit, List<UUID> spaceIds,
                                          UUID selectedSpaceId, GraphSearchIntent graphIntent) {
+        return searchInternal(repositoryId, query, limit, spaceIds, selectedSpaceId, graphIntent, true);
+    }
+
+    public List<CodeSearchResult> searchWithoutGraph(UUID repositoryId, String query, int limit, List<UUID> spaceIds,
+                                                     UUID selectedSpaceId, GraphSearchIntent graphIntent) {
+        return searchInternal(repositoryId, query, limit, spaceIds, selectedSpaceId, graphIntent, false);
+    }
+
+    private List<CodeSearchResult> searchInternal(UUID repositoryId, String query, int limit, List<UUID> spaceIds,
+                                                  UUID selectedSpaceId, GraphSearchIntent graphIntent,
+                                                  boolean includeGraphExpansion) {
         String safeQuery = query == null ? "" : query.trim();
         if (safeQuery.isBlank()) {
             return List.of();
@@ -105,8 +116,41 @@ public class CodeSearchService {
                 .limit(safeLimit)
                 .toList();
         List<CodeSearchResult> expanded = expandRelated(repositoryId, ranked, safeLimit);
-        expanded = expandGraph(repositoryId, safeQuery, expanded, safeLimit, resolveIntent(safeQuery, graphIntent));
+        if (includeGraphExpansion) {
+            expanded = expandGraph(repositoryId, safeQuery, expanded, safeLimit, resolveIntent(safeQuery, graphIntent));
+        }
         return expanded.stream()
+                .map(result -> boost(result, rerankBoost(safeQuery, result)))
+                .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
+                .limit(safeLimit)
+                .toList();
+    }
+
+    public List<CodeSearchResult> cheapSearch(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
+        String safeQuery = query == null ? "" : query.trim();
+        if (safeQuery.isBlank()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 24));
+        int candidateLimit = Math.min(32, Math.max(safeLimit * 2, 8));
+        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
+                ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        List<String> expandedQueries = expandedQueries(safeQuery).stream().limit(4).toList();
+
+        for (String searchQuery : expandedQueries) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, searchQuery, candidateLimit, safeSpaceIds, selectedSpaceId)) {
+                merge(merged, searchQuery.equalsIgnoreCase(safeQuery) ? result : boost(result, 0.04));
+            }
+        }
+        for (String identifier : identifiersFrom(String.join(" ", expandedQueries)).stream().limit(4).toList()) {
+            for (CodeSearchResult result : repository.keywordSearch(repositoryId, identifier, Math.max(6, candidateLimit / 2), safeSpaceIds, selectedSpaceId)) {
+                merge(merged, boost(result, 0.14));
+            }
+        }
+
+        return merged.values().stream()
                 .map(result -> boost(result, rerankBoost(safeQuery, result)))
                 .sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed())
                 .limit(safeLimit)
@@ -182,8 +226,8 @@ public class CodeSearchService {
                 .toList();
     }
 
-    private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked,
-                                               int limit, GraphSearchIntent intent) {
+    public List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked,
+                                              int limit, GraphSearchIntent intent) {
         if (!properties.getCode().getGraph().isEnabled() || ranked == null || ranked.isEmpty()) {
             return ranked;
         }
