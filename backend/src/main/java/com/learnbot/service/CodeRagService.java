@@ -803,15 +803,88 @@ public class CodeRagService {
             RagPipelineService.CodeEvidenceSearchPlan searchPlan,
             Map<UUID, CodeSearchResult> merged
     ) {
-        if (searchPlan == null || !searchPlan.usable() || searchPlanQueries(searchPlan).isEmpty()) {
+        if (searchPlan == null || !searchPlan.usable()
+                || (searchPlanQueries(searchPlan).isEmpty() && searchPlan.checklist().isEmpty())) {
             return 0;
         }
         int before = merged.size();
         int perQueryLimit = Math.max(6, Math.min(searchLimit, 18));
+        LinkedHashSet<String> groupedQueries = new LinkedHashSet<>();
+        for (RagPipelineService.CodeEvidenceChecklistItem item : searchPlan.checklist()) {
+            groupedQueries.addAll(collectSearchPlanChecklistEvidence(
+                    repositoryId,
+                    selectedSpaceId,
+                    spaceIds,
+                    questionMode,
+                    perQueryLimit,
+                    item,
+                    merged
+            ));
+        }
         for (String query : searchPlanQueries(searchPlan)) {
+            if (groupedQueries.contains(query)) {
+                continue;
+            }
             collectCheapEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, perQueryLimit, merged);
         }
         return Math.max(0, merged.size() - before);
+    }
+
+    private Set<String> collectSearchPlanChecklistEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            CodeQuestionMode questionMode,
+            int perQueryLimit,
+            RagPipelineService.CodeEvidenceChecklistItem item,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        LinkedHashSet<String> usedQueries = new LinkedHashSet<>();
+        if (item == null) {
+            return usedQueries;
+        }
+        String group = normalizeEvidenceGroupValue(item.evidenceGroup());
+        if (group.isBlank() || "unknown".equals(group)) {
+            return usedQueries;
+        }
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        addAllNonBlank(queries, item.queries());
+        if (queries.isEmpty() && notBlank(item.goal())) {
+            queries.add(item.goal());
+        }
+        if (queries.isEmpty()) {
+            return usedQueries;
+        }
+        int beforeGroup = merged.size();
+        for (String query : queries.stream().limit(3).toList()) {
+            usedQueries.add(query);
+            List<CodeSearchResult> results = searchService.cheapSearch(repositoryId, query, perQueryLimit, spaceIds, selectedSpaceId);
+            if (results == null) {
+                results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, query, questionMode, perQueryLimit);
+            }
+            int addedForQuery = 0;
+            for (CodeSearchResult result : results) {
+                if (addedForQuery >= 4) {
+                    break;
+                }
+                merge(merged, markLlmSearchPlanGroupEvidence(result, item, query));
+                addedForQuery++;
+            }
+        }
+        if (merged.size() == beforeGroup && notBlank(item.goal())) {
+            String fallbackQuery = item.goal() + " " + String.join(" ", evidenceGroupQueryTerms(group));
+            usedQueries.add(fallbackQuery);
+            List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, fallbackQuery, questionMode, Math.min(perQueryLimit, 10));
+            int added = 0;
+            for (CodeSearchResult result : results) {
+                if (added >= 3) {
+                    break;
+                }
+                merge(merged, markLlmSearchPlanGroupEvidence(result, item, fallbackQuery));
+                added++;
+            }
+        }
+        return usedQueries;
     }
 
     private List<String> searchPlanQueries(RagPipelineService.CodeEvidenceSearchPlan searchPlan) {
@@ -1520,6 +1593,7 @@ public class CodeRagService {
         List<CodeSearchResult> selected = ranked.stream()
                 .limit(selectionLimit)
                 .toList();
+        selected = ensureMarkedChecklistGroupCoverage(ranked, selected, selectionLimit);
         return ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, selectionLimit);
     }
 
@@ -1741,6 +1815,50 @@ public class CodeRagService {
         return selected != null && selected.stream().anyMatch(result -> group.equals(llmCoverageGroup(result)));
     }
 
+    private List<CodeSearchResult> ensureMarkedChecklistGroupCoverage(
+            List<CodeSearchResult> ranked,
+            List<CodeSearchResult> selected,
+            int limit
+    ) {
+        if (ranked == null || ranked.isEmpty() || selected == null || selected.isEmpty()) {
+            return selected == null ? List.of() : selected;
+        }
+        LinkedHashSet<String> groups = ranked.stream()
+                .filter(result -> Boolean.TRUE.equals(metadataBoolean(result, "llmChecklistGroupRequired")))
+                .map(this::llmCoverageGroup)
+                .filter(group -> !group.isBlank() && !"unknown".equals(group))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (groups.isEmpty()) {
+            return selected;
+        }
+        List<CodeSearchResult> adjusted = new ArrayList<>(selected);
+        int coverageLimit = Math.max(Math.max(1, limit), groups.size());
+        for (String group : groups) {
+            if (selectedHasLlmCoverageGroup(adjusted, group)) {
+                continue;
+            }
+            CodeSearchResult replacement = ranked.stream()
+                    .filter(result -> !containsChunk(adjusted, result))
+                    .filter(result -> group.equals(llmCoverageGroup(result)))
+                    .max(Comparator
+                            .comparingDouble((CodeSearchResult result) -> Boolean.TRUE.equals(metadataBoolean(result, "llmChecklistGroupRequired")) ? 1.0 : 0.0)
+                            .thenComparingDouble(evidenceRanker::score))
+                    .orElse(null);
+            if (replacement == null) {
+                continue;
+            }
+            if (adjusted.size() < coverageLimit) {
+                adjusted.add(replacement);
+                continue;
+            }
+            int replaceIndex = weakestNonRequiredGroupIndex(adjusted, groups.stream().toList());
+            if (replaceIndex >= 0) {
+                adjusted.set(replaceIndex, replacement);
+            }
+        }
+        return limitedMutable(adjusted, coverageLimit);
+    }
+
     private String llmCoverageGroup(CodeSearchResult result) {
         return normalizeEvidenceGroupValue(metadataString(result, "llmEvidenceCoverageGroup", "llmChecklistGroup"));
     }
@@ -1798,6 +1916,29 @@ public class CodeRagService {
             return index;
         }
         return -1;
+    }
+
+    private CodeSearchResult markLlmSearchPlanGroupEvidence(
+            CodeSearchResult result,
+            RagPipelineService.CodeEvidenceChecklistItem item,
+            String query
+    ) {
+        if (result == null || item == null) {
+            return result;
+        }
+        String group = normalizeEvidenceGroupValue(item.evidenceGroup());
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("llmSearchPlanEvidence", true);
+        metadata.put("llmChecklistGroupRequired", true);
+        metadata.put("llmChecklistGroup", group);
+        metadata.put("llmEvidenceCoverageGroup", group);
+        metadata.put("llmChecklistClaimId", safe(item.claimId(), ""));
+        metadata.put("llmChecklistGoal", safe(item.goal(), ""));
+        metadata.put("llmSearchPlanQuery", safe(query, ""));
+        metadata.put("evidenceRankReason", String.valueOf(metadata.getOrDefault("evidenceRankReason", ""))
+                + (metadata.containsKey("evidenceRankReason") ? "; " : "")
+                + "Selected by LLM evidence search plan group=" + group);
+        return boost(withMetadata(result, metadata), 0.10);
     }
 
     private void addIfAbsent(List<CodeSearchResult> results, CodeSearchResult candidate, int limit) {
