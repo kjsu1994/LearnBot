@@ -582,21 +582,18 @@ class CodeRagServiceTest {
         verify(ollamaClient, atLeastOnce()).chatResult(anyString(), promptCaptor.capture(), anyInt());
         String prompt = promptCaptor.getAllValues().get(0);
         assertThat(prompt)
-                .contains("evidenceRole=retrieval/search-expansion")
-                .contains("graph-traversal/expansion")
-                .contains("evidence-ranking")
-                .contains("answer-context/generation")
-                .contains("evidencePhase=SEARCH_EXPANSION")
-                .contains("evidencePhase=RANKING")
-                .contains("evidencePhase=ANSWER_GENERATION")
-                .contains("executionOrder=SEARCH_EXPANSION.happensAfter=INDEXING.happensBefore=RANKING")
-                .contains("citationKind=direct_code")
-                .contains("evidenceResponsibility=implementation_flow");
+                .doesNotContain("evidenceRole=retrieval/search-expansion")
+                .doesNotContain("evidencePhase=SEARCH_EXPANSION")
+                .doesNotContain("evidencePhase=RANKING")
+                .doesNotContain("evidencePhase=ANSWER_GENERATION")
+                .doesNotContain("citationKind=direct_code")
+                .doesNotContain("evidenceResponsibility=implementation_flow");
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("evidencePhase", "SEARCH_EXPANSION")
-                        .containsEntry("citationKind", "direct_code")
-                        .containsEntry("evidenceResponsibility", "implementation_flow"));
+                        .containsKey("debugHeuristicEvidencePhase")
+                        .containsEntry("debugHeuristicCitationKind", "direct_code")
+                        .containsKey("debugHeuristicEvidenceResponsibility")
+                        .doesNotContainKeys("evidencePhase", "citationKind", "evidenceResponsibility"));
     }
 
     @Test
@@ -660,30 +657,30 @@ class CodeRagServiceTest {
         verify(ollamaClient, atLeastOnce()).chatResult(anyString(), promptCaptor.capture(), anyInt());
         String prompt = promptCaptor.getAllValues().get(0);
         assertThat(prompt)
-                .contains("Evidence validation:")
-                .contains("fallbackScope=ROUTING")
-                .contains("fallbackScope=GRAPH_ANALYSIS")
-                .contains("fallbackScope=SEARCH_EXPANSION")
-                .contains("fallbackScope=ANSWER_GENERATION")
-                .contains("analysisDiagnosticStatus=FAILED")
-                .contains("evidenceResponsibility=route_decision")
-                .contains("evidenceResponsibility=analysis_diagnostic")
-                .contains("evidenceResponsibility=search_fallback")
-                .contains("evidenceResponsibility=answer_fallback");
+                .doesNotContain("Evidence validation:")
+                .doesNotContain("fallbackScope=ROUTING")
+                .doesNotContain("fallbackScope=GRAPH_ANALYSIS")
+                .doesNotContain("fallbackScope=SEARCH_EXPANSION")
+                .doesNotContain("fallbackScope=ANSWER_GENERATION")
+                .doesNotContain("evidenceResponsibility=route_decision")
+                .doesNotContain("evidenceResponsibility=analysis_diagnostic")
+                .doesNotContain("evidenceResponsibility=search_fallback")
+                .doesNotContain("evidenceResponsibility=answer_fallback");
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
-                        .containsEntry("evidenceResponsibility", "analysis_diagnostic")
-                        .containsEntry("analysisDiagnosticStatus", "FAILED")
-                        .containsEntry("analysisDiagnosticScope", "GRAPH_ANALYSIS"));
+                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("debugHeuristicEvidenceResponsibility", "analysis_diagnostic")
+                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("fallbackScope", "SEARCH_EXPANSION")
-                        .containsEntry("evidenceResponsibility", "search_fallback"));
+                        .containsEntry("debugFallbackScope", "SEARCH_EXPANSION")
+                        .containsEntry("debugHeuristicEvidenceResponsibility", "search_fallback")
+                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("fallbackScope", "ANSWER_GENERATION")
-                        .containsEntry("evidenceResponsibility", "answer_fallback"));
+                        .containsEntry("debugFallbackScope", "ANSWER_GENERATION")
+                        .containsEntry("debugHeuristicEvidenceResponsibility", "answer_fallback")
+                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
     }
 
     @Test
@@ -750,9 +747,9 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
                         .containsEntry("llmCoverageFallbackScope", "GRAPH_ANALYSIS")
-                        .containsEntry("analysisDiagnosticStatus", "FAILED"));
+                        .doesNotContainKey("fallbackScope"));
     }
 
     @Test
@@ -819,7 +816,7 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("fallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
                         .containsEntry("analysisDiagnosticStage", "JAVA_SEMANTIC")
                         .containsEntry("analysisDiagnosticLanguage", "java")
                         .containsEntry("analysisDiagnosticAnalyzer", "JavaParser Symbol Solver"));
@@ -1886,6 +1883,75 @@ class CodeRagServiceTest {
     }
 
     @Test
+    void llmCodeEvidenceAdjudicationOrderOwnsFinalEvidenceSlate() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(2);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult coverageHelper = result(
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "ensureLlmPlannedCoverage",
+                0.95,
+                "ensureLlmPlannedCoverage adjusts selected evidence after retrieval"
+        );
+        CodeSearchResult graphStorage = result(
+                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                "method",
+                "replaceGraph",
+                0.71,
+                "INSERT INTO code_graph_nodes ... INSERT INTO code_graph_edges ..."
+        );
+        CodeSearchResult graphAnalyzer = result(
+                "backend/src/main/java/com/learnbot/service/JavaSemanticGraphAnalyzer.java",
+                "method",
+                "addEndpoint",
+                0.70,
+                "addEndpoint creates EXPOSES_ENDPOINT graph edges and endpoint metadata"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(coverageHelper, graphStorage, graphAnalyzer));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"reason\":\"graph storage question\"}"),
+                        chat("{\"enough\":true,\"missingAreas\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[],\"reason\":\"enough for adjudication\"}"),
+                        chat("""
+                        {"selected":[
+                          {"index":3,"score":0.98,"evidenceKind":"direct_code","implementationPhase":"GRAPH_STORAGE","responsibility":"graph_persistence","coverageGroup":"graph_persistence","mustUse":true,"supportedClaims":["stores graph nodes and edges"],"notSupportedClaims":["performs coverage planning"],"rankReason":"direct storage SQL","reason":"storage implementation"},
+                          {"index":1,"score":0.90,"evidenceKind":"direct_code","implementationPhase":"INDEXING","responsibility":"framework_semantics","coverageGroup":"framework_semantics","mustUse":true,"supportedClaims":["builds endpoint graph edges"],"notSupportedClaims":["persists graph tables"],"rankReason":"direct analyzer implementation","reason":"spring graph analyzer"}
+                        ],"reason":"storage and analyzer evidence are stronger than helper coverage code"}
+                        """));
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("Graph storage is handled by CodeRepository and Spring endpoint graph edges are built by JavaSemanticGraphAnalyzer [1][2]."));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How are Spring graph edges and metadata stored?",
+                "overview",
+                3
+        );
+
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .containsExactly(
+                        "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
+                        "backend/src/main/java/com/learnbot/service/JavaSemanticGraphAnalyzer.java"
+                );
+        assertThat(response.evidence().get(0).metadata())
+                .containsEntry("llmEvidenceSlateRank", 1)
+                .containsEntry("llmEvidenceSlateMustUse", true)
+                .containsEntry("llmEvidenceCoverageGroup", "graph_persistence");
+    }
+
+    @Test
     void followUpRetrievalGroundsInventedServiceFileNamesToRuntimeRagEvidence() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -2040,6 +2106,77 @@ class CodeRagServiceTest {
                 .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
         assertThat(filePaths.indexOf("backend/src/main/java/app/service/RagAnswerPipeline.java"))
                 .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
+    }
+
+    @Test
+    void followUpRetrievalStopsWhenRequiredEvidenceGroupsAreSatisfied() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        CodeSearchResult seed = result(
+                "backend/src/main/java/app/web/WorkerController.java",
+                "method",
+                "status",
+                0.50,
+                "WorkerController exposes status lookup for tool executions"
+        );
+        CodeSearchResult claim = result(
+                "backend/src/main/java/app/repository/ToolExecutionRepository.java",
+                "method",
+                "claimNext",
+                0.70,
+                "claim next pending queue work item and set status RUNNING with lease"
+        );
+        CodeSearchResult response = result(
+                "backend/src/main/java/app/web/WorkerController.java",
+                "method",
+                "completeTool",
+                0.69,
+                "receive response result output completion callback acknowledgement from worker"
+        );
+        CodeSearchResult persistence = result(
+                "backend/src/main/java/app/repository/ToolExecutionRepository.java",
+                "method",
+                "complete",
+                0.68,
+                "repository save update status output finished complete persisted result"
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(1, String.class);
+                    if (query.contains("claim response persistence")) {
+                        return List.of(claim, response, persistence);
+                    }
+                    return List.of(seed);
+                });
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"worker flow\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\",\"persistence update\"],\"followUpQueries\":[\"claim response persistence\",\"unused response query\",\"unused persistence query\"],\"queryAreas\":[\"claim response persistence\",\"response\",\"persistence\"],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\",\"persistence_update\"],\"reason\":\"need request and response flow\"}"),
+                        chat("{\"selected\":[{\"index\":1,\"score\":0.9,\"evidenceKind\":\"direct_code\",\"implementationPhase\":\"SEARCH_EXPANSION\",\"responsibility\":\"data_structure\",\"coverageGroup\":\"queue_claim\",\"mustUse\":true,\"supportedClaims\":[\"claims work\"],\"notSupportedClaims\":[],\"rankReason\":\"claim evidence\",\"reason\":\"claim evidence\"}],\"reason\":\"ok\"}")
+                );
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat("The worker claims work and stores the response [1]."));
+
+        CodeAskResponse responseAnswer = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does a worker claim a tool request and store the response?",
+                "flow",
+                4
+        );
+
+        assertThat(responseAnswer.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("followUpQueriesUsed=1"));
+        assertThat(responseAnswer.evidence())
+                .extracting(CodeEvidence::filePath)
+                .contains("backend/src/main/java/app/repository/ToolExecutionRepository.java");
     }
 
     @Test

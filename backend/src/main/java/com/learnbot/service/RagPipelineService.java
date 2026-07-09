@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeConversationAnchor;
@@ -58,13 +59,14 @@ public class RagPipelineService {
         }
 
         try {
-            String response = ollamaClient.chatResult(
+            String response = requestStructuredJson(
+                    "query rewrite",
                     rewriteSystemPrompt(domain),
                     rewriteUserPrompt(question, domain, baselineQueries),
-                    OllamaClient.ChatRole.AUXILIARY,
                     Math.max(1, pipeline().getRewriteMaxOutputTokens()),
-                    Duration.ofSeconds(Math.max(1, pipeline().getRewriteTimeoutSeconds()))
-            ).content();
+                    Duration.ofSeconds(Math.max(1, pipeline().getRewriteTimeoutSeconds())),
+                    queryRewriteSchema()
+            );
             List<String> rewritten = parseRewriteQueries(response);
             addQueries(queries, rewritten);
             boolean usedRewrite = !rewritten.isEmpty();
@@ -222,13 +224,14 @@ public class RagPipelineService {
             boolean commitInsightAvailable
     ) {
         try {
-            String response = ollamaClient.chatResult(
+            String response = requestStructuredJson(
+                    "code route",
                     codeRagRouterSystemPrompt(),
                     codeRagRouterUserPrompt(question, requestedMode, conversationContext, commitInsightAvailable),
-                    OllamaClient.ChatRole.AUXILIARY,
                     420,
-                    Duration.ofSeconds(Math.max(1, pipeline().getCodeRouteTimeoutSeconds()))
-            ).content();
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeRouteTimeoutSeconds())),
+                    codeRouteSchema()
+            );
             CodeRagRouteDecision decision = parseCodeRagRoute(response);
             if (decision.route() == CodeRagRoute.UNKNOWN) {
                 return CodeRagRouteDecision.fallback("router returned unknown route");
@@ -249,13 +252,14 @@ public class RagPipelineService {
         int candidateLimit = Math.max(1, Math.min(pipeline().getCodeEvidenceAdjudicationMaxCandidates(), candidates.size()));
         List<CodeSearchResult> head = candidates.stream().limit(candidateLimit).toList();
         try {
-            String response = ollamaClient.chatResult(
+            String response = requestStructuredJson(
+                    "code evidence adjudication",
                     codeAdjudicationSystemPrompt(),
                     codeAdjudicationUserPrompt(question, mode, head, limit),
-                    OllamaClient.ChatRole.AUXILIARY,
                     Math.max(1, pipeline().getCodeEvidenceAdjudicationMaxOutputTokens()),
-                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceAdjudicationTimeoutSeconds()))
-            ).content();
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceAdjudicationTimeoutSeconds())),
+                    codeAdjudicationSchema()
+            );
             Map<Integer, AdjudicatedCandidate> decisions = parseCodeAdjudication(response);
             if (decisions.isEmpty()) {
                 return new CodeEvidenceAdjudication(true, false, "llm code evidence adjudication returned no usable selections", candidates);
@@ -271,26 +275,106 @@ public class RagPipelineService {
 
     public CodeEvidenceFollowUpPlan planCodeEvidenceFollowUp(String question, String mode, List<CodeSearchResult> candidates, int maxQueries) {
         if (candidates == null || candidates.isEmpty()) {
-            return new CodeEvidenceFollowUpPlan(false, true, "no initial evidence", List.of(), List.of(), List.of());
+            return new CodeEvidenceFollowUpPlan(false, true, "no initial evidence", List.of(), List.of(), List.of(), List.of());
         }
         try {
-            String response = ollamaClient.chatResult(
+            String response = requestStructuredJson(
+                    "code evidence follow-up",
                     codeEvidenceCoverageSystemPrompt(),
                     codeEvidenceCoverageUserPrompt(question, mode, candidates),
-                    OllamaClient.ChatRole.AUXILIARY,
                     Math.max(1, pipeline().getCodeEvidenceFollowUpMaxOutputTokens()),
-                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceFollowUpTimeoutSeconds()))
-            ).content();
+                    Duration.ofSeconds(Math.max(1, pipeline().getCodeEvidenceFollowUpTimeoutSeconds())),
+                    codeEvidenceFollowUpSchema()
+            );
             return parseCodeEvidenceFollowUp(response, maxQueries);
         } catch (RuntimeException ex) {
             log.info("RAG code evidence follow-up planning skipped reason={} message={} question={}",
                     ex.getClass().getSimpleName(), safeMessage(ex), abbreviate(question));
-            return new CodeEvidenceFollowUpPlan(true, false, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of());
+            return new CodeEvidenceFollowUpPlan(true, false, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of(), List.of());
         }
     }
 
     private LearnBotProperties.Rag.Pipeline pipeline() {
         return properties.getRag().getPipeline();
+    }
+
+    private String requestStructuredJson(
+            String operation,
+            String systemPrompt,
+            String userPrompt,
+            int maxOutputTokens,
+            Duration timeout,
+            Map<String, Object> schema
+    ) {
+        RuntimeException lastFailure = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            int tokenLimit = attempt == 0
+                    ? Math.max(1, maxOutputTokens)
+                    : Math.min(2048, Math.max(maxOutputTokens + 256, maxOutputTokens * 2));
+            String attemptSystemPrompt = attempt == 0
+                    ? systemPrompt
+                    : systemPrompt + "\nReturn one complete minified JSON object matching the schema. No prose.";
+            String attemptUserPrompt = attempt == 0
+                    ? userPrompt
+                    : userPrompt + "\n\nThe previous structured response was invalid or truncated. Return only one complete JSON object.";
+            OllamaClient.ChatResult result = structuredChatResult(
+                    attemptSystemPrompt,
+                    attemptUserPrompt,
+                    tokenLimit,
+                    timeout,
+                    schema
+            );
+            try {
+                String json = extractValidJsonObject(result == null ? "" : result.content());
+                if (!json.isBlank()) {
+                    return json;
+                }
+                lastFailure = new IllegalArgumentException(operation + " response did not contain JSON"
+                        + nullable(" doneReason=", result == null ? null : result.doneReason()));
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+            }
+            if (attempt == 0) {
+                log.info("Structured LLM JSON retry operation={} reason={} doneReason={} promptTokens={} outputTokens={}",
+                        operation,
+                        lastFailure == null ? "unknown" : lastFailure.getClass().getSimpleName(),
+                        result == null ? "" : safe(result.doneReason()),
+                        result == null ? 0 : result.promptEvalCount(),
+                        result == null ? 0 : result.evalCount());
+            }
+        }
+        throw new IllegalArgumentException(operation + " response did not contain valid JSON", lastFailure);
+    }
+
+    private OllamaClient.ChatResult structuredChatResult(
+            String systemPrompt,
+            String userPrompt,
+            int tokenLimit,
+            Duration timeout,
+            Map<String, Object> schema
+    ) {
+        try {
+            OllamaClient.ChatResult result = ollamaClient.chatResult(
+                    systemPrompt,
+                    userPrompt,
+                    OllamaClient.ChatRole.AUXILIARY,
+                    tokenLimit,
+                    timeout,
+                    schema
+            );
+            if (result != null) {
+                return result;
+            }
+        } catch (RuntimeException ex) {
+            log.info("Structured LLM format call unavailable reason={}", ex.getClass().getSimpleName());
+        }
+        return ollamaClient.chatResult(
+                systemPrompt,
+                userPrompt,
+                OllamaClient.ChatRole.AUXILIARY,
+                tokenLimit,
+                timeout
+        );
     }
 
     private String codeRagRouterSystemPrompt() {
@@ -423,15 +507,29 @@ public class RagPipelineService {
     private String codeAdjudicationSystemPrompt() {
         return """
                 You are an evidence selection judge for code RAG.
-                Decide which retrieved code chunks are the best evidence for answering the user's question.
+                Decide which retrieved code chunks are the best evidence for answering the user's question,
+                and classify what each selected chunk can directly prove.
                 Return strict JSON only. No Markdown.
-                JSON schema: {"selected":[{"index":1,"score":0.0,"reason":"short reason"}],"reason":"short reason"}
+                JSON schema: {"selected":[{"index":1,"score":0.0,"evidenceKind":"direct_code","implementationPhase":"UNKNOWN","responsibility":"unknown","coverageGroup":"unknown","mustUse":false,"supportedClaims":["claim"],"notSupportedClaims":["claim"],"rankReason":"short reason","reason":"short reason"}],"reason":"short reason"}
                 Rules:
                 - Do not answer the user question.
                 - Prefer source chunks that directly implement runtime behavior for architecture, flow, and reasoning questions.
+                - Order selected items by answer usefulness. The first selected item should be the strongest primary citation.
                 - Use tests only when the question asks about tests or when they are clearly supporting evidence.
                 - Use local-agent/tooling chunks only when the question asks about local agents, tools, patching, or agent execution.
                 - Prefer direct evidence over indirect summaries when both are available.
+                - Classify what the candidate actually proves, not what nearby terms suggest.
+                - A method that reads graph tables for traversal/search expansion is not graph persistence evidence.
+                - Graph persistence requires code/schema that creates, inserts, updates, deletes, replaces, or activates graph nodes/edges.
+                - Graph relationship evidence can support inferred relationships, but must not be treated as a direct code statement.
+                - fallbackScope-like failure handling is diagnostic evidence only; do not use it as citation kind.
+                - Set mustUse=true only for candidates that are essential to answer the main question.
+                - coverageGroup must use the closest evidence group or unknown.
+                - Use request_intake for code that receives an external request, message, command, or controller/API call.
+                - Use queue_claim for code that polls, leases, claims, dequeues, or fetches the next pending work item.
+                - Use response_intake for code that receives a result, callback, completion, acknowledgement, or tool/worker response.
+                - Use persistence_update for repository/storage code that saves status, output, completion, or durable state.
+                - Use async_transport for WebSocket, SSE, message bus, stream, queue, or event transport code.
                 - Select only indexes from the candidate list.
                 """;
     }
@@ -443,7 +541,7 @@ public class RagPipelineService {
                 Do not answer the user.
                 If key implementation evidence is missing or the evidence is off-topic, request a small number of concrete follow-up search queries.
                 This must work across programming languages and frameworks. Use file paths, symbols, services, controllers, repositories, routes, handlers, hooks, jobs, tasks, and database/query terms from the evidence when useful.
-                JSON schema: {"enough":true,"missingAreas":["area"],"followUpQueries":["query"],"queryAreas":["area for query"],"reason":"short reason"}
+                JSON schema: {"enough":true,"missingAreas":["area"],"followUpQueries":["query"],"queryAreas":["area for query"],"requiredEvidenceGroups":["group"],"reason":"short reason"}
                 Rules:
                 - Set enough=false when evidence is mostly tests, frontend gates, history storage, retention, docs, generated, or vendor code but the question asks about runtime behavior.
                 - Conversation history repositories, UI gate/status helpers, retention/cleanup services, and verification summaries are supporting evidence only. They are not enough for runtime flow or answer-generation questions unless the user explicitly asks about them.
@@ -452,6 +550,12 @@ public class RagPipelineService {
                 - Do not spend all follow-up queries on indexing or storage if retrieval/search or answer/model generation is missing.
                 - For RAG answer-generation questions, require direct runtime evidence for retrieval/search, context construction, and model/answer generation, not only stored conversation turns.
                 - queryAreas must align one-to-one with followUpQueries when possible.
+                - requiredEvidenceGroups must use only these values: entrypoint, request_intake, orchestration, queue_claim, response_intake, persistence_update, async_transport, graph_build, graph_persistence, graph_schema, graph_traversal, evidence_ranking, answer_context, framework_semantics, data_structure, unknown.
+                - For questions asking how a request/job/task/tool/work item is fetched and how a response/result is stored, include queue_claim, response_intake, and persistence_update when those areas are missing.
+                - For Controller/Service/Repository flow questions, separate request_intake or entrypoint, orchestration, and persistence_update instead of treating one layer as enough.
+                - For WebSocket, SSE, queue, stream, message, worker, event, or callback flows, include async_transport when transport handling is missing.
+                - For graph storage questions, include graph_schema and graph_persistence when schema or persistence evidence is missing.
+                - For graph expansion questions, include graph_traversal and evidence_ranking when traversal or scoring evidence is missing.
                 - Keep follow-up queries short, concrete, and source-code oriented.
                 """;
     }
@@ -461,7 +565,9 @@ public class RagPipelineService {
         prompt.append("Question:\n").append(safe(question)).append("\n\n");
         prompt.append("Question mode: ").append(safe(mode)).append("\n\n");
         prompt.append("Current evidence candidates:\n");
-        for (int index = 0; index < Math.min(10, candidates.size()); index++) {
+        int previewCount = Math.min(14, candidates.size());
+        int previewExcerptChars = previewCount > 10 ? 420 : 520;
+        for (int index = 0; index < previewCount; index++) {
             CodeSearchResult result = candidates.get(index);
             CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(result);
             prompt.append(index + 1).append(". file=").append(safe(result.filePath()))
@@ -475,7 +581,7 @@ public class RagPipelineService {
                     .append(safe(result.methodName())).append(" ")
                     .append(safe(result.symbolName())).append("\n")
                     .append("Excerpt:\n")
-                    .append(trimForPrompt(result.content(), 520))
+                    .append(trimForPrompt(result.content(), previewExcerptChars))
                     .append("\n\n");
         }
         prompt.append("Return JSON only.");
@@ -495,8 +601,14 @@ public class RagPipelineService {
             int queryLimit = Math.max(0, Math.min(4, maxQueries));
             List<String> queries = parsedStrings(parsed.get("followUpQueries")).stream().limit(queryLimit).toList();
             List<String> queryAreas = parsedStrings(parsed.get("queryAreas")).stream().limit(queryLimit).toList();
+            List<String> groups = parsedStrings(parsed.get("requiredEvidenceGroups")).stream()
+                    .map(this::normalizeEvidenceGroup)
+                    .filter(group -> !"unknown".equals(group))
+                    .distinct()
+                    .limit(6)
+                    .toList();
             String reason = stringValue(parsed.get("reason"));
-            return new CodeEvidenceFollowUpPlan(true, enough, reason, missingAreas, enough ? List.of() : queries, enough ? List.of() : queryAreas);
+            return new CodeEvidenceFollowUpPlan(true, enough, reason, missingAreas, enough ? List.of() : queries, enough ? List.of() : queryAreas, enough ? List.of() : groups);
         } catch (Exception ex) {
             throw new IllegalArgumentException("Invalid code evidence follow-up JSON", ex);
         }
@@ -518,16 +630,33 @@ public class RagPipelineService {
                     .append(" runtimeRole=").append(profile.runtimeRole())
                     .append(" domainRole=").append(profile.domainRole())
                     .append(" parserConfidence=").append(profile.parserConfidence())
+                    .append(" retrievalSource=").append(metadataValue(result, "retrievalSource"))
+                    .append(" graphExpanded=").append(metadataValue(result, "graphExpanded"))
+                    .append(" graphEdgeType=").append(metadataValue(result, "graphEdgeType"))
+                    .append(" graphEvidenceKind=").append(metadataValue(result, "graphEvidenceKind"))
                     .append("\nSymbols: ")
                     .append(safe(result.className())).append(" ")
                     .append(safe(result.methodName())).append(" ")
                     .append(safe(result.symbolName())).append("\n")
                     .append("Excerpt:\n")
-                    .append(trimForPrompt(result.content(), 900))
+                    .append(trimForPrompt(result.content(), adjudicationExcerptChars(candidates.size())))
                     .append("\n\n");
         }
         prompt.append("Return JSON only.");
         return prompt.toString();
+    }
+
+    private int adjudicationExcerptChars(int candidateCount) {
+        if (candidateCount > 30) {
+            return 420;
+        }
+        if (candidateCount > 20) {
+            return 560;
+        }
+        if (candidateCount > 10) {
+            return 700;
+        }
+        return 900;
     }
 
     private Map<Integer, AdjudicatedCandidate> parseCodeAdjudication(String response) {
@@ -555,10 +684,23 @@ public class RagPipelineService {
                 double score = Math.max(0, Math.min(1, parseDouble(map.get("score"), Math.max(0.1, 1.0 - (rank * 0.08)))));
                 Object reasonValue = map.get("reason");
                 String reason = reasonValue == null ? "selected by llm evidence adjudicator" : String.valueOf(reasonValue);
-                decisions.put(index, new AdjudicatedCandidate(index, score, reason));
+                String evidenceKind = normalizeEnumValue(map.get("evidenceKind"), "direct_code",
+                        List.of("direct_code", "graph_relationship", "supporting_context"));
+                String implementationPhase = normalizeEnumValue(map.get("implementationPhase"), "UNKNOWN",
+                        List.of("INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN"));
+                String responsibility = normalizeEnumValue(map.get("responsibility"), "unknown",
+                        List.of("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "framework_semantics", "data_structure", "helper_check", "unknown"));
+                String coverageGroup = normalizeEvidenceGroup(stringValue(map.get("coverageGroup")));
+                Object mustUseValue = map.get("mustUse");
+                boolean mustUse = mustUseValue != null && Boolean.parseBoolean(String.valueOf(mustUseValue));
+                List<String> supportedClaims = parsedStrings(map.get("supportedClaims")).stream().limit(5).toList();
+                List<String> notSupportedClaims = parsedStrings(map.get("notSupportedClaims")).stream().limit(5).toList();
+                String rankReason = stringValue(map.get("rankReason"));
+                decisions.put(index, new AdjudicatedCandidate(index, score, evidenceKind, implementationPhase,
+                        responsibility, coverageGroup, mustUse, supportedClaims, notSupportedClaims, rankReason, reason, rank + 1));
                 rank++;
             }
-            return Map.copyOf(decisions);
+            return decisions;
         } catch (Exception ex) {
             throw new IllegalArgumentException("Invalid code evidence adjudication JSON", ex);
         }
@@ -566,18 +708,27 @@ public class RagPipelineService {
 
     private List<CodeSearchResult> applyCodeAdjudication(List<CodeSearchResult> candidates, List<CodeSearchResult> head, Map<Integer, AdjudicatedCandidate> decisions) {
         List<CodeSearchResult> adjusted = new ArrayList<>();
-        for (int index = 0; index < head.size(); index++) {
-            CodeSearchResult result = head.get(index);
-            AdjudicatedCandidate decision = decisions.get(index + 1);
-            double bonus = decision == null ? -0.04 : 0.28 + (decision.score() * 0.32);
+        Set<Integer> selectedIndexes = new java.util.LinkedHashSet<>();
+        for (AdjudicatedCandidate decision : decisions.values()) {
+            if (decision.index() < 1 || decision.index() > head.size() || !selectedIndexes.add(decision.index())) {
+                continue;
+            }
+            CodeSearchResult result = head.get(decision.index() - 1);
+            double bonus = 0.6 + (decision.score() * 0.4);
             adjusted.add(withAdjudicationMetadata(result, decision, bonus));
+        }
+        for (int index = 0; index < head.size(); index++) {
+            int candidateIndex = index + 1;
+            if (selectedIndexes.contains(candidateIndex)) {
+                continue;
+            }
+            CodeSearchResult result = head.get(index);
+            adjusted.add(withAdjudicationMetadata(result, null, -0.04));
         }
         if (candidates.size() > head.size()) {
             adjusted.addAll(candidates.subList(head.size(), candidates.size()));
         }
-        return adjusted.stream()
-                .sorted(java.util.Comparator.comparingDouble(this::adjudicatedScore).reversed())
-                .toList();
+        return adjusted;
     }
 
     private CodeSearchResult withAdjudicationMetadata(CodeSearchResult result, AdjudicatedCandidate decision, double bonus) {
@@ -590,6 +741,24 @@ public class RagPipelineService {
         if (decision != null) {
             metadata.put("llmEvidenceAdjudicationScore", round(decision.score()));
             metadata.put("llmEvidenceAdjudicationReason", decision.reason());
+            metadata.put("llmEvidenceSlateRank", decision.slateRank());
+            metadata.put("llmEvidenceSlateMustUse", decision.mustUse());
+            metadata.put("llmEvidenceKind", decision.evidenceKind());
+            metadata.put("llmImplementationPhase", decision.implementationPhase());
+            metadata.put("llmEvidenceResponsibility", decision.responsibility());
+            metadata.put("llmEvidenceClassificationSource", "llm_adjudication");
+            if (!"unknown".equals(decision.coverageGroup())) {
+                metadata.put("llmEvidenceCoverageGroup", decision.coverageGroup());
+            }
+            if (!decision.rankReason().isBlank()) {
+                metadata.put("llmEvidenceRankReason", decision.rankReason());
+            }
+            if (!decision.supportedClaims().isEmpty()) {
+                metadata.put("llmSupportedClaims", decision.supportedClaims());
+            }
+            if (!decision.notSupportedClaims().isEmpty()) {
+                metadata.put("llmNotSupportedClaims", decision.notSupportedClaims());
+            }
         }
         return new CodeSearchResult(
                 result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
@@ -656,14 +825,142 @@ public class RagPipelineService {
         }
     }
 
+    private String extractValidJsonObject(String response) {
+        String json = extractJsonObject(response);
+        if (json.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isObject()) {
+                throw new IllegalArgumentException("Structured response root must be a JSON object.");
+            }
+            return json;
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Structured response was not valid JSON.", ex);
+        }
+    }
+
     private String extractJsonObject(String response) {
         String text = safe(response).trim();
         int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start < 0 || end <= start) {
+        if (start < 0) {
             return "";
         }
-        return text.substring(start, end + 1);
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (ch == '"') {
+                inString = true;
+            } else if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substring(start, i + 1);
+                }
+                if (depth < 0) {
+                    return "";
+                }
+            }
+        }
+        return "";
+    }
+
+    private Map<String, Object> queryRewriteSchema() {
+        return objectSchema(Map.of(
+                "queries", arraySchema(stringSchema()),
+                "keywords", arraySchema(stringSchema()),
+                "reason", stringSchema()
+        ), List.of("queries", "keywords", "reason"));
+    }
+
+    private Map<String, Object> codeRouteSchema() {
+        return objectSchema(Map.of(
+                "route", enumSchema("ANSWER_FROM_PRIOR", "EXPAND_PREVIOUS_ANSWER", "CODE_OVERVIEW_FLOW", "LOCATE_SYMBOL", "EXPLAIN_METHOD", "IMPACT_ANALYSIS", "COMMIT_DIFF", "CLARIFY", "CODE_SEARCH"),
+                "mode", enumSchema("overview", "flow", "locate", "method", "reasoning", "impact", "auto", ""),
+                "confidence", numberSchema(),
+                "queries", arraySchema(stringSchema()),
+                "commitRef", stringSchema(),
+                "targetFile", stringSchema(),
+                "targetSymbol", stringSchema(),
+                "reason", stringSchema()
+        ), List.of("route", "mode", "confidence", "queries", "commitRef", "targetFile", "targetSymbol", "reason"));
+    }
+
+    private Map<String, Object> codeEvidenceFollowUpSchema() {
+        return objectSchema(Map.of(
+                "enough", booleanSchema(),
+                "missingAreas", arraySchema(stringSchema()),
+                "followUpQueries", arraySchema(stringSchema()),
+                "queryAreas", arraySchema(stringSchema()),
+                "requiredEvidenceGroups", arraySchema(enumSchema("entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake", "persistence_update", "async_transport", "graph_build", "graph_persistence", "graph_schema", "graph_traversal", "evidence_ranking", "answer_context", "framework_semantics", "data_structure", "unknown")),
+                "reason", stringSchema()
+        ), List.of("enough", "missingAreas", "followUpQueries", "queryAreas", "requiredEvidenceGroups", "reason"));
+    }
+
+    private Map<String, Object> codeAdjudicationSchema() {
+        return objectSchema(Map.of(
+                "selected", arraySchema(objectSchema(Map.ofEntries(
+                        Map.entry("index", integerSchema()),
+                        Map.entry("score", numberSchema()),
+                        Map.entry("evidenceKind", enumSchema("direct_code", "graph_relationship", "supporting_context")),
+                        Map.entry("implementationPhase", enumSchema("INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN")),
+                        Map.entry("responsibility", enumSchema("graph_build", "graph_persistence", "graph_traversal", "ranking", "answer_context", "framework_semantics", "data_structure", "helper_check", "unknown")),
+                        Map.entry("coverageGroup", enumSchema("entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake", "persistence_update", "async_transport", "graph_build", "graph_persistence", "graph_schema", "graph_traversal", "evidence_ranking", "answer_context", "framework_semantics", "data_structure", "unknown")),
+                        Map.entry("mustUse", booleanSchema()),
+                        Map.entry("supportedClaims", arraySchema(stringSchema())),
+                        Map.entry("notSupportedClaims", arraySchema(stringSchema())),
+                        Map.entry("rankReason", stringSchema()),
+                        Map.entry("reason", stringSchema())
+                ), List.of("index", "score", "evidenceKind", "implementationPhase", "responsibility", "coverageGroup", "mustUse", "supportedClaims", "notSupportedClaims", "rankReason", "reason"))),
+                "reason", stringSchema()
+        ), List.of("selected", "reason"));
+    }
+
+    private Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) {
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties);
+        schema.put("required", required);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private Map<String, Object> arraySchema(Map<String, Object> items) {
+        return Map.of("type", "array", "items", items);
+    }
+
+    private Map<String, Object> enumSchema(String... values) {
+        return Map.of("type", "string", "enum", List.of(values));
+    }
+
+    private Map<String, Object> stringSchema() {
+        return Map.of("type", "string");
+    }
+
+    private Map<String, Object> booleanSchema() {
+        return Map.of("type", "boolean");
+    }
+
+    private Map<String, Object> numberSchema() {
+        return Map.of("type", "number");
+    }
+
+    private Map<String, Object> integerSchema() {
+        return Map.of("type", "integer");
     }
 
     private void addQueries(Set<String> queries, Collection<String> values) {
@@ -817,6 +1114,42 @@ public class RagPipelineService {
         return value != null && !value.isBlank();
     }
 
+    private String normalizeEvidenceGroup(String value) {
+        String normalized = safe(value)
+                .trim()
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
+        return switch (normalized) {
+            case "entrypoint", "request_intake", "orchestration", "queue_claim", "response_intake",
+                    "persistence_update", "async_transport", "graph_build", "graph_persistence",
+                    "graph_schema", "graph_traversal", "evidence_ranking", "answer_context",
+                    "framework_semantics", "data_structure" -> normalized;
+            default -> "unknown";
+        };
+    }
+
+    private String metadataValue(CodeSearchResult result, String key) {
+        if (result == null || result.metadata() == null || key == null) {
+            return "";
+        }
+        Object value = result.metadata().get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String normalizeEnumValue(Object value, String fallback, List<String> allowed) {
+        String text = value == null ? "" : String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return fallback;
+        }
+        for (String candidate : allowed == null ? List.<String>of() : allowed) {
+            if (candidate.equalsIgnoreCase(text)) {
+                return candidate;
+            }
+        }
+        return fallback;
+    }
+
     private int parseInt(Object value, int fallback) {
         if (value instanceof Number number) {
             return number.intValue();
@@ -902,13 +1235,15 @@ public class RagPipelineService {
             String reason,
             List<String> missingAreas,
             List<String> followUpQueries,
-            List<String> queryAreas
+            List<String> queryAreas,
+            List<String> requiredEvidenceGroups
     ) {
         public CodeEvidenceFollowUpPlan {
             reason = reason == null ? "" : reason;
             missingAreas = missingAreas == null ? List.of() : List.copyOf(missingAreas);
             followUpQueries = followUpQueries == null ? List.of() : List.copyOf(followUpQueries);
             queryAreas = queryAreas == null ? List.of() : List.copyOf(queryAreas);
+            requiredEvidenceGroups = requiredEvidenceGroups == null ? List.of() : List.copyOf(requiredEvidenceGroups);
         }
     }
 
@@ -963,6 +1298,29 @@ public class RagPipelineService {
         }
     }
 
-    private record AdjudicatedCandidate(int index, double score, String reason) {
+    private record AdjudicatedCandidate(
+            int index,
+            double score,
+            String evidenceKind,
+            String implementationPhase,
+            String responsibility,
+            String coverageGroup,
+            boolean mustUse,
+            List<String> supportedClaims,
+            List<String> notSupportedClaims,
+            String rankReason,
+            String reason,
+            int slateRank
+    ) {
+        private AdjudicatedCandidate {
+            evidenceKind = evidenceKind == null || evidenceKind.isBlank() ? "direct_code" : evidenceKind;
+            implementationPhase = implementationPhase == null || implementationPhase.isBlank() ? "UNKNOWN" : implementationPhase;
+            responsibility = responsibility == null || responsibility.isBlank() ? "unknown" : responsibility;
+            coverageGroup = coverageGroup == null || coverageGroup.isBlank() ? "unknown" : coverageGroup;
+            supportedClaims = supportedClaims == null ? List.of() : List.copyOf(supportedClaims);
+            notSupportedClaims = notSupportedClaims == null ? List.of() : List.copyOf(notSupportedClaims);
+            rankReason = rankReason == null ? "" : rankReason;
+            reason = reason == null ? "" : reason;
+        }
     }
 }

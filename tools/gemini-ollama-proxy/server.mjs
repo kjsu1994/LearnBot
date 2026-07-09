@@ -2,7 +2,7 @@ import http from "node:http";
 
 const port = Number(process.env.GEMINI_OLLAMA_PROXY_PORT || 11435);
 const apiKey = process.env.GEMINI_API_KEY;
-const defaultModel = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+const defaultModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 const endpoint = (process.env.GEMINI_OPENAI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/+$/, "");
 
 if (!apiKey) {
@@ -71,7 +71,7 @@ async function handleChat(body, res) {
     created_at: new Date().toISOString(),
     message: { role: "assistant", content },
     done: true,
-    done_reason: data?.choices?.[0]?.finish_reason || "stop",
+    done_reason: normalizeFinishReason(data?.choices?.[0]?.finish_reason || "stop"),
     prompt_eval_count: usage.prompt_tokens || 0,
     eval_count: usage.completion_tokens || 0
   });
@@ -90,7 +90,34 @@ function toOpenAiChatPayload(body, model, stream) {
   if (Number.isInteger(options.num_predict) && options.num_predict > 0) {
     payload.max_tokens = options.num_predict;
   }
+  const responseFormat = toOpenAiResponseFormat(body.format);
+  if (responseFormat) {
+    payload.response_format = responseFormat;
+    if (process.env.GEMINI_REASONING_EFFORT) {
+      payload.reasoning_effort = process.env.GEMINI_REASONING_EFFORT;
+    }
+  }
   return payload;
+}
+
+function toOpenAiResponseFormat(format) {
+  if (!format) {
+    return null;
+  }
+  if (format === "json") {
+    return { type: "json_object" };
+  }
+  if (typeof format === "object") {
+    return {
+      type: "json_schema",
+      json_schema: {
+        name: "learnbot_structured_response",
+        strict: true,
+        schema: format
+      }
+    };
+  }
+  return null;
 }
 
 function toMessage(message) {
@@ -133,7 +160,7 @@ async function streamOpenAiAsOllama(upstream, res, model) {
       const choice = data?.choices?.[0] || {};
       const delta = choice?.delta?.content || "";
       if (choice.finish_reason) {
-        finishReason = choice.finish_reason;
+        finishReason = normalizeFinishReason(choice.finish_reason);
       }
       if (data.usage) {
         promptTokens = data.usage.prompt_tokens || promptTokens;
@@ -160,10 +187,15 @@ function writeOllamaDone(res, model, finishReason, promptTokens, completionToken
     created_at: new Date().toISOString(),
     message: { role: "assistant", content: "" },
     done: true,
-    done_reason: finishReason || "stop",
+    done_reason: normalizeFinishReason(finishReason || "stop"),
     prompt_eval_count: promptTokens || 0,
     eval_count: completionTokens || 0
   }) + "\n");
+}
+
+function normalizeFinishReason(reason) {
+  const value = String(reason || "stop");
+  return value === "max_tokens" ? "length" : value;
 }
 
 function readJson(req) {

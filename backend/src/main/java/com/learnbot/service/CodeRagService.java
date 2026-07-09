@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -218,6 +219,9 @@ public class CodeRagService {
                 When a context item has graphEvidence=inferred, explain it as relationship-based graph evidence, not as a direct code statement.
                 When context items include evidenceRole, separate retrieval/search expansion, graph traversal/storage, evidence ranking, and answer context/rendering responsibilities.
                 When context items include evidencePhase, keep INDEXING, SEARCH_EXPANSION, RANKING, and ANSWER_GENERATION in that chronological order unless direct code evidence proves otherwise.
+                Do not describe SEARCH_EXPANSION evidence as graph/index storage logic unless cited INDEXING or STORAGE evidence directly shows persistence.
+                Do not describe RANKING evidence as retrieval or graph expansion logic unless cited code directly performs that work.
+                Do not describe ANSWER_GENERATION evidence as indexing, storage, retrieval, or ranking logic unless cited code directly calls that phase.
                 Treat citationKind=direct_code as direct source evidence and citationKind containing graph_relationship as relationship evidence; do not cite relationship evidence as if it were a direct method call.
                 Use evidenceResponsibility to distinguish implementation_flow evidence from helper_check or data_structure evidence.
                 When context items include fallbackScope, keep routing fallback, graph/index analysis fallback, search expansion fallback, and answer-generation fallback as separate mechanisms.
@@ -671,13 +675,22 @@ public class CodeRagService {
                 4
         );
         int followUpQueriesUsed = 0;
+        boolean followUpStoppedEarly = false;
 
         if (!followUpPlan.enough() && !followUpPlan.followUpQueries().isEmpty() && pipelineService.maxIterations() > 1) {
             for (int index = 0; index < followUpPlan.followUpQueries().size(); index++) {
+                if (requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
+                    followUpStoppedEarly = true;
+                    break;
+                }
                 String query = followUpPlan.followUpQueries().get(index);
                 String queryArea = index < followUpPlan.queryAreas().size() ? followUpPlan.queryAreas().get(index) : "";
-                followUpCandidateCount += collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, query, queryArea, questionMode, searchLimit, merged);
+                String evidenceGroup = followUpEvidenceGroup(followUpPlan, index, queryArea + " " + query);
+                followUpCandidateCount += collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, query, queryArea, evidenceGroup, questionMode, searchLimit, merged);
                 followUpQueriesUsed++;
+            }
+            if (requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
+                followUpStoppedEarly = followUpStoppedEarly || followUpQueriesUsed < followUpPlan.followUpQueries().size();
             }
             iteration = 2;
             results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
@@ -706,6 +719,7 @@ public class CodeRagService {
                         question,
                         query,
                         query,
+                        "",
                         questionMode,
                         searchLimit,
                         merged
@@ -732,18 +746,21 @@ public class CodeRagService {
 
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();
         long followUpSelectedCount = results.stream().filter(this::isLlmFollowUpEvidence).count();
-        log.info("Code RAG evidence follow-up attempted={} enough={} queriesUsed={} candidatesAdded={} selected={} missingAreas={} reason={} question={}",
+        log.info("Code RAG evidence follow-up attempted={} enough={} queriesUsed={} candidatesAdded={} selected={} earlyStop={} missingAreas={} groups={} reason={} question={}",
                 followUpPlan.attempted(),
                 followUpPlan.enough(),
                 followUpQueriesUsed,
                 followUpCandidateCount,
                 followUpSelectedCount,
+                followUpStoppedEarly,
                 followUpPlan.missingAreas(),
+                followUpPlan.requiredEvidenceGroups(),
                 safe(followUpPlan.reason(), ""),
                 abbreviate(question, 180));
         if (followUpPlan.attempted()) {
-            log.info("Code RAG evidence follow-up detail queryAreas={} queries={} selectedFiles={}",
+            log.info("Code RAG evidence follow-up detail queryAreas={} groups={} queries={} selectedFiles={}",
                     followUpPlan.queryAreas(),
+                    followUpPlan.requiredEvidenceGroups(),
                     followUpPlan.followUpQueries(),
                     selectedPathSummary(results));
         }
@@ -1083,18 +1100,19 @@ public class CodeRagService {
             String originalQuestion,
             String query,
             String queryArea,
+            String evidenceGroup,
             CodeQuestionMode questionMode,
             int limit,
             Map<UUID, CodeSearchResult> merged
     ) {
         int before = merged.size();
-        for (String groundedQuery : groundedFollowUpQueries(originalQuestion, query, queryArea)) {
+        for (String groundedQuery : groundedFollowUpQueries(originalQuestion, query, queryArea, evidenceGroup)) {
             List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, groundedQuery, questionMode, limit);
             for (CodeSearchResult result : results) {
                 merge(merged, markLlmFollowUpEvidence(result, groundedQuery));
             }
         }
-        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + query + " " + originalQuestion));
+        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + query + " " + evidenceGroup + " " + originalQuestion));
         if (!normalizedArea.isBlank()) {
             for (CodeSearchResult result : llmAreaFollowUpEvidence(repositoryId, selectedSpaceId, spaceIds, normalizedArea, limit)) {
                 merge(merged, markLlmFollowUpEvidence(result, "llm coverage area grounded follow-up"));
@@ -1133,18 +1151,25 @@ public class CodeRagService {
         return terms.isEmpty() ? "" : "(" + String.join("|", terms) + ")";
     }
 
-    private List<String> groundedFollowUpQueries(String originalQuestion, String query, String queryArea) {
+    private List<String> groundedFollowUpQueries(String originalQuestion, String query, String queryArea, String evidenceGroup) {
         String sanitized = sanitizeFollowUpQuery(query);
         if (sanitized.isBlank()) {
             return List.of();
         }
         List<String> queries = new ArrayList<>();
         queries.add(sanitized);
-        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + sanitized + " " + originalQuestion));
+        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + sanitized + " " + evidenceGroup + " " + originalQuestion));
         String areaTerms = String.join(" ", coverageTerms(normalizedArea));
         if (!areaTerms.isBlank()) {
             queries.add(sanitized + " " + areaTerms);
             queries.add("code implementation " + areaTerms);
+        }
+        List<String> groupTerms = evidenceGroupQueryTerms(evidenceGroup);
+        if (!groupTerms.isEmpty()) {
+            String groupQuery = String.join(" ", groupTerms);
+            queries.add(sanitized + " " + groupQuery);
+            queries.add("code implementation " + groupQuery);
+            queries.add(groupQuery + " " + String.join(" ", resourceIdentifierQueries(queryArea + " " + sanitized + " " + originalQuestion)));
         }
         List<String> resources = resourceIdentifierQueries(queryArea + " " + sanitized + " " + originalQuestion);
         if (!resources.isEmpty()) {
@@ -1158,6 +1183,154 @@ public class CodeRagService {
                 .distinct()
                 .limit(8)
                 .toList();
+    }
+
+    private String followUpEvidenceGroup(RagPipelineService.CodeEvidenceFollowUpPlan plan, int index, String text) {
+        if (plan != null && plan.requiredEvidenceGroups() != null && !plan.requiredEvidenceGroups().isEmpty()) {
+            if (index < plan.requiredEvidenceGroups().size()) {
+                return plan.requiredEvidenceGroups().get(index);
+            }
+            List<String> groups = plan.requiredEvidenceGroups();
+            String normalized = normalizeQuestionText(splitIdentifierTerms(text));
+            for (String group : groups) {
+                if (groupMatchesArea(group, normalized)) {
+                    return group;
+                }
+            }
+            return groups.get(Math.min(index, groups.size() - 1));
+        }
+        return inferEvidenceGroup(text);
+    }
+
+    private String inferEvidenceGroup(String text) {
+        String normalized = normalizeQuestionText(splitIdentifierTerms(text));
+        if (normalized.isBlank()) {
+            return "";
+        }
+        if (containsRoleTerms(normalized, "code graph nodes", "code graph edges", "schema", "migration", "table", "ddl", "edge type")) {
+            return "graph_schema";
+        }
+        if (containsRoleTerms(normalized, "websocket", "web socket", "sse", "stream", "message", "event", "event bus", "publish", "subscribe", "push", "heartbeat")) {
+            return "async_transport";
+        }
+        if (containsRoleTerms(normalized, "claim", "claimed", "poll", "polling", "next", "pending", "lease", "dequeue", "queue", "work item", "fetch", "take", "가져", "가져오")) {
+            return "queue_claim";
+        }
+        if (containsRoleTerms(normalized, "callback", "response", "result", "output", "complete", "completion", "finished", "ack", "acknowledge", "응답", "결과", "완료")) {
+            return "response_intake";
+        }
+        if (containsRoleTerms(normalized, "store", "stored", "save", "saved", "persist", "persistence", "insert", "update", "delete", "upsert", "status", "state", "저장", "상태")) {
+            return "persistence_update";
+        }
+        if (containsRoleTerms(normalized, "storage", "persist", "persistence", "insert", "update", "delete", "merge", "replace", "activate", "save")) {
+            return "graph_persistence";
+        }
+        if (containsRoleTerms(normalized, "traversal", "neighbor", "neighbors", "hop", "direction", "path", "related chunks", "expand")) {
+            return "graph_traversal";
+        }
+        if (containsRoleTerms(normalized, "rank", "ranking", "score", "weight", "evidence score")) {
+            return "evidence_ranking";
+        }
+        if (containsRoleTerms(normalized, "answer", "context", "prompt", "citation", "generation", "llm")) {
+            return "answer_context";
+        }
+        if (containsRoleTerms(normalized, "builder", "analyzer", "analysis", "diagnostic", "nodes", "edges")) {
+            return "graph_build";
+        }
+        if (containsRoleTerms(normalized, "controller", "endpoint", "route", "handler", "request mapping")) {
+            return "request_intake";
+        }
+        if (containsRoleTerms(normalized, "service", "orchestrate", "pipeline", "flow", "delegate")) {
+            return "orchestration";
+        }
+        if (containsRoleTerms(normalized, "transaction", "repository", "entity", "annotation", "framework", "spring", "wpf", "winforms")) {
+            return "framework_semantics";
+        }
+        return "";
+    }
+
+    private boolean groupMatchesArea(String group, String normalizedArea) {
+        if (group == null || group.isBlank() || normalizedArea == null || normalizedArea.isBlank()) {
+            return false;
+        }
+        return evidenceGroupQueryTerms(group).stream().anyMatch(term -> normalizedArea.contains(term.toLowerCase(Locale.ROOT)));
+    }
+
+    private boolean requiredEvidenceGroupsSatisfied(
+            RagPipelineService.CodeEvidenceFollowUpPlan plan,
+            Collection<CodeSearchResult> candidates
+    ) {
+        if (plan == null || plan.enough() || plan.requiredEvidenceGroups() == null || plan.requiredEvidenceGroups().isEmpty()
+                || candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+        List<CodeSearchResult> candidateList = candidates.stream()
+                .filter(result -> !isProjectContext(result.chunkType()))
+                .toList();
+        if (candidateList.isEmpty()) {
+            return false;
+        }
+        for (String group : plan.requiredEvidenceGroups()) {
+            if (!followUpEvidenceGroupSatisfied(group, candidateList)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean followUpEvidenceGroupSatisfied(String group, List<CodeSearchResult> candidates) {
+        List<String> terms = evidenceGroupQueryTerms(group);
+        if (terms.isEmpty()) {
+            return false;
+        }
+        int requiredMatches = switch (safe(group, "")) {
+            case "queue_claim", "response_intake", "persistence_update", "async_transport", "request_intake" -> 2;
+            default -> 1;
+        };
+        return candidates.stream().anyMatch(result -> evidenceGroupMatchCount(terms, result) >= requiredMatches);
+    }
+
+    private int evidenceGroupMatchCount(List<String> terms, CodeSearchResult result) {
+        if (terms == null || terms.isEmpty() || result == null) {
+            return 0;
+        }
+        String text = normalizeQuestionText(splitIdentifierTerms(String.join(" ",
+                safe(result.filePath(), ""),
+                safe(result.symbolName(), ""),
+                safe(result.className(), ""),
+                safe(result.methodName(), ""),
+                safe(result.namespaceName(), ""),
+                safe(result.content(), "")
+        )));
+        int matched = 0;
+        for (String term : terms) {
+            String normalizedTerm = normalizeQuestionText(splitIdentifierTerms(term));
+            if (!normalizedTerm.isBlank() && text.contains(normalizedTerm)) {
+                matched++;
+            }
+        }
+        return matched;
+    }
+
+    private List<String> evidenceGroupQueryTerms(String group) {
+        return switch (safe(group, "")) {
+            case "entrypoint" -> List.of("controller", "route", "endpoint", "handler", "request", "mapping");
+            case "request_intake" -> List.of("controller", "route", "endpoint", "handler", "request", "input", "receive", "submit", "create", "enqueue");
+            case "orchestration" -> List.of("service", "orchestrate", "pipeline", "flow", "calls", "delegates");
+            case "queue_claim" -> List.of("queue", "pending", "next", "claim", "claimed", "poll", "lease", "dequeue", "work item", "running");
+            case "response_intake" -> List.of("response", "result", "output", "complete", "completion", "callback", "ack", "acknowledge", "handle response");
+            case "persistence_update" -> List.of("repository", "save", "update", "insert", "delete", "upsert", "persist", "status", "output", "finished", "complete");
+            case "async_transport" -> List.of("websocket", "sse", "message", "event", "stream", "queue", "push", "poll", "heartbeat", "ack");
+            case "graph_build" -> List.of("graph", "builder", "analyzer", "nodes", "edges", "diagnostics");
+            case "graph_persistence" -> List.of("graph", "nodes", "edges", "insert", "update", "delete", "merge", "replace", "active", "persistence");
+            case "graph_schema" -> List.of("schema", "table", "migration", "code_graph_nodes", "code_graph_edges", "edge_type", "metadata");
+            case "graph_traversal" -> List.of("graph", "traversal", "neighbors", "hop", "direction", "path", "related chunks");
+            case "evidence_ranking" -> List.of("evidence", "rank", "score", "weight", "ranking", "reason");
+            case "answer_context" -> List.of("answer", "context", "prompt", "citation", "generation", "llm");
+            case "framework_semantics" -> List.of("annotation", "framework", "transaction", "controller", "service", "repository", "entity");
+            case "data_structure" -> List.of("record", "dto", "class", "type", "metadata", "node", "edge");
+            default -> List.of();
+        };
     }
 
     private List<String> resourceIdentifierQueries(String text) {
@@ -1251,6 +1424,17 @@ public class CodeRagService {
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
         ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
         RagPipelineService.CodeEvidenceAdjudication adjudication = pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit);
+        if (adjudication.used()) {
+            ranked = adjudication.results();
+            List<CodeSearchResult> selected = preservePinnedEvidence(ranked, llmEvidenceSlateSelection(ranked, limit), limit);
+            log.info("Code RAG LLM evidence slate selected={} final={} llmSelectedFiles={} finalFiles={} question={}",
+                    ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).count(),
+                    selected.size(),
+                    selectedPathSummary(ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).toList()),
+                    selectedPathSummary(selected),
+                    abbreviate(question, 180));
+            return selected;
+        }
         if (adjudication.attempted()) {
             ranked = adjudication.results();
         }
@@ -1264,20 +1448,98 @@ public class CodeRagService {
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
             selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
             selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-            return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
+            return orderLlmClassifiedEvidence(orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit)));
         }
         if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.IMPACT || questionMode == CodeQuestionMode.REASONING) {
             selected = diverseByCategory(ranked, limit);
             selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
             selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
             selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-            return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
+            return orderLlmClassifiedEvidence(orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit)));
         }
         selected = ranked.stream().limit(limit).toList();
         selected = sourceAwareEvidenceSelection(questionMode, question, ranked, selected, limit);
         selected = ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
         selected = preferStructuredEvidence(questionMode, question, ranked, selected, limit);
-        return orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit));
+        return orderLlmClassifiedEvidence(orderLlmPlannedEvidence(followUpPlan, preservePinnedEvidence(ranked, selected, limit)));
+    }
+
+    private List<CodeSearchResult> orderLlmClassifiedEvidence(List<CodeSearchResult> selected) {
+        if (selected == null || selected.size() <= 1 || selected.stream().noneMatch(this::hasLlmEvidenceClassification)) {
+            return selected == null ? List.of() : selected;
+        }
+        Map<UUID, Integer> originalOrder = new LinkedHashMap<>();
+        for (int index = 0; index < selected.size(); index++) {
+            originalOrder.putIfAbsent(selected.get(index).chunkId(), index);
+        }
+        return selected.stream()
+                .sorted(Comparator
+                        .comparingInt((CodeSearchResult result) -> {
+                            List<String> phases = evidencePhases(result);
+                            return phases.isEmpty() ? 99 : phaseOrder(phases.get(0));
+                        })
+                        .thenComparing((CodeSearchResult result) -> "direct_code".equals(citationKind(result)) ? 0 : 1)
+                        .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result))
+                        .thenComparingInt(result -> originalOrder.getOrDefault(result.chunkId(), Integer.MAX_VALUE)))
+                .toList();
+    }
+
+    private List<CodeSearchResult> llmEvidenceSlateSelection(List<CodeSearchResult> ranked, int limit) {
+        if (ranked == null || ranked.isEmpty()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, limit);
+        List<CodeSearchResult> selected = new ArrayList<>();
+        ranked.stream()
+                .filter(this::isLlmEvidenceAdjudicationSelected)
+                .sorted(Comparator
+                        .comparingInt(this::llmEvidenceSlateRank)
+                        .thenComparing((CodeSearchResult result) -> Boolean.TRUE.equals(metadataBoolean(result, "llmEvidenceSlateMustUse")) ? 0 : 1)
+                        .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result)))
+                .forEach(result -> addIfAbsent(selected, result, safeLimit));
+        ranked.stream()
+                .filter(result -> !isLlmEvidenceAdjudicationSelected(result))
+                .forEach(result -> addIfAbsent(selected, result, safeLimit));
+        return limitedMutable(selected, safeLimit);
+    }
+
+    private void addIfAbsent(List<CodeSearchResult> results, CodeSearchResult candidate, int limit) {
+        if (candidate == null || results.size() >= limit || containsChunk(results, candidate)) {
+            return;
+        }
+        results.add(candidate);
+    }
+
+    private boolean isLlmEvidenceAdjudicationSelected(CodeSearchResult result) {
+        return result != null
+                && result.metadata() != null
+                && Boolean.TRUE.equals(result.metadata().get("llmEvidenceAdjudicationSelected"));
+    }
+
+    private int llmEvidenceSlateRank(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return Integer.MAX_VALUE;
+        }
+        Object value = result.metadata().get("llmEvidenceSlateRank");
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? Integer.MAX_VALUE : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private Boolean metadataBoolean(CodeSearchResult result, String key) {
+        if (result == null || result.metadata() == null || key == null) {
+            return false;
+        }
+        Object value = result.metadata().get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
     }
 
     private List<CodeSearchResult> preferStructuredEvidence(
@@ -1587,6 +1849,7 @@ public class CodeRagService {
         addCoverageAreas(areas, followUpPlan.queryAreas());
         addCoverageAreas(areas, followUpPlan.missingAreas());
         addCoverageAreas(areas, followUpPlan.followUpQueries());
+        addCoverageAreas(areas, followUpPlan.requiredEvidenceGroups());
         return areas.stream().limit(6).toList();
     }
 
@@ -2923,34 +3186,48 @@ public class CodeRagService {
 
     private Map<String, Object> responseEvidenceMetadata(CodeSearchResult result) {
         Map<String, Object> metadata = new LinkedHashMap<>(evidenceRanker.responseMetadata(result.metadata()));
-        List<String> roles = evidenceRoles(result);
-        if (!roles.isEmpty()) {
-            metadata.put("evidenceRole", String.join("|", roles));
+        if (hasLlmEvidenceClassification(result)) {
+            String role = llmEvidenceResponsibility(result);
+            if (!role.isBlank()) {
+                metadata.put("evidenceRole", role);
+            }
+            List<String> phases = evidencePhases(result);
+            if (!phases.isEmpty()) {
+                metadata.put("evidencePhase", String.join("|", phases));
+                metadata.put("executionOrder", executionOrder(phases));
+            }
+            metadata.put("citationKind", citationKind(result));
+            metadata.put("evidenceResponsibility", role.isBlank() ? "unknown" : role);
+        } else {
+            List<String> heuristicRoles = evidenceRoles(result);
+            if (!heuristicRoles.isEmpty()) {
+                metadata.put("debugHeuristicEvidenceRole", String.join("|", heuristicRoles));
+            }
+            List<String> heuristicPhases = heuristicEvidencePhases(result);
+            if (!heuristicPhases.isEmpty()) {
+                metadata.put("debugHeuristicEvidencePhase", String.join("|", heuristicPhases));
+                metadata.put("debugHeuristicExecutionOrder", executionOrder(heuristicPhases));
+            }
+            metadata.put("debugHeuristicCitationKind", heuristicCitationKind(result));
+            metadata.put("debugHeuristicEvidenceResponsibility", heuristicEvidenceResponsibility(result));
+            String fallbackScope = fallbackScope(result);
+            if (!fallbackScope.isBlank()) {
+                metadata.put("debugFallbackScope", fallbackScope);
+            }
         }
-        List<String> phases = evidencePhases(result);
-        if (!phases.isEmpty()) {
-            metadata.put("evidencePhase", String.join("|", phases));
-            metadata.put("executionOrder", executionOrder(phases));
-        }
-        metadata.put("citationKind", citationKind(result));
-        metadata.put("evidenceResponsibility", evidenceResponsibility(result));
-        String fallbackScope = fallbackScope(result);
-        if (!fallbackScope.isBlank()) {
-            metadata.put("fallbackScope", fallbackScope);
-        }
-        String analysisDiagnosticStatus = analysisDiagnosticStatus(result);
+        String analysisDiagnosticStatus = directAnalysisDiagnosticStatus(result);
         if (!analysisDiagnosticStatus.isBlank()) {
             metadata.put("analysisDiagnosticStatus", analysisDiagnosticStatus);
-            metadata.put("analysisDiagnosticScope", analysisDiagnosticScope(result));
-            String stage = analysisDiagnosticStage(result);
+            metadata.put("analysisDiagnosticScope", directAnalysisDiagnosticScope(result));
+            String stage = directAnalysisDiagnosticStage(result);
             if (!stage.isBlank()) {
                 metadata.put("analysisDiagnosticStage", stage);
             }
-            String language = analysisDiagnosticLanguage(result);
+            String language = directAnalysisDiagnosticLanguage(result);
             if (!language.isBlank()) {
                 metadata.put("analysisDiagnosticLanguage", language);
             }
-            String analyzer = analysisDiagnosticAnalyzer(result);
+            String analyzer = directAnalysisDiagnosticAnalyzer(result);
             if (!analyzer.isBlank()) {
                 metadata.put("analysisDiagnosticAnalyzer", analyzer);
             }
@@ -3677,6 +3954,7 @@ public class CodeRagService {
                 .limit(12)
                 .map(result -> safe(result.filePath(), "")
                         + (safe(result.methodName(), "").isBlank() ? "" : "#" + result.methodName())
+                        + (isLlmEvidenceAdjudicationSelected(result) ? "[llm-rank=" + llmEvidenceSlateRank(result) + "]" : "")
                         + (isLlmFollowUpEvidence(result) ? "[follow-up]" : ""))
                 .collect(Collectors.joining("; "));
     }
@@ -3758,8 +4036,8 @@ public class CodeRagService {
     }
 
     private String evidenceRoleContext(CodeSearchResult result) {
-        List<String> roles = evidenceRoles(result);
-        return roles.isEmpty() ? "" : " evidenceRole=" + String.join("|", roles);
+        String role = llmEvidenceResponsibility(result);
+        return role.isBlank() ? "" : " evidenceRole=" + role;
     }
 
     private String evidencePhaseContext(CodeSearchResult result) {
@@ -3768,22 +4046,16 @@ public class CodeRagService {
     }
 
     private String evidenceResponsibilityContext(CodeSearchResult result) {
-        if (evidenceRoles(result).isEmpty() && !isGraphExpanded(result) && fallbackScope(result).isBlank()) {
-            return "";
-        }
-        return " evidenceResponsibility=" + evidenceResponsibility(result);
+        String responsibility = llmEvidenceResponsibility(result);
+        return responsibility.isBlank() ? "" : " evidenceResponsibility=" + responsibility;
     }
 
     private String fallbackScopeContext(CodeSearchResult result) {
-        String scope = fallbackScope(result);
-        return scope.isBlank() ? "" : " fallbackScope=" + scope;
+        return "";
     }
 
     private String citationKindContext(CodeSearchResult result) {
-        if (evidenceRoles(result).isEmpty() && !isGraphExpanded(result) && fallbackScope(result).isBlank()) {
-            return "";
-        }
-        return " citationKind=" + citationKind(result);
+        return hasLlmEvidenceClassification(result) ? " citationKind=" + citationKind(result) : "";
     }
 
     private String executionOrderContext(CodeSearchResult result) {
@@ -3792,39 +4064,32 @@ public class CodeRagService {
     }
 
     private String analysisDiagnosticContext(CodeSearchResult result) {
-        String status = analysisDiagnosticStatus(result);
+        String status = directAnalysisDiagnosticStatus(result);
         if (status.isBlank()) {
             return "";
         }
         return " analysisDiagnosticStatus=" + status
-                + " analysisDiagnosticScope=" + analysisDiagnosticScope(result)
-                + nullable(" analysisDiagnosticStage=", analysisDiagnosticStage(result))
-                + nullable(" analysisDiagnosticLanguage=", analysisDiagnosticLanguage(result))
-                + nullable(" analysisDiagnosticAnalyzer=", analysisDiagnosticAnalyzer(result));
+                + " analysisDiagnosticScope=" + directAnalysisDiagnosticScope(result)
+                + nullable(" analysisDiagnosticStage=", directAnalysisDiagnosticStage(result))
+                + nullable(" analysisDiagnosticLanguage=", directAnalysisDiagnosticLanguage(result))
+                + nullable(" analysisDiagnosticAnalyzer=", directAnalysisDiagnosticAnalyzer(result));
     }
 
     private String evidenceValidationContext(List<CodeSearchResult> results) {
         if (results == null || results.isEmpty()) {
             return "";
         }
-        LinkedHashSet<String> scopes = results.stream()
-                .map(this::fallbackScope)
-                .filter(scope -> !scope.isBlank())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        boolean hasDiagnostics = results.stream().anyMatch(result -> !analysisDiagnosticStatus(result).isBlank());
-        if (scopes.isEmpty() && !hasDiagnostics) {
+        boolean hasClassification = results.stream().anyMatch(this::hasLlmEvidenceClassification);
+        boolean hasDiagnostics = results.stream().anyMatch(result -> !directAnalysisDiagnosticStatus(result).isBlank());
+        if (!hasClassification && !hasDiagnostics) {
             return "";
         }
         List<String> checks = new ArrayList<>();
-        checks.add("Evidence validation: fallbackScope values describe separate mechanisms; do not chain them unless cited code directly shows the call or condition.");
+        checks.add("Evidence validation: LLM evidence classification describes what each chunk can prove; do not use unclassified chunks as proof for phase-specific claims.");
         checks.add("rank/evidenceScore are relevance signals, not execution order.");
         checks.add("Guard clauses and early returns are failure handling only when cited code or diagnostic metadata reports failed, partial, skipped, unavailable, or exception.");
-        if (scopes.contains("GRAPH_ANALYSIS") && scopes.contains("ANSWER_GENERATION")) {
-            checks.add("GRAPH_ANALYSIS fallback and ANSWER_GENERATION fallback are distinct; do not say graph analysis failure triggers answer fallback without direct call evidence.");
-        }
-        if (scopes.contains("GRAPH_ANALYSIS") && scopes.contains("SEARCH_EXPANSION")) {
-            checks.add("GRAPH_ANALYSIS fallback is indexing/analysis evidence; SEARCH_EXPANSION fallback is retrieval/traversal evidence.");
-        }
+        checks.add("retrievalSource=graph_expansion means the chunk was found through graph traversal; it is not graph persistence evidence.");
+        checks.add("GRAPH_STORAGE evidence requires code/schema that creates, inserts, updates, deletes, replaces, or activates graph nodes/edges.");
         if (hasDiagnostics) {
             checks.add("analysisDiagnosticStatus is diagnostic metadata for graph/index analysis evidence, not proof of runtime answer-generation fallback.");
             checks.add("If analysisDiagnosticLanguage or analysisDiagnosticStage does not match a language/framework named in the question, treat it as cross-language supporting evidence rather than the primary answer basis.");
@@ -3833,6 +4098,17 @@ public class CodeRagService {
     }
 
     private List<String> evidencePhases(CodeSearchResult result) {
+        if (result == null) {
+            return List.of();
+        }
+        String llmPhase = llmImplementationPhase(result);
+        if (!llmPhase.isBlank() && !"UNKNOWN".equals(llmPhase)) {
+            return List.of(llmPhase);
+        }
+        return List.of();
+    }
+
+    private List<String> heuristicEvidencePhases(CodeSearchResult result) {
         if (result == null) {
             return List.of();
         }
@@ -3864,7 +4140,7 @@ public class CodeRagService {
                 .toList();
     }
 
-    private String evidenceResponsibility(CodeSearchResult result) {
+    private String heuristicEvidenceResponsibility(CodeSearchResult result) {
         if (result == null) {
             return "unknown";
         }
@@ -3975,6 +4251,39 @@ public class CodeRagService {
             return "SUCCESS";
         }
         return "";
+    }
+
+    private String directAnalysisDiagnosticStatus(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return "";
+        }
+        for (String key : List.of("analysisDiagnosticStatus", "diagnosticStatus", "analysisStatus")) {
+            Object value = result.metadata().get(key);
+            String normalized = normalizeDiagnosticStatus(value == null ? "" : String.valueOf(value));
+            if (!normalized.isBlank()) {
+                return normalized;
+            }
+        }
+        return "";
+    }
+
+    private String directAnalysisDiagnosticScope(CodeSearchResult result) {
+        String scope = metadataString(result, "analysisDiagnosticScope", "diagnosticScope");
+        return scope.isBlank() && !directAnalysisDiagnosticStatus(result).isBlank() ? "GRAPH_ANALYSIS" : scope;
+    }
+
+    private String directAnalysisDiagnosticStage(CodeSearchResult result) {
+        String stage = metadataString(result, "analysisDiagnosticStage", "diagnosticStage", "stage");
+        return stage.isBlank() ? "" : stage.toUpperCase(Locale.ROOT);
+    }
+
+    private String directAnalysisDiagnosticLanguage(CodeSearchResult result) {
+        return normalizeDiagnosticLanguage(metadataString(result,
+                "analysisDiagnosticLanguage", "diagnosticLanguage", "language"));
+    }
+
+    private String directAnalysisDiagnosticAnalyzer(CodeSearchResult result) {
+        return metadataString(result, "analysisDiagnosticAnalyzer", "diagnosticAnalyzer", "analyzer");
     }
 
     private String normalizeDiagnosticStatus(String value) {
@@ -4130,6 +4439,57 @@ public class CodeRagService {
         if (result == null) {
             return "unknown";
         }
+        String llmKind = llmEvidenceKind(result);
+        if (!llmKind.isBlank()) {
+            return switch (llmKind) {
+                case "graph_relationship" -> "graph_relationship";
+                case "supporting_context" -> "supporting_context";
+                default -> "direct_code";
+            };
+        }
+        return "unknown";
+    }
+
+    private boolean hasLlmEvidenceClassification(CodeSearchResult result) {
+        return result != null
+                && result.metadata() != null
+                && "llm_adjudication".equals(String.valueOf(result.metadata().get("llmEvidenceClassificationSource")));
+    }
+
+    private String llmEvidenceKind(CodeSearchResult result) {
+        if (!hasLlmEvidenceClassification(result)) {
+            return "";
+        }
+        String kind = metadataString(result, "llmEvidenceKind");
+        return switch (kind) {
+            case "graph_relationship", "supporting_context", "direct_code" -> kind;
+            default -> "";
+        };
+    }
+
+    private String llmImplementationPhase(CodeSearchResult result) {
+        if (!hasLlmEvidenceClassification(result)) {
+            return "";
+        }
+        String phase = metadataString(result, "llmImplementationPhase");
+        return switch (phase) {
+            case "INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN" -> phase;
+            default -> "";
+        };
+    }
+
+    private String llmEvidenceResponsibility(CodeSearchResult result) {
+        if (!hasLlmEvidenceClassification(result)) {
+            return "";
+        }
+        String responsibility = metadataString(result, "llmEvidenceResponsibility");
+        return responsibility.isBlank() ? "unknown" : responsibility;
+    }
+
+    private String heuristicCitationKind(CodeSearchResult result) {
+        if (result == null) {
+            return "unknown";
+        }
         if (isGraphExpanded(result)) {
             Object kind = result.metadata().get("graphEvidenceKind");
             String graphKind = safe(kind == null ? null : String.valueOf(kind), "inferred");
@@ -4146,7 +4506,10 @@ public class CodeRagService {
     }
 
     private boolean isDirectCodeEvidence(CodeSearchResult result) {
-        return citationKind(result).startsWith("direct_code");
+        if (hasLlmEvidenceClassification(result)) {
+            return citationKind(result).startsWith("direct_code");
+        }
+        return heuristicCitationKind(result).startsWith("direct_code");
     }
 
     private String executionOrder(List<String> phases) {
@@ -4168,9 +4531,10 @@ public class CodeRagService {
     private int phaseOrder(String phase) {
         return switch (safe(phase, "")) {
             case "INDEXING" -> 0;
-            case "SEARCH_EXPANSION" -> 1;
-            case "RANKING" -> 2;
-            case "ANSWER_GENERATION" -> 3;
+            case "GRAPH_STORAGE" -> 1;
+            case "SEARCH_EXPANSION" -> 2;
+            case "RANKING" -> 3;
+            case "ANSWER_GENERATION" -> 4;
             default -> 99;
         };
     }
@@ -4178,9 +4542,10 @@ public class CodeRagService {
     private String phaseByOrder(int order) {
         return switch (order) {
             case 0 -> "INDEXING";
-            case 1 -> "SEARCH_EXPANSION";
-            case 2 -> "RANKING";
-            case 3 -> "ANSWER_GENERATION";
+            case 1 -> "GRAPH_STORAGE";
+            case 2 -> "SEARCH_EXPANSION";
+            case 3 -> "RANKING";
+            case 4 -> "ANSWER_GENERATION";
             default -> "";
         };
     }

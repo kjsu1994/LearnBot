@@ -5,7 +5,7 @@ if (-not $env:GEMINI_API_KEY) {
 }
 
 if (-not $env:GEMINI_MODEL) {
-    $env:GEMINI_MODEL = "gemini-3.5-flash"
+    $env:GEMINI_MODEL = "gemini-3.1-flash-lite"
 }
 
 if (-not $env:GEMINI_OLLAMA_PROXY_PORT) {

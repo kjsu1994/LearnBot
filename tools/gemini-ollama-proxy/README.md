@@ -8,7 +8,7 @@ It is intentionally isolated under `tools/gemini-ollama-proxy` and does not chan
 
 ```powershell
 $env:GEMINI_API_KEY = "제미나이키값"
-$env:GEMINI_MODEL = "gemini-3.5-flash"
+$env:GEMINI_MODEL = "gemini-3.1-flash-lite"
 .\tools\gemini-ollama-proxy\start.ps1
 ```
 튜닝부에 입력 

@@ -1779,6 +1779,7 @@ public class CodeRepository {
             metadata.put("graphTraversalRows", traversalRows);
             metadata.put("graphTraversalReachedHop", reachedHop);
             metadata.put("graphTraversalTruncated", truncated);
+            metadata.put("retrievalSource", "graph_expansion");
             CodeSearchResult enriched = new CodeSearchResult(
                     base.chunkId(), base.repositoryId(), base.fileId(), base.repositoryName(), base.filePath(),
                     base.chunkType(), base.symbolName(), base.className(), base.methodName(), base.namespaceName(),

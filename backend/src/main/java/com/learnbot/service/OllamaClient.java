@@ -106,12 +106,23 @@ public class OllamaClient {
     }
 
     public ChatResult chatResult(String systemPrompt, String userPrompt, ChatRole role, Integer maxOutputTokens, Duration timeout) {
+        return chatResult(systemPrompt, userPrompt, role, maxOutputTokens, timeout, null);
+    }
+
+    public ChatResult chatResult(
+            String systemPrompt,
+            String userPrompt,
+            ChatRole role,
+            Integer maxOutputTokens,
+            Duration timeout,
+            Object format
+    ) {
         List<AdminSettingsService.LlmSettings> candidates = candidates(role);
         RuntimeException lastFailure = null;
         for (int index = 0; index < candidates.size(); index++) {
             AdminSettingsService.LlmSettings settings = candidates.get(index);
             try {
-                return chatResultWith(settings, systemPrompt, userPrompt, index > 0, maxOutputTokens, timeout);
+                return chatResultWith(settings, systemPrompt, userPrompt, index > 0, maxOutputTokens, timeout, format);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
                 if (index < candidates.size() - 1) {
@@ -151,8 +162,8 @@ public class OllamaClient {
         return embeddingRequests.get();
     }
 
-    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout) {
-        Map<String, Object> body = chatRequestBody(settings, systemPrompt, userPrompt, false, maxOutputTokens);
+    private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout, Object format) {
+        Map<String, Object> body = chatRequestBody(settings, systemPrompt, userPrompt, false, maxOutputTokens, format);
         Map<String, Object> options = optionMap(maxOutputTokens);
         String keepAlive = keepAliveFor(settings.role());
 
@@ -268,6 +279,10 @@ public class OllamaClient {
     }
 
     private Map<String, Object> chatRequestBody(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean stream, Integer maxOutputTokens) {
+        return chatRequestBody(settings, systemPrompt, userPrompt, stream, maxOutputTokens, null);
+    }
+
+    private Map<String, Object> chatRequestBody(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean stream, Integer maxOutputTokens, Object format) {
         Map<String, Object> options = optionMap(maxOutputTokens);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", settings.model());
@@ -277,6 +292,9 @@ public class OllamaClient {
                 Map.of("role", "user", "content", userPrompt)
         ));
         body.put("options", options);
+        if (format != null) {
+            body.put("format", format);
+        }
         putIfConfigured(body, "keep_alive", keepAliveFor(settings.role()));
         return body;
     }

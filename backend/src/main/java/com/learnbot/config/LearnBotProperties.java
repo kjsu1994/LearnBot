@@ -626,9 +626,9 @@ public class LearnBotProperties {
             @Min(1)
             private int queryEmbeddingCacheTtlSeconds = 3600;
             @Min(1)
-            private int codeEvidenceAdjudicationMaxCandidates = 10;
+            private int codeEvidenceAdjudicationMaxCandidates = 40;
             @Min(1)
-            private int codeEvidenceAdjudicationMaxOutputTokens = 512;
+            private int codeEvidenceAdjudicationMaxOutputTokens = 1024;
             @Min(1)
             private int codeEvidenceAdjudicationTimeoutSeconds = 8;
             private Reranker reranker = new Reranker();
