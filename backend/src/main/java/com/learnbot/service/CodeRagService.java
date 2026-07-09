@@ -433,12 +433,12 @@ public class CodeRagService {
                 .findFirst()
                 .orElse("");
         if (!query.isBlank()) {
-            return query;
+            return fallback + "\n\nRetrieval hints from route decision:\n" + query;
         }
         String symbol = safe(routeDecision.targetSymbol(), "");
         String file = safe(routeDecision.targetFile(), "");
-        String combined = (file + " " + symbol + " " + fallback).trim();
-        return combined.isBlank() ? fallback : combined;
+        String combined = (file + " " + symbol).trim();
+        return combined.isBlank() ? fallback : fallback + "\n\nRetrieval hints from route decision:\n" + combined;
     }
 
     private String routedMode(String requestedMode, RagPipelineService.CodeRagRouteDecision routeDecision) {
@@ -632,23 +632,36 @@ public class CodeRagService {
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
-        int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 12 : limit + 8);
+        int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 6 : limit + 4);
         CodeQueryPlan deterministicPlan = codeQueryPlan(question, questionMode);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
-        for (String query : literalEvidenceQueries(question)) {
-            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
-        }
-        for (String query : conversationAnchorQueries(question, conversationContext)) {
-            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
-        }
-        for (String query : deterministicPlan.auxiliaryQueries()) {
-            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
-        }
-        if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
-            for (String query : codeOverviewQueries(question, questionMode)) {
+        RagPipelineService.CodeEvidenceSearchPlan searchPlan = pipelineService.planCodeEvidenceSearch(
+                question,
+                questionMode.value(),
+                repositoryMapContext(repositoryId, selectedSpaceId, spaceIds, questionMode),
+                4
+        );
+        int plannedCandidateCount = collectSearchPlanEvidence(repositoryId, selectedSpaceId, spaceIds, questionMode, searchLimit, searchPlan, merged);
+        boolean useServerFallback = !searchPlan.usable() || searchPlan.confidence() < 0.45 || merged.size() < Math.max(10, limit);
+        if (useServerFallback) {
+            for (String query : literalEvidenceQueries(question)) {
                 collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
             }
+            for (String query : conversationAnchorQueries(question, conversationContext)) {
+                collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+            }
+            for (String query : deterministicPlan.auxiliaryQueries()) {
+                collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+            }
+            if (questionMode == CodeQuestionMode.OVERVIEW || questionMode == CodeQuestionMode.CALL_FLOW) {
+                for (String query : codeOverviewQueries(question, questionMode)) {
+                    collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged);
+                }
+            }
         }
+        log.info("Code RAG search plan attempted={} usable={} confidence={} queries={} candidatesAdded={} serverFallback={} reason={} question={}",
+                searchPlan.attempted(), searchPlan.usable(), searchPlan.confidence(), searchPlan.queries(),
+                plannedCandidateCount, useServerFallback, safe(searchPlan.reason(), ""), abbreviate(question, 180));
         List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit, null);
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
                 question,
@@ -672,7 +685,8 @@ public class CodeRagService {
                 question,
                 questionMode.value(),
                 results,
-                4
+                2,
+                searchPlan.checklist()
         );
         int followUpQueriesUsed = 0;
         boolean followUpStoppedEarly = false;
@@ -709,7 +723,9 @@ public class CodeRagService {
                     "llm evidence follow-up: " + safe(followUpPlan.reason(), "")
             );
         }
-        List<String> completenessQueries = contextCompletenessFollowUpQueries(question, questionMode, results);
+        List<String> completenessQueries = followUpPlan.attempted()
+                ? List.of()
+                : contextCompletenessFollowUpQueries(question, questionMode, results);
         if (!completenessQueries.isEmpty() && pipelineService.maxIterations() > 1) {
             for (String query : completenessQueries) {
                 followUpCandidateCount += collectFollowUpEvidenceForQuery(
@@ -765,6 +781,75 @@ public class CodeRagService {
                     selectedPathSummary(results));
         }
         return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, followUpPlan, followUpQueriesUsed, followUpCandidateCount, iteration, merged.size(), pinnedCandidateCount, pinnedUsedCount);
+    }
+
+    private int collectSearchPlanEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            CodeQuestionMode questionMode,
+            int searchLimit,
+            RagPipelineService.CodeEvidenceSearchPlan searchPlan,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        if (searchPlan == null || !searchPlan.usable() || searchPlanQueries(searchPlan).isEmpty()) {
+            return 0;
+        }
+        int before = merged.size();
+        int perQueryLimit = Math.max(6, Math.min(searchLimit, 18));
+        for (String query : searchPlanQueries(searchPlan)) {
+            collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, query, questionMode, perQueryLimit, merged);
+        }
+        return Math.max(0, merged.size() - before);
+    }
+
+    private List<String> searchPlanQueries(RagPipelineService.CodeEvidenceSearchPlan searchPlan) {
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        if (searchPlan != null) {
+            addAllNonBlank(queries, searchPlan.queries());
+            for (RagPipelineService.CodeEvidenceChecklistItem item : searchPlan.checklist()) {
+                addAllNonBlank(queries, item.queries());
+            }
+        }
+        return queries.stream().limit(8).toList();
+    }
+
+    private void addAllNonBlank(Set<String> output, List<String> values) {
+        if (output == null || values == null) {
+            return;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                output.add(value.trim());
+            }
+        }
+    }
+
+    private String repositoryMapContext(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            CodeQuestionMode questionMode
+    ) {
+        try {
+            List<CodeSearchResult> context = collectEvidence(
+                    repositoryId,
+                    selectedSpaceId,
+                    spaceIds,
+                    CodeProjectContextBuilder.CONTEXT_FILE_PATH + " project_structure repository_summary directory_summary file_summary",
+                    questionMode,
+                    8
+            );
+            return context.stream()
+                    .filter(result -> result != null && result.filePath() != null
+                            && result.filePath().equals(CodeProjectContextBuilder.CONTEXT_FILE_PATH))
+                    .limit(8)
+                    .map(result -> safe(result.chunkType(), "") + " " + safe(result.symbolName(), "") + "\n"
+                            + truncate(result.content(), 900))
+                    .collect(Collectors.joining("\n\n"));
+        } catch (RuntimeException ex) {
+            return "";
+        }
     }
 
     private boolean shouldUseEvidenceFallback(CodeRetrieval retrieval) {
@@ -1112,10 +1197,10 @@ public class CodeRagService {
                 merge(merged, markLlmFollowUpEvidence(result, groundedQuery));
             }
         }
-        String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + query + " " + evidenceGroup + " " + originalQuestion));
-        if (!normalizedArea.isBlank()) {
+        if (merged.size() == before) {
+            String normalizedArea = normalizeQuestionText(splitIdentifierTerms(queryArea + " " + query + " " + evidenceGroup + " " + originalQuestion));
             for (CodeSearchResult result : llmAreaFollowUpEvidence(repositoryId, selectedSpaceId, spaceIds, normalizedArea, limit)) {
-                merge(merged, markLlmFollowUpEvidence(result, "llm coverage area grounded follow-up"));
+                merge(merged, markLlmFollowUpEvidence(result, "llm coverage area focused follow-up"));
             }
         }
         return Math.max(0, merged.size() - before);
@@ -1162,26 +1247,23 @@ public class CodeRagService {
         String areaTerms = String.join(" ", coverageTerms(normalizedArea));
         if (!areaTerms.isBlank()) {
             queries.add(sanitized + " " + areaTerms);
-            queries.add("code implementation " + areaTerms);
         }
         List<String> groupTerms = evidenceGroupQueryTerms(evidenceGroup);
         if (!groupTerms.isEmpty()) {
             String groupQuery = String.join(" ", groupTerms);
             queries.add(sanitized + " " + groupQuery);
-            queries.add("code implementation " + groupQuery);
             queries.add(groupQuery + " " + String.join(" ", resourceIdentifierQueries(queryArea + " " + sanitized + " " + originalQuestion)));
         }
         List<String> resources = resourceIdentifierQueries(queryArea + " " + sanitized + " " + originalQuestion);
         if (!resources.isEmpty()) {
             String resourceQuery = String.join(" ", resources);
             queries.add(resourceQuery);
-            queries.add("insert update delete merge select " + resourceQuery);
         }
         return queries.stream()
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .distinct()
-                .limit(8)
+                .limit(3)
                 .toList();
     }
 
@@ -1365,10 +1447,18 @@ public class CodeRagService {
     ) {
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
         ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
+        int selectionLimit = candidateSlateLimit(limit);
         List<CodeSearchResult> selected = ranked.stream()
-                .limit(limit)
+                .limit(selectionLimit)
                 .toList();
-        return ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, limit);
+        return ensureLlmPlannedCoverage(question, followUpPlan, ranked, selected, selectionLimit);
+    }
+
+    private int candidateSlateLimit(int answerLimit) {
+        int configured = properties == null
+                ? 40
+                : properties.getRag().getPipeline().getCodeEvidenceAdjudicationMaxCandidates();
+        return Math.max(1, Math.min(Math.max(answerLimit, configured), 40));
     }
 
     private int minCodeEvidence(CodeQuestionMode questionMode) {
@@ -1388,7 +1478,7 @@ public class CodeRagService {
             int limit
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
-        int searchLimit = questionMode == CodeQuestionMode.OVERVIEW ? Math.min(30, limit + 12) : Math.min(30, limit + 8);
+        int searchLimit = questionMode == CodeQuestionMode.OVERVIEW ? Math.min(24, limit + 6) : Math.min(20, limit + 4);
         for (CodeSearchResult result : searchService.search(repositoryId, question, searchLimit, spaceIds, selectedSpaceId)) {
             merge(merged, result);
         }
@@ -1423,7 +1513,8 @@ public class CodeRagService {
         int limit = pipelineService.codeContextLimit(questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, results);
         ranked = applyAnalysisDiagnosticAffinityRanking(question, ranked);
-        RagPipelineService.CodeEvidenceAdjudication adjudication = pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit);
+        List<RagPipelineService.CodeEvidenceChecklistItem> checklist = followUpPlan == null ? List.of() : followUpPlan.checklist();
+        RagPipelineService.CodeEvidenceAdjudication adjudication = pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit, checklist);
         if (adjudication.used()) {
             ranked = adjudication.results();
             List<CodeSearchResult> selected = preservePinnedEvidence(ranked, llmEvidenceSlateSelection(ranked, limit), limit);
@@ -2266,6 +2357,10 @@ public class CodeRagService {
         metadata.put("llmCoverageReason", "llm evidence coverage plan");
         if (role != null && !role.isBlank()) {
             metadata.put("llmCoverageRole", role);
+        }
+        String fallbackScope = fallbackScope(result);
+        if (!fallbackScope.isBlank()) {
+            metadata.put("llmCoverageFallbackScope", fallbackScope);
         }
         return new CodeSearchResult(
                 result.chunkId(),
@@ -3215,6 +3310,12 @@ public class CodeRagService {
                 metadata.put("debugFallbackScope", fallbackScope);
             }
         }
+        copyMetadata(result.metadata(), metadata,
+                "llmCoverageArea",
+                "llmCoverageRequired",
+                "llmCoverageReason",
+                "llmCoverageRole",
+                "llmCoverageFallbackScope");
         String analysisDiagnosticStatus = directAnalysisDiagnosticStatus(result);
         if (!analysisDiagnosticStatus.isBlank()) {
             metadata.put("analysisDiagnosticStatus", analysisDiagnosticStatus);
@@ -3233,6 +3334,17 @@ public class CodeRagService {
             }
         }
         return Map.copyOf(metadata);
+    }
+
+    private void copyMetadata(Map<String, Object> source, Map<String, Object> target, String... keys) {
+        if (source == null || target == null || keys == null) {
+            return;
+        }
+        for (String key : keys) {
+            if (key != null && source.containsKey(key)) {
+                target.put(key, source.get(key));
+            }
+        }
     }
 
     private String preview(String content) {

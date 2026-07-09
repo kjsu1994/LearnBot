@@ -2016,7 +2016,7 @@ class CodeRagServiceTest {
                 .extracting(CodeEvidence::filePath)
                 .contains("backend/src/main/java/com/learnbot/service/CodeRagService.java");
         assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("followUpQueriesUsed=3"));
+                assertThat(note).contains("followUpQueriesUsed=2"));
         verify(searchService, atLeastOnce()).runtimeRoleSearch(
                 isNull(),
                 argThat(pattern -> pattern.contains("retriev") || pattern.contains("generation") || pattern.contains("answer")),

@@ -246,6 +246,106 @@ class RagPipelineServiceTest {
     }
 
     @Test
+    void codeEvidenceSearchPlanParsesChecklistItems() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RuntimeTuningService runtimeTuningService = mock(RuntimeTuningService.class);
+        when(runtimeTuningService.codeEvidenceDecisionModel()).thenReturn(1);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties(), runtimeTuningService);
+
+        when(ollamaClient.chatResult(
+                anyString(),
+                anyString(),
+                eq(OllamaClient.ChatRole.PRIMARY),
+                anyInt(),
+                any(Duration.class),
+                any()
+        )).thenReturn(new OllamaClient.ChatResult("""
+                {"usable":true,"confidence":0.86,"queries":["/api/code/ask CodeController ask CodeRagService"],"checklist":[{"claimId":"request-entrypoint","evidenceGroup":"request_intake","goal":"find endpoint handling /api/code/ask","queries":["CodeController ask /api/code/ask"]},{"claimId":"graph-expansion","evidenceGroup":"graph_traversal","goal":"find graph expansion implementation","queries":["CodeSearchService expandGraph graphRelatedChunks"]}],"reason":"phase-specific plan"}
+                """, "stop", true, 200, 160, "http://ollama", "test", "primary", false));
+
+        RagPipelineService.CodeEvidenceSearchPlan plan = service.planCodeEvidenceSearch(
+                "Explain /api/code/ask from controller to graph expansion and answer generation",
+                "flow",
+                "__learnbot__/project-context.md",
+                4
+        );
+
+        assertThat(plan.usable()).isTrue();
+        assertThat(plan.checklist()).hasSize(2);
+        assertThat(plan.checklist().get(0).claimId()).isEqualTo("request-entrypoint");
+        assertThat(plan.checklist().get(1).evidenceGroup()).isEqualTo("graph_traversal");
+        assertThat(plan.checklist().get(1).queries()).containsExactly("CodeSearchService expandGraph graphRelatedChunks");
+    }
+
+    @Test
+    void codeEvidenceFollowUpPromptCarriesChecklistForward() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        CodeSearchResult candidate = new CodeSearchResult(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "LearnBot",
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "method",
+                "askPrioritized",
+                "CodeRagService",
+                "askPrioritized",
+                "com.learnbot.service",
+                null,
+                null,
+                1,
+                170,
+                220,
+                "private CodeAskResponse askPrioritized(...) { ... }",
+                0.72,
+                Map.of()
+        );
+        List<RagPipelineService.CodeEvidenceChecklistItem> checklist = List.of(
+                new RagPipelineService.CodeEvidenceChecklistItem(
+                        "graph-expansion",
+                        "graph_traversal",
+                        "find concrete graph expansion implementation",
+                        List.of("CodeSearchService expandGraph graphRelatedChunks")
+                )
+        );
+
+        when(ollamaClient.chatResult(
+                anyString(),
+                anyString(),
+                eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(),
+                any(Duration.class),
+                any()
+        )).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":false,"missingAreas":["graph expansion"],"followUpQueries":["CodeSearchService expandGraph"],"queryAreas":["graph expansion"],"requiredEvidenceGroups":["graph_traversal"],"reason":"need concrete traversal evidence"}
+                """, "stop", true, 120, 90, "http://ollama", "test", "auxiliary", false));
+
+        RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
+                "Explain /api/code/ask graph expansion",
+                "flow",
+                List.of(candidate),
+                2,
+                checklist
+        );
+
+        assertThat(plan.checklist()).containsExactlyElementsOf(checklist);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(
+                anyString(),
+                promptCaptor.capture(),
+                eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(),
+                any(Duration.class),
+                any()
+        );
+        assertThat(promptCaptor.getValue())
+                .contains("Required evidence checklist")
+                .contains("graph-expansion")
+                .contains("find concrete graph expansion implementation");
+    }
+
+    @Test
     void codeEvidenceCanBeSufficientWhenStructuredEvidenceIsStrongEvenIfTermsDiffer() {
         RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), new LearnBotProperties());
         CodeSearchResult result = new CodeSearchResult(

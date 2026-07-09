@@ -31,6 +31,7 @@ public class RuntimeTuningService {
     public static final String OLLAMA_MAX_LOADED_MODELS = "OLLAMA_MAX_LOADED_MODELS";
     public static final String OLLAMA_NUM_PARALLEL = "OLLAMA_NUM_PARALLEL";
     public static final String RERANKER_ENABLED = "LEARNBOT_RERANKER_ENABLED";
+    public static final String CODE_EVIDENCE_DECISION_MODEL = "RAG_PIPELINE_CODE_EVIDENCE_DECISION_MODEL";
 
     private final AppSettingsRepository settingsRepository;
     private final LearnBotProperties properties;
@@ -165,6 +166,10 @@ public class RuntimeTuningService {
 
     public int ollamaNumParallel() {
         return value(OLLAMA_NUM_PARALLEL);
+    }
+
+    public int codeEvidenceDecisionModel() {
+        return value(CODE_EVIDENCE_DECISION_MODEL);
     }
 
     public boolean rerankerEnabled() {
@@ -341,6 +346,7 @@ public class RuntimeTuningService {
                 new TuningDefinition(OVERVIEW_MAX_CODE_CATEGORIES, "Code overview category count", "Different code evidence categories for architecture and flow answers.", "Overview", "range", overview.getMaxCodeCategories(), 4, 24, 1, false, "Higher values broaden code answers and may add noise.", OVERVIEW_MAX_CODE_CATEGORIES),
                 new TuningDefinition(OVERVIEW_MAX_RECURSIVE_ITERATIONS, "Overview search iterations", "Additional overview search passes.", "Overview", "select", overview.getMaxRecursiveIterations(), 1, 5, 1, false, "Higher values may improve quality but increase latency.", OVERVIEW_MAX_RECURSIVE_ITERATIONS),
                 new TuningDefinition(LLM_MAX_OUTPUT_TOKENS, "Max answer length", "Maximum generated answer tokens. 0 means no explicit limit.", "LLM", "number", properties.getOllama().getMaxOutputTokens(), 0, 4096, 128, false, "Too low can truncate answers; too high may be slower.", LLM_MAX_OUTPUT_TOKENS),
+                new TuningDefinition(CODE_EVIDENCE_DECISION_MODEL, "Code evidence decision model", "Model used for code evidence sufficiency and final evidence selection.", "RAG", "select", pipeline.getCodeEvidenceDecisionModel(), 0, 1, 1, false, "0 uses the auxiliary model for speed. 1 uses the primary model for better evidence judgment.", CODE_EVIDENCE_DECISION_MODEL),
                 new TuningDefinition(OLLAMA_MAX_LOADED_MODELS, "Loaded model count", "Number of models kept loaded by Ollama.", "Ollama", "select", envInt(OLLAMA_MAX_LOADED_MODELS, 1), 1, 4, 1, true, "Use 1 unless VRAM/RAM is sufficient.", OLLAMA_MAX_LOADED_MODELS),
                 new TuningDefinition(OLLAMA_NUM_PARALLEL, "Parallel Ollama requests", "Parallel requests handled by Ollama.", "Ollama", "select", envInt(OLLAMA_NUM_PARALLEL, 1), 1, 8, 1, true, "Use 1 on small machines; increase only on larger GPU servers.", OLLAMA_NUM_PARALLEL)
         );

@@ -610,7 +610,6 @@ public class LearnBotProperties {
             private boolean answerRepairEnabled = true;
             private boolean queryEmbeddingCacheEnabled = true;
             private boolean codeEvidenceAdjudicationEnabled = true;
-
             @Min(1)
             private int codeRouteTimeoutSeconds = 20;
 
@@ -619,6 +618,12 @@ public class LearnBotProperties {
 
             @Min(1)
             private int codeEvidenceFollowUpTimeoutSeconds = 12;
+
+            /**
+             * 0 = auxiliary model, 1 = primary model.
+             * Evidence follow-up/adjudication are accuracy-sensitive, so the default is primary.
+             */
+            private int codeEvidenceDecisionModel = 1;
 
             @Min(1)
             private int queryEmbeddingCacheMaxEntries = 1024;
@@ -807,6 +812,14 @@ public class LearnBotProperties {
 
             public void setCodeEvidenceFollowUpTimeoutSeconds(int codeEvidenceFollowUpTimeoutSeconds) {
                 this.codeEvidenceFollowUpTimeoutSeconds = codeEvidenceFollowUpTimeoutSeconds;
+            }
+
+            public int getCodeEvidenceDecisionModel() {
+                return codeEvidenceDecisionModel;
+            }
+
+            public void setCodeEvidenceDecisionModel(int codeEvidenceDecisionModel) {
+                this.codeEvidenceDecisionModel = codeEvidenceDecisionModel;
             }
 
             public int getQueryEmbeddingCacheMaxEntries() {

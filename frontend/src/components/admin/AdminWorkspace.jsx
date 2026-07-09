@@ -18,8 +18,16 @@ const tuningText = {
   LEARNBOT_RAG_OVERVIEW_MAX_CODE_CATEGORIES: ['코드 개요 카테고리 수', '코드 구조/흐름 질문에서 서로 다른 범주의 근거를 최대 몇 개까지 쓸지 정합니다.', '높을수록 구조 답변이 풍부해지지만 잡음도 늘 수 있습니다.'],
   LEARNBOT_RAG_OVERVIEW_MAX_RECURSIVE_ITERATIONS: ['개요 탐색 반복 횟수', '근거가 부족할 때 추가 탐색을 몇 번까지 허용할지 정합니다.', '높을수록 품질은 좋아질 수 있지만 지연 시간이 늘어납니다.'],
   LLM_MAX_OUTPUT_TOKENS: ['답변 최대 길이', '모델이 생성할 수 있는 답변 토큰 상한입니다. 0은 제한 없음입니다.', '[0 = 제한 없음] 모델에 최대 생성 길이 옵션을 보내지 않습니다. 값이 낮으면 답변이 잘릴 수 있고, 높으면 응답이 느려질 수 있습니다.'],
+  RAG_PIPELINE_CODE_EVIDENCE_DECISION_MODEL: ['코드 evidence 판단 모델', '코드 근거 충분성 판단과 최종 근거 선택에 사용할 모델입니다.', '정확은 메인모델을 사용해 품질을 우선하고, 빠름은 보조모델을 사용해 지연 시간을 줄입니다.'],
   OLLAMA_MAX_LOADED_MODELS: ['동시 로드 모델 수', 'Ollama가 메모리에 동시에 올려둘 모델 수입니다.', 'VRAM/RAM이 충분하지 않으면 1을 권장합니다.'],
   OLLAMA_NUM_PARALLEL: ['Ollama 병렬 요청 수', 'Ollama가 한 모델에서 동시에 처리할 요청 수입니다.', '작은 장비는 1, 큰 GPU 서버만 2 이상을 권장합니다.'],
+};
+
+const tuningSelectText = {
+  RAG_PIPELINE_CODE_EVIDENCE_DECISION_MODEL: {
+    0: '빠름 (보조모델)',
+    1: '정확 (메인모델)',
+  },
 };
 
 const presetText = {
@@ -1167,7 +1175,7 @@ function AdminWorkspace({
                       {isSelect ? (
                         <select value={value} onChange={(event) => updateTuningValue(setting.key, event.target.value)}>
                           {Array.from({ length: Math.floor((setting.max - setting.min) / setting.step) + 1 }, (_, index) => setting.min + index * setting.step).map((option) => (
-                            <option value={option} key={option}>{option}</option>
+                            <option value={option} key={option}>{tuningSelectText[setting.key]?.[option] || option}</option>
                           ))}
                         </select>
                       ) : (
@@ -1190,7 +1198,9 @@ function AdminWorkspace({
                           />
                         </div>
                       )}
-                      <span className="tuning-meta">기본값 {setting.defaultValue} · {setting.envKey}</span>
+                      <span className="tuning-meta">
+                        기본값 {tuningSelectText[setting.key]?.[setting.defaultValue] || setting.defaultValue} · {setting.envKey}
+                      </span>
                     </label>
                   );
                 })}
