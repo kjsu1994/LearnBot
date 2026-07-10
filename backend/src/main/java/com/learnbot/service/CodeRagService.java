@@ -694,23 +694,11 @@ public class CodeRagService {
         int followUpQueriesUsed = 0;
         boolean followUpStoppedEarly = false;
 
-        if (!followUpPlan.enough() && !followUpPlan.followUpQueries().isEmpty() && pipelineService.maxIterations() > 1) {
-            for (int index = 0; index < followUpPlan.followUpQueries().size(); index++) {
-                if (followUpQueriesUsed > 0 && requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
-                    followUpStoppedEarly = true;
-                    break;
-                }
-                String query = followUpPlan.followUpQueries().get(index);
-                String queryArea = index < followUpPlan.queryAreas().size() ? followUpPlan.queryAreas().get(index) : "";
-                String evidenceGroup = followUpEvidenceGroup(followUpPlan, index, queryArea + " " + query);
-                RagPipelineService.CodeSearchOperation operation = index < followUpPlan.operations().size()
-                        ? followUpPlan.operations().get(index)
-                        : new RagPipelineService.CodeSearchOperation("hybrid_search", query, queryArea, evidenceGroup);
-                followUpCandidateCount += executeFollowUpSearchOperation(repositoryId, selectedSpaceId, spaceIds, question, operation, evidenceGroup, questionMode, searchLimit, merged);
+        if (!followUpPlan.enough() && !followUpPlan.operations().isEmpty() && pipelineService.maxIterations() > 1) {
+            for (RagPipelineService.CodeSearchOperation operation : followUpPlan.operations()) {
+                followUpCandidateCount += executeFollowUpSearchOperation(
+                        repositoryId, selectedSpaceId, spaceIds, operation, questionMode, searchLimit, merged);
                 followUpQueriesUsed++;
-            }
-            if (requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
-                followUpStoppedEarly = followUpStoppedEarly || followUpQueriesUsed < followUpPlan.followUpQueries().size();
             }
             iteration = 2;
             results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
@@ -1321,39 +1309,39 @@ public class CodeRagService {
             UUID repositoryId,
             UUID selectedSpaceId,
             List<UUID> spaceIds,
-            String originalQuestion,
             RagPipelineService.CodeSearchOperation operation,
-            String fallbackEvidenceGroup,
             CodeQuestionMode questionMode,
             int limit,
             Map<UUID, CodeSearchResult> merged
     ) {
-        String query = sanitizeFollowUpQuery(operation.query());
+        String query = safe(operation.query(), "").trim();
         if (query.isBlank()) {
             return 0;
         }
-        String area = safe(operation.area(), "");
-        String evidenceGroup = safe(operation.evidenceGroup(), "").isBlank() ? fallbackEvidenceGroup : operation.evidenceGroup();
-        if ("hybrid_search".equals(operation.type())) {
-            return collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, originalQuestion,
-                    query, area, evidenceGroup, questionMode, limit, merged);
-        }
         int before = merged.size();
-        if ("reference_search".equals(operation.type())) {
-            try {
+        try {
+            List<CodeSearchResult> results;
+            if ("reference_search".equals(operation.type())) {
                 var references = referenceService.findReferences(repositoryId, selectedSpaceId, spaceIds, query, limit);
-                java.util.stream.Stream.concat(references.definitions().stream(), references.references().stream())
-                        .forEach(result -> merge(merged, markLlmFollowUpEvidence(result, operation.type() + ": " + query)));
-            } catch (IllegalArgumentException ignored) {
-                return 0;
+                results = java.util.stream.Stream.concat(references.definitions().stream(), references.references().stream()).toList();
+            } else if ("hybrid_search".equals(operation.type())) {
+                results = searchService.searchWithoutGraph(
+                        repositoryId, query, limit, spaceIds, selectedSpaceId, graphSearchIntent(questionMode));
+            } else {
+                results = searchService.cheapSearch(repositoryId, query, limit, spaceIds, selectedSpaceId);
             }
-            return Math.max(0, merged.size() - before);
+            for (CodeSearchResult result : results == null ? List.<CodeSearchResult>of() : results) {
+                merge(merged, markLlmFollowUpEvidence(result, operation.type() + ": " + query));
+            }
+            int added = Math.max(0, merged.size() - before);
+            log.info("Code RAG follow-up operation type={} query={} status=completed candidatesAdded={}",
+                    operation.type(), abbreviate(query, 160), added);
+            return added;
+        } catch (RuntimeException ex) {
+            log.info("Code RAG follow-up operation type={} query={} status=failed reason={}",
+                    operation.type(), abbreviate(query, 160), ex.getClass().getSimpleName());
+            return 0;
         }
-        List<CodeSearchResult> results = searchService.cheapSearch(repositoryId, query, limit, spaceIds, selectedSpaceId);
-        for (CodeSearchResult result : results == null ? List.<CodeSearchResult>of() : results) {
-            merge(merged, markLlmFollowUpEvidence(result, operation.type() + ": " + query));
-        }
-        return Math.max(0, merged.size() - before);
     }
 
     private int expandGraphEvidenceOnce(
@@ -4148,7 +4136,7 @@ public class CodeRagService {
         if (content.isBlank()) {
             return defaultMaxChars;
         }
-        return Math.min(Math.max(defaultMaxChars, content.length()), 3600);
+        return Math.max(defaultMaxChars, content.length());
     }
 
     private boolean isCoreFullContextCandidate(String question, CodeQuestionMode questionMode, CodeSearchResult result) {
@@ -4182,50 +4170,9 @@ public class CodeRagService {
     }
 
     private CodeExcerpt codeExcerptInfo(String question, CodeSearchResult result, int maxChars) {
-        String content = result == null ? "" : result.content();
-        String compact = content == null ? "" : content.replaceAll("\\R{3,}", "\n\n").trim();
-        if (compact.length() <= maxChars) {
-            return new CodeExcerpt(compact, "FULL_CHUNK", true, false, resultLineStart(result), resultLineEnd(result));
-        }
-
-        List<String> lines = compact.lines()
-                .map(String::stripTrailing)
-                .filter(line -> !line.isBlank())
-                .toList();
-        List<String> terms = codeQueryTerms(question, result);
-        Map<Integer, String> selected = new LinkedHashMap<>();
-        for (int index = 0; index < lines.size(); index++) {
-            String normalizedLine = normalizeCodeText(lines.get(index));
-            boolean matches = terms.stream().anyMatch(normalizedLine::contains);
-            if (!matches) {
-                continue;
-            }
-            for (int offset = -1; offset <= 1; offset++) {
-                int selectedIndex = index + offset;
-                if (selectedIndex >= 0 && selectedIndex < lines.size()) {
-                    selected.putIfAbsent(selectedIndex, lines.get(selectedIndex));
-                }
-            }
-            if (selected.size() >= 18) {
-                break;
-            }
-        }
-
-        boolean focused = !selected.isEmpty();
-        String excerpt = focused
-                ? selected.values().stream().collect(Collectors.joining("\n"))
-                : compact.substring(0, Math.min(compact.length(), maxChars));
-        if (excerpt.length() > maxChars) {
-            excerpt = excerpt.substring(0, maxChars);
-        }
-        int startLine = focused
-                ? resultLineStart(result) + selected.keySet().stream().mapToInt(Integer::intValue).min().orElse(0)
-                : resultLineStart(result);
-        int endLine = focused
-                ? resultLineStart(result) + selected.keySet().stream().mapToInt(Integer::intValue).max().orElse(0)
-                : resultLineStart(result) + Math.max(0, (int) excerpt.lines().count() - 1);
-        String text = excerpt.stripTrailing() + (excerpt.length() < compact.length() ? "\n..." : "");
-        return new CodeExcerpt(text, focused ? "FOCUSED_EXCERPT" : "TRUNCATED_CHUNK", false, true, startLine, endLine);
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(question, result, maxChars);
+        return new CodeExcerpt(excerpt.text(), excerpt.kind(), excerpt.contentComplete(), excerpt.omittedByBudget(),
+                excerpt.lineStart(), excerpt.lineEnd());
     }
 
     private int resultLineStart(CodeSearchResult result) {

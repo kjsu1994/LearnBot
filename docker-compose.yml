@@ -128,6 +128,8 @@ services:
     logging: *default-logging
 
   backend:
+    extra_hosts:
+      - "host.docker.internal:${LEARNBOT_HOST_GATEWAY:-host-gateway}"
     container_name: learnbot-backend
     build:
       context: ./backend

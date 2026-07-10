@@ -760,7 +760,7 @@ public class RagPipelineService {
                     .append(safe(result.methodName())).append(" ")
                     .append(safe(result.symbolName())).append("\n")
                     .append("Excerpt:\n")
-                    .append(trimForPrompt(result.content(), previewExcerptChars))
+                    .append(EvidenceExcerptSelector.select(question, result, previewExcerptChars).text())
                     .append("\n\n");
         }
         prompt.append("Return JSON only.");
@@ -886,7 +886,7 @@ public class RagPipelineService {
                     .append(safe(result.methodName())).append(" ")
                     .append(safe(result.symbolName())).append("\n")
                     .append("Excerpt:\n")
-                    .append(trimForPrompt(result.content(), adjudicationExcerptChars(candidates.size())))
+                    .append(EvidenceExcerptSelector.select(question, result, adjudicationExcerptChars(candidates.size())).text())
                     .append("\n\n");
         }
         prompt.append("Return JSON only.");

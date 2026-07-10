@@ -221,7 +221,7 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"followUpQueries\":[\"runtime RAG retrieval context construction model answer generation\"],\"queryAreas\":[\"answer generation\"],\"reason\":\"initial evidence lacks answer generation\"}")
+                        chat("{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks answer generation\"}")
                 );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
@@ -2093,13 +2093,15 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"context construction\",\"answer generation flow\"],\"followUpQueries\":[\"backend/src/main/java/com/learnbot/service/RetrievalService.java: how does retrieval query indexed chunks?\",\"backend/src/main/java/com/learnbot/service/ContextConstructionService.java: how is retrieved context merged?\",\"backend/src/main/java/com/learnbot/service/AnswerGenerationService.java: how does the model generate answers from context?\"],\"queryAreas\":[\"retrieval pipeline\",\"context construction\",\"answer generation with context\"],\"reason\":\"initial evidence lacks runtime RAG answer flow\"}")
+                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"answer generation flow\"],\"operations\":[{\"type\":\"hybrid_search\",\"query\":\"runtime RAG retrieval pipeline\",\"area\":\"retrieval pipeline\",\"evidenceGroup\":\"orchestration\"},{\"type\":\"hybrid_search\",\"query\":\"runtime RAG answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks runtime RAG answer flow\"}")
                 );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
                     return List.of(indexing, conversationStore, finalGate);
                 });
         when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(runtimeRag));
+        when(searchService.searchWithoutGraph(isNull(), anyString(), anyInt(), anyList(), isNull(), any()))
                 .thenReturn(List.of(runtimeRag));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
@@ -2119,14 +2121,10 @@ class CodeRagServiceTest {
                 .contains("backend/src/main/java/com/learnbot/service/CodeRagService.java");
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("followUpQueriesUsed=2"));
-        verify(searchService, atLeastOnce()).runtimeRoleSearch(
-                isNull(),
-                argThat(pattern -> pattern.contains("retriev") || pattern.contains("generation") || pattern.contains("answer")),
-                argThat(pattern -> pattern.contains("answer") || pattern.contains("retriev")),
-                anyInt(),
-                anyList(),
-                isNull()
-        );
+        verify(searchService).searchWithoutGraph(
+                isNull(), eq("runtime RAG retrieval pipeline"), anyInt(), anyList(), isNull(), any());
+        verify(searchService).searchWithoutGraph(
+                isNull(), eq("runtime RAG answer generation"), anyInt(), anyList(), isNull(), any());
     }
 
     @Test
@@ -2176,11 +2174,13 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to rag answer flow\"],\"reason\":\"broad flow question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"answer generation flow\"],\"followUpQueries\":[\"RAG retrieval pipeline context construction\",\"RAG answer generation model response\"],\"queryAreas\":[\"retrieval pipeline\",\"answer generation\"],\"reason\":\"initial evidence lacks runtime retrieval and answer generation\"}")
+                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"answer generation flow\"],\"operations\":[{\"type\":\"hybrid_search\",\"query\":\"RAG retrieval pipeline context construction\",\"area\":\"retrieval pipeline\",\"evidenceGroup\":\"orchestration\"},{\"type\":\"hybrid_search\",\"query\":\"RAG answer generation model response\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks runtime retrieval and answer generation\"}")
                 );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(indexing, supportGate, turnStore));
         when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(retrieval, answer));
+        when(searchService.searchWithoutGraph(isNull(), anyString(), anyInt(), anyList(), isNull(), any()))
                 .thenReturn(List.of(retrieval, answer));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
@@ -2201,17 +2201,13 @@ class CodeRagServiceTest {
                         "backend/src/main/java/app/service/RagRetrievalPipeline.java",
                         "backend/src/main/java/app/service/RagAnswerPipeline.java"
                 );
-        List<String> filePaths = response.evidence().stream()
-                .map(CodeEvidence::filePath)
-                .toList();
-        assertThat(filePaths.indexOf("backend/src/main/java/app/service/RagRetrievalPipeline.java"))
-                .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
-        assertThat(filePaths.indexOf("backend/src/main/java/app/service/RagAnswerPipeline.java"))
-                .isLessThan(filePaths.indexOf("frontend/src/components/code/finalResponseGate.js"));
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .doesNotContain("frontend/src/components/code/finalResponseGate.js");
     }
 
     @Test
-    void followUpRetrievalStopsWhenRequiredEvidenceGroupsAreSatisfied() {
+    void followUpRetrievalExecutesAllPlannedOperationsWhenEvidenceGroupsAreSatisfiedEarly() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mock(OllamaClient.class);
@@ -2263,7 +2259,7 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"worker flow\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\",\"persistence update\"],\"followUpQueries\":[\"claim response persistence\",\"unused response query\",\"unused persistence query\"],\"queryAreas\":[\"claim response persistence\",\"response\",\"persistence\"],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\",\"persistence_update\"],\"reason\":\"need request and response flow\"}"),
+                        chat("{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"claim response persistence\",\"area\":\"claim response persistence\",\"evidenceGroup\":\"queue_claim\"},{\"type\":\"keyword_search\",\"query\":\"unused response query\",\"area\":\"response\",\"evidenceGroup\":\"response_intake\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"need request and response flow\"}"),
                         chat("{\"selected\":[{\"index\":1,\"score\":0.9,\"evidenceKind\":\"direct_code\",\"implementationPhase\":\"SEARCH_EXPANSION\",\"responsibility\":\"data_structure\",\"coverageGroup\":\"queue_claim\",\"mustUse\":true,\"supportedClaims\":[\"claims work\"],\"notSupportedClaims\":[],\"rankReason\":\"claim evidence\",\"reason\":\"claim evidence\"}],\"reason\":\"ok\"}")
                 );
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
@@ -2279,7 +2275,9 @@ class CodeRagServiceTest {
         );
 
         assertThat(responseAnswer.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("followUpQueriesUsed=1"));
+                assertThat(note).contains("followUpQueriesUsed=2"));
+        verify(searchService, times(2))
+                .cheapSearch(isNull(), anyString(), anyInt(), anyList(), isNull());
         assertThat(responseAnswer.evidence())
                 .extracting(CodeEvidence::filePath)
                 .contains("backend/src/main/java/app/repository/ToolExecutionRepository.java");
