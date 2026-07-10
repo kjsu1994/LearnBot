@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ public class OllamaClient {
 
     private final WebClient.Builder webClientBuilder;
     private final WebClient webClient;
+    private final WebClient embeddingWebClient;
     private final LearnBotProperties properties;
     private final AdminSettingsService adminSettingsService;
     private final RuntimeTuningService runtimeTuningService;
@@ -46,11 +48,18 @@ public class OllamaClient {
         this.adminSettingsService = adminSettingsService;
         this.runtimeTuningService = runtimeTuningService;
         this.webClient = builder.baseUrl(properties.getOllama().getBaseUrl()).build();
+        this.embeddingWebClient = builder.baseUrl(properties.getOllama().getEmbeddingBaseUrl()).build();
     }
 
     public OllamaClient(WebClient.Builder builder, LearnBotProperties properties, AdminSettingsService adminSettingsService) {
         this(builder, properties, adminSettingsService, null);
     }
+    @PostConstruct
+    void warmupQueryEmbedding() {
+        embedForQuery(List.of("learnbot embedding warmup"));
+        log.info("Ollama query embedding warmup completed model={} baseUrl={}", properties.getOllama().getEmbeddingModel(), properties.getOllama().getEmbeddingBaseUrl());
+    }
+
 
     public List<List<Double>> embed(List<String> inputs) {
         embeddingRequests.incrementAndGet();
@@ -72,6 +81,28 @@ public class OllamaClient {
             return response.embeddings();
         } catch (WebClientResponseException.NotFound ex) {
             return inputs.stream().map(this::embedLegacy).toList();
+        } finally {
+            embeddingRequests.updateAndGet(current -> Math.max(0, current - 1));
+        }
+    }
+
+    public List<List<Double>> embedForQuery(List<String> inputs) {
+        embeddingRequests.incrementAndGet();
+        try {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", properties.getOllama().getEmbeddingModel());
+            body.put("input", inputs);
+            putIfConfigured(body, "keep_alive", properties.getOllama().getEmbeddingKeepAlive());
+            EmbedResponse response = embeddingWebClient.post()
+                    .uri("/api/embed")
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(EmbedResponse.class)
+                    .block();
+            if (response == null || response.embeddings() == null || response.embeddings().isEmpty()) {
+                throw new IllegalArgumentException("Ollama returned no embeddings.");
+            }
+            return response.embeddings();
         } finally {
             embeddingRequests.updateAndGet(current -> Math.max(0, current - 1));
         }
@@ -161,6 +192,18 @@ public class OllamaClient {
     public int embeddingRequestCount() {
         return embeddingRequests.get();
     }
+
+    public void awaitNoPrimaryRequests() {
+        while (hasPrimaryRequestInFlight()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("GPU embedding wait interrupted.", ex);
+            }
+        }
+    }
+
 
     private ChatResult chatResultWith(AdminSettingsService.LlmSettings settings, String systemPrompt, String userPrompt, boolean fallbackUsed, Integer maxOutputTokens, Duration timeout, Object format) {
         Map<String, Object> body = chatRequestBody(settings, systemPrompt, userPrompt, false, maxOutputTokens, format);
@@ -294,6 +337,7 @@ public class OllamaClient {
         body.put("options", options);
         if (format != null) {
             body.put("format", format);
+            body.put("think", false);
         }
         putIfConfigured(body, "keep_alive", keepAliveFor(settings.role()));
         return body;
@@ -495,12 +539,7 @@ public class OllamaClient {
 
     private List<AdminSettingsService.LlmSettings> candidates(ChatRole role) {
         List<AdminSettingsService.LlmSettings> candidates = new ArrayList<>();
-        if (role == ChatRole.PRIMARY) {
-            addCandidate(candidates, adminSettingsService.primaryLlmSettings());
-            addCandidate(candidates, adminSettingsService.auxiliaryLlmSettings());
-        } else {
-            addCandidate(candidates, adminSettingsService.auxiliaryLlmSettings());
-        }
+        addCandidate(candidates, adminSettingsService.primaryLlmSettings());
         return candidates;
     }
 

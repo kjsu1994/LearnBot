@@ -46,6 +46,7 @@ public class EmbeddingService {
 
     private List<List<Double>> embedBatch(List<String> texts, int batchSize, int minBatchSize) {
         try {
+            ollamaClient.awaitNoPrimaryRequests();
             List<List<Double>> embeddings = ollamaClient.embed(texts);
             validate(embeddings, texts.size());
             return embeddings;
@@ -72,6 +73,7 @@ public class EmbeddingService {
         while (nextLength < source.length()) {
             String shortened = source.substring(0, nextLength);
             try {
+                ollamaClient.awaitNoPrimaryRequests();
                 List<List<Double>> embeddings = ollamaClient.embed(List.of(shortened));
                 validate(embeddings, 1);
                 log.warn("Embedding input was shortened after Ollama rejected it. originalChars={} embeddedChars={} reason={}",

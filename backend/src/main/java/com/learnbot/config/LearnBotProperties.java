@@ -417,6 +417,9 @@ public class LearnBotProperties {
         @NotBlank
         private String baseUrl = "http://localhost:11434";
 
+
+        @NotBlank
+        private String embeddingBaseUrl = "http://localhost:11434";
         @NotBlank
         private String chatModel = "ornith:9b";
 
@@ -449,6 +452,14 @@ public class LearnBotProperties {
             this.baseUrl = baseUrl;
         }
 
+
+        public String getEmbeddingBaseUrl() {
+            return embeddingBaseUrl;
+        }
+
+        public void setEmbeddingBaseUrl(String embeddingBaseUrl) {
+            this.embeddingBaseUrl = embeddingBaseUrl;
+        }
         public String getChatModel() {
             return chatModel;
         }

@@ -471,7 +471,7 @@ public class SearchService {
 
     private CachedEmbeddingResult embeddingFor(String semanticQuery) {
         if (!embeddingCacheEnabled()) {
-            return new CachedEmbeddingResult(ollamaClient.embed(List.of(semanticQuery)).get(0), false);
+            return new CachedEmbeddingResult(ollamaClient.embedForQuery(List.of(semanticQuery)).get(0), false);
         }
         String key = embeddingCacheKey(semanticQuery);
         long now = System.currentTimeMillis();
@@ -479,7 +479,7 @@ public class SearchService {
         if (cached != null && cached.expiresAtMillis() > now) {
             return new CachedEmbeddingResult(cached.values(), true);
         }
-        List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+        List<Double> embedding = ollamaClient.embedForQuery(List.of(semanticQuery)).get(0);
         embeddingCache.put(key, new CachedEmbedding(embedding, now + embeddingCacheTtlMillis()));
         trimEmbeddingCache();
         return new CachedEmbeddingResult(embedding, false);

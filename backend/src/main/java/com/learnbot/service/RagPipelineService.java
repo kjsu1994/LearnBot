@@ -351,7 +351,8 @@ public class RagPipelineService {
             Map<String, Object> schema
     ) {
         RuntimeException lastFailure = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
+        int maxAttempts = "code evidence adjudication".equals(operation) ? 1 : 2;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int tokenLimit = attempt == 0
                     ? Math.max(1, maxOutputTokens)
                     : Math.min(2048, Math.max(maxOutputTokens + 256, maxOutputTokens * 2));
@@ -379,7 +380,7 @@ public class RagPipelineService {
             } catch (RuntimeException ex) {
                 lastFailure = ex;
             }
-            if (attempt == 0) {
+            if (attempt == 0 && maxAttempts > 1) {
                 log.info("Structured LLM JSON retry operation={} reason={} doneReason={} promptTokens={} outputTokens={}",
                         operation,
                         lastFailure == null ? "unknown" : lastFailure.getClass().getSimpleName(),
@@ -400,6 +401,7 @@ public class RagPipelineService {
             Map<String, Object> schema
     ) {
         OllamaClient.ChatRole role = structuredChatRole(operation);
+        boolean allowUnformattedFallback = !"code evidence adjudication".equals(operation);
         try {
             OllamaClient.ChatResult result = ollamaClient.chatResult(
                     systemPrompt,
@@ -414,6 +416,12 @@ public class RagPipelineService {
             }
         } catch (RuntimeException ex) {
             log.info("Structured LLM format call unavailable reason={}", ex.getClass().getSimpleName());
+            if (!allowUnformattedFallback) {
+                throw ex;
+            }
+        }
+        if (!allowUnformattedFallback) {
+            throw new IllegalArgumentException("Structured LLM format call returned no result.");
         }
         return ollamaClient.chatResult(
                 systemPrompt,

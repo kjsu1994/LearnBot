@@ -579,7 +579,7 @@ public class CodeSearchService {
 
     private List<Double> embeddingFor(String semanticQuery) {
         if (!embeddingCacheEnabled()) {
-            return ollamaClient.embed(List.of(semanticQuery)).get(0);
+            return ollamaClient.embedForQuery(List.of(semanticQuery)).get(0);
         }
         String key = embeddingCacheKey(semanticQuery);
         long now = System.currentTimeMillis();
@@ -587,7 +587,7 @@ public class CodeSearchService {
         if (cached != null && cached.expiresAtMillis() > now) {
             return cached.values();
         }
-        List<Double> embedding = ollamaClient.embed(List.of(semanticQuery)).get(0);
+        List<Double> embedding = ollamaClient.embedForQuery(List.of(semanticQuery)).get(0);
         embeddingCache.put(key, new CachedEmbedding(embedding, now + embeddingCacheTtlMillis()));
         pruneEmbeddingCache(now);
         return embedding;
