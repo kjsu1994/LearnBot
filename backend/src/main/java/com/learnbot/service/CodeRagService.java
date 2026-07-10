@@ -228,6 +228,9 @@ public class CodeRagService {
                 fallbackScope=GRAPH_ANALYSIS is indexing or graph-build diagnostic evidence; it does not by itself prove answer generation fallback was used.
                 fallbackScope=SEARCH_EXPANSION is retrieval or graph traversal fallback evidence; it does not by itself prove indexing analysis failed.
                 fallbackScope=ANSWER_GENERATION is final answer generation or answer repair fallback evidence; only connect it to earlier phases when direct cited code shows that call or condition.
+                Treat llmSupportedClaims as claims directly supported by that evidence.
+                Treat llmNotSupportedClaims as explicit boundaries; do not state them as facts unless another selected citation directly supports them.
+                Build the answer from selected evidence and these claim boundaries. Do not restore unselected candidate interpretations.
                 When the question names a language or framework, prefer matching analysisDiagnosticLanguage, analysisDiagnosticStage, and analysisDiagnosticAnalyzer; mention non-matching diagnostics only as separate cross-language evidence.
                 Treat rank, evidenceScore, and phase-level executionOrder as relevance/ordering hints, not as method call order.
                 Treat guard clauses and early returns as failure handling only when the cited code or diagnostic metadata says failed, partial, skipped, unavailable, or exception.
@@ -693,14 +696,17 @@ public class CodeRagService {
 
         if (!followUpPlan.enough() && !followUpPlan.followUpQueries().isEmpty() && pipelineService.maxIterations() > 1) {
             for (int index = 0; index < followUpPlan.followUpQueries().size(); index++) {
-                if (requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
+                if (followUpQueriesUsed > 0 && requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
                     followUpStoppedEarly = true;
                     break;
                 }
                 String query = followUpPlan.followUpQueries().get(index);
                 String queryArea = index < followUpPlan.queryAreas().size() ? followUpPlan.queryAreas().get(index) : "";
                 String evidenceGroup = followUpEvidenceGroup(followUpPlan, index, queryArea + " " + query);
-                followUpCandidateCount += collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, query, queryArea, evidenceGroup, questionMode, searchLimit, merged);
+                RagPipelineService.CodeSearchOperation operation = index < followUpPlan.operations().size()
+                        ? followUpPlan.operations().get(index)
+                        : new RagPipelineService.CodeSearchOperation("hybrid_search", query, queryArea, evidenceGroup);
+                followUpCandidateCount += executeFollowUpSearchOperation(repositoryId, selectedSpaceId, spaceIds, question, operation, evidenceGroup, questionMode, searchLimit, merged);
                 followUpQueriesUsed++;
             }
             if (requiredEvidenceGroupsSatisfied(followUpPlan, merged.values())) {
@@ -1311,6 +1317,45 @@ public class CodeRagService {
         return Math.max(0, merged.size() - before);
     }
 
+    private int executeFollowUpSearchOperation(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String originalQuestion,
+            RagPipelineService.CodeSearchOperation operation,
+            String fallbackEvidenceGroup,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        String query = sanitizeFollowUpQuery(operation.query());
+        if (query.isBlank()) {
+            return 0;
+        }
+        String area = safe(operation.area(), "");
+        String evidenceGroup = safe(operation.evidenceGroup(), "").isBlank() ? fallbackEvidenceGroup : operation.evidenceGroup();
+        if ("hybrid_search".equals(operation.type())) {
+            return collectFollowUpEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, originalQuestion,
+                    query, area, evidenceGroup, questionMode, limit, merged);
+        }
+        int before = merged.size();
+        if ("reference_search".equals(operation.type())) {
+            try {
+                var references = referenceService.findReferences(repositoryId, selectedSpaceId, spaceIds, query, limit);
+                java.util.stream.Stream.concat(references.definitions().stream(), references.references().stream())
+                        .forEach(result -> merge(merged, markLlmFollowUpEvidence(result, operation.type() + ": " + query)));
+            } catch (IllegalArgumentException ignored) {
+                return 0;
+            }
+            return Math.max(0, merged.size() - before);
+        }
+        List<CodeSearchResult> results = searchService.cheapSearch(repositoryId, query, limit, spaceIds, selectedSpaceId);
+        for (CodeSearchResult result : results == null ? List.<CodeSearchResult>of() : results) {
+            merge(merged, markLlmFollowUpEvidence(result, operation.type() + ": " + query));
+        }
+        return Math.max(0, merged.size() - before);
+    }
+
     private int expandGraphEvidenceOnce(
             UUID repositoryId,
             String question,
@@ -1665,7 +1710,10 @@ public class CodeRagService {
         if (adjudication.used()) {
             ranked = adjudication.results();
             List<CodeSearchResult> selected = preservePinnedEvidence(ranked, llmEvidenceSlateSelection(ranked, limit), limit);
-            selected = ensureLlmChecklistGroupCoverage(followUpPlan, ranked, selected, limit);
+            selected = selected.stream()
+                    .sorted(Comparator.comparingInt(this::llmEvidenceSlateRank)
+                            .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result)))
+                    .toList();
             log.info("Code RAG LLM evidence slate selected={} final={} llmSelectedFiles={} finalFiles={} question={}",
                     ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).count(),
                     selected.size(),
@@ -1727,7 +1775,8 @@ public class CodeRagService {
         if (ranked == null || ranked.isEmpty()) {
             return List.of();
         }
-        int safeLimit = Math.max(1, limit);
+        int selectedCount = (int) ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).count();
+        int safeLimit = Math.max(Math.max(1, limit), selectedCount);
         List<CodeSearchResult> selected = new ArrayList<>();
         ranked.stream()
                 .filter(this::isLlmEvidenceAdjudicationSelected)
@@ -1735,9 +1784,6 @@ public class CodeRagService {
                         .comparingInt(this::llmEvidenceSlateRank)
                         .thenComparing((CodeSearchResult result) -> Boolean.TRUE.equals(metadataBoolean(result, "llmEvidenceSlateMustUse")) ? 0 : 1)
                         .thenComparing((CodeSearchResult result) -> -evidenceRanker.score(result)))
-                .forEach(result -> addIfAbsent(selected, result, safeLimit));
-        ranked.stream()
-                .filter(result -> !isLlmEvidenceAdjudicationSelected(result))
                 .forEach(result -> addIfAbsent(selected, result, safeLimit));
         return limitedMutable(selected, safeLimit);
     }
@@ -3023,6 +3069,7 @@ public class CodeRagService {
                             + analysisDiagnosticContext(result)
                             + graphContext(result)
                             + evidenceRankingContext(result)
+                            + adjudicationClaimContext(result)
                             + excerptContext(result, excerpt)
                             + "\n" + excerpt.text();
                 })
@@ -3387,6 +3434,7 @@ public class CodeRagService {
                 + analysisDiagnosticContext(result)
                 + graphContext(result)
                 + evidenceRankingContext(result)
+                + adjudicationClaimContext(result)
                 + excerptContext(result, excerpt)
                 + "\n" + excerpt.text();
     }
@@ -5088,6 +5136,16 @@ public class CodeRagService {
                 + (evidenceRanker.debug() && isGraphExpanded(result) ? nullable(" reason=", reason == null ? null : String.valueOf(reason)) : "");
     }
 
+
+    private String adjudicationClaimContext(CodeSearchResult result) {
+        if (result == null || result.metadata() == null) {
+            return "";
+        }
+        Object supported = result.metadata().get("llmSupportedClaims");
+        Object unsupported = result.metadata().get("llmNotSupportedClaims");
+        return nullable(" llmSupportedClaims=", supported == null ? null : String.valueOf(supported))
+                + nullable(" llmNotSupportedClaims=", unsupported == null ? null : String.valueOf(unsupported));
+    }
     private boolean isConversationPinned(CodeSearchResult result) {
         return result != null && result.metadata() != null && Boolean.TRUE.equals(result.metadata().get("conversationPinned"));
     }

@@ -15,6 +15,7 @@ import com.learnbot.repository.SecurityRepository;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -1817,8 +1818,11 @@ class CodeRagServiceTest {
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(broadService, exactCodeService));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
-                .thenReturn(chat("{\"selected\":[{\"index\":2,\"score\":0.96,\"reason\":\"direct code rag flow evidence\"}],\"reason\":\"prefer exact code rag service\"}"));
+        when(ollamaClient.chatResult(anyString(), anyString(), any(OllamaClient.ChatRole.class), anyInt(), any(Duration.class), any()))
+                .thenReturn(
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"commitRef\":\"\",\"targetFile\":\"\",\"targetSymbol\":\"\",\"reason\":\"code rag flow\"}"),
+                        chat("{\"enough\":true,\"missingAreas\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[],\"reason\":\"enough\"}"),
+                        chat("{\"selected\":[{\"index\":2,\"score\":0.96,\"reason\":\"direct code rag flow evidence\"}],\"reason\":\"prefer exact code rag service\"}"));
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
                 .thenReturn(chat("Code RAG answer generation is handled in CodeRagService [1]."));
 
@@ -1922,9 +1926,9 @@ class CodeRagServiceTest {
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(coverageHelper, graphStorage, graphAnalyzer));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+        when(ollamaClient.chatResult(anyString(), anyString(), any(OllamaClient.ChatRole.class), anyInt(), any(Duration.class), any()))
                 .thenReturn(
-                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"reason\":\"graph storage question\"}"),
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"commitRef\":\"\",\"targetFile\":\"\",\"targetSymbol\":\"\",\"reason\":\"graph storage question\"}"),
                         chat("{\"enough\":true,\"missingAreas\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[],\"reason\":\"enough for adjudication\"}"),
                         chat("""
                         {"selected":[
@@ -2023,9 +2027,9 @@ class CodeRagServiceTest {
                   "reason":"each required group has direct evidence"
                 }
                 """;
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
+        when(ollamaClient.chatResult(anyString(), anyString(), any(OllamaClient.ChatRole.class), anyInt(), any(Duration.class), any()))
                 .thenReturn(
-                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"api flow\"}"),
+                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"commitRef\":\"\",\"targetFile\":\"\",\"targetSymbol\":\"\",\"reason\":\"api flow\"}"),
                         chat(groupedEvidenceDecision),
                         chat(groupedEvidenceDecision),
                         chat(groupedEvidenceDecision));

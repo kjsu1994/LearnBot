@@ -223,7 +223,7 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         )).thenReturn(new OllamaClient.ChatResult("""
-                {"enough":false,"missingAreas":["graph schema","graph persistence"],"followUpQueries":["graph storage nodes edges"],"queryAreas":["persistence"],"requiredEvidenceGroups":["graph_schema","graph_persistence","queue_claim","response_intake","persistence_update","async_transport","unknown","graph_schema"],"reason":"need storage proof"}
+                {"enough":false,"missingAreas":["graph schema","graph persistence"],"operations":[{"type":"keyword_search","query":"graph storage nodes edges","area":"persistence","evidenceGroup":"graph_persistence"}],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["graph_schema","graph_persistence","queue_claim","response_intake","persistence_update","async_transport","unknown","graph_schema"],"reason":"need storage proof"}
                 """, "stop", true, 120, 90, "http://ollama", "test", "auxiliary", false));
 
         RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
@@ -243,6 +243,11 @@ class RagPipelineServiceTest {
                 "async_transport"
         );
         assertThat(plan.followUpQueries()).containsExactly("graph storage nodes edges");
+        assertThat(plan.operations()).singleElement().satisfies(operation -> {
+            assertThat(operation.type()).isEqualTo("keyword_search");
+            assertThat(operation.query()).isEqualTo("graph storage nodes edges");
+            assertThat(operation.evidenceGroup()).isEqualTo("graph_persistence");
+        });
     }
 
     @Test

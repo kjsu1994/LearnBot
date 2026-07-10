@@ -277,8 +277,8 @@ public class RagPipelineService {
             List<CodeSearchResult> adjudicated = applyCodeAdjudication(candidates, head, decisions);
             return new CodeEvidenceAdjudication(true, true, "llm code evidence adjudication used", adjudicated);
         } catch (RuntimeException ex) {
-            log.info("RAG code evidence adjudication skipped reason={} question={}",
-                    ex.getClass().getSimpleName(), abbreviate(question));
+            log.info("RAG code evidence adjudication skipped reason={} message={} question={}",
+                    ex.getClass().getSimpleName(), safeMessage(ex), abbreviate(question));
             return new CodeEvidenceAdjudication(true, false, "llm code evidence adjudication failed", candidates);
         }
     }
@@ -319,7 +319,7 @@ public class RagPipelineService {
             List<CodeEvidenceChecklistItem> checklist
     ) {
         if (candidates == null || candidates.isEmpty()) {
-            return new CodeEvidenceFollowUpPlan(false, true, "no initial evidence", List.of(), List.of(), List.of(), List.of(), checklist);
+            return new CodeEvidenceFollowUpPlan(false, true, "no initial evidence", List.of(), List.of(), List.of(), List.of(), checklist, List.of());
         }
         try {
             String response = requestStructuredJson(
@@ -334,7 +334,7 @@ public class RagPipelineService {
         } catch (RuntimeException ex) {
             log.info("RAG code evidence follow-up planning skipped reason={} message={} question={}",
                     ex.getClass().getSimpleName(), safeMessage(ex), abbreviate(question));
-            return new CodeEvidenceFollowUpPlan(true, false, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of(), List.of(), checklist);
+            return new CodeEvidenceFollowUpPlan(true, false, "follow-up planner failed: " + safeMessage(ex), List.of(), List.of(), List.of(), List.of(), checklist, List.of());
         }
     }
 
@@ -679,8 +679,11 @@ public class RagPipelineService {
                 Do not answer the user.
                 If key implementation evidence is missing or the evidence is off-topic, request a small number of concrete follow-up search queries.
                 This must work across programming languages and frameworks. Use file paths, symbols, services, controllers, repositories, routes, handlers, hooks, jobs, tasks, and database/query terms from the evidence when useful.
-                JSON schema: {"enough":true,"missingAreas":["area"],"followUpQueries":["query"],"queryAreas":["area for query"],"requiredEvidenceGroups":["group"],"reason":"short reason"}
+                JSON schema: {"enough":true,"missingAreas":["area"],"operations":[{"type":"hybrid_search","query":"query","area":"area","evidenceGroup":"group"}],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["group"],"reason":"short reason"}
                 Rules:
+                - Use operations for follow-up retrieval. Allowed types are keyword_search, hybrid_search, and reference_search.
+                - Return query values only. Never return shell commands, SQL, regex programs, or tool invocation syntax.
+                - keyword_search finds exact text and identifiers; hybrid_search combines lexical and semantic retrieval; reference_search finds definitions and references.
                 - Set enough=false when evidence is mostly tests, frontend gates, history storage, retention, docs, generated, or vendor code but the question asks about runtime behavior.
                 - When a required evidence checklist is provided, enough=true only if each checklist item is directly covered or clearly irrelevant.
                 - If a checklist item is only represented by a broad orchestrator and a concrete phase method is needed, request a follow-up query for the concrete implementation method.
@@ -781,6 +784,17 @@ public class RagPipelineService {
             int queryLimit = Math.max(0, Math.min(4, maxQueries));
             List<String> queries = parsedStrings(parsed.get("followUpQueries")).stream().limit(queryLimit).toList();
             List<String> queryAreas = parsedStrings(parsed.get("queryAreas")).stream().limit(queryLimit).toList();
+            List<CodeSearchOperation> operations = parseCodeSearchOperations(parsed.get("operations"), queryLimit);
+            if (operations.isEmpty() && !queries.isEmpty()) {
+                List<CodeSearchOperation> compatible = new ArrayList<>();
+                for (int index = 0; index < queries.size(); index++) {
+                    compatible.add(new CodeSearchOperation("hybrid_search", queries.get(index), index < queryAreas.size() ? queryAreas.get(index) : "", ""));
+                }
+                operations = List.copyOf(compatible);
+            } else if (!operations.isEmpty() && queries.isEmpty()) {
+                queries = operations.stream().map(CodeSearchOperation::query).toList();
+                queryAreas = operations.stream().map(CodeSearchOperation::area).toList();
+            }
             List<String> groups = parsedStrings(parsed.get("requiredEvidenceGroups")).stream()
                     .map(this::normalizeEvidenceGroup)
                     .filter(group -> !"unknown".equals(group))
@@ -788,10 +802,31 @@ public class RagPipelineService {
                     .limit(6)
                     .toList();
             String reason = stringValue(parsed.get("reason"));
-        return new CodeEvidenceFollowUpPlan(true, enough, reason, missingAreas, enough ? List.of() : queries, enough ? List.of() : queryAreas, enough ? List.of() : groups, checklist);
+            return new CodeEvidenceFollowUpPlan(true, enough, reason, missingAreas, enough ? List.of() : queries, enough ? List.of() : queryAreas,
+                    enough ? List.of() : groups, checklist, enough ? List.of() : operations);
         } catch (Exception ex) {
             throw new IllegalArgumentException("Invalid code evidence follow-up JSON", ex);
         }
+    }
+
+    private List<CodeSearchOperation> parseCodeSearchOperations(Object value, int limit) {
+        if (!(value instanceof Collection<?> collection)) {
+            return List.of();
+        }
+        List<CodeSearchOperation> operations = new ArrayList<>();
+        for (Object item : collection) {
+            if (operations.size() >= limit || !(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String type = normalizeEnumValue(map.get("type"), "hybrid_search",
+                    List.of("keyword_search", "hybrid_search", "reference_search"));
+            String query = stringValue(map.get("query")).trim();
+            if (!query.isBlank()) {
+                operations.add(new CodeSearchOperation(type, query, stringValue(map.get("area")),
+                        normalizeEvidenceGroup(stringValue(map.get("evidenceGroup")))));
+            }
+        }
+        return List.copyOf(operations);
     }
 
     private CodeEvidenceSearchPlan parseCodeEvidenceSearchPlan(String response, int maxQueries) {
@@ -1116,6 +1151,12 @@ public class RagPipelineService {
         return objectSchema(Map.of(
                 "enough", booleanSchema(),
                 "missingAreas", arraySchema(stringSchema()),
+                "operations", arraySchema(objectSchema(Map.of(
+                        "type", enumSchema("keyword_search", "hybrid_search", "reference_search"),
+                        "query", stringSchema(),
+                        "area", stringSchema(),
+                        "evidenceGroup", evidenceGroupSchema()
+                ), List.of("type", "query", "area", "evidenceGroup"))),
                 "followUpQueries", arraySchema(stringSchema()),
                 "queryAreas", arraySchema(stringSchema()),
                 "requiredEvidenceGroups", arraySchema(evidenceGroupSchema()),
@@ -1505,7 +1546,8 @@ public class RagPipelineService {
             List<String> followUpQueries,
             List<String> queryAreas,
             List<String> requiredEvidenceGroups,
-            List<CodeEvidenceChecklistItem> checklist
+            List<CodeEvidenceChecklistItem> checklist,
+            List<CodeSearchOperation> operations
     ) {
         public CodeEvidenceFollowUpPlan {
             reason = reason == null ? "" : reason;
@@ -1514,6 +1556,16 @@ public class RagPipelineService {
             queryAreas = queryAreas == null ? List.of() : List.copyOf(queryAreas);
             requiredEvidenceGroups = requiredEvidenceGroups == null ? List.of() : List.copyOf(requiredEvidenceGroups);
             checklist = checklist == null ? List.of() : List.copyOf(checklist);
+            operations = operations == null ? List.of() : List.copyOf(operations);
+        }
+    }
+
+    public record CodeSearchOperation(String type, String query, String area, String evidenceGroup) {
+        public CodeSearchOperation {
+            type = type == null ? "hybrid_search" : type;
+            query = query == null ? "" : query;
+            area = area == null ? "" : area;
+            evidenceGroup = evidenceGroup == null ? "" : evidenceGroup;
         }
     }
 
