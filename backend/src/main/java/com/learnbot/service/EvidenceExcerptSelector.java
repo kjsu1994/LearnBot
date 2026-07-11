@@ -26,10 +26,23 @@ final class EvidenceExcerptSelector {
 
     static Excerpt select(String question, CodeSearchResult result, int maxChars) {
         String content = result == null || result.content() == null ? "" : result.content();
-        String compact = content.replaceAll("\\R{3,}", "\n\n").trim();
         int budget = Math.max(120, maxChars);
         int sourceStart = result == null ? 0 : Math.max(0, result.lineStart());
         int sourceEnd = result == null ? sourceStart : Math.max(sourceStart, result.lineEnd());
+        if (isDirectRead(result)) {
+            List<String> sourceLines = sourceLines(content, sourceStart, sourceEnd);
+            String directContent = String.join("\n", sourceLines);
+            if (directContent.length() <= budget) {
+                return new Excerpt(directContent, "FULL_CHUNK", true, false, sourceStart,
+                        actualLineEnd(sourceStart, sourceEnd, sourceLines.size()));
+            }
+            RequestedRange requestedRange = requestedRange(result, sourceStart, sourceEnd, sourceLines.size());
+            return requestedRange == null
+                    ? boundedDirectRead(sourceLines, budget, sourceStart, sourceEnd)
+                    : requestedDirectRead(sourceLines, sourceStart, sourceEnd, requestedRange);
+        }
+
+        String compact = content.replaceAll("\\R{3,}", "\n\n").trim();
         if (compact.length() <= budget) {
             return new Excerpt(compact, "FULL_CHUNK", true, false, sourceStart, sourceEnd);
         }
@@ -122,6 +135,152 @@ final class EvidenceExcerptSelector {
         }
         return new Excerpt(text.toString().stripTrailing() + "\n...", "SCORED_WINDOWS", false, true,
                 sourceStart + firstLine, sourceStart + lastLine);
+    }
+
+    private static boolean isDirectRead(CodeSearchResult result) {
+        return result != null
+                && result.metadata() != null
+                && Boolean.parseBoolean(String.valueOf(result.metadata().getOrDefault("llmDirectRead", false)));
+    }
+
+    private static Excerpt requestedDirectRead(
+            List<String> lines,
+            int sourceStart,
+            int sourceEnd,
+            RequestedRange requestedRange
+    ) {
+        int firstIndex = requestedRange.lineStart() - sourceStart;
+        int lastIndex = requestedRange.lineEnd() - sourceStart;
+        StringBuilder text = new StringBuilder();
+        if (firstIndex > 0) {
+            text.append(requestedRangeOmissionMarker(sourceStart, requestedRange.lineStart() - 1));
+        }
+        text.append(String.join("\n", lines.subList(firstIndex, lastIndex + 1)));
+        if (lastIndex < lines.size() - 1) {
+            text.append(requestedRangeOmissionMarker(
+                    requestedRange.lineEnd() + 1,
+                    actualLineEnd(sourceStart, sourceEnd, lines.size())
+            ));
+        }
+        boolean complete = firstIndex == 0 && lastIndex == lines.size() - 1;
+        return new Excerpt(
+                text.toString().stripTrailing(),
+                "DIRECT_READ_REQUESTED_RANGE",
+                complete,
+                false,
+                requestedRange.lineStart(),
+                requestedRange.lineEnd()
+        );
+    }
+
+    private static Excerpt boundedDirectRead(List<String> lines, int budget, int sourceStart, int sourceEnd) {
+        int actualEnd = actualLineEnd(sourceStart, sourceEnd, lines.size());
+        if (lines.size() <= 1) {
+            return new Excerpt(String.join("\n", lines), "FULL_CHUNK", true, false, sourceStart, actualEnd);
+        }
+        int markerBudget = omissionMarker(sourceStart, actualEnd).length();
+        int available = Math.max(40, budget - markerBudget);
+        int headEnd = prefixEnd(lines, available * 2 / 3);
+        int tailStart = suffixStart(lines, available - (available * 2 / 3));
+        if (headEnd + 1 >= tailStart) {
+            return new Excerpt(String.join("\n", lines), "FULL_CHUNK", true, false, sourceStart, actualEnd);
+        }
+        int omittedStart = sourceStart + headEnd + 1;
+        int omittedEnd = sourceStart + tailStart - 1;
+        String text = String.join("\n", lines.subList(0, headEnd + 1))
+                + omissionMarker(omittedStart, omittedEnd)
+                + String.join("\n", lines.subList(tailStart, lines.size()));
+        return new Excerpt(text.stripTrailing(), "DIRECT_READ_BOUNDED", false, true, sourceStart, actualEnd);
+    }
+
+    private static List<String> sourceLines(String content, int sourceStart, int sourceEnd) {
+        String normalized = content == null ? "" : content.replace("\r\n", "\n").replace('\r', '\n');
+        List<String> lines = new ArrayList<>(List.of(normalized.split("\n", -1)));
+        if (lines.size() > 1 && lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
+        }
+        int expectedLines = Math.max(1, sourceEnd - sourceStart + 1);
+        if (lines.size() > expectedLines) {
+            return List.copyOf(lines.subList(0, expectedLines));
+        }
+        return lines.isEmpty() ? List.of("") : List.copyOf(lines);
+    }
+
+    private static RequestedRange requestedRange(
+            CodeSearchResult result,
+            int sourceStart,
+            int sourceEnd,
+            int availableLines
+    ) {
+        Integer requestedStart = metadataInteger(result, "llmRequestedLineStart");
+        Integer requestedEnd = metadataInteger(result, "llmRequestedLineEnd");
+        if (requestedStart == null || requestedEnd == null || requestedEnd < requestedStart) {
+            return null;
+        }
+        int actualEnd = actualLineEnd(sourceStart, sourceEnd, availableLines);
+        int lineStart = Math.max(sourceStart, requestedStart);
+        int lineEnd = Math.min(actualEnd, requestedEnd);
+        return lineEnd < lineStart ? null : new RequestedRange(lineStart, lineEnd);
+    }
+
+    private static Integer metadataInteger(CodeSearchResult result, String key) {
+        if (result == null || result.metadata() == null) {
+            return null;
+        }
+        Object value = result.metadata().get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static int prefixEnd(List<String> lines, int budget) {
+        int used = 0;
+        int end = 0;
+        for (int index = 0; index < lines.size(); index++) {
+            int addition = lines.get(index).length() + (index == 0 ? 0 : 1);
+            if (index > 0 && used + addition > Math.max(1, budget)) {
+                break;
+            }
+            used += addition;
+            end = index;
+        }
+        return end;
+    }
+
+    private static int suffixStart(List<String> lines, int budget) {
+        int used = 0;
+        int start = lines.size() - 1;
+        for (int index = lines.size() - 1; index >= 0; index--) {
+            int addition = lines.get(index).length() + (index == lines.size() - 1 ? 0 : 1);
+            if (index < lines.size() - 1 && used + addition > Math.max(1, budget)) {
+                break;
+            }
+            used += addition;
+            start = index;
+        }
+        return start;
+    }
+
+    private static int actualLineEnd(int sourceStart, int sourceEnd, int lineCount) {
+        return Math.min(sourceEnd, sourceStart + Math.max(0, lineCount - 1));
+    }
+
+    private static String omissionMarker(int lineStart, int lineEnd) {
+        return "\n... direct-read content omitted by prompt budget: lines "
+                + lineStart + "-" + lineEnd + " ...\n";
+    }
+
+    private static String requestedRangeOmissionMarker(int lineStart, int lineEnd) {
+        return "\n... direct-read content outside requested range omitted: lines "
+                + lineStart + "-" + lineEnd + " ...\n";
     }
 
     private static Map<String, Double> weightedTerms(String question, CodeSearchResult result) {
@@ -288,5 +447,8 @@ final class EvidenceExcerptSelector {
     }
 
     private record Window(int start, int end, double score) {
+    }
+
+    private record RequestedRange(int lineStart, int lineEnd) {
     }
 }

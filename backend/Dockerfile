@@ -23,10 +23,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/target/learnbot-backend-0.1.0.jar app.jar
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
+COPY --from=roslyn-build /usr/share/dotnet/sdk /usr/share/dotnet/sdk
+COPY --from=roslyn-build /usr/share/dotnet/packs /usr/share/dotnet/packs
+COPY --from=roslyn-build /usr/share/dotnet/sdk-manifests /usr/share/dotnet/sdk-manifests
 COPY --from=dotnet-runtime /usr/lib/x86_64-linux-gnu/libicudata.so.72* /usr/lib/x86_64-linux-gnu/
 COPY --from=dotnet-runtime /usr/lib/x86_64-linux-gnu/libicui18n.so.72* /usr/lib/x86_64-linux-gnu/
 COPY --from=dotnet-runtime /usr/lib/x86_64-linux-gnu/libicuuc.so.72* /usr/lib/x86_64-linux-gnu/
 COPY --from=roslyn-build /out /app/roslyn
+ENV DOTNET_ROOT=/usr/share/dotnet
 RUN ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

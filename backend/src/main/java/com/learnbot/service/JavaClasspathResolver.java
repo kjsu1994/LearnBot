@@ -44,13 +44,13 @@ public class JavaClasspathResolver {
         long started = System.nanoTime();
         if (!properties.getCode().getGraph().isDependencyResolutionEnabled()) {
             return new JavaClasspathResolution(List.of(), CodeAnalysisDiagnostic.skipped(
-                    "JAVA_CLASSPATH", "Static dependency resolver", "CACHE_AND_ALLOWLIST", "Dependency resolution is disabled."
+                    "JAVA_CLASSPATH", "Static dependency resolver", "LOCAL_CACHE", "Dependency resolution is disabled."
             ));
         }
         Set<String> coordinates = discoverCoordinates(repositoryRoot);
         if (coordinates.isEmpty()) {
             return new JavaClasspathResolution(List.of(), CodeAnalysisDiagnostic.skipped(
-                    "JAVA_CLASSPATH", "Static dependency resolver", "CACHE_AND_ALLOWLIST", "No static Java dependency coordinates found."
+                    "JAVA_CLASSPATH", "Static dependency resolver", "LOCAL_CACHE", "No static Java dependency coordinates found."
             ));
         }
         int maxArtifacts = Math.max(1, properties.getCode().getGraph().getDependencyMaxArtifacts());
@@ -87,13 +87,15 @@ public class JavaClasspathResolver {
         }
         String status = failed == 0 && !limited ? "SUCCESS" : jars.isEmpty() ? "FAILED" : "PARTIAL";
         return new JavaClasspathResolution(List.copyOf(jars), new CodeAnalysisDiagnostic(
-                "JAVA_CLASSPATH", "Static dependency resolver", status, "CACHE_AND_ALLOWLIST",
+                "JAVA_CLASSPATH", "Static dependency resolver", status,
+                properties.getCode().getGraph().isDependencyNetworkEnabled() ? "LOCAL_CACHE_AND_ALLOWLIST" : "LOCAL_CACHE",
                 coordinates.size(), jars.size(), failed, jars.size(), Math.max(0, coordinates.size() - jars.size()),
                 0, 0, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
                 limited ? "Dependency resolution stopped at a configured resource limit."
                         : failed > 0 ? "Some dependencies could not be resolved; source analysis will continue."
                         : "Dependency classpath resolved.",
-                Map.of("artifactBytes", bytes, "limitReached", limited)
+                Map.of("artifactBytes", bytes, "limitReached", limited,
+                        "networkEnabled", properties.getCode().getGraph().isDependencyNetworkEnabled())
         ));
     }
 
@@ -197,6 +199,9 @@ public class JavaClasspathResolver {
         Path target = cache.resolve(relative).normalize();
         if (!target.startsWith(cache) || (Files.isRegularFile(target) && Files.size(target) > remainingBytes)) return null;
         if (Files.isRegularFile(target)) return target;
+        Path local = localDependency(relative, matcher.group(1), matcher.group(2), matcher.group(3));
+        if (local != null && Files.size(local) <= remainingBytes) return local;
+        if (!properties.getCode().getGraph().isDependencyNetworkEnabled()) return null;
         for (String base : properties.getCode().getGraph().getDependencyAllowedRepositories()) {
             URI repository = URI.create(base.endsWith("/") ? base : base + "/");
             if (!"https".equalsIgnoreCase(repository.getScheme()) || repository.getHost() == null) continue;
@@ -228,6 +233,24 @@ public class JavaClasspathResolver {
             return target;
         }
         return null;
+    }
+
+    private Path localDependency(String mavenRelative, String group, String artifact, String version) {
+        Path home = Path.of(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
+        Path maven = home.resolve(".m2/repository").resolve(mavenRelative).normalize();
+        if (maven.startsWith(home) && Files.isRegularFile(maven)) return maven;
+        Path gradleVersion = home.resolve(".gradle/caches/modules-2/files-2.1")
+                .resolve(group).resolve(artifact).resolve(version).normalize();
+        if (!gradleVersion.startsWith(home) || !Files.isDirectory(gradleVersion)) return null;
+        String expected = artifact + "-" + version + ".jar";
+        try (var paths = Files.walk(gradleVersion, 2)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> expected.equals(path.getFileName().toString()))
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private void addCoordinate(Set<String> values, String coordinate) {

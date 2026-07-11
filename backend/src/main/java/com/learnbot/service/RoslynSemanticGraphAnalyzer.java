@@ -103,6 +103,7 @@ public class RoslynSemanticGraphAnalyzer {
             metadata.put("failedSourceFiles", failedFiles);
             metadata.put("fallbackFiles", fallbackFiles);
             metadata.put("safeMode", isSafeMode(output.mode() == null ? mode : output.mode()));
+            metadata.put("workspaceLoaded", output.workspaceLoaded());
             metadata.put("deprecatedModeAlias", usesDeprecatedModeAlias());
             if (fallbackFrom != null && !fallbackFrom.isBlank()) {
                 metadata.put("fallbackFrom", fallbackFrom);
@@ -292,7 +293,8 @@ public class RoslynSemanticGraphAnalyzer {
     }
 
     private record AnalyzerOutput(List<AnalyzerNode> nodes, List<AnalyzerEdge> edges, String mode,
-                                  int projectCount, int analyzedFiles, int failedProjects, int failedFiles) {}
+                                  int projectCount, int analyzedFiles, int failedProjects, int failedFiles,
+                                  boolean workspaceLoaded) {}
     private record AnalyzerNode(String key, String type, String name, String qualifiedName, String filePath, int line,
                                 Map<String, Object> metadata) {}
     private record AnalyzerEdge(String sourceKey, String targetKey, String type, double confidence,

@@ -204,6 +204,8 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:-learnbot1234}
       S3_BUCKET: ${S3_BUCKET:-learnbot-raw}
       LEARNBOT_CODE_WORKSPACE_PATH: /var/lib/learnbot/repos
+      LEARNBOT_LOCAL_SOURCE_DRIVE: ${LEARNBOT_LOCAL_SOURCE_DRIVE:-C}
+      LEARNBOT_LOCAL_CONTAINER_ROOT: ${LEARNBOT_LOCAL_CONTAINER_ROOT:-/host/local}
       LEARNBOT_EXPORT_DIR: /var/lib/learnbot/export
       LEARNBOT_RETENTION_ENABLED: ${LEARNBOT_RETENTION_ENABLED:-true}
       LEARNBOT_RETENTION_DRY_RUN: ${LEARNBOT_RETENTION_DRY_RUN:-false}
@@ -234,6 +236,7 @@ services:
     volumes:
       - code-repos:/var/lib/learnbot/repos
       - ./export:/var/lib/learnbot/export
+      - "${LEARNBOT_LOCAL_SOURCE_ROOT:-C:/}:${LEARNBOT_LOCAL_CONTAINER_ROOT:-/host/local}:ro"
     logging: *default-logging
 
 volumes:

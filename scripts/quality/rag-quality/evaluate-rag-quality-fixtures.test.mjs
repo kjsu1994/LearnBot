@@ -10,6 +10,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(scriptDir, "evaluate-rag-quality-fixtures.mjs");
 const fixturesPath = path.join(scriptDir, "fixtures.json");
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "learnbot-rag-quality-"));
+const offlineReportPath = path.join(tempDir, "rag-quality-offline.json");
 const reportPath = path.join(tempDir, "rag-quality-live.json");
 const liveFixturesPath = path.join(tempDir, "rag-live-fixtures.json");
 const authReportPath = path.join(tempDir, "rag-quality-live-auth.json");
@@ -21,7 +22,15 @@ const seededFollowUpReportPath = path.join(tempDir, "rag-quality-seeded-follow-u
 const seededFollowUpLiveFixturesPath = path.join(tempDir, "rag-quality-seeded-follow-up-live.json");
 const evidenceBackedFollowUpFixturesPath = path.join(tempDir, "rag-quality-evidence-backed-follow-up-fixtures.json");
 const evidenceBackedFollowUpReportPath = path.join(tempDir, "rag-quality-evidence-backed-follow-up.json");
+const environmentFixturesPath = path.join(tempDir, "rag-quality-environment-fixtures.json");
+const environmentReportPath = path.join(tempDir, "rag-quality-environment.json");
+const environmentLiveFixturesPath = path.join(tempDir, "rag-quality-environment-live.json");
+const missingEnvironmentReportPath = path.join(tempDir, "rag-quality-environment-missing.json");
+const mismatchedEnvironmentReportPath = path.join(tempDir, "rag-quality-environment-mismatched.json");
+const diverseScoringFixturesPath = path.join(tempDir, "rag-quality-diverse-scoring-fixtures.json");
+const diverseScoringReportPath = path.join(tempDir, "rag-quality-diverse-scoring.json");
 let seededFollowUpConversationIdSeen = false;
+let environmentRepositoryIdSeen = null;
 
 const server = http.createServer(async (request, response) => {
   if (request.method === "POST" && request.url === "/auth/api/auth/login") {
@@ -38,7 +47,23 @@ const server = http.createServer(async (request, response) => {
     return;
   }
   const requestPath = request.url.startsWith("/auth") ? request.url.slice("/auth".length) : request.url;
-  if (request.method !== "POST" || requestPath !== "/api/rag/ask") {
+  if (request.method === "GET" && requestPath === "/api/code/repositories") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify([{
+      id: "11111111-1111-1111-1111-111111111111",
+      sourceType: "LOCAL",
+      status: "INDEXED",
+      lastIndexedCommit: "0123456789abcdef0123456789abcdef01234567",
+      contentFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      worktreeState: "CLEAN",
+      analyzerVersion: "test-analyzer",
+      indexSchemaVersion: "test-schema",
+      activeFileCount: 10,
+      activeChunkCount: 20,
+    }]));
+    return;
+  }
+  if (request.method !== "POST" || !["/api/rag/ask", "/api/code/ask"].includes(requestPath)) {
     response.writeHead(404, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ message: "not found" }));
     return;
@@ -49,6 +74,9 @@ const server = http.createServer(async (request, response) => {
     body += chunk;
   }
   const payload = body ? JSON.parse(body) : {};
+  if (requestPath === "/api/code/ask") {
+    environmentRepositoryIdSeen = payload.repositoryId ?? null;
+  }
   const isFollowUp = String(payload.question ?? "").includes("recorded");
   if (isFollowUp && payload.conversationId === "conv-seeded") {
     seededFollowUpConversationIdSeen = true;
@@ -85,6 +113,26 @@ const server = http.createServer(async (request, response) => {
 
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 try {
+  const offlineResult = await runNode([
+    scriptPath,
+    "--fixtures", fixturesPath,
+    "--report", offlineReportPath,
+  ]);
+  assert.equal(offlineResult.status, 0, offlineResult.stderr || offlineResult.stdout);
+  const offlineReport = JSON.parse(fs.readFileSync(offlineReportPath, "utf8"));
+  const codeGroundingResult = offlineReport.results.find((item) => item.id === "code-local-agent-tool-api-flow");
+  assert.equal(codeGroundingResult.passed, true);
+  assert.equal(codeGroundingResult.claims.requiredCoverage, 1);
+  assert.equal(codeGroundingResult.claims.forbiddenClaimsFound.length, 0);
+  assert.equal(codeGroundingResult.codeGrounding.fileCoverage, 1);
+  assert.equal(codeGroundingResult.codeGrounding.symbolCoverage, 1);
+  assert.equal(codeGroundingResult.codeGrounding.observedSymbols.includes("undefined"), false);
+  assert.deepEqual(codeGroundingResult.failedGates, []);
+  assert.equal(offlineReport.summary.strongGatePassedCases, 3);
+  assert.equal(offlineReport.summary.gateFailures.requiredClaims, 0);
+  assert.equal(offlineReport.summary.gateFailures.expectedFiles, 0);
+  assert.equal(offlineReport.summary.gateFailures.expectedSymbols, 0);
+
   const { port } = server.address();
   const result = await runNode([
     scriptPath,
@@ -106,6 +154,10 @@ try {
   assert.equal(report.summary.failedCases, 0);
   assert.equal(report.summary.followUpQuality, 1);
   assert.equal(report.summary.followUpPassedCases, 2);
+  assert.equal(report.summary.strongGatePassRate, 1);
+  assert.equal(report.summary.answerAccuracy, 1);
+  assert.equal(report.summary.answerAccuracyDefinition.includes("strongGatePassedCases / scoredCases"), true);
+  assert.equal(report.results[0].citation.mode, "exact");
   assert.equal(report.results[0].status, "passed");
   assert.equal(report.results[1].status, "skipped");
   assert.equal(report.results[1].skipReason, "LIVE_CODE_REPOSITORY_ID_REQUIRED");
@@ -114,6 +166,7 @@ try {
 
   const liveFixtures = JSON.parse(fs.readFileSync(liveFixturesPath, "utf8"));
   assert.equal(liveFixtures.schema, "learnbot.quality.rag-live-fixtures.v1");
+  assert.equal(liveFixtures.liveCapture.caseDelayMs, 0);
   assert.equal(liveFixtures.cases[0].observed.citationIds[0], "doc-security-policy#chunk-1");
   assert.equal(liveFixtures.cases[2].observed.effectiveQuestion, "What must be recorded from the security approval policy?");
 
@@ -143,6 +196,10 @@ try {
           evidence: [],
           latencyMs: 10,
         },
+        requiredClaims: ["Repository stores the response"],
+        forbiddenClaims: ["Manager approval"],
+        expectedFiles: ["src/main/java/example/ToolRepository.java"],
+        expectedSymbols: ["complete"],
         expectedEvidenceSnippets: ["not present"],
         maxLatencyMs: 1,
       },
@@ -157,6 +214,53 @@ try {
   const failedReport = JSON.parse(fs.readFileSync(failedReportPath, "utf8"));
   assert.equal(failedReport.passed, false);
   assert.equal(failedReport.summary.failedCases, 1);
+  assert.deepEqual(
+    failedReport.results[0].failedGates,
+    ["citations", "evidence", "requiredClaims", "forbiddenClaims", "expectedFiles", "expectedSymbols", "implementationBodies", "latency"],
+  );
+  assert.equal(failedReport.summary.gateFailures.requiredClaims, 1);
+  assert.equal(failedReport.summary.gateFailures.forbiddenClaims, 1);
+  assert.equal(failedReport.summary.gateFailures.expectedFiles, 1);
+  assert.equal(failedReport.summary.gateFailures.expectedSymbols, 1);
+  assert.equal(failedReport.summary.gateFailures.implementationBodies, 1);
+
+  fs.writeFileSync(diverseScoringFixturesPath, JSON.stringify({
+    cases: [
+      {
+        id: "java-diverse-equivalent-claim",
+        language: "java",
+        questionLanguage: "ko",
+        domain: "code",
+        question: "응답은 어디에 저장해?",
+        citationRequired: false,
+        observed: { answer: "리포지토리의 complete에서 저장합니다.", citationIds: [], evidence: [], latencyMs: 10 },
+        requiredClaimGroups: [["repository.complete", "리포지토리의 complete"]],
+        maxLatencyMs: 100,
+      },
+      {
+        id: "csharp-diverse-insufficient-evidence",
+        language: "csharp",
+        domain: "code",
+        question: "Explain an invented persistence method.",
+        answerMode: "insufficient",
+        citationRequired: false,
+        acceptedAnswerTerms: ["not found", "insufficient evidence"],
+        observed: { answer: "The method was not found in the repository.", citationIds: [], evidence: [], latencyMs: 10 },
+        maxLatencyMs: 100,
+      },
+    ],
+  }, null, 2));
+  const diverseScoringResult = await runNode([
+    scriptPath,
+    "--fixtures", diverseScoringFixturesPath,
+    "--report", diverseScoringReportPath,
+  ]);
+  assert.equal(diverseScoringResult.status, 0, diverseScoringResult.stderr || diverseScoringResult.stdout);
+  const diverseScoringReport = JSON.parse(fs.readFileSync(diverseScoringReportPath, "utf8"));
+  assert.equal(diverseScoringReport.results[0].claims.requiredCoverage, 1);
+  assert.equal(diverseScoringReport.results[1].answerMode.passed, true);
+  assert.equal(diverseScoringReport.slices.cohort.diverse.answerAccuracy, 1);
+  assert.equal(diverseScoringReport.slices.questionLanguage.ko.cases, 1);
 
   fs.writeFileSync(seededFollowUpFixturesPath, JSON.stringify({
     cases: [
@@ -221,6 +325,88 @@ try {
   assert.equal(evidenceBackedFollowUpReport.results[0].followUp.quality, 1);
   assert.equal(evidenceBackedFollowUpReport.results[0].followUp.matchedAnswerTerms, 0);
   assert.equal(evidenceBackedFollowUpReport.results[0].followUp.matchedEvidenceTerms, 2);
+
+  fs.writeFileSync(environmentFixturesPath, JSON.stringify({
+    repositoryVersions: {
+      java: {
+        repositoryId: "${LEARNBOT_TEST_REPOSITORY_ID}",
+        expectedSourceType: "${LEARNBOT_TEST_EXPECTED_SOURCE_TYPE}",
+        expectedCommitSha: "${LEARNBOT_TEST_EXPECTED_COMMIT}",
+        expectedContentFingerprint: "${LEARNBOT_TEST_EXPECTED_FINGERPRINT}",
+      },
+    },
+    cases: [
+      {
+        id: "environment-repository-grounded-citation",
+        domain: "code",
+        repositoryId: "${LEARNBOT_TEST_REPOSITORY_ID}",
+        question: "What is the security policy?",
+        expectedCitationIds: [],
+        expectedEvidenceSnippets: ["Security exceptions require manager approval"],
+        maxLatencyMs: 1500,
+      },
+    ],
+  }, null, 2));
+  const environmentResult = await runNode([
+    scriptPath,
+    "--live",
+    "--server", `http://127.0.0.1:${port}`,
+    "--fixtures", environmentFixturesPath,
+    "--report", environmentReportPath,
+    "--live-fixtures-report", environmentLiveFixturesPath,
+    "--case-delay-ms", "0",
+  ], { env: {
+    LEARNBOT_TEST_REPOSITORY_ID: "11111111-1111-1111-1111-111111111111",
+    LEARNBOT_TEST_EXPECTED_COMMIT: "0123456789abcdef0123456789abcdef01234567",
+    LEARNBOT_TEST_EXPECTED_FINGERPRINT: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    LEARNBOT_TEST_EXPECTED_SOURCE_TYPE: "LOCAL",
+  } });
+  assert.equal(environmentResult.status, 0, environmentResult.stderr || environmentResult.stdout);
+  assert.equal(environmentRepositoryIdSeen, "11111111-1111-1111-1111-111111111111");
+  const environmentReport = JSON.parse(fs.readFileSync(environmentReportPath, "utf8"));
+  assert.equal(environmentReport.results[0].citation.mode, "grounded");
+  assert.equal(environmentReport.results[0].citation.evidenceMatchedCitationIds.length, 1);
+  assert.equal(environmentReport.results[0].gates.citations, true);
+  const environmentLiveFixtures = JSON.parse(fs.readFileSync(environmentLiveFixturesPath, "utf8"));
+  assert.equal(environmentLiveFixtures.cases[0].repositoryId, "${LEARNBOT_TEST_REPOSITORY_ID}");
+  assert.deepEqual(
+    environmentLiveFixtures.cases[0].liveCapture.repositoryIdEnvironmentVariables,
+    ["LEARNBOT_TEST_REPOSITORY_ID"],
+  );
+  assert.equal(environmentLiveFixtures.liveCapture.environmentValidation.status, "VALID");
+
+  environmentRepositoryIdSeen = null;
+  const mismatchedEnvironmentResult = await runNode([
+    scriptPath,
+    "--live",
+    "--server", `http://127.0.0.1:${port}`,
+    "--fixtures", environmentFixturesPath,
+    "--report", mismatchedEnvironmentReportPath,
+    "--live-fixtures-report", environmentLiveFixturesPath,
+  ], { env: {
+    LEARNBOT_TEST_REPOSITORY_ID: "11111111-1111-1111-1111-111111111111",
+    LEARNBOT_TEST_EXPECTED_COMMIT: "ffffffffffffffffffffffffffffffffffffffff",
+    LEARNBOT_TEST_EXPECTED_FINGERPRINT: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    LEARNBOT_TEST_EXPECTED_SOURCE_TYPE: "LOCAL",
+  } });
+  assert.equal(mismatchedEnvironmentResult.status, 1);
+  assert.equal(mismatchedEnvironmentResult.stderr.includes("INVALID_ENVIRONMENT"), true);
+  assert.equal(mismatchedEnvironmentResult.stderr.includes("INDEXED_COMMIT_MISMATCH")
+    || mismatchedEnvironmentResult.stderr.includes("expected ffffffff"), true);
+  assert.equal(environmentRepositoryIdSeen, null);
+  assert.equal(fs.existsSync(mismatchedEnvironmentReportPath), false);
+
+  const missingEnvironmentResult = await runNode([
+    scriptPath,
+    "--live",
+    "--server", `http://127.0.0.1:${port}`,
+    "--fixtures", environmentFixturesPath,
+    "--report", missingEnvironmentReportPath,
+    "--live-fixtures-report", environmentLiveFixturesPath,
+  ], { env: { LEARNBOT_TEST_REPOSITORY_ID: "" } });
+  assert.equal(missingEnvironmentResult.status, 0, missingEnvironmentResult.stderr || missingEnvironmentResult.stdout);
+  const missingEnvironmentReport = JSON.parse(fs.readFileSync(missingEnvironmentReportPath, "utf8"));
+  assert.equal(missingEnvironmentReport.results[0].skipReason, "LIVE_CODE_REPOSITORY_ID_ENV_REQUIRED");
 } finally {
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -228,9 +414,12 @@ try {
 
 console.log("evaluate-rag-quality-fixtures live capture tests passed");
 
-function runNode(args) {
+function runNode(args, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...(options.env ?? {}) },
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {

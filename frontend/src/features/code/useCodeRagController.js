@@ -44,6 +44,7 @@ export function useCodeRagController({
     storeToken: false,
   });
   const [zipForm, setZipForm] = useState({ file: null, name: '' });
+  const [localRepoForm, setLocalRepoForm] = useState({ localPath: '', name: '' });
   const [zipReplaceFile, setZipReplaceFile] = useState(null);
   const [indexCredential, setIndexCredential] = useState({ username: '', token: '', storeToken: true });
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('');
@@ -517,6 +518,26 @@ export function useCodeRagController({
       } else {
         setPendingCodeTurn((current) => current ? { ...current, ...completed, streaming: false } : null);
       }
+    });
+  }
+
+  async function registerLocalRepository(event) {
+    event.preventDefault();
+    if (!localRepoForm.localPath.trim()) return;
+    await run('repo-local-register', async () => {
+      const created = await request('/api/code/repositories/local', {
+        method: 'POST',
+        json: {
+          localPath: localRepoForm.localPath.trim(),
+          name: localRepoForm.name.trim(),
+          spaceId: activeSpaceId,
+        },
+      });
+      setSelectedRepositoryId(created.id);
+      setLocalRepoForm({ localPath: '', name: '' });
+      await request(`/api/code/repositories/${created.id}/index`, { method: 'POST', json: {} });
+      await refreshRepositories();
+      await refreshJobs(created.id);
     });
   }
 
@@ -1553,6 +1574,8 @@ export function useCodeRagController({
     setRepoForm,
     zipForm,
     setZipForm,
+    localRepoForm,
+    setLocalRepoForm,
     zipReplaceFile,
     setZipReplaceFile,
     indexCredential,
@@ -1617,6 +1640,7 @@ export function useCodeRagController({
     refreshCodeFiles,
     searchCodeFiles,
     registerRepository,
+    registerLocalRepository,
     uploadZipRepository,
     indexRepository,
     replaceZipRepository,

@@ -19,24 +19,46 @@
       "maxLatencyMs": 20000
     },
     {
-      "id": "live-code-local-agent-flow-order",
+      "id": "live-code-local-agent-tool-api-flow",
       "domain": "code",
       "repositoryId": "",
-      "question": "What is the approved Local Agent execution order?",
+      "question": "Local Agent가 tool 요청을 가져오고 응답을 저장하는 API 흐름을 Controller, Service, Repository 기준으로 설명해줘.",
       "mode": "overview",
-      "limit": 10,
+      "limit": 20,
       "expectedCitationIds": [],
       "expectedEvidenceSnippets": [
-        "patch.apply",
-        "command.runAllowed",
-        "git.status",
-        "rollback.restore"
+        "nextTool",
+        "claimNext",
+        "completeTool",
+        "repository.complete"
+      ],
+      "requiredClaims": [
+        "GET /api/local-agents/tools/next",
+        "LocalAgentToolGatewayService.claimNext",
+        "LocalAgentToolExecutionRepository.claimNext",
+        "POST /api/local-agents/tools/{requestId}/response",
+        "LocalAgentToolGatewayService.complete",
+        "LocalAgentToolExecutionRepository.complete"
+      ],
+      "forbiddenClaims": [
+        "enqueueReadOnlyTool is the request retrieval endpoint",
+        "repository.complete is omitted from the source"
+      ],
+      "expectedFiles": [
+        "backend/src/main/java/com/learnbot/web/LocalAgentController.java",
+        "backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java",
+        "backend/src/main/java/com/learnbot/repository/LocalAgentToolExecutionRepository.java"
+      ],
+      "expectedSymbols": [
+        "nextTool",
+        "claimNext",
+        "completeTool",
+        "complete"
       ],
       "forbiddenAnswerTerms": [
-        "arbitrary shell",
-        "server-local mutation must not be the default path"
+        "createApprovalRequest is the claim flow"
       ],
-      "maxLatencyMs": 20000
+      "maxLatencyMs": 60000
     }
   ]
 }

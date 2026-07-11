@@ -157,35 +157,6 @@ public class CodeSearchService {
                 .toList();
     }
 
-    public List<CodeSearchResult> runtimeRoleSearch(
-            UUID repositoryId,
-            String domainPattern,
-            String behaviorPattern,
-            int limit,
-            List<UUID> spaceIds,
-            UUID selectedSpaceId
-    ) {
-        String safeDomainPattern = domainPattern == null ? "" : domainPattern.trim();
-        String safeBehaviorPattern = behaviorPattern == null ? "" : behaviorPattern.trim();
-        if (safeDomainPattern.isBlank() || safeBehaviorPattern.isBlank()) {
-            return List.of();
-        }
-        try {
-            return repository.runtimeRoleSearch(
-                    repositoryId,
-                    safeDomainPattern,
-                    safeBehaviorPattern,
-                    Math.max(1, Math.min(limit, 30)),
-                    spaceIds == null || spaceIds.isEmpty()
-                            ? java.util.List.of(com.learnbot.repository.SecurityRepository.DEFAULT_SPACE_ID)
-                            : spaceIds,
-                    selectedSpaceId
-            );
-        } catch (RuntimeException ignored) {
-            return List.of();
-        }
-    }
-
     public List<String> expandedQueries(String query) {
         if (query == null || query.isBlank()) {
             return List.of();
@@ -243,7 +214,7 @@ public class CodeSearchService {
             for (CodeSearchResult related : repository.graphRelatedChunks(
                     repositoryId,
                     seeds,
-                    graphEdgeTypes(query, intent),
+                    graphEdgeTypes(intent),
                     graphMaxHop(intent),
                     graphDirection(intent),
                     Math.max(limit, properties.getCode().getGraph().getMaxExpandedResults()),
@@ -455,7 +426,7 @@ public class CodeSearchService {
                 || normalized.contains("\uAD6C\uC131");
     }
 
-    private List<String> graphEdgeTypes(String query, GraphSearchIntent intent) {
+    private List<String> graphEdgeTypes(GraphSearchIntent intent) {
         if (intent == GraphSearchIntent.FLOW) {
             return List.of("EXPOSES_ENDPOINT", "CALLS", "INJECTS", "RETURNS", "HANDLES_EVENT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY", "COMMAND_BINDING", "COMMAND_TARGETS", "COMMAND_EXECUTES", "DATA_CONTEXT");
         }
@@ -467,14 +438,6 @@ public class CodeSearchService {
         }
         if (intent == GraphSearchIntent.OVERVIEW) {
             return List.of("CONTAINS", "DEFINES", "EXTENDS", "IMPLEMENTS", "INJECTS", "ANNOTATED_BY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DATA_CONTEXT", "COMMAND_BINDING", "COMMAND_TARGETS");
-        }
-        String normalized = normalizeCodeText(query);
-        if (normalized.contains("flow") || normalized.contains("impact") || normalized.contains("call")
-                || normalized.contains("흐름") || normalized.contains("호출")) {
-            return List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_BINDING", "COMMAND_TARGETS", "COMMAND_EXECUTES", "DATA_CONTEXT", "TRANSACTION_BOUNDARY");
-        }
-        if (isOverviewQuestion(query)) {
-            return List.of("CONTAINS", "DEFINES", "REFERENCES", "DEPENDS_ON", "RELATED_TO", "DECLARES_BEAN", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DATA_CONTEXT", "COMMAND_BINDING", "COMMAND_TARGETS");
         }
         return List.of("DEFINES", "CONTAINS", "CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "USES_COMMAND", "COMMAND_BINDING", "COMMAND_TARGETS", "COMMAND_EXECUTES", "DATA_CONTEXT", "DECLARES_CONTROL", "CODE_BEHIND", "PARTIAL_OF", "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY", "FILTERS_BY_PROPERTY");
     }

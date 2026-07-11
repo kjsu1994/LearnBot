@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, GitBranch, Info, Loader2, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Eye, FileArchive, FileCode2, FolderOpen, GitBranch, Info, Loader2, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { codeModes } from '../../config/constants.js';
 import { formatDate, getCodeModeGuide, getCodeModeLabel, getStatusLabel, jobChangeText, jobPercent, submitFormOnShortcut } from '../../lib/formatters.js';
 import { useStreamingAutoScroll } from '../../lib/useStreamingAutoScroll.js';
@@ -4268,6 +4268,9 @@ function CodeSourceManagementPanel(props) {
     jobDiagnostics = {},
     loadJobDiagnostics = () => {},
     registerRepository = (event) => event.preventDefault(),
+    registerLocalRepository = (event) => event.preventDefault(),
+    localRepoForm = { localPath: '', name: '' },
+    setLocalRepoForm = () => {},
     uploadZipRepository = (event) => event.preventDefault(),
     replaceZipRepository = () => {},
     indexRepository = () => {},
@@ -4330,6 +4333,35 @@ function CodeSourceManagementPanel(props) {
             </button>
           </div>
         </form>
+        <form className="stack" onSubmit={registerLocalRepository}>
+          <div className="panel-title">
+            <FolderOpen size={18} />
+            <div>
+              <h2>로컬 폴더 등록</h2>
+              <p>설정된 호스트 드라이브의 프로젝트 폴더를 직접 등록하고 인덱싱합니다.</p>
+            </div>
+          </div>
+          <label htmlFor="local-repo-path">Windows 폴더 경로</label>
+          <input
+            id="local-repo-path"
+            value={localRepoForm.localPath}
+            onChange={(event) => setLocalRepoForm((current) => ({ ...current, localPath: event.target.value }))}
+            placeholder="C:\\Users\\name\\source\\Project"
+          />
+          <label htmlFor="local-repo-name">표시 이름</label>
+          <input
+            id="local-repo-name"
+            value={localRepoForm.name}
+            onChange={(event) => setLocalRepoForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="비우면 폴더 이름 사용"
+          />
+          <div className="action-row">
+            <button disabled={!localRepoForm.localPath.trim() || loading('repo-local-register')}>
+              {loading('repo-local-register') ? <Loader2 className="spin" size={16} /> : <FolderOpen size={16} />}
+              등록 및 인덱싱
+            </button>
+          </div>
+        </form>
         <form className="stack" onSubmit={uploadZipRepository}>
           <div className="panel-title">
             <FileArchive size={18} />
@@ -4371,7 +4403,7 @@ function CodeSourceManagementPanel(props) {
               <article className={repo.id === selectedRepositoryId ? 'document-row selected repo-row' : 'document-row repo-row'} key={repo.id} onClick={() => setSelectedRepositoryId(repo.id)}>
                 <div className="document-main">
                   <strong>{repo.name}</strong>
-                  <small>{repo.sourceType === 'ZIP' ? repo.sourceLabel : repo.gitUrl}</small>
+                  <small>{repo.sourceType === 'ZIP' ? repo.sourceLabel : (repo.sourceType === 'LOCAL' ? repo.localPath : repo.gitUrl)}</small>
                   {repo.errorMessage && <small className="danger-note">{repo.errorMessage}</small>}
                   {repo.credentialStored && <small className="success-note">암호화된 Git 토큰 저장됨</small>}
                 </div>

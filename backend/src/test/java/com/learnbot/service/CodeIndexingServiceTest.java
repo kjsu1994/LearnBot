@@ -9,6 +9,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CodeIndexingServiceTest {
 
     @Test
+    void localSourceNeverInvokesGitSynchronization() {
+        CodeRepositoryRecord local = new CodeRepositoryRecord(
+                UUID.randomUUID(), UUID.randomUUID(), "local", "LOCAL", "/host/local/project", null,
+                "git@github.com:org/project.git", "HEAD", "NONE", "/host/local/project", "LOCAL_READY", "abc123"
+        );
+
+        assertThat(CodeIndexingService.sourceRevision(local, () -> {
+            throw new AssertionError("LOCAL indexing must not synchronize Git");
+        })).isEqualTo("abc123");
+    }
+
+    @Test
+    void gitSourceStillInvokesGitSynchronization() {
+        CodeRepositoryRecord git = new CodeRepositoryRecord(
+                UUID.randomUUID(), UUID.randomUUID(), "git", "GIT", "https://example.test/project.git", null,
+                "https://example.test/project.git", "main", "NONE", "/repos/project", "PENDING", null
+        );
+
+        assertThat(CodeIndexingService.sourceRevision(git, () -> "new-commit"))
+                .isEqualTo("new-commit");
+    }
+
+    @Test
+    void mapsConfiguredWindowsDrivePathToConfiguredDockerMount() {
+        assertThat(CodeIndexingService.dockerLocalPath(
+                "D:\\Users\\developer\\Project", "D", "/mnt/source"))
+                .isEqualTo("/mnt/source/Users/developer/Project");
+    }
+
+    @Test
+    void preservesContainerLocalPathForLocalAgentCompatibility() {
+        assertThat(CodeIndexingService.dockerLocalPath(
+                "/workspace/Project", "C", "/host/local"))
+                .isEqualTo("/workspace/Project");
+    }
+
+    @Test
     void contentHashMatchDoesNotReuseLegacyParserChunks() {
         ActiveCodeFileSnapshot legacy = new ActiveCodeFileSnapshot(
                 UUID.randomUUID(),

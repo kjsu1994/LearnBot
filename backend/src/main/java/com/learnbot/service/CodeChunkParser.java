@@ -655,10 +655,7 @@ public class CodeChunkParser {
         String parser = String.valueOf(enriched.getOrDefault("parser", enriched.getOrDefault("strategy", "")));
         CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(relativePath, chunkType, parser);
         enriched.putIfAbsent("sourceRole", profile.sourceRole());
-        enriched.putIfAbsent("runtimeRole", profile.runtimeRole());
-        enriched.putIfAbsent("domainRole", profile.domainRole());
         enriched.putIfAbsent("parserConfidence", profile.parserConfidence());
-        enriched.putIfAbsent("localAgentEvidence", profile.localAgentEvidence());
         return enriched;
     }
 

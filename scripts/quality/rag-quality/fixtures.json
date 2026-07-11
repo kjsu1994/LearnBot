@@ -25,25 +25,68 @@
       }
     },
     {
-      "id": "code-approved-flow-order",
+      "id": "code-local-agent-tool-api-flow",
       "domain": "code",
-      "question": "What is the approved Local Agent execution order?",
-      "expectedCitationIds": ["code-local-agent-flow#contract"],
-      "expectedEvidenceSnippets": [
-        "patch.apply",
-        "command.runAllowed",
-        "git.status",
-        "rollback.restore"
+      "question": "Local Agent가 tool 요청을 가져오고 응답을 저장하는 API 흐름을 Controller, Service, Repository 기준으로 설명해줘.",
+      "expectedCitationIds": [
+        "code-local-agent-flow#controller",
+        "code-local-agent-flow#service",
+        "code-local-agent-flow#repository"
       ],
-      "forbiddenAnswerTerms": ["arbitrary shell", "server-local mutation by default"],
+      "expectedEvidenceSnippets": [
+        "GET /api/local-agents/tools/next",
+        "toolGatewayService.claimNext",
+        "repository.claimNext",
+        "POST /api/local-agents/tools/{requestId}/response",
+        "toolGatewayService.complete",
+        "repository.complete"
+      ],
+      "requiredClaims": [
+        "GET /api/local-agents/tools/next",
+        "LocalAgentToolGatewayService.claimNext",
+        "LocalAgentToolExecutionRepository.claimNext",
+        "POST /api/local-agents/tools/{requestId}/response",
+        "LocalAgentToolGatewayService.complete",
+        "LocalAgentToolExecutionRepository.complete"
+      ],
+      "forbiddenClaims": [
+        "enqueueReadOnlyTool is the request retrieval endpoint",
+        "repository.complete is omitted from the source"
+      ],
+      "expectedFiles": [
+        "backend/src/main/java/com/learnbot/web/LocalAgentController.java",
+        "backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java",
+        "backend/src/main/java/com/learnbot/repository/LocalAgentToolExecutionRepository.java"
+      ],
+      "expectedSymbols": ["nextTool", "claimNext", "completeTool", "complete"],
+      "expectedImplementationSymbols": [],
+      "forbiddenAnswerTerms": ["createApprovalRequest is the claim flow"],
       "maxLatencyMs": 1500,
       "observed": {
-        "answer": "The approved execution flow is patch.apply, command.runAllowed, git.status, then rollback.restore. [code-local-agent-flow#contract]",
-        "citationIds": ["code-local-agent-flow#contract"],
+        "answer": "GET /api/local-agents/tools/next enters LocalAgentController.nextTool, then calls LocalAgentToolGatewayService.claimNext and LocalAgentToolExecutionRepository.claimNext. POST /api/local-agents/tools/{requestId}/response enters LocalAgentController.completeTool, then calls LocalAgentToolGatewayService.complete and LocalAgentToolExecutionRepository.complete. [1][2][3]",
+        "citationIds": [
+          "code-local-agent-flow#controller",
+          "code-local-agent-flow#service",
+          "code-local-agent-flow#repository"
+        ],
         "evidence": [
           {
-            "id": "code-local-agent-flow#contract",
-            "text": "The approved execution-flow contract requires patch.apply, command.runAllowed, git.status, and rollback.restore in order."
+            "id": "code-local-agent-flow#controller",
+            "filePath": "backend/src/main/java/com/learnbot/web/LocalAgentController.java",
+            "symbols": ["nextTool", "completeTool"],
+            "text": "GET /api/local-agents/tools/next calls toolGatewayService.claimNext. POST /api/local-agents/tools/{requestId}/response calls toolGatewayService.complete."
+          },
+          {
+            "id": "code-local-agent-flow#service",
+            "filePath": "backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java",
+            "symbols": ["claimNext", "complete"],
+            "text": "LocalAgentToolGatewayService.claimNext calls repository.claimNext. LocalAgentToolGatewayService.complete validates and enriches the response before calling repository.complete."
+          },
+          {
+            "id": "code-local-agent-flow#repository",
+            "filePath": "backend/src/main/java/com/learnbot/repository/LocalAgentToolExecutionRepository.java",
+            "symbols": ["claimNext", "complete"],
+            "text": "LocalAgentToolExecutionRepository.claimNext claims a queued request. LocalAgentToolExecutionRepository.complete stores the terminal response fields."
           }
         ],
         "latencyMs": 510

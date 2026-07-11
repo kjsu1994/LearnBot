@@ -65,6 +65,7 @@ learnbot:
       rewrite-enabled: ${RAG_PIPELINE_REWRITE_ENABLED:true}
       self-check-enabled: ${RAG_PIPELINE_SELF_CHECK_ENABLED:true}
       max-iterations: ${RAG_PIPELINE_MAX_ITERATIONS:2}
+      code-retrieval-max-iterations: ${RAG_PIPELINE_CODE_RETRIEVAL_MAX_ITERATIONS:3}
       rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:20}
       document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:8}
       code-context-limit: ${RAG_PIPELINE_CODE_CONTEXT_LIMIT:12}
@@ -126,6 +127,8 @@ learnbot:
     region: ${S3_REGION:us-east-1}
   code:
     workspace-path: ${LEARNBOT_CODE_WORKSPACE_PATH:/var/lib/learnbot/repos}
+    local-source-drive: ${LEARNBOT_LOCAL_SOURCE_DRIVE:C}
+    local-container-root: ${LEARNBOT_LOCAL_CONTAINER_ROOT:/host/local}
     max-file-bytes: ${LEARNBOT_CODE_MAX_FILE_BYTES:1000000}
     max-files: ${LEARNBOT_CODE_MAX_FILES:5000}
     max-archive-bytes: ${LEARNBOT_CODE_MAX_ARCHIVE_BYTES:512000000}
@@ -154,6 +157,7 @@ learnbot:
       roslyn-fallback-simple-enabled: ${LEARNBOT_CODE_GRAPH_ROSLYN_FALLBACK_SIMPLE_ENABLED:true}
       roslyn-diagnostic-stderr-chars: ${LEARNBOT_CODE_GRAPH_ROSLYN_DIAGNOSTIC_STDERR_CHARS:1200}
       dependency-resolution-enabled: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_RESOLUTION_ENABLED:true}
+      dependency-network-enabled: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_NETWORK_ENABLED:false}
       dependency-allowed-repositories: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_ALLOWED_REPOSITORIES:https://repo.maven.apache.org/maven2}
       dependency-max-artifacts: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_ARTIFACTS:256}
       dependency-max-bytes: ${LEARNBOT_CODE_GRAPH_DEPENDENCY_MAX_BYTES:536870912}

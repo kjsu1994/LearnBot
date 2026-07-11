@@ -32,6 +32,8 @@ class JavaClasspathResolverTest {
 
         assertThat(result.jars()).containsExactly(jar);
         assertThat(result.diagnostic().status()).isEqualTo("SUCCESS");
+        assertThat(result.diagnostic().mode()).isEqualTo("LOCAL_CACHE");
+        assertThat(result.diagnostic().metadata()).containsEntry("networkEnabled", false);
     }
 
     @Test

@@ -5,6 +5,8 @@ using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.Build.Locator;
 
 if (args.Length < 1 || !Directory.Exists(args[0]))
 {
@@ -16,25 +18,33 @@ var root = Path.GetFullPath(args[0]);
 var requestedMode = NormalizeMode(args.Length > 1 ? args[1] : "SIMPLE");
 var dotnetUiEnabled = args.Length < 3 || bool.TryParse(args[2], out var parsedUiFlag) && parsedUiFlag;
 var inputs = ResolveInputs(root, requestedMode);
+var workspaceAnalysis = requestedMode == "SIMPLE" ? null : await LoadWorkspaceAnalysis(root, requestedMode);
 var parseOptions = new CSharpParseOptions(preprocessorSymbols: inputs.DefineConstants);
-var trees = new List<SyntaxTree>();
+var parsedTrees = new List<SyntaxTree>();
 var failedFiles = 0;
-foreach (var path in inputs.Files)
+if (workspaceAnalysis is null)
 {
-    try
+    foreach (var path in inputs.Files)
     {
-        trees.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(path), parseOptions, path: path));
-    }
-    catch
-    {
-        failedFiles++;
+        try
+        {
+            parsedTrees.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(path), parseOptions, path: path));
+        }
+        catch
+        {
+            failedFiles++;
+        }
     }
 }
+var trees = workspaceAnalysis?.Trees ?? parsedTrees;
 var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ?? "")
     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
     .Select(path => MetadataReference.CreateFromFile(path));
 var compilation = CSharpCompilation.Create("LearnBot.IndexedRepository", trees, references,
     new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+SemanticModel ModelFor(SyntaxTree tree) => workspaceAnalysis?.Models.TryGetValue(tree, out var model) == true
+    ? model
+    : compilation.GetSemanticModel(tree, ignoreAccessibility: true);
 
 var nodes = new Dictionary<string, GraphNode>(StringComparer.Ordinal);
 var edges = new Dictionary<string, GraphEdge>(StringComparer.Ordinal);
@@ -42,7 +52,7 @@ var entityTypes = new HashSet<string>(StringComparer.Ordinal);
 
 foreach (var tree in trees)
 {
-    var model = compilation.GetSemanticModel(tree, ignoreAccessibility: true);
+    var model = ModelFor(tree);
     var syntaxRoot = await tree.GetRootAsync();
     foreach (var declaration in syntaxRoot.DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
     {
@@ -71,7 +81,7 @@ foreach (var tree in trees)
 
 foreach (var tree in trees)
 {
-    var model = compilation.GetSemanticModel(tree, ignoreAccessibility: true);
+    var model = ModelFor(tree);
     var syntaxRoot = await tree.GetRootAsync();
     var file = Relative(root, tree.FilePath);
     foreach (var field in syntaxRoot.DescendantNodes().OfType<FieldDeclarationSyntax>())
@@ -178,7 +188,12 @@ if (dotnetUiEnabled)
 }
 
 Console.Write(JsonSerializer.Serialize(new GraphOutput(
-    nodes.Values, edges.Values, inputs.Mode, inputs.ProjectCount, trees.Count, inputs.FailedProjects, failedFiles
+    nodes.Values, edges.Values, inputs.Mode,
+    workspaceAnalysis?.ProjectCount ?? inputs.ProjectCount,
+    trees.Count,
+    workspaceAnalysis?.FailedProjects ?? inputs.FailedProjects,
+    failedFiles,
+    workspaceAnalysis is not null
 ), new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -641,6 +656,110 @@ AnalysisInputs ResolveInputs(string repositoryRoot, string mode)
         projectFiles.Distinct(StringComparer.OrdinalIgnoreCase).Count(), failedProjects, defines.ToArray());
 }
 
+async Task<WorkspaceAnalysis?> LoadWorkspaceAnalysis(string repositoryRoot, string mode)
+{
+    try
+    {
+        RegisterLocalMSBuild();
+
+        using var workspace = MSBuildWorkspace.Create();
+        var workspaceFailures = 0;
+        workspace.WorkspaceFailed += (_, _) => workspaceFailures++;
+        Solution solution;
+        if (mode == "SAFE_SOLUTION")
+        {
+            var solutionPath = Directory.EnumerateFiles(repositoryRoot, "*.sln", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (solutionPath is null) return null;
+            solution = await workspace.OpenSolutionAsync(solutionPath);
+        }
+        else
+        {
+            var projectPaths = Directory.EnumerateFiles(repositoryRoot, "*.csproj", SearchOption.AllDirectories)
+                .Where(path => !IsExcluded(path))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (projectPaths.Length == 0) return null;
+            foreach (var projectPath in projectPaths)
+                await workspace.OpenProjectAsync(projectPath);
+            solution = workspace.CurrentSolution;
+        }
+
+        var modelByTree = new Dictionary<SyntaxTree, SemanticModel>();
+        var loadedTrees = new List<SyntaxTree>();
+        var failedProjects = 0;
+        foreach (var project in solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
+        {
+            var projectCompilation = await project.GetCompilationAsync();
+            if (projectCompilation is null)
+            {
+                failedProjects++;
+                continue;
+            }
+            foreach (var tree in projectCompilation.SyntaxTrees)
+            {
+                if (string.IsNullOrWhiteSpace(tree.FilePath) || !IsRepositoryFile(repositoryRoot, tree.FilePath))
+                    continue;
+                loadedTrees.Add(tree);
+                modelByTree[tree] = projectCompilation.GetSemanticModel(tree, ignoreAccessibility: true);
+            }
+        }
+        if (loadedTrees.Count == 0) return null;
+        return new WorkspaceAnalysis(
+            loadedTrees.Distinct().ToList(),
+            modelByTree,
+            solution.Projects.Count(project => project.Language == LanguageNames.CSharp),
+            failedProjects + workspaceFailures);
+    }
+    catch (Exception exception)
+    {
+        var message = Regex.Replace(exception.Message ?? exception.GetType().Name, "\\s+", " ").Trim();
+        Console.Error.WriteLine("MSBuildWorkspace fallback: " + (message.Length <= 500 ? message : message[..500]));
+        return null;
+    }
+}
+
+void RegisterLocalMSBuild()
+{
+    if (MSBuildLocator.IsRegistered) return;
+    var instances = MSBuildLocator.QueryVisualStudioInstances()
+        .OrderByDescending(instance => instance.Version)
+        .ToArray();
+    if (instances.Length > 0)
+    {
+        MSBuildLocator.RegisterInstance(instances[0]);
+        return;
+    }
+
+    var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+    if (string.IsNullOrWhiteSpace(dotnetRoot))
+        dotnetRoot = Path.GetDirectoryName(Environment.ProcessPath);
+    var sdkRoot = string.IsNullOrWhiteSpace(dotnetRoot) ? null : Path.Combine(dotnetRoot, "sdk");
+    var sdkPath = sdkRoot is not null && Directory.Exists(sdkRoot)
+        ? Directory.EnumerateDirectories(sdkRoot)
+            .Where(path => File.Exists(Path.Combine(path, "MSBuild.dll")))
+            .OrderByDescending(path => ParseSdkVersion(Path.GetFileName(path)))
+            .FirstOrDefault()
+        : null;
+    if (sdkPath is null)
+        throw new InvalidOperationException("No local dotnet SDK with MSBuild.dll was found.");
+    MSBuildLocator.RegisterMSBuildPath(sdkPath);
+}
+
+Version ParseSdkVersion(string value)
+{
+    var stable = (value ?? "0.0").Split('-', 2)[0];
+    return Version.TryParse(stable, out var version) ? version : new Version(0, 0);
+}
+
+bool IsRepositoryFile(string repositoryRoot, string path)
+{
+    var fullRoot = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+    var fullPath = Path.GetFullPath(path);
+    return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) && !IsExcluded(fullPath);
+}
+
 string NormalizeMode(string mode)
 {
     return (mode ?? "SIMPLE").Trim().ToUpperInvariant() switch
@@ -670,8 +789,11 @@ string[] ProjectsFromSolutions(string repositoryRoot)
 }
 
 IEnumerable<string> SafeCsFiles(string directory) => Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-    .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-        && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
+    .Where(path => !IsExcluded(path));
+
+bool IsExcluded(string path) =>
+    path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+    || path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}");
 
 void RemoveGlob(HashSet<string> files, string directory, string glob)
 {
@@ -682,8 +804,10 @@ void RemoveGlob(HashSet<string> files, string directory, string glob)
 }
 
 record AnalysisInputs(string[] Files, string Mode, int ProjectCount, int FailedProjects, string[] DefineConstants);
+record WorkspaceAnalysis(List<SyntaxTree> Trees, Dictionary<SyntaxTree, SemanticModel> Models,
+    int ProjectCount, int FailedProjects);
 record GraphOutput(IEnumerable<GraphNode> Nodes, IEnumerable<GraphEdge> Edges, string Mode,
-    int ProjectCount, int AnalyzedFiles, int FailedProjects, int FailedFiles);
+    int ProjectCount, int AnalyzedFiles, int FailedProjects, int FailedFiles, bool WorkspaceLoaded);
 record GraphNode(string Key, string Type, string Name, string QualifiedName, string? FilePath, int Line, Dictionary<string, object>? Metadata = null);
 record GraphEdge(string SourceKey, string TargetKey, string Type, double Confidence, string FilePath, int Line, string Source, Dictionary<string, object>? Metadata = null);
 record BindingDescriptor(string Path, string? Mode, string? UpdateSourceTrigger, string? ElementName, string? RelativeSource, string? StaticResourceKey);

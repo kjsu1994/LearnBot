@@ -22,10 +22,7 @@ public final class CodeSourceClassifier {
         String strategy = safe(parser);
         return new SourceProfile(
                 sourceRole(path, type),
-                runtimeRole(path, type),
-                domainRole(path),
-                parserConfidence(strategy),
-                isLocalAgentPath(path)
+                parserConfidence(strategy)
         );
     }
 
@@ -43,26 +40,6 @@ public final class CodeSourceClassifier {
             }
         }
         return classify(result).sourceRole();
-    }
-
-    public static String runtimeRole(CodeSearchResult result) {
-        if (result != null && result.metadata() != null) {
-            Object value = result.metadata().get("runtimeRole");
-            if (value != null && !String.valueOf(value).isBlank()) {
-                return String.valueOf(value);
-            }
-        }
-        return classify(result).runtimeRole();
-    }
-
-    public static boolean isLocalAgentEvidence(CodeSearchResult result) {
-        if (result != null && result.metadata() != null) {
-            Object value = result.metadata().get("localAgentEvidence");
-            if (value instanceof Boolean bool) {
-                return bool;
-            }
-        }
-        return classify(result).localAgentEvidence();
     }
 
     private static String sourceRole(String path, String chunkType) {
@@ -88,53 +65,16 @@ public final class CodeSourceClassifier {
         if (path.endsWith(".md") || path.contains("/docs/") || path.contains("/doc/")) {
             return SOURCE_DOCS;
         }
-        if (SOURCE_CONFIG.equals(runtimeRole(path, chunkType))) {
+        if (isConfigPath(path)) {
             return SOURCE_CONFIG;
         }
         return SOURCE_MAIN;
     }
 
-    private static String runtimeRole(String path, String chunkType) {
-        if (path.contains("/controller") || path.contains("/controllers/") || path.contains("/web/")
-                || path.contains("/routes/") || path.contains("/router/") || path.contains("/endpoint")
-                || path.contains("/views/") || path.contains("/pages/") || path.contains("/components/")) {
-            return "controller";
-        }
-        if (path.contains("/service") || path.contains("/services/") || path.contains("/usecase")
-                || path.contains("/usecases/") || path.contains("/application/")) {
-            return "service";
-        }
-        if (path.contains("/repository") || path.contains("/repositories/") || path.contains("/dao/")
-                || path.contains("/db/") || path.contains("/database/") || path.contains("/persistence/")) {
-            return "repository";
-        }
-        if (path.contains("/model") || path.contains("/models/") || path.contains("/entity")
-                || path.contains("/entities/") || path.contains("/domain/") || path.contains("/dto/")) {
-            return "model";
-        }
-        if (path.contains("/config/") || path.contains("/configuration/") || path.endsWith(".yml")
+    private static boolean isConfigPath(String path) {
+        return path.contains("/config/") || path.contains("/configuration/") || path.endsWith(".yml")
                 || path.endsWith(".yaml") || path.endsWith(".json") || path.endsWith(".xml")
-                || path.endsWith(".config") || path.endsWith(".csproj") || path.endsWith(".sln")) {
-            return SOURCE_CONFIG;
-        }
-        if ("project_structure".equals(chunkType) || "repository_summary".equals(chunkType)
-                || "directory_summary".equals(chunkType) || "file_summary".equals(chunkType)) {
-            return "project_context";
-        }
-        return "unknown";
-    }
-
-    private static String domainRole(String path) {
-        if (isLocalAgentPath(path)) {
-            return "local_agent";
-        }
-        if (path.contains("coderag") || path.contains("code-rag") || path.contains("/code/")) {
-            return "code_rag";
-        }
-        if (path.contains("rag") || path.contains("embedding") || path.contains("index")) {
-            return "rag";
-        }
-        return "application";
+                || path.endsWith(".config") || path.endsWith(".csproj") || path.endsWith(".sln");
     }
 
     private static double parserConfidence(String parser) {
@@ -147,12 +87,6 @@ public final class CodeSourceClassifier {
         };
     }
 
-    private static boolean isLocalAgentPath(String path) {
-        return path.contains("local-agent") || path.contains("localagent")
-                || path.contains("/local-agents/") || path.contains("/agentloop/")
-                || path.contains("/code-agent/");
-    }
-
     private static String normalizePath(String value) {
         return safe(value).replace('\\', '/').toLowerCase(Locale.ROOT);
     }
@@ -163,10 +97,7 @@ public final class CodeSourceClassifier {
 
     public record SourceProfile(
             String sourceRole,
-            String runtimeRole,
-            String domainRole,
-            double parserConfidence,
-            boolean localAgentEvidence
+            double parserConfidence
     ) {
     }
 }

@@ -38,7 +38,7 @@ class SearchServiceTest {
                 0.62
         );
 
-        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1)));
+        when(ollamaClient.embedForQuery(anyList())).thenReturn(List.of(List.of(0.1)));
         when(repository.search(anyString(), anyList(), isNull(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(noisy, relevant));
         when(repository.keywordSearch(anyString(), isNull(), anyInt(), anyList(), isNull()))
@@ -105,7 +105,7 @@ class SearchServiceTest {
                 )
         );
 
-        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1)));
+        when(ollamaClient.embedForQuery(anyList())).thenReturn(List.of(List.of(0.1)));
         when(repository.search(anyString(), anyList(), isNull(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(generic, clause));
         when(repository.keywordSearch(anyString(), isNull(), anyInt(), anyList(), isNull()))
@@ -125,7 +125,7 @@ class SearchServiceTest {
         properties.getRag().getPipeline().setQueryEmbeddingCacheTtlSeconds(3600);
         SearchService service = new SearchService(repository, ollamaClient, null, properties);
 
-        when(ollamaClient.embed(anyList())).thenReturn(List.of(List.of(0.1)));
+        when(ollamaClient.embedForQuery(anyList())).thenReturn(List.of(List.of(0.1)));
         when(repository.search(anyString(), anyList(), isNull(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(result("policy.pdf", "security policy", 0.8)));
         when(repository.keywordSearch(anyString(), isNull(), anyInt(), anyList(), isNull()))
@@ -134,7 +134,7 @@ class SearchServiceTest {
         SearchService.SearchResponse first = service.searchDetailed("security policy", null, 2, List.of(UUID.randomUUID()), null, "BALANCED");
         SearchService.SearchResponse second = service.searchDetailed("security policy", null, 2, List.of(UUID.randomUUID()), null, "BALANCED");
 
-        verify(ollamaClient, times(1)).embed(anyList());
+        verify(ollamaClient, times(1)).embedForQuery(anyList());
         assertThat(first.timing().embeddingCacheHit()).isFalse();
         assertThat(second.timing().embeddingCacheHit()).isTrue();
     }

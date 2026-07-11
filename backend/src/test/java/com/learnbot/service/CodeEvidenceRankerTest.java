@@ -195,6 +195,27 @@ class CodeEvidenceRankerTest {
                 .contains("graph COMMAND_BINDING");
     }
 
+    @Test
+    void prefersConcreteImplementationOverLargeFileLevelChunk() {
+        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
+        CodeSearchResult wholeFile = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Pipeline.java",
+                "file", null, "Pipeline", null, null, null, null, 0,
+                1, 2200, "pipeline failure fallback analysis search answer", 0.62, Map.of());
+        CodeSearchResult implementation = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/GraphBuilder.java",
+                "method", "build", "GraphBuilder", "build", null, null, null, 1,
+                40, 95, "Graph build() { try { return analyze(); } catch (RuntimeException ex) { return baseGraph; } }",
+                0.48, Map.of());
+
+        List<CodeSearchResult> ranked = ranker.rank(
+                "How does graph analysis failure preserve a fallback result?",
+                CodeRagService.CodeQuestionMode.REASONING,
+                List.of(wholeFile, implementation));
+
+        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("build");
+    }
+
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
         UUID chunkId = UUID.randomUUID();
         return new CodeSearchResult(

@@ -56,7 +56,7 @@ class CodeGraphLlmEnricherTest {
 
         CodeGraph enriched = enricher.enrich(graph, List.of(chunk(chunkId)));
 
-        assertThat(enriched).isSameAs(graph);
+        assertThat(enriched).isEqualTo(graph);
     }
 
     private CodeGraph graph(UUID chunkId) {

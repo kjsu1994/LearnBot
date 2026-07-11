@@ -189,6 +189,8 @@ export default function App() {
     setRepoForm,
     zipForm,
     setZipForm,
+    localRepoForm,
+    setLocalRepoForm,
     zipReplaceFile,
     setZipReplaceFile,
     indexCredential,
@@ -252,6 +254,7 @@ export default function App() {
     refreshCodeFiles,
     searchCodeFiles,
     registerRepository,
+    registerLocalRepository,
     uploadZipRepository,
     indexRepository,
     replaceZipRepository,
@@ -1080,6 +1083,9 @@ export default function App() {
             setReferenceSymbol={setReferenceSymbol}
             referenceResult={referenceResult}
             registerRepository={registerRepository}
+            registerLocalRepository={registerLocalRepository}
+            localRepoForm={localRepoForm}
+            setLocalRepoForm={setLocalRepoForm}
             uploadZipRepository={uploadZipRepository}
             zipForm={zipForm}
             setZipForm={setZipForm}
@@ -1292,6 +1298,9 @@ export default function App() {
               jobFailures,
               loadJobFailures,
               registerRepository,
+              registerLocalRepository,
+              localRepoForm,
+              setLocalRepoForm,
               uploadZipRepository,
               zipForm,
               setZipForm,

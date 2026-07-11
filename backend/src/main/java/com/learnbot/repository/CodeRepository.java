@@ -163,6 +163,7 @@ public class CodeRepository {
         return jdbc.query("""
                 SELECT r.id, r.space_id, r.name, r.source_type, r.source_label, r.source_hash,
                        r.git_url, r.branch, r.auth_type, r.local_path, r.status, r.last_indexed_commit,
+                       r.content_fingerprint, r.worktree_state, r.analyzer_version, r.index_schema_version,
                        r.error_message, r.created_at, r.updated_at,
                        (r.credential_token_ciphertext IS NOT NULL) AS credential_stored,
                        COALESCE(f.active_file_count, 0) AS active_file_count,
@@ -838,7 +839,9 @@ public class CodeRepository {
                 )
                 SELECT gen_random_uuid(), repository_id, :newFileId, :indexVersion, file_path, chunk_index, chunk_type,
                        symbol_name, class_name, method_name, namespace_name, control_name, event_name,
-                       line_start, line_end, content, metadata, embedding, FALSE
+                       line_start, line_end, content,
+                       metadata || jsonb_build_object('indexVersion', CAST(:indexVersion AS text)),
+                       embedding, FALSE
                 FROM code_chunks
                 WHERE file_id = :oldFileId
                   AND repository_id = :repositoryId
@@ -959,7 +962,9 @@ public class CodeRepository {
                     VALUES (
                         :id, :repositoryId, :fileId, :indexVersion, :filePath, :chunkIndex, :chunkType,
                         :symbolName, :className, :methodName, :namespaceName, :controlName, :eventName,
-                        :lineStart, :lineEnd, :content, CAST(:metadata AS jsonb), CAST(:embedding AS vector), FALSE
+                        :lineStart, :lineEnd, :content,
+                        CAST(:metadata AS jsonb) || jsonb_build_object('indexVersion', CAST(:indexVersion AS text)),
+                        CAST(:embedding AS vector), FALSE
                     )
                     """, batch);
         }
@@ -1215,6 +1220,137 @@ public class CodeRepository {
                 .addValue("repositoryId", repositoryId), this::mapSearchResult);
     }
 
+    public void updateIndexIdentity(UUID repositoryId, UUID jobId, String contentFingerprint,
+                                    String worktreeState, String analyzerVersion, String indexSchemaVersion) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("jobId", jobId)
+                .addValue("contentFingerprint", contentFingerprint)
+                .addValue("worktreeState", worktreeState)
+                .addValue("analyzerVersion", analyzerVersion)
+                .addValue("indexSchemaVersion", indexSchemaVersion);
+        jdbc.update("""
+                UPDATE indexing_jobs
+                SET content_fingerprint=:contentFingerprint, worktree_state=:worktreeState,
+                    analyzer_version=:analyzerVersion, index_schema_version=:indexSchemaVersion
+                WHERE id=:jobId AND repository_id=:repositoryId
+                """, params);
+        jdbc.update("""
+                UPDATE code_repositories
+                SET content_fingerprint=:contentFingerprint, worktree_state=:worktreeState,
+                    analyzer_version=:analyzerVersion, index_schema_version=:indexSchemaVersion,
+                    updated_at=now()
+                WHERE id=:repositoryId
+                """, params);
+    }
+
+    public List<CodeSearchResult> findActiveChunksByPathAndLineRange(
+            UUID repositoryId,
+            String filePath,
+            int lineStart,
+            int lineEnd,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        String normalizedPath = normalizeRepositoryRelativePath(filePath);
+        if (normalizedPath.isBlank() || lineStart < 1 || lineEnd < lineStart) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       1.25 AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE c.active
+                  AND c.file_path = :filePath
+                  AND c.line_start <= :lineEnd
+                  AND c.line_end >= :lineStart
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.line_start, c.chunk_index
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("filePath", normalizedPath)
+                .addValue("lineStart", lineStart)
+                .addValue("lineEnd", lineEnd)
+                .addValue("limit", Math.max(1, Math.min(limit, 100)))
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> listActiveSymbolsByPath(
+            UUID repositoryId,
+            String filePath,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        String normalizedPath = normalizeRepositoryRelativePath(filePath);
+        if (normalizedPath.isBlank()) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       1.10 AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE c.active
+                  AND c.file_path = :filePath
+                  AND (NULLIF(c.symbol_name, '') IS NOT NULL
+                       OR NULLIF(c.method_name, '') IS NOT NULL
+                       OR NULLIF(c.class_name, '') IS NOT NULL
+                       OR NULLIF(c.control_name, '') IS NOT NULL
+                       OR NULLIF(c.event_name, '') IS NOT NULL)
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.line_start, c.chunk_index
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("filePath", normalizedPath)
+                .addValue("limit", Math.max(1, Math.min(limit, 80)))
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
     public List<CodeSearchResult> keywordSearch(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
@@ -1273,102 +1409,31 @@ public class CodeRepository {
                 """, params, this::mapSearchResult);
     }
 
-    public List<CodeSearchResult> runtimeRoleSearch(
+    public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
+        return findSymbolDefinitions(repositoryId, symbol, null, limit, spaceIds, selectedSpaceId);
+    }
+
+    public List<CodeSearchResult> findSymbolDefinitions(
             UUID repositoryId,
-            String domainPattern,
-            String behaviorPattern,
+            String symbol,
+            String filePath,
             int limit,
             List<UUID> spaceIds,
             UUID selectedSpaceId
     ) {
-        List<UUID> safeSpaceIds = spaceIds == null || spaceIds.isEmpty()
-                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
-                : spaceIds;
+        String normalizedSymbol = symbol == null ? "" : symbol.trim();
+        String normalizedPath = filePath == null || filePath.isBlank()
+                ? null
+                : normalizeRepositoryRelativePath(filePath);
+        if (normalizedSymbol.isBlank() || (filePath != null && !filePath.isBlank() && normalizedPath.isBlank())) {
+            return List.of();
+        }
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("repositoryId", repositoryId)
-                .addValue("domainPattern", domainPattern)
-                .addValue("behaviorPattern", behaviorPattern)
+                .addValue("symbol", normalizedSymbol)
+                .addValue("filePath", normalizedPath)
                 .addValue("limit", Math.max(1, Math.min(limit, 50)))
-                .addValue("spaceIds", safeSpaceIds)
-                .addValue("selectedSpaceId", selectedSpaceId);
-
-        return jdbc.query("""
-                WITH candidate_chunks AS (
-                    SELECT c.*,
-                           lower(concat_ws(' ',
-                               c.file_path,
-                               c.symbol_name,
-                               c.class_name,
-                               c.method_name,
-                               c.namespace_name,
-                               c.control_name,
-                               c.event_name
-                           )) AS identity_haystack,
-                           lower(concat_ws(' ',
-                               c.file_path,
-                               c.symbol_name,
-                               c.class_name,
-                               c.method_name,
-                               c.namespace_name,
-                               c.control_name,
-                               c.event_name,
-                               c.content
-                           )) AS haystack
-                    FROM code_chunks c
-                    JOIN code_repositories r ON r.id = c.repository_id
-                    WHERE c.active
-                      AND r.deleted_at IS NULL
-                      AND r.space_id IN (:spaceIds)
-                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
-                      AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
-                      AND lower(c.file_path) !~ '(^|/)(test|tests|spec|__tests__|node_modules|vendor|third_party|external|generated|build|dist|target)(/|$)'
-                      AND lower(c.file_path) !~ '(local-agent|localagent|/local-agents/|/agentloop/|/code-agent/)'
-                      AND (
-                        lower(c.file_path) ~ '(^|/)(service|services|application|usecase|usecases|handler|handlers|pipeline|pipelines|web|controller|controllers|routes|router)(/|$)'
-                        OR lower(c.file_path) ~ '(service|handler|controller|pipeline)\\.[a-z0-9]+$'
-                      )
-                )
-                SELECT c.id AS chunk_id,
-                       c.repository_id,
-                       c.file_id,
-                       r.name AS repository_name,
-                       c.file_path,
-                       c.chunk_type,
-                       c.symbol_name,
-                       c.class_name,
-                       c.method_name,
-                       c.namespace_name,
-                       c.control_name,
-                       c.event_name,
-                       c.chunk_index,
-                       c.line_start,
-                       c.line_end,
-                       c.content,
-                       c.metadata,
-                       (
-                         CASE WHEN c.identity_haystack ~ :domainPattern THEN 0.55 ELSE 0 END +
-                         CASE WHEN c.haystack ~ :behaviorPattern THEN 0.45 ELSE 0 END +
-                         CASE WHEN lower(c.file_path) ~ '(^|/)(service|services|application|usecase|usecases|pipeline|pipelines)(/|$)' THEN 0.25 ELSE 0 END +
-                         CASE WHEN c.chunk_type IN ('method', 'function', 'class') THEN 0.12 ELSE 0 END +
-                         CASE WHEN c.haystack ~ '(retriev|search|context|prompt|answer|response|generation|model|llm|chat|stream)' THEN 0.20 ELSE 0 END -
-                         CASE WHEN c.identity_haystack ~ '(conversation|history|savedanswer|metrics|tuning|handoff|gate|verification|summary|schema|profile|dto|jobsummary|failure)' THEN 0.35 ELSE 0 END
-                       ) AS score
-                FROM candidate_chunks c
-                JOIN code_repositories r ON r.id = c.repository_id
-                WHERE c.identity_haystack ~ :domainPattern
-                  AND c.haystack ~ :behaviorPattern
-                ORDER BY score DESC, c.file_path, c.line_start
-                LIMIT :limit
-                """, params, this::mapSearchResult);
-    }
-
-    public List<CodeSearchResult> findSymbolDefinitions(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("repositoryId", repositoryId)
-                .addValue("symbol", symbol)
-                .addValue("likeQuery", "%" + symbol + "%")
-                .addValue("limit", Math.max(1, Math.min(limit, 50)))
-                .addValue("spaceIds", spaceIds)
+                .addValue("spaceIds", authorizedSpaceIds(spaceIds))
                 .addValue("selectedSpaceId", selectedSpaceId);
 
         return jdbc.query("""
@@ -1395,7 +1460,7 @@ public class CodeRepository {
                          CASE WHEN lower(c.class_name) = lower(:symbol) THEN 1.00 ELSE 0 END +
                          CASE WHEN lower(c.control_name) = lower(:symbol) THEN 0.90 ELSE 0 END +
                          CASE WHEN lower(c.event_name) = lower(:symbol) THEN 0.90 ELSE 0 END +
-                         CASE WHEN c.file_path ILIKE :likeQuery THEN 0.15 ELSE 0 END
+                         CASE WHEN c.file_path = CAST(:filePath AS text) THEN 0.30 ELSE 0 END
                        ) AS score
                 FROM code_chunks c
                 JOIN code_repositories r ON r.id = c.repository_id
@@ -1404,17 +1469,78 @@ public class CodeRepository {
                   AND r.space_id IN (:spaceIds)
                   AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
                   AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                  AND (CAST(:filePath AS text) IS NULL OR c.file_path = CAST(:filePath AS text))
                   AND (
                     lower(c.symbol_name) = lower(:symbol)
                     OR lower(c.method_name) = lower(:symbol)
                     OR lower(c.class_name) = lower(:symbol)
                     OR lower(c.control_name) = lower(:symbol)
                     OR lower(c.event_name) = lower(:symbol)
-                    OR c.file_path ILIKE :likeQuery
                   )
                 ORDER BY score DESC, c.file_path, c.line_start
                 LIMIT :limit
                 """, params, this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> findAdjacentActiveChunks(
+            UUID repositoryId,
+            UUID chunkId,
+            int radius,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (chunkId == null) {
+            return List.of();
+        }
+        int safeRadius = Math.max(0, Math.min(radius, 20));
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        return jdbc.query("""
+                WITH anchor AS (
+                    SELECT c.repository_id, c.file_id, c.chunk_index
+                    FROM code_chunks c
+                    JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                    WHERE c.id = :chunkId
+                      AND c.active
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                      AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                )
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       GREATEST(0.0, 1.0 - (ABS(c.chunk_index - a.chunk_index) * 0.05)) AS score
+                FROM anchor a
+                JOIN code_chunks c ON c.repository_id = a.repository_id AND c.file_id = a.file_id
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE c.active
+                  AND ABS(c.chunk_index - a.chunk_index) <= :radius
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.chunk_index
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("chunkId", chunkId)
+                .addValue("radius", safeRadius)
+                .addValue("limit", Math.max(1, Math.min(limit, 100)))
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
     }
 
     public List<CodeSearchResult> findSymbolReferences(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
@@ -1851,6 +1977,10 @@ public class CodeRepository {
                 rs.getString("local_path"),
                 rs.getString("status"),
                 rs.getString("last_indexed_commit"),
+                rs.getString("content_fingerprint"),
+                rs.getString("worktree_state"),
+                rs.getString("analyzer_version"),
+                rs.getString("index_schema_version"),
                 rs.getString("error_message"),
                 rs.getBoolean("credential_stored"),
                 rs.getInt("active_file_count"),
@@ -1994,6 +2124,35 @@ public class CodeRepository {
             builder.append(values.get(i));
         }
         return builder.append(']').toString();
+    }
+
+    private List<UUID> authorizedSpaceIds(List<UUID> spaceIds) {
+        return spaceIds == null || spaceIds.isEmpty()
+                ? List.of(SecurityRepository.DEFAULT_SPACE_ID)
+                : spaceIds;
+    }
+
+    private String normalizeRepositoryRelativePath(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            return "";
+        }
+        String normalized = filePath.trim().replace('\\', '/');
+        if (normalized.indexOf('\0') >= 0
+                || normalized.startsWith("/")
+                || normalized.matches("^[A-Za-z]:($|/.*)")) {
+            return "";
+        }
+        List<String> segments = new ArrayList<>();
+        for (String segment : normalized.split("/+")) {
+            if (segment.isBlank() || ".".equals(segment)) {
+                continue;
+            }
+            if ("..".equals(segment)) {
+                return "";
+            }
+            segments.add(segment);
+        }
+        return String.join("/", segments);
     }
 
     private String trimMessage(String message) {

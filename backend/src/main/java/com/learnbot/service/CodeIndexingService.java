@@ -33,12 +33,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
 
 @Service
 public class CodeIndexingService {
     private static final Logger log = LoggerFactory.getLogger(CodeIndexingService.class);
     static final String CODE_PARSER_SIGNATURE = "code-symbol-v5";
     static final String CODE_CHUNK_PROFILE = "symbolic-main-v4";
+    static final String INDEX_SCHEMA_VERSION = "code-index-v2";
+    static final String ANALYZER_VERSION = "javaparser-3.26.3_roslyn-4.11";
     static final String PROJECT_CONTEXT_PARSER_SIGNATURE = "project-context-v2";
     static final String PROJECT_CONTEXT_CHUNK_PROFILE = "project-context-v2";
 
@@ -169,7 +172,11 @@ public class CodeIndexingService {
             String headCommit,
             String gitRemote
     ) {
-        String cleanLocalPath = localPath == null ? "" : localPath.trim();
+        String cleanLocalPath = dockerLocalPath(
+                localPath,
+                properties.getCode().getLocalSourceDrive(),
+                properties.getCode().getLocalContainerRoot()
+        );
         if (cleanLocalPath.isBlank()) {
             throw new IllegalArgumentException("localPath is required.");
         }
@@ -189,6 +196,25 @@ public class CodeIndexingService {
         );
         auditService.log(user, "CODE_LOCAL_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Local code repository was registered for Local Agent work.");
         return record;
+    }
+
+    static String dockerLocalPath(String localPath, String sourceDrive, String containerRoot) {
+        String clean = localPath == null ? "" : localPath.trim();
+        String drive = sourceDrive == null ? "" : sourceDrive.trim().replace(":", "");
+        if (!drive.isBlank() && clean.matches("(?i)^" + java.util.regex.Pattern.quote(drive) + ":[\\\\/].*")) {
+            String root = containerRoot == null ? "" : containerRoot.trim().replaceAll("/+$", "");
+            return root + "/" + clean.substring(3).replace('\\', '/');
+        }
+        return clean;
+    }
+
+    static String sourceRevision(CodeRepositoryRecord record, Supplier<String> gitSync) {
+        return switch (record.sourceType()) {
+            case "GIT" -> gitSync.get();
+            case "ZIP" -> record.sourceHash();
+            case "LOCAL" -> record.lastIndexedCommit();
+            default -> throw new IllegalArgumentException("Unsupported code repository source type: " + record.sourceType());
+        };
     }
 
     public List<CodeRepositorySummary> listRepositories(AppUser user, UUID spaceId) {
@@ -232,9 +258,9 @@ public class CodeIndexingService {
             return runningJob.get();
         }
 
-        GitAccessToken resolvedAccessToken = "ZIP".equals(record.sourceType())
-                ? new GitAccessToken(null, null)
-                : resolveAccessToken(repositoryId, accessToken, storeToken);
+        GitAccessToken resolvedAccessToken = "GIT".equals(record.sourceType())
+                ? resolveAccessToken(repositoryId, accessToken, storeToken)
+                : new GitAccessToken(null, null);
         if ("GIT".equals(record.sourceType()) && "TOKEN".equals(record.authType()) && !resolvedAccessToken.hasToken()) {
             throw new IllegalArgumentException("This repository requires a Git token. Enter a token before indexing.");
         }
@@ -336,12 +362,11 @@ public class CodeIndexingService {
         int modifiedFiles = 0;
         int unchangedFiles = 0;
         int deletedFiles = 0;
+        String contentFingerprint = null;
 
         try {
             ensureNotCancelled(jobId);
-            commitHash = "ZIP".equals(record.sourceType())
-                    ? record.sourceHash()
-                    : gitWorkspaceService.sync(record, accessToken);
+            commitHash = sourceRevision(record, () -> gitWorkspaceService.sync(record, accessToken));
             ensureNotCancelled(jobId);
             ensureEmbeddingAvailable();
 
@@ -366,12 +391,14 @@ public class CodeIndexingService {
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             List<CodeProjectContextBuilder.IndexedFileContext> projectContexts = new java.util.ArrayList<>();
             List<PendingCodeFile> pendingFiles = new java.util.ArrayList<>();
+            Map<String, String> snapshotHashes = new java.util.TreeMap<>();
             for (CodeFileCandidate candidate : candidates) {
                 ensureNotCancelled(jobId);
                 ActiveCodeFileSnapshot previousFile = previousFiles.get(candidate.relativePath());
                 try {
                     String content = contentReader.read(candidate.absolutePath());
                     String contentHash = sha256(content);
+                    snapshotHashes.put(candidate.relativePath(), contentHash);
                     List<ParsedCodeChunk> chunks = chunkParser.parse(candidate.relativePath(), candidate.language(), content);
                     if (!chunks.isEmpty()) {
                         projectContexts.add(new CodeProjectContextBuilder.IndexedFileContext(
@@ -416,6 +443,7 @@ public class CodeIndexingService {
                     processedFiles++;
                     repository.addJobFailure(repositoryId, jobId, candidate.relativePath(), "FILE", rootMessage(ex));
                     if (previousFile != null && previousFile.chunkCount() > 0) {
+                        snapshotHashes.put(candidate.relativePath(), previousFile.contentHash());
                         repository.copyActiveFileToIndex(repositoryId, previousFile.fileId(), UUID.randomUUID(), jobId);
                         totalChunks += previousFile.chunkCount();
                         unchangedFiles++;
@@ -449,6 +477,10 @@ public class CodeIndexingService {
             }
 
             totalChunks += addProjectContextChunks(record, jobId, projectContexts);
+            contentFingerprint = snapshotFingerprint(snapshotHashes);
+            String worktreeState = "LOCAL".equals(record.sourceType()) ? "SNAPSHOT" : "CLEAN";
+            repository.updateIndexIdentity(repositoryId, jobId, contentFingerprint, worktreeState,
+                    ANALYZER_VERSION, INDEX_SCHEMA_VERSION);
             updateProgress(jobId, totalFiles, processedFiles, totalChunks, failedFiles, addedFiles, modifiedFiles, unchangedFiles, deletedFiles);
             buildCodeGraph(record, jobId);
             if (totalChunks == 0) {
@@ -492,6 +524,13 @@ public class CodeIndexingService {
             runningJobs.remove(jobId);
             cancelledJobs.remove(jobId);
         }
+    }
+
+    private String snapshotFingerprint(Map<String, String> hashes) {
+        String canonical = hashes.entrySet().stream()
+                .map(entry -> entry.getKey().replace('\\', '/') + "\u0000" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        return sha256(canonical);
     }
 
     private int addProjectContextChunks(

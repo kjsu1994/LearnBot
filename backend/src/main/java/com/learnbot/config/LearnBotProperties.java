@@ -589,6 +589,9 @@ public class LearnBotProperties {
             private int maxIterations = 2;
 
             @Min(1)
+            private int codeRetrievalMaxIterations = 3;
+
+            @Min(1)
             private int rerankTopN = 20;
 
             @Min(1)
@@ -671,6 +674,14 @@ public class LearnBotProperties {
 
             public void setMaxIterations(int maxIterations) {
                 this.maxIterations = maxIterations;
+            }
+
+            public int getCodeRetrievalMaxIterations() {
+                return codeRetrievalMaxIterations;
+            }
+
+            public void setCodeRetrievalMaxIterations(int codeRetrievalMaxIterations) {
+                this.codeRetrievalMaxIterations = codeRetrievalMaxIterations;
             }
 
             public int getRerankTopN() {
@@ -1234,6 +1245,12 @@ public class LearnBotProperties {
         @NotBlank
         private String workspacePath = "/var/lib/learnbot/repos";
 
+        @NotBlank
+        private String localSourceDrive = "C";
+
+        @NotBlank
+        private String localContainerRoot = "/host/local";
+
         @Min(1)
         private long maxFileBytes = 1_000_000;
 
@@ -1268,6 +1285,22 @@ public class LearnBotProperties {
 
         public void setWorkspacePath(String workspacePath) {
             this.workspacePath = workspacePath;
+        }
+
+        public String getLocalSourceDrive() {
+            return localSourceDrive;
+        }
+
+        public void setLocalSourceDrive(String localSourceDrive) {
+            this.localSourceDrive = localSourceDrive;
+        }
+
+        public String getLocalContainerRoot() {
+            return localContainerRoot;
+        }
+
+        public void setLocalContainerRoot(String localContainerRoot) {
+            this.localContainerRoot = localContainerRoot;
         }
 
         public long getMaxFileBytes() {
@@ -1438,6 +1471,7 @@ public class LearnBotProperties {
             private int roslynDiagnosticStderrChars = 1200;
 
             private boolean dependencyResolutionEnabled = true;
+            private boolean dependencyNetworkEnabled = false;
             private List<String> dependencyAllowedRepositories = new ArrayList<>(List.of("https://repo.maven.apache.org/maven2"));
 
             @Min(1)
@@ -1547,6 +1581,8 @@ public class LearnBotProperties {
             public void setRoslynDiagnosticStderrChars(int roslynDiagnosticStderrChars) { this.roslynDiagnosticStderrChars = roslynDiagnosticStderrChars; }
             public boolean isDependencyResolutionEnabled() { return dependencyResolutionEnabled; }
             public void setDependencyResolutionEnabled(boolean dependencyResolutionEnabled) { this.dependencyResolutionEnabled = dependencyResolutionEnabled; }
+            public boolean isDependencyNetworkEnabled() { return dependencyNetworkEnabled; }
+            public void setDependencyNetworkEnabled(boolean dependencyNetworkEnabled) { this.dependencyNetworkEnabled = dependencyNetworkEnabled; }
             public List<String> getDependencyAllowedRepositories() { return dependencyAllowedRepositories; }
             public void setDependencyAllowedRepositories(List<String> dependencyAllowedRepositories) { this.dependencyAllowedRepositories = dependencyAllowedRepositories; }
             public int getDependencyMaxArtifacts() { return dependencyMaxArtifacts; }

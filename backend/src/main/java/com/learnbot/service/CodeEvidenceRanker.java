@@ -141,7 +141,8 @@ public class CodeEvidenceRanker {
         double conversation = isConversationPinned(result) ? 0.18 : 0;
         double sourcePolicy = sourcePolicyScore(question, mode, result);
         double flowGuard = flowGuardScore(question, mode, result);
-        double total = base + text + graph + literal + intent + structure + resourceAccess + legacy + flow + conversation + sourcePolicy + flowGuard;
+        double granularity = implementationGranularityScore(result);
+        double total = base + text + graph + literal + intent + structure + resourceAccess + legacy + flow + conversation + sourcePolicy + flowGuard + granularity;
         Map<String, Object> parts = new LinkedHashMap<>();
         parts.put("baseSearch", round(base));
         parts.put("textMatch", round(text));
@@ -166,6 +167,9 @@ public class CodeEvidenceRanker {
         }
         if (flowGuard != 0) {
             parts.put("flowGuard", round(flowGuard));
+        }
+        if (granularity != 0) {
+            parts.put("granularity", round(granularity));
         }
         return withMetadata(result, total, parts, reason(question, mode, result, graph, intent, structure, resourceAccess, flow, sourcePolicy, flowGuard));
     }
@@ -291,6 +295,16 @@ public class CodeEvidenceRanker {
         return 0.45 * pathScore * depthFactor * edgeFactor * evidenceKindFactor * sourceFactor * truncationFactor;
     }
 
+    private double implementationGranularityScore(CodeSearchResult result) {
+        int span = Math.max(1, result.lineEnd() - result.lineStart() + 1);
+        boolean concreteSymbol = !safe(result.methodName(), "").isBlank()
+                || !safe(result.symbolName(), "").isBlank();
+        if (concreteSymbol && span <= 400) return 0.12;
+        if (!concreteSymbol && span > 1500) return -0.35;
+        if (!concreteSymbol && span > 500) return -0.20;
+        return 0;
+    }
+
     private double graphEvidenceKindFactor(CodeSearchResult result) {
         if (result == null || result.metadata() == null) {
             return 1.0;
@@ -357,9 +371,7 @@ public class CodeEvidenceRanker {
 
     private double sourcePolicyScore(String question, CodeRagService.CodeQuestionMode mode, CodeSearchResult result) {
         String sourceRole = CodeSourceClassifier.sourceRole(result);
-        String runtimeRole = CodeSourceClassifier.runtimeRole(result);
         boolean asksForTests = asksForTests(question);
-        boolean asksForLocalAgent = asksForLocalAgent(question);
         double score = 0;
 
         if (CodeSourceClassifier.SOURCE_MAIN.equals(sourceRole)) {
@@ -375,19 +387,6 @@ public class CodeEvidenceRanker {
             score -= 0.45;
         }
 
-        if (!asksForLocalAgent && CodeSourceClassifier.isLocalAgentEvidence(result)) {
-            score -= 0.55;
-        } else if (asksForLocalAgent && CodeSourceClassifier.isLocalAgentEvidence(result)) {
-            score += 0.18;
-        }
-
-        if (mode == CodeRagService.CodeQuestionMode.CALL_FLOW || mode == CodeRagService.CodeQuestionMode.OVERVIEW
-                || mode == CodeRagService.CodeQuestionMode.REASONING) {
-            score += switch (runtimeRole) {
-                case "controller", "service", "repository", "project_context" -> 0.08;
-                default -> 0;
-            };
-        }
         return score;
     }
 
@@ -479,9 +478,6 @@ public class CodeEvidenceRanker {
         if (flowGuard < 0) reasons.add("flow helper or endpoint mismatch deprioritized");
         if (sourcePolicy < 0 && CodeSourceClassifier.SOURCE_TEST.equals(CodeSourceClassifier.sourceRole(result)) && !asksForTests(question)) {
             reasons.add("test evidence deprioritized");
-        }
-        if (sourcePolicy < 0 && CodeSourceClassifier.isLocalAgentEvidence(result) && !asksForLocalAgent(question)) {
-            reasons.add("local-agent evidence deprioritized");
         }
         if (reasons.isEmpty()) reasons.add("hybrid search relevance");
         return String.join(", ", reasons);
@@ -756,17 +752,6 @@ public class CodeEvidenceRanker {
                 || normalized.contains("spec")
                 || normalized.contains("coverage")
                 || normalized.contains("검증");
-    }
-
-    private boolean asksForLocalAgent(String question) {
-        String normalized = normalize(question);
-        return normalized.contains("local agent")
-                || normalized.contains("localagent")
-                || normalized.contains("agent")
-                || normalized.contains("에이전트")
-                || normalized.contains("patch")
-                || normalized.contains("tool")
-                || normalized.contains("mutation");
     }
 
     private String normalize(String value) {

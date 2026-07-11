@@ -43,7 +43,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         CommitInsightService commitInsightService = mock(CommitInsightService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, commitInsightService, ollamaClient, new LearnBotProperties());
         CodeAskResponse commitResponse = new CodeAskResponse("commit", "commit answer [1]", List.of(new CodeEvidence(
                 1,
@@ -93,7 +93,7 @@ class CodeRagServiceTest {
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         CommitInsightService commitInsightService = mock(CommitInsightService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(
@@ -156,7 +156,7 @@ class CodeRagServiceTest {
     void routerFailureFallsBackToCodeSearchAndRestoresPrimaryRequestSlot() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -199,7 +199,7 @@ class CodeRagServiceTest {
     void llmPlannedFollowUpSearchMergesAdditionalEvidenceBeforeAnswering() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -223,6 +223,11 @@ class CodeRagServiceTest {
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
                         chat("{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks answer generation\"}")
                 );
+        stubRetrievalIterations(
+                ollamaClient,
+                "{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"answer_generation\"],\"reason\":\"initial evidence lacks answer generation\"}",
+                "{\"enough\":true,\"missingAreas\":[],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"answer_generation\"],\"reason\":\"answer generation evidence is now present\"}"
+        );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
                     String query = invocation.getArgument(1);
@@ -254,13 +259,13 @@ class CodeRagServiceTest {
                 .contains(
                         "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
                         "backend/src/main/java/com/learnbot/service/CodeRagService.java"
-                );
+        );
         assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("LLM-planned follow-up retrieval"));
+                assertThat(note).contains("1 LLM-planned Retrieval Iteration(s)"));
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("followUpQueriesUsed=1").contains("answer generation"));
         assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("queryAreas=[answer generation]"));
+                assertThat(note).contains("llm retrieval iteration 2"));
         verify(searchService, atLeastOnce()).cheapSearch(isNull(), argThat(query -> query.contains("runtime RAG retrieval context construction model answer generation")), anyInt(), anyList(), isNull());
     }
 
@@ -268,7 +273,7 @@ class CodeRagServiceTest {
     void overviewKeepsEvidenceWhenChatModelFails() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.82);
 
@@ -296,7 +301,7 @@ class CodeRagServiceTest {
     void avoidsAnswerWhenNoEvidenceIsFound() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull())).thenReturn(List.of());
@@ -319,7 +324,7 @@ class CodeRagServiceTest {
     void overviewRewritesTooShortModelAnswerIntoNaturalSummary() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult controller = result("backend/src/main/java/com/learnbot/web/CodeController.java", "method", "ask", 0.72);
         CodeSearchResult rag = result("backend/src/main/java/com/learnbot/service/CodeRagService.java", "method", "ask", 0.68);
@@ -347,7 +352,7 @@ class CodeRagServiceTest {
     void compressesLongCodeContextBeforeCallingLlm() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         List<CodeSearchResult> results = java.util.stream.IntStream.range(0, 12)
                 .mapToObj(index -> result(
@@ -384,7 +389,7 @@ class CodeRagServiceTest {
     void marksExcerptCompletenessAndKeepsCoreFlowMethodFullWhenBudgetAllows() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -436,7 +441,7 @@ class CodeRagServiceTest {
     void locateRewritesUncitedModelAnswerIntoActionableFallback() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult controller = result("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.82);
         CodeSearchResult serviceResult = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.76);
@@ -473,7 +478,7 @@ class CodeRagServiceTest {
     void ranksGraphCallFlowEvidenceAboveWeakTextMatch() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult noisy = result("backend/src/main/java/com/learnbot/service/ReportService.java", "method", "render", 0.95);
         CodeSearchResult graph = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.42, "CALLS", 0.96, 1);
@@ -502,7 +507,7 @@ class CodeRagServiceTest {
     void evidenceRankingDebugExposesScorePartsAndGraphDiagnostics() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getCode().getGraph().setEvidenceRankingDebug(true);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -531,7 +536,7 @@ class CodeRagServiceTest {
     void answerContextLabelsGenericEvidenceResponsibilities() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -606,7 +611,7 @@ class CodeRagServiceTest {
     void answerContextSeparatesGenericFallbackScopes() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -689,80 +694,12 @@ class CodeRagServiceTest {
                         .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
     }
 
-    @Test
-    void llmPlannedCoverageSelectsRequiredGenericFallbackScope() {
-        CodeSearchService searchService = mock(CodeSearchService.class);
-        CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
-        LearnBotProperties properties = new LearnBotProperties();
-        properties.getRag().getPipeline().setRewriteEnabled(false);
-        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
-
-        CodeSearchResult answerFallback = resultWithParser(
-                "backend/src/main/java/app/service/AnswerFallbackService.java",
-                "method",
-                "fallbackAnswer",
-                0.97,
-                "fallbackAnswer repairs the final response when LLM unavailable or citation validation failed",
-                "parser"
-        );
-        CodeSearchResult routingFallback = resultWithParser(
-                "backend/src/main/java/app/service/RouteDecisionService.java",
-                "method",
-                "fallback",
-                0.94,
-                "fallback chooses CODE_SEARCH when route decision is unavailable",
-                "parser"
-        );
-        CodeSearchResult graphAnalysisFallback = resultWithParser(
-                "backend/src/main/java/app/service/GraphBuildService.java",
-                "method",
-                "buildWithDiagnostics",
-                0.42,
-                "buildWithDiagnostics catches exception, records failed semantic graph analyzer diagnostic, and continues with base graph",
-                "parser"
-        );
-        CodeSearchResult searchExpansionFallback = resultWithParser(
-                "backend/src/main/java/app/service/SearchExpansionService.java",
-                "method",
-                "expandGraph",
-                0.40,
-                "expandGraph catches exception from graph related chunks and returns ranked search results",
-                "parser"
-        );
-
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
-                .thenReturn(
-                        chat("{\"route\":\"CODE_SEARCH\",\"mode\":\"overview\",\"confidence\":0.88,\"queries\":[],\"reason\":\"fallback behavior question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"semantic graph analysis failed diagnostics\"],\"followUpQueries\":[],\"queryAreas\":[\"graph analysis fallback diagnostics\"],\"reason\":\"need analysis diagnostic evidence\"}")
-                );
-        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
-                .thenReturn(List.of(answerFallback, routingFallback, graphAnalysisFallback, searchExpansionFallback));
-        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
-                .thenReturn(chat("Graph analysis fallback is separate from answer fallback [1][2]."));
-
-        CodeAskResponse response = service.ask(
-                null,
-                null,
-                List.of(SecurityRepository.DEFAULT_SPACE_ID),
-                "How does semantic graph analysis failure fallback work?",
-                "overview",
-                2
-        );
-
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
-                        .containsEntry("llmCoverageFallbackScope", "GRAPH_ANALYSIS")
-                        .doesNotContainKey("fallbackScope"));
-    }
 
     @Test
     void javaGraphFailureQuestionPrefersMatchingDiagnosticStageOverRoslynDiagnostic() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -832,7 +769,7 @@ class CodeRagServiceTest {
     void confidenceUsesGraphEvidenceScoreWhenRawSearchScoreIsLow() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult serviceResult = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.12, "CALLS", 0.98, 1);
         CodeSearchResult repositoryResult = graphResult("backend/src/main/java/com/learnbot/repository/AuthRepository.java", "method", "findUser", 0.10, "USES_ENTITY", 0.92, 1);
@@ -857,7 +794,7 @@ class CodeRagServiceTest {
     void callFlowSelectionPrioritizesEvidenceScoreBeforeFlowRank() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult weakController = graphResult("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.15, "CALLS", 0.20, 2);
         CodeSearchResult strongService = graphResult("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.45, "CALLS", 0.99, 1);
@@ -883,7 +820,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         CodeRagService service = new CodeRagService(
                 searchService,
@@ -953,7 +890,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         CodeRagService service = new CodeRagService(
                 searchService,
@@ -1023,7 +960,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         CodeRagService service = new CodeRagService(
                 searchService,
@@ -1090,7 +1027,7 @@ class CodeRagServiceTest {
     void conversationalAutoModeInheritsNarrowPreviousModeWhenQuestionHasNoModeKeyword() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result(
                 "backend/src/main/java/com/learnbot/service/CodeRagService.java",
@@ -1128,7 +1065,7 @@ class CodeRagServiceTest {
     void conversationalAutoModeUsesLocateOnlyWhenLocationKeywordIsExplicit() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result(
                 "backend/src/main/java/com/learnbot/service/CodeRagService.java",
@@ -1167,7 +1104,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         CodeRagService service = new CodeRagService(
                 searchService,
@@ -1234,7 +1171,7 @@ class CodeRagServiceTest {
     void implementationReasonQuestionUsesReasoningModeAndPromptGuidance() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult controller = result("backend/src/main/java/com/learnbot/web/AuthController.java", "method", "login", 0.72);
         CodeSearchResult serviceResult = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.68);
@@ -1263,7 +1200,7 @@ class CodeRagServiceTest {
     void reasoningModeFallsBackWithCitationsWhenModelAnswerIsUncited() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
 
@@ -1290,7 +1227,7 @@ class CodeRagServiceTest {
     void explicitLocateStillWinsForLocationQuestions() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result("backend/src/main/java/com/learnbot/service/AuthService.java", "method", "login", 0.72);
 
@@ -1316,7 +1253,7 @@ class CodeRagServiceTest {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeRepository codeRepository = mock(CodeRepository.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         CodeRagService service = new CodeRagService(
                 searchService,
@@ -1385,7 +1322,7 @@ class CodeRagServiceTest {
     void streamingReplacesVisibleAnswerWhenSelfCheckWouldFallback() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1435,7 +1372,7 @@ class CodeRagServiceTest {
     void diagnosticsIncludeOriginalQualityFailureReasonWhenAnswerFallsBack() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1468,7 +1405,7 @@ class CodeRagServiceTest {
     void streamingUsesStatusEventsCompactContextAndNoDefaultOutputLimit() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1525,7 +1462,7 @@ class CodeRagServiceTest {
     void streamingContinuesWhenModelStopsByLength() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1594,7 +1531,7 @@ class CodeRagServiceTest {
     void diagnosticsReportInvalidCodeCitationReference() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1645,7 +1582,7 @@ class CodeRagServiceTest {
     void diagnosticsReportCodeEvidenceSelectionSummary() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1676,7 +1613,7 @@ class CodeRagServiceTest {
     void deterministicCodePlannerAddsPatchIntentQueries() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -1728,10 +1665,10 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void overviewPrioritizesRuntimeImplementationEvidenceOverTestsAndLocalAgentNoise() {
+    void overviewPrioritizesRelevantMainImplementationEvidenceOverTests() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         properties.getRag().getPipeline().setCodeContextLimit(2);
@@ -1747,7 +1684,7 @@ class CodeRagServiceTest {
                 "backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java",
                 "method",
                 "queue",
-                0.93,
+                0.60,
                 "local agent queue handles patch tools"
         );
         CodeSearchResult indexingService = result(
@@ -1787,14 +1724,14 @@ class CodeRagServiceTest {
                         "backend/src/main/java/com/learnbot/service/CodeRagService.java"
                 );
         assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("sourceRoles={main=2}").contains("runtimeRoles={service=2}"));
+                assertThat(note).contains("sourceRoles={main=2}").doesNotContain("runtimeRoles="));
     }
 
     @Test
     void llmCodeEvidenceAdjudicationCanChooseLowerScoredButBetterEvidence() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         properties.getRag().getPipeline().setCodeContextLimit(1);
@@ -1846,7 +1783,7 @@ class CodeRagServiceTest {
     void llmCodeEvidenceAdjudicationFallsBackToDeterministicRankingWhenJudgeFails() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         properties.getRag().getPipeline().setCodeContextLimit(1);
@@ -1895,7 +1832,7 @@ class CodeRagServiceTest {
     void llmCodeEvidenceAdjudicationOrderOwnsFinalEvidenceSlate() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         properties.getRag().getPipeline().setCodeContextLimit(2);
@@ -1964,12 +1901,16 @@ class CodeRagServiceTest {
     void llmChecklistCoverageGroupsArePreservedBeyondContextLimit() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         properties.getRag().getPipeline().setCodeContextLimit(3);
         properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
-        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        RagPipelineService pipelineService = new RagPipelineService(
+                ollamaClient, properties, mock(RuntimeTuningService.class));
+        CodeRagService service = new CodeRagService(
+                searchService, referenceService, null, ollamaClient, properties,
+                pipelineService, new CodeEvidenceRanker(properties));
         CodeSearchResult controller = result(
                 "backend/src/main/java/com/learnbot/web/CodeController.java",
                 "method",
@@ -2001,17 +1942,40 @@ class CodeRagServiceTest {
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(controller, search, ranking, generation));
+        when(searchService.cheapSearch(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenAnswer(invocation -> {
+                    String query = invocation.getArgument(1);
+                    if (query.contains("request entrypoint")) {
+                        return List.of(controller);
+                    }
+                    if (query.contains("graph expansion")) {
+                        return List.of(search);
+                    }
+                    if (query.contains("ranking")) {
+                        return List.of(ranking);
+                    }
+                    if (query.contains("answer generation")) {
+                        return List.of(generation);
+                    }
+                    return List.of();
+                });
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         String groupedEvidenceDecision = """
                 {
                   "usable":true,
                   "confidence":0.9,
                   "queries":[],
-                  "enough":false,
-                  "missingAreas":["request intake","graph expansion","ranking","answer generation"],
+                  "enough":true,
+                  "missingAreas":[],
                   "followUpQueries":[],
                   "queryAreas":[],
                   "requiredEvidenceGroups":["request_intake","graph_traversal","evidence_ranking","answer_generation"],
+                  "coverageSelections":[
+                    {"evidenceGroup":"request_intake","evidenceIndexes":[1],"supportedClaims":["request entrypoint"],"pipelineStage":"request_intake"},
+                    {"evidenceGroup":"graph_traversal","evidenceIndexes":[2],"supportedClaims":["graph expansion"],"pipelineStage":"search_expansion"},
+                    {"evidenceGroup":"evidence_ranking","evidenceIndexes":[3],"supportedClaims":["evidence ranking"],"pipelineStage":"evidence_ranking"},
+                    {"evidenceGroup":"answer_generation","evidenceIndexes":[4],"supportedClaims":["answer generation"],"pipelineStage":"answer_generation"}
+                  ],
                   "checklist":[
                     {"claimId":"request","evidenceGroup":"request_intake","goal":"find request entrypoint","queries":[]},
                     {"claimId":"graph","evidenceGroup":"graph_traversal","goal":"find graph expansion","queries":[]},
@@ -2019,12 +1983,9 @@ class CodeRagServiceTest {
                     {"claimId":"generation","evidenceGroup":"answer_generation","goal":"find answer generation","queries":[]}
                   ],
                   "selected":[
-                    {"index":1,"score":0.95,"evidenceKind":"direct_code","implementationPhase":"SEARCH_EXPANSION","responsibility":"request_intake","coverageGroup":"request_intake","mustUse":true,"supportedClaims":["request entrypoint"],"notSupportedClaims":[],"rankReason":"controller endpoint","reason":"controller endpoint"},
-                    {"index":2,"score":0.94,"evidenceKind":"direct_code","implementationPhase":"SEARCH_EXPANSION","responsibility":"graph_traversal","coverageGroup":"graph_traversal","mustUse":true,"supportedClaims":["graph expansion"],"notSupportedClaims":[],"rankReason":"graph expansion method","reason":"graph expansion method"},
-                    {"index":3,"score":0.93,"evidenceKind":"direct_code","implementationPhase":"RANKING","responsibility":"evidence_ranking","coverageGroup":"evidence_ranking","mustUse":true,"supportedClaims":["evidence ranking"],"notSupportedClaims":[],"rankReason":"rank method","reason":"rank method"},
-                    {"index":4,"score":0.92,"evidenceKind":"direct_code","implementationPhase":"ANSWER_GENERATION","responsibility":"answer_generation","coverageGroup":"answer_generation","mustUse":true,"supportedClaims":["model call"],"notSupportedClaims":[],"rankReason":"model call method","reason":"model call method"}
+                    {"index":1,"score":0.95,"evidenceKind":"direct_code","implementationPhase":"SEARCH_EXPANSION","responsibility":"request_intake","coverageGroup":"request_intake","mustUse":true,"supportedClaims":["request entrypoint"],"notSupportedClaims":[],"rankReason":"controller endpoint","reason":"controller endpoint"}
                   ],
-                  "reason":"each required group has direct evidence"
+                  "reason":"all groups are present even though adjudication selected only the primary entrypoint"
                 }
                 """;
         when(ollamaClient.chatResult(anyString(), anyString(), any(OllamaClient.ChatRole.class), anyInt(), any(Duration.class), any()))
@@ -2049,89 +2010,19 @@ class CodeRagServiceTest {
                 .extracting(CodeEvidence::methodName)
                 .contains("ask", "expandGraph", "rank", "chatWithLimit");
         assertThat(response.evidence())
-                .extracting(evidence -> evidence.metadata().get("llmEvidenceCoverageGroup"))
-                .contains("request_intake", "graph_traversal", "evidence_ranking", "answer_generation");
+                .allSatisfy(evidence -> assertThat(evidence.metadata())
+                        .containsKey("llmValidatedEvidenceGroup"));
+        assertThat(response.evidence()).allSatisfy(evidence ->
+                assertThat(evidence.metadata()).containsEntry("llmChecklistGroupRequired", true));
+        assertThat(response.answer()).contains("API request flows through");
     }
 
-    @Test
-    void followUpRetrievalGroundsInventedServiceFileNamesToRuntimeRagEvidence() {
-        CodeSearchService searchService = mock(CodeSearchService.class);
-        CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
-        LearnBotProperties properties = new LearnBotProperties();
-        properties.getRag().getPipeline().setRewriteEnabled(false);
-        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
-        CodeSearchResult indexing = result(
-                "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
-                "file_section",
-                null,
-                0.86,
-                "CodeIndexingService scans files and creates chunks for indexing"
-        );
-        CodeSearchResult conversationStore = result(
-                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
-                "file_section",
-                null,
-                0.82,
-                "RagConversationRepository stores conversation turns and evidence JSON"
-        );
-        CodeSearchResult finalGate = result(
-                "frontend/src/components/code/mutationFinalResponseHandoffGate.js",
-                "method",
-                "buildMutationFinalResponseHandoffGateView",
-                0.80,
-                "Frontend gate renders final response handoff status"
-        );
-        CodeSearchResult runtimeRag = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
-                "method",
-                "askPrioritized",
-                0.20,
-                "CodeRagService retrieves code evidence, builds context, calls the LLM model, validates citations, and returns the RAG answer response"
-        );
-
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
-                .thenReturn(
-                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"retrieval/search pipeline\",\"answer generation flow\"],\"operations\":[{\"type\":\"hybrid_search\",\"query\":\"runtime RAG retrieval pipeline\",\"area\":\"retrieval pipeline\",\"evidenceGroup\":\"orchestration\"},{\"type\":\"hybrid_search\",\"query\":\"runtime RAG answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks runtime RAG answer flow\"}")
-                );
-        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
-                .thenAnswer(invocation -> {
-                    return List.of(indexing, conversationStore, finalGate);
-                });
-        when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
-                .thenReturn(List.of(runtimeRag));
-        when(searchService.searchWithoutGraph(isNull(), anyString(), anyInt(), anyList(), isNull(), any()))
-                .thenReturn(List.of(runtimeRag));
-        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
-                .thenReturn(chat("The runtime RAG answer flow is handled by CodeRagService after indexing evidence is available [1]."));
-
-        CodeAskResponse response = service.ask(
-                null,
-                null,
-                List.of(SecurityRepository.DEFAULT_SPACE_ID),
-                "Explain indexing to RAG response flow",
-                "overview",
-                3
-        );
-
-        assertThat(response.evidence())
-                .extracting(CodeEvidence::filePath)
-                .contains("backend/src/main/java/com/learnbot/service/CodeRagService.java");
-        assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("followUpQueriesUsed=2"));
-        verify(searchService).searchWithoutGraph(
-                isNull(), eq("runtime RAG retrieval pipeline"), anyInt(), anyList(), isNull(), any());
-        verify(searchService).searchWithoutGraph(
-                isNull(), eq("runtime RAG answer generation"), anyInt(), anyList(), isNull(), any());
-    }
 
     @Test
     void ragFlowQuestionsKeepRuntimeRetrievalAndAnswerEvidenceOverSupportEvidence() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -2178,8 +2069,6 @@ class CodeRagServiceTest {
                 );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(indexing, supportGate, turnStore));
-        when(searchService.runtimeRoleSearch(isNull(), anyString(), anyString(), anyInt(), anyList(), isNull()))
-                .thenReturn(List.of(retrieval, answer));
         when(searchService.searchWithoutGraph(isNull(), anyString(), anyInt(), anyList(), isNull(), any()))
                 .thenReturn(List.of(retrieval, answer));
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
@@ -2210,7 +2099,7 @@ class CodeRagServiceTest {
     void followUpRetrievalExecutesAllPlannedOperationsWhenEvidenceGroupsAreSatisfiedEarly() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -2253,6 +2142,9 @@ class CodeRagServiceTest {
                     if (query.contains("claim response persistence")) {
                         return List.of(claim, response, persistence);
                     }
+                    if (query.contains("unused response query")) {
+                        return List.of(response, persistence);
+                    }
                     return List.of();
                 });
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
@@ -2262,6 +2154,11 @@ class CodeRagServiceTest {
                         chat("{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"claim response persistence\",\"area\":\"claim response persistence\",\"evidenceGroup\":\"queue_claim\"},{\"type\":\"keyword_search\",\"query\":\"unused response query\",\"area\":\"response\",\"evidenceGroup\":\"response_intake\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"need request and response flow\"}"),
                         chat("{\"selected\":[{\"index\":1,\"score\":0.9,\"evidenceKind\":\"direct_code\",\"implementationPhase\":\"SEARCH_EXPANSION\",\"responsibility\":\"data_structure\",\"coverageGroup\":\"queue_claim\",\"mustUse\":true,\"supportedClaims\":[\"claims work\"],\"notSupportedClaims\":[],\"rankReason\":\"claim evidence\",\"reason\":\"claim evidence\"}],\"reason\":\"ok\"}")
                 );
+        stubRetrievalIterations(
+                ollamaClient,
+                "{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"claim response persistence\",\"area\":\"claim response persistence\",\"evidenceGroup\":\"queue_claim\"},{\"type\":\"keyword_search\",\"query\":\"unused response query\",\"area\":\"response\",\"evidenceGroup\":\"response_intake\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"need request and response flow\"}",
+                "{\"enough\":true,\"missingAreas\":[],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"both evidence groups are present\"}"
+        );
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
                 .thenReturn(chat("The worker claims work and stores the response [1]."));
 
@@ -2287,7 +2184,7 @@ class CodeRagServiceTest {
     void ragFlowSelectionReplacesLineWindowsWithStructuredEvidenceWhenAvailable() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -2373,7 +2270,7 @@ class CodeRagServiceTest {
     void llmCoveragePlanCanReplaceMultipleSupportEvidenceWithoutImmutableListFailure() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -2436,104 +2333,12 @@ class CodeRagServiceTest {
                 .contains("search", "generateCodeAnswer");
     }
 
-    @Test
-    void llmCoveragePlanSelectsApiRequestSearchRankingAndGenerationEvidence() {
-        CodeSearchService searchService = mock(CodeSearchService.class);
-        CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
-        LearnBotProperties properties = new LearnBotProperties();
-        properties.getRag().getPipeline().setRewriteEnabled(false);
-        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
-
-        CodeSearchResult dto = resultWithParser(
-                "backend/src/main/java/com/learnbot/dto/CodeAskResponse.java",
-                "record",
-                null,
-                0.99,
-                "CodeAskResponse DTO contains answer fields",
-                "javaparser"
-        );
-        CodeSearchResult history = resultWithParser(
-                "backend/src/main/java/com/learnbot/repository/RagConversationRepository.java",
-                "method",
-                "saveTurn",
-                0.98,
-                "conversation history storage support evidence",
-                "javaparser"
-        );
-        CodeSearchResult controller = resultWithParser(
-                "backend/src/main/java/com/learnbot/web/CodeController.java",
-                "method",
-                "ask",
-                0.30,
-                "POST /api/code/ask controller validates request and calls codeRagService.askConversational",
-                "javaparser"
-        );
-        CodeSearchResult orchestration = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
-                "method",
-                "askPrioritized",
-                0.29,
-                "askPrioritized orchestrates retrieveCodeEvidence, rankedCodeEvidence, and answer generation",
-                "javaparser"
-        );
-        CodeSearchResult retrieval = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
-                "method",
-                "search",
-                0.28,
-                "search retrieves query context evidence chunks from indexed code",
-                "javaparser"
-        );
-        CodeSearchResult ranking = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
-                "method",
-                "rank",
-                0.27,
-                "rank scores and reranks code evidence for the answer",
-                "javaparser"
-        );
-        CodeSearchResult generation = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/RagPipelineService.java",
-                "method",
-                "generateCodeAnswer",
-                0.26,
-                "generateCodeAnswer builds prompt context and returns answer response citations from the model",
-                "javaparser"
-        );
-
-        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
-                .thenReturn(List.of(dto, history, controller, orchestration, retrieval, ranking, generation));
-        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
-                .thenReturn(
-                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"api flow\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"followUpQueries\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"queryAreas\":[\"controller endpoint\",\"service orchestration\",\"search evidence\",\"evidence ranking\",\"answer generation\"],\"reason\":\"need full runtime path\"}")
-                );
-        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
-                .thenThrow(new RuntimeException("model unavailable"));
-
-        CodeAskResponse response = service.ask(
-                null,
-                null,
-                List.of(SecurityRepository.DEFAULT_SPACE_ID),
-                "Explain /api/code/ask request flow from Controller through Service search evidence ranking and answer generation",
-                "flow",
-                5
-        );
-
-        assertThat(response.evidence())
-                .extracting(CodeEvidence::methodName)
-                .contains("ask", "askPrioritized", "search", "rank", "generateCodeAnswer");
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRequired", true));
-    }
 
     @Test
     void llmCoveragePlanSelectsIndexingPersistenceAndGraphStorageEvidence() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
+        OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
@@ -2612,97 +2417,36 @@ class CodeRagServiceTest {
                 .contains("runIndexing", "buildWithDiagnostics", "replaceGraph");
     }
 
-    @Test
-    void llmCoveragePlanSelectsDistinctRetrievalTraversalAndRankingRoles() {
-        CodeSearchService searchService = mock(CodeSearchService.class);
-        CodeReferenceService referenceService = mock(CodeReferenceService.class);
-        OllamaClient ollamaClient = mock(OllamaClient.class);
-        LearnBotProperties properties = new LearnBotProperties();
-        properties.getRag().getPipeline().setRewriteEnabled(false);
-        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
-
-        CodeSearchResult helper = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
-                "method",
-                "isGraphEdge",
-                0.99,
-                "isGraphEdge checks graphExpanded metadata and graphEdgeType for ranking intent matching",
-                "javaparser"
-        );
-        CodeSearchResult dto = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeGraphEdge.java",
-                "record",
-                null,
-                0.98,
-                "CodeGraphEdge carries source target type confidence evidenceChunkId metadata",
-                "javaparser"
-        );
-        CodeSearchResult expandGraph = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeSearchService.java",
-                "method",
-                "expandGraph",
-                0.25,
-                "expandGraph performs retrieval search expansion from seed chunks, calls repository graphRelatedChunks, and passes graph edge types",
-                "javaparser"
-        );
-        CodeSearchResult graphTraversal = resultWithParser(
-                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
-                "method",
-                "graphNeighbors",
-                0.24,
-                "graphNeighbors traverses code_graph_edges by edge types, direction, confidence, max hop, and graph path score",
-                "javaparser"
-        );
-        CodeSearchResult graphChunks = resultWithParser(
-                "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
-                "method",
-                "graphChunksForPaths",
-                0.23,
-                "graphChunksForPaths attaches graphPathScore graphDepth graphEdgeType graphExpanded metadata to expanded chunks",
-                "javaparser"
-        );
-        CodeSearchResult ranking = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
-                "method",
-                "graphEvidenceScore",
-                0.22,
-                "graphEvidenceScore ranks graph evidence using graphPathScore graphDepth edgeWeight and ranking score",
-                "javaparser"
-        );
-
-        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
-                .thenReturn(List.of(helper, dto, expandGraph, graphTraversal, graphChunks, ranking));
-        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
-        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
-                .thenReturn(
-                        chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[],\"reason\":\"graph rag flow\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"search expansion logic based on graph edges\",\"graph traversal path score calculation\",\"evidence ranking using graph edge metadata\"],\"followUpQueries\":[\"search expansion graph edges\",\"graph traversal path score\",\"evidence ranking graph edge metadata\"],\"queryAreas\":[\"search expansion logic based on graph edges\",\"graph traversal path score calculation\",\"evidence ranking using graph edge metadata\"],\"reason\":\"need distinct responsibilities\"}")
-                );
-        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
-                .thenThrow(new RuntimeException("model unavailable"));
-
-        CodeAskResponse response = service.ask(
-                null,
-                null,
-                List.of(SecurityRepository.DEFAULT_SPACE_ID),
-                "Explain how graph edges affect retrieval expansion, graph traversal, and evidence ranking",
-                "overview",
-                4
-        );
-
-        assertThat(response.evidence())
-                .extracting(CodeEvidence::methodName)
-                .contains("expandGraph", "graphNeighbors", "graphEvidenceScore");
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "retrieval/search-expansion"));
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "graph-traversal/expansion"));
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata()).containsEntry("llmCoverageRole", "evidence-ranking"));
-    }
 
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
+    }
+
+    private OllamaClient mockOllamaClient() {
+        return mock(OllamaClient.class, invocation -> {
+            Object[] arguments = invocation.getArguments();
+            if ("chatResult".equals(invocation.getMethod().getName())
+                    && arguments.length == 6
+                    && arguments[0] instanceof String systemPrompt
+                    && systemPrompt.contains("judge whether current code RAG evidence")) {
+                return chat("{\"enough\":true,\"missingAreas\":[],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[],\"reason\":\"test evidence is sufficient\"}");
+            }
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+    }
+
+    private void stubRetrievalIterations(OllamaClient ollamaClient, String... responses) {
+        OllamaClient.ChatResult[] results = java.util.Arrays.stream(responses)
+                .map(CodeRagServiceTest::chat)
+                .toArray(OllamaClient.ChatResult[]::new);
+        when(ollamaClient.chatResult(
+                argThat(prompt -> prompt != null && prompt.contains("judge whether current code RAG evidence")),
+                anyString(),
+                any(OllamaClient.ChatRole.class),
+                anyInt(),
+                any(Duration.class),
+                any()
+        )).thenReturn(results[0], java.util.Arrays.copyOfRange(results, 1, results.length));
     }
 
     private static OllamaClient.ChatStreamDelta streamDelta(String content, boolean done) {

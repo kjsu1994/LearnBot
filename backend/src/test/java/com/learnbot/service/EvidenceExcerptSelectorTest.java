@@ -59,6 +59,58 @@ class EvidenceExcerptSelectorTest {
                 .contains("decimal.TryParse", "IsArgRange(argValue)", "LogWarning(message)", "return");
     }
 
+    @Test
+    void preservesDirectReadBoundariesInsteadOfApplyingQuestionWindows() {
+        String content = "method-start\n" + "middle-line\n".repeat(200) + "catch-and-method-end";
+        CodeSearchResult directRead = withMetadata(result(content), Map.of("llmDirectRead", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "middle line", directRead, 360);
+
+        assertThat(excerpt.kind()).isEqualTo("DIRECT_READ_BOUNDED");
+        assertThat(excerpt.contentComplete()).isFalse();
+        assertThat(excerpt.omittedByBudget()).isTrue();
+        assertThat(excerpt.text())
+                .contains("method-start", "direct-read content omitted by prompt budget", "catch-and-method-end");
+    }
+
+    @Test
+    void requestedMiddleRangeIsPreservedWithTruthfulExcerptBounds() {
+        String content = IntStream.rangeClosed(100, 199)
+                .mapToObj(line -> "source-line-" + line)
+                .reduce((left, right) -> left + "\n" + right)
+                .orElseThrow();
+        CodeSearchResult directRead = withLineRangeAndMetadata(
+                result(content),
+                100,
+                199,
+                Map.of(
+                        "llmDirectRead", true,
+                        "llmReadOperation", "read_file_range",
+                        "llmRequestedLineStart", 145,
+                        "llmRequestedLineEnd", 147
+                )
+        );
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "explain the requested range", directRead, 120);
+
+        assertThat(excerpt.kind()).isEqualTo("DIRECT_READ_REQUESTED_RANGE");
+        assertThat(excerpt.contentComplete()).isFalse();
+        assertThat(excerpt.omittedByBudget()).isFalse();
+        assertThat(excerpt.lineStart()).isEqualTo(145);
+        assertThat(excerpt.lineEnd()).isEqualTo(147);
+        assertThat(excerpt.text())
+                .contains(
+                        "outside requested range omitted: lines 100-144",
+                        "source-line-145",
+                        "source-line-146",
+                        "source-line-147",
+                        "outside requested range omitted: lines 148-199"
+                )
+                .doesNotContain("source-line-144", "source-line-148");
+    }
+
     private CodeSearchResult result(String content) {
         UUID repositoryId = UUID.randomUUID();
         return new CodeSearchResult(
@@ -84,5 +136,26 @@ class EvidenceExcerptSelectorTest {
                         "llmFollowUpQuery", "IsArgRange out of range validation"
                 )
         );
+    }
+
+    private CodeSearchResult withMetadata(CodeSearchResult result, Map<String, Object> metadata) {
+        return new CodeSearchResult(
+                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
+                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
+                result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
+                result.content(), result.score(), metadata);
+    }
+
+    private CodeSearchResult withLineRangeAndMetadata(
+            CodeSearchResult result,
+            int lineStart,
+            int lineEnd,
+            Map<String, Object> metadata
+    ) {
+        return new CodeSearchResult(
+                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
+                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
+                result.controlName(), result.eventName(), result.chunkIndex(), lineStart, lineEnd,
+                result.content(), result.score(), metadata);
     }
 }
