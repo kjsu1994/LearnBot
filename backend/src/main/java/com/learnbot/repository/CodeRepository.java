@@ -9,9 +9,11 @@ import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeFileSummary;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.CodeSymbolOutline;
 import com.learnbot.dto.IndexingJobSummary;
 import com.learnbot.dto.IndexingJobFailureSummary;
 import com.learnbot.service.ActiveCodeFileSnapshot;
+import com.learnbot.service.ActiveCodeIndexIdentity;
 import com.learnbot.service.CodeGraph;
 import com.learnbot.service.CodeGraphEdge;
 import com.learnbot.service.CodeGraphNode;
@@ -1220,6 +1222,68 @@ public class CodeRepository {
                 .addValue("repositoryId", repositoryId), this::mapSearchResult);
     }
 
+    public Optional<ActiveCodeIndexIdentity> findActiveIndexIdentity(
+            UUID repositoryId,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (repositoryId == null) {
+            return Optional.empty();
+        }
+        List<ActiveCodeIndexIdentity> identities = jdbc.query("""
+                SELECT r.id AS repository_id,
+                       r.space_id,
+                       c.index_version,
+                       COALESCE(j.content_fingerprint, r.content_fingerprint, '') AS content_fingerprint,
+                       COALESCE(j.analyzer_version, r.analyzer_version, '') AS analyzer_version,
+                       COALESCE(j.index_schema_version, r.index_schema_version, '') AS index_schema_version,
+                       COALESCE(j.enrichment_status, '') AS enrichment_status,
+                       CONCAT(
+                           COALESCE((SELECT COUNT(*) FROM code_graph_edges e
+                                     WHERE e.repository_id = r.id AND e.index_version = c.index_version AND e.active), 0),
+                           ':',
+                           COALESCE((SELECT MAX(EXTRACT(EPOCH FROM e.created_at)) FROM code_graph_edges e
+                                     WHERE e.repository_id = r.id AND e.index_version = c.index_version AND e.active), 0)
+                       ) AS graph_revision,
+                       CONCAT(
+                           COALESCE((SELECT COUNT(*) FROM code_analysis_diagnostics d
+                                     WHERE d.repository_id = r.id AND d.index_version = c.index_version), 0),
+                           ':',
+                           COALESCE((SELECT MAX(EXTRACT(EPOCH FROM d.created_at)) FROM code_analysis_diagnostics d
+                                     WHERE d.repository_id = r.id AND d.index_version = c.index_version), 0)
+                       ) AS diagnostic_revision
+                FROM code_repositories r
+                JOIN code_chunks c ON c.repository_id = r.id AND c.active
+                LEFT JOIN indexing_jobs j ON j.id = c.index_version AND j.repository_id = r.id
+                WHERE r.id = :repositoryId
+                  AND r.deleted_at IS NULL
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                GROUP BY r.id, r.space_id, c.index_version,
+                         j.content_fingerprint, r.content_fingerprint,
+                         j.analyzer_version, r.analyzer_version,
+                         j.index_schema_version, r.index_schema_version,
+                         j.enrichment_status
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("spaceIds", authorizedSpaceIds(spaceIds))
+                .addValue("selectedSpaceId", selectedSpaceId), (rs, rowNum) -> new ActiveCodeIndexIdentity(
+                        rs.getObject("repository_id", UUID.class),
+                        rs.getObject("space_id", UUID.class),
+                        rs.getObject("index_version", UUID.class),
+                        rs.getString("content_fingerprint"),
+                        rs.getString("analyzer_version"),
+                        rs.getString("index_schema_version"),
+                        rs.getString("enrichment_status"),
+                        rs.getString("graph_revision"),
+                        rs.getString("diagnostic_revision")
+                ));
+        if (identities.size() > 1) {
+            throw new IllegalStateException("multiple active code index versions were found");
+        }
+        return identities.stream().findFirst();
+    }
+
     public void updateIndexIdentity(UUID repositoryId, UUID jobId, String contentFingerprint,
                                     String worktreeState, String analyzerVersion, String indexSchemaVersion) {
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -1349,6 +1413,117 @@ public class CodeRepository {
                 .addValue("limit", Math.max(1, Math.min(limit, 80)))
                 .addValue("spaceIds", safeSpaceIds)
                 .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
+    public List<CodeSymbolOutline> listActiveSymbolOutlinesByPaths(
+            UUID repositoryId,
+            List<String> filePaths,
+            int perPathLimit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (repositoryId == null || filePaths == null || filePaths.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalizedPaths = filePaths.stream()
+                .map(this::normalizeRepositoryRelativePath)
+                .filter(path -> !path.isBlank())
+                .distinct()
+                .limit(32)
+                .toList();
+        if (normalizedPaths.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        int safePerPathLimit = Math.max(1, Math.min(perPathLimit, 240));
+        return jdbc.query("""
+                WITH available_symbols AS (
+                    SELECT n.node_key AS entity_id,
+                           n.file_path,
+                           n.node_type AS kind,
+                           n.name,
+                           COALESCE(n.qualified_name, '') AS qualified_name,
+                           COALESCE(c.line_start, 0) AS line_start,
+                           COALESCE(c.line_end, 0) AS line_end,
+                           n.chunk_id,
+                           COALESCE(NULLIF(n.metadata->>'analyzer', ''),
+                                    NULLIF(n.metadata->>'language', ''), 'semantic-graph') AS analyzer,
+                           'COMPILER_SEMANTIC' AS authority
+                    FROM code_graph_nodes n
+                    JOIN code_repositories r ON r.id = n.repository_id AND r.deleted_at IS NULL
+                    LEFT JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                    WHERE n.active
+                      AND n.repository_id = :repositoryId
+                      AND n.file_path IN (:filePaths)
+                      AND n.node_type NOT IN ('file', 'directory')
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+
+                    UNION ALL
+
+                    SELECT 'chunk:' || c.id::text AS entity_id,
+                           c.file_path,
+                           COALESCE(NULLIF(c.chunk_type, ''), 'symbol') AS kind,
+                           COALESCE(NULLIF(c.method_name, ''), NULLIF(c.symbol_name, ''),
+                                    NULLIF(c.class_name, ''), NULLIF(c.control_name, ''), NULLIF(c.event_name, '')) AS name,
+                           '' AS qualified_name,
+                           c.line_start,
+                           c.line_end,
+                           c.id AS chunk_id,
+                           'chunk-parser' AS analyzer,
+                           'SYNTAX_RECOVERED' AS authority
+                    FROM code_chunks c
+                    JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                    WHERE c.active
+                      AND c.repository_id = :repositoryId
+                      AND c.file_path IN (:filePaths)
+                      AND COALESCE(NULLIF(c.method_name, ''), NULLIF(c.symbol_name, ''),
+                                   NULLIF(c.class_name, ''), NULLIF(c.control_name, ''), NULLIF(c.event_name, '')) IS NOT NULL
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM code_graph_nodes n
+                          WHERE n.active AND n.repository_id = c.repository_id AND n.file_path = c.file_path
+                            AND n.node_type NOT IN ('file', 'directory')
+                      )
+                ), deduplicated AS (
+                    SELECT available_symbols.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY file_path, kind, name, line_start, line_end
+                               ORDER BY LENGTH(qualified_name) DESC, analyzer, entity_id
+                           ) AS duplicate_rank
+                    FROM available_symbols
+                ), ranked AS (
+                    SELECT entity_id, file_path, kind, name, qualified_name, line_start, line_end,
+                           chunk_id, analyzer, authority,
+                           COUNT(*) OVER (PARTITION BY file_path) AS total_in_file,
+                           ROW_NUMBER() OVER (PARTITION BY file_path ORDER BY line_start, line_end, kind, name, entity_id) AS row_number
+                    FROM deduplicated
+                    WHERE duplicate_rank = 1
+                )
+                SELECT entity_id, file_path, kind, name, qualified_name, line_start, line_end,
+                       chunk_id, analyzer, authority, total_in_file
+                FROM ranked
+                WHERE row_number <= :perPathLimit
+                ORDER BY file_path, row_number
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("filePaths", normalizedPaths)
+                .addValue("perPathLimit", safePerPathLimit)
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), (rs, rowNum) -> new CodeSymbolOutline(
+                        rs.getString("entity_id"),
+                        rs.getString("file_path"),
+                        rs.getString("kind"),
+                        rs.getString("name"),
+                        rs.getString("qualified_name"),
+                        rs.getInt("line_start"),
+                        rs.getInt("line_end"),
+                        rs.getObject("chunk_id", UUID.class),
+                        rs.getString("analyzer"),
+                        rs.getString("authority"),
+                        rs.getInt("total_in_file")
+                ));
     }
 
     public List<CodeSearchResult> keywordSearch(UUID repositoryId, String query, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {
@@ -1541,6 +1716,53 @@ public class CodeRepository {
                 .addValue("limit", Math.max(1, Math.min(limit, 100)))
                 .addValue("spaceIds", safeSpaceIds)
                 .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> findActiveChunksByPath(
+            UUID repositoryId,
+            String filePath,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (filePath == null || filePath.isBlank()) {
+            return List.of();
+        }
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata,
+                       1.0 AS score
+                FROM code_chunks c
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE c.active
+                  AND c.repository_id = :repositoryId
+                  AND c.file_path = :filePath
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                ORDER BY c.chunk_index
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("filePath", filePath.trim())
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId)
+                .addValue("limit", Math.max(1, Math.min(limit, 100))), this::mapSearchResult);
     }
 
     public List<CodeSearchResult> findSymbolReferences(UUID repositoryId, String symbol, int limit, List<UUID> spaceIds, UUID selectedSpaceId) {

@@ -105,15 +105,15 @@ final class CodeEvidenceOperationExecutor {
                 repositoryId, symbol, path, limit, spaceIds, selectedSpaceId).stream()
                 .map(result -> markSymbolEvidenceKind(result, "DEFINITION"))
                 .toList();
+        if (!definitions.isEmpty()) {
+            return definitions.stream().limit(limit).toList();
+        }
         List<CodeSearchResult> references = repository.findSymbolReferences(
                         repositoryId, symbol, limit, spaceIds, selectedSpaceId).stream()
-                .filter(result -> path == null || path.equals(result.filePath()) || !definitions.isEmpty())
+                .filter(result -> path == null || path.equals(result.filePath()))
                 .map(result -> markSymbolEvidenceKind(result, "REFERENCE"))
                 .toList();
-        LinkedHashMap<UUID, CodeSearchResult> combined = new LinkedHashMap<>();
-        definitions.forEach(result -> combined.put(result.chunkId(), result));
-        references.forEach(result -> combined.putIfAbsent(result.chunkId(), result));
-        return combined.values().stream().limit(limit).toList();
+        return references.stream().limit(limit).toList();
     }
 
     private CodeSearchResult markSymbolEvidenceKind(CodeSearchResult result, String kind) {

@@ -299,7 +299,7 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         )).thenReturn(new OllamaClient.ChatResult("""
-                {"enough":false,"missingAreas":["concrete implementation"],"operations":[{"type":"read_chunk","chunkId":"0bda573c-f187-43af-93ee-8377ea026472","area":"method body","evidenceGroup":"queue_claim"},{"type":"read_symbol","path":"backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java","symbol":"claimNext","area":"service method","evidenceGroup":"queue_claim"},{"type":"list_file_symbols","path":"backend/src/main/java/com/learnbot/service/CodeRagService.java","area":"file navigation","evidenceGroup":"orchestration"},{"type":"read_file_range","path":"backend/src/main/java/com/learnbot/repository/LocalAgentToolExecutionRepository.java","lineStart":64,"lineEnd":132,"area":"repository update","evidenceGroup":"persistence_update"}],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["queue_claim","persistence_update"],"reason":"read exact evidence"}
+                {"enough":false,"missingAreas":["concrete implementation"],"operations":[{"operationId":"read-claim-body","claimIds":["claim_next"],"originEvidenceIds":["test-index:0bda573c-f187-43af-93ee-8377ea026472:1-20"],"type":"read_chunk","chunkId":"0bda573c-f187-43af-93ee-8377ea026472","area":"method body","evidenceGroup":"queue_claim"},{"type":"read_symbol","path":"backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java","symbol":"claimNext","area":"service method","evidenceGroup":"queue_claim"},{"type":"list_file_symbols","path":"backend/src/main/java/com/learnbot/service/CodeRagService.java","area":"file navigation","evidenceGroup":"orchestration"},{"type":"read_file_range","path":"backend/src/main/java/com/learnbot/repository/LocalAgentToolExecutionRepository.java","lineStart":64,"lineEnd":132,"area":"repository update","evidenceGroup":"persistence_update"}],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["queue_claim","persistence_update"],"reason":"read exact evidence"}
                 """, "stop", true, 180, 140, "http://ollama", "test", "auxiliary", false));
 
         RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
@@ -315,10 +315,15 @@ class RagPipelineServiceTest {
             assertThat(operation.validationError()).isBlank();
         });
         assertThat(plan.operations().get(0).chunkId()).isEqualTo(chunkId.toString());
+        assertThat(plan.operations().get(0).operationId()).isEqualTo("read-claim-body");
+        assertThat(plan.operations().get(0).claimIds()).containsExactly("claim_next");
+        assertThat(plan.operations().get(0).originEvidenceIds())
+                .containsExactly("test-index:0bda573c-f187-43af-93ee-8377ea026472:1-20");
+        assertThat(plan.operations().get(0).operationId()).isNotBlank();
+        assertThat(plan.operations().subList(1, 4)).allSatisfy(operation ->
+                assertThat(operation.operationId()).isBlank());
         assertThat(plan.operations().get(1).path()).isEqualTo("backend/src/main/java/com/learnbot/service/LocalAgentToolGatewayService.java");
         assertThat(plan.operations().get(1).symbol()).isEqualTo("claimNext");
-        assertThat(plan.operations().get(2).type()).isEqualTo("list_file_symbols");
-        assertThat(plan.operations().get(2).path()).isEqualTo("backend/src/main/java/com/learnbot/service/CodeRagService.java");
         assertThat(plan.operations().get(3).lineStart()).isEqualTo(64);
         assertThat(plan.operations().get(3).lineEnd()).isEqualTo(132);
 
@@ -351,10 +356,15 @@ class RagPipelineServiceTest {
         );
         assertThat(operationProperties).containsKeys(
                 "path", "symbol", "chunkId", "lineStart", "lineEnd", "radius",
-                "relations", "direction", "maxHops"
+                "relations", "direction", "maxHops", "operationId", "claimIds", "originEvidenceIds"
         );
         assertThat((List<String>) operationSchema.get("required"))
-                .containsExactlyInAnyOrder("type", "area", "evidenceGroup");
+                .containsExactlyInAnyOrder(
+                        "type", "query", "area", "evidenceGroup", "path", "symbol", "chunkId",
+                        "lineStart", "lineEnd", "radius", "relations", "direction", "maxHops",
+                        "operationId", "claimIds", "originEvidenceIds");
+        assertThat((Map<String, Object>) operationProperties.get("claimIds"))
+                .containsEntry("minItems", 1);
     }
 
     @Test
@@ -414,16 +424,12 @@ class RagPipelineServiceTest {
                 "keyword_search", "claimNext", "service", "orchestration"
         );
 
-        assertThat(plan.operations()).singleElement().satisfies(operation -> {
-            assertThat(operation.type()).isEqualTo("hybrid_search");
-            assertThat(operation.query()).isEqualTo("claimNext service implementation");
-            assertThat(operation.path()).isBlank();
-            assertThat(operation.lineStart()).isNull();
-        });
+        assertThat(plan.operations()).isEmpty();
         assertThat(legacy.query()).isEqualTo("claimNext");
         assertThat(legacy.path()).isBlank();
         assertThat(legacy.radius()).isNull();
         assertThat(legacy.validationError()).isBlank();
+        assertThat(legacy.operationId()).isBlank();
     }
 
     @Test
@@ -443,7 +449,7 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         )).thenReturn(new OllamaClient.ChatResult("""
-                {"enough":true,"missingAreas":[],"operations":[{"type":"read_chunk","chunkId":"0bda573c-f187-43af-93ee-8377ea026472","area":"method","evidenceGroup":"queue_claim"}],"followUpQueries":["unused"],"queryAreas":["unused"],"requiredEvidenceGroups":["queue_claim","persistence_update"],"reason":"evidence is sufficient"}
+                {"enough":true,"missingAreas":[],"operations":[],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["queue_claim","persistence_update"],"coverageSelections":[{"evidenceGroup":"queue_claim","evidenceIndexes":[1],"supportedClaims":["queued work is claimed"],"pipelineStage":"execution"},{"evidenceGroup":"persistence_update","evidenceIndexes":[1],"supportedClaims":["state is persisted"],"pipelineStage":"persistence"}],"reason":"evidence is sufficient"}
                 """, "stop", true, 80, 60, "http://ollama", "test", "auxiliary", false));
 
         RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
@@ -459,6 +465,31 @@ class RagPipelineServiceTest {
         assertThat(plan.followUpQueries()).isEmpty();
         assertThat(plan.requiredEvidenceGroups()).containsExactly("queue_claim", "persistence_update");
         assertThat(plan.checklist()).containsExactlyElementsOf(checklist);
+    }
+
+    @Test
+    void rejectsEnoughWithoutDirectCoverageWithoutAnotherLlmCall() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        when(ollamaClient.chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any()
+        )).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":true,"missingAreas":[],"operations":[],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["failure_handling"],"coverageSelections":[],"reason":"assumed enough"}
+                """, "stop", true, 80, 60, "http://ollama", "test", "auxiliary", false));
+
+        RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
+                "Explain analyzer failure handling", "flow",
+                List.of(followUpCandidate(UUID.randomUUID())), 2,
+                List.of(new RagPipelineService.CodeEvidenceChecklistItem(
+                        "failure", "failure_handling", "prove failure handling", List.of("analyzer failure handling")))
+        );
+
+        assertThat(plan.enough()).isFalse();
+        assertThat(plan.operations()).isEmpty();
+        verify(ollamaClient, times(1)).chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any());
     }
 
     @Test
@@ -510,6 +541,65 @@ class RagPipelineServiceTest {
     }
 
     @Test
+    void legacyFollowUpQueriesRetainRequiredEvidenceGroupsAsExecutableOperations() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        when(ollamaClient.chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any()
+        )).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":false,"missingAreas":["failure handling","response fallback"],"operations":[],"followUpQueries":["analyzer exception handling","response fallback strategy"],"queryAreas":["analysis","answer"],"requiredEvidenceGroups":["semantic_failure_handling","response_fallback"],"reason":"need direct implementations"}
+                """, "stop", true, 80, 60, "http://ollama", "test", "auxiliary", false));
+
+        RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
+                "Explain analysis failure and response fallback",
+                "flow",
+                List.of(followUpCandidate(UUID.randomUUID())),
+                2,
+                List.of(
+                        new RagPipelineService.CodeEvidenceChecklistItem("analysis", "semantic_failure_handling", "analyzer failure", List.of()),
+                        new RagPipelineService.CodeEvidenceChecklistItem("answer", "response_fallback", "response fallback", List.of())
+                )
+        );
+
+        assertThat(plan.operations()).isEmpty();
+        verify(ollamaClient, times(1)).chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any());
+    }
+
+    @Test
+    void removesCoveredGroupOperationsAndFillsOnlyUncoveredGroups() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        when(ollamaClient.chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any()
+        )).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":false,"missingAreas":["stale covered group","remaining behavior"],"operations":[{"type":"read_symbol","path":"Observed.java","symbol":"observedMethod","area":"covered","evidenceGroup":"observed_behavior"}],"followUpQueries":["observed method implementation","remaining behavior implementation"],"queryAreas":["observed","remaining"],"requiredEvidenceGroups":["observed_behavior","remaining_behavior"],"coverageSelections":[{"evidenceGroup":"observed_behavior","evidenceIndexes":[1],"supportedClaims":["observed behavior is implemented"],"pipelineStage":"observed_stage"}],"reason":"need remaining behavior"}
+                """, "stop", true, 80, 60, "http://ollama", "test", "auxiliary", false));
+
+        RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
+                "Explain both behaviors", "flow",
+                List.of(followUpCandidate(UUID.randomUUID())), 2,
+                List.of(
+                        new RagPipelineService.CodeEvidenceChecklistItem("observed", "observed_behavior", "observed", List.of("observed method")),
+                        new RagPipelineService.CodeEvidenceChecklistItem("remaining", "remaining_behavior", "remaining", List.of("remaining behavior implementation"))
+                )
+        );
+
+        assertThat(plan.enough()).isFalse();
+        assertThat(plan.missingAreas()).containsExactly("remaining_behavior");
+        assertThat(plan.operations()).singleElement().satisfies(operation -> {
+            assertThat(operation.type()).isEqualTo("read_symbol");
+            assertThat(operation.evidenceGroup()).isEqualTo("observed_behavior");
+        });
+        verify(ollamaClient, times(1)).chatResult(
+                anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any());
+    }
+
+    @Test
     void codeEvidenceSearchPlanParsesChecklistItems() {
         OllamaClient ollamaClient = mock(OllamaClient.class);
         RuntimeTuningService runtimeTuningService = mock(RuntimeTuningService.class);
@@ -524,7 +614,7 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         )).thenReturn(new OllamaClient.ChatResult("""
-                {"usable":true,"confidence":0.86,"queries":["/api/code/ask CodeController ask CodeRagService"],"checklist":[{"claimId":"request-entrypoint","evidenceGroup":"request_intake","goal":"find endpoint handling /api/code/ask","queries":["CodeController ask /api/code/ask"]},{"claimId":"graph-expansion","evidenceGroup":"graph_traversal","goal":"find graph expansion implementation","queries":["CodeSearchService expandGraph graphRelatedChunks"]}],"reason":"phase-specific plan"}
+                {"usable":true,"confidence":0.86,"hypothesis":"trace entry and graph expansion","hypothesisVersion":1,"checklist":[{"claimId":"request-entrypoint","goal":"find endpoint handling /api/code/ask","actor":"controller","action":"accept","object":"code question","expectedOutcome":"request enters Code RAG","scopeHints":["controller"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":["CodeController ask /api/code/ask"]},{"claimId":"graph-expansion","goal":"find graph expansion implementation","actor":"search service","action":"expand","object":"graph candidates","expectedOutcome":"related chunks are retrieved","scopeHints":["search"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":["CodeSearchService expandGraph graphRelatedChunks"]}],"operations":[{"type":"hybrid_search","query":"CodeController ask /api/code/ask","area":"entry","evidenceGroup":"request-entrypoint","operationId":"op-1","claimIds":["request-entrypoint"],"originEvidenceIds":[]},{"type":"hybrid_search","query":"CodeSearchService expandGraph graphRelatedChunks","area":"graph","evidenceGroup":"graph-expansion","operationId":"op-2","claimIds":["graph-expansion"],"originEvidenceIds":[]}],"reason":"phase-specific plan"}
                 """, "stop", true, 200, 160, "http://ollama", "test", "primary", false));
 
         RagPipelineService.CodeEvidenceSearchPlan plan = service.planCodeEvidenceSearch(
@@ -536,11 +626,11 @@ class RagPipelineServiceTest {
 
         assertThat(plan.usable()).isTrue();
         assertThat(plan.checklist()).hasSize(2);
-        assertThat(plan.checklist().get(0).claimId()).isEqualTo("request-entrypoint");
-        assertThat(plan.checklist().get(1).evidenceGroup()).isEqualTo("graph_traversal");
+        assertThat(plan.checklist().get(0).claimId()).isEqualTo("claim-1");
+        assertThat(plan.checklist().get(1).evidenceGroup()).isEqualTo("claim-2");
         assertThat(plan.checklist().get(1).queries()).containsExactly("CodeSearchService expandGraph graphRelatedChunks");
         ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient, times(2)).chatResult(
+        verify(ollamaClient, times(1)).chatResult(
                 systemPrompt.capture(),
                 anyString(),
                 eq(OllamaClient.ChatRole.PRIMARY),
@@ -548,16 +638,12 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         );
-        assertThat(systemPrompt.getAllValues().get(0))
-                .contains("one checklist item per action")
-                .contains("Do not make one checklist item per layer")
+        assertThat(systemPrompt.getValue())
+                .contains("actor, action, object")
+                .contains("Architectural layers are scope hints")
                 .contains("class declaration, constructor, dependency field")
                 .contains("Preserve the actor, object, action, direction, state transition, and side effect")
                 .contains("Do not invent likely class or method names")
-                .doesNotContain("producer enqueue", "approval changes");
-        assertThat(systemPrompt.getAllValues().get(1))
-                .contains("independent audit")
-                .contains("actor, object, action, direction")
                 .doesNotContain("producer enqueue", "approval changes");
     }
 
@@ -700,7 +786,7 @@ class RagPipelineServiceTest {
     }
 
     @Test
-    void codeEvidenceSearchPlanReviewsArchitectureOnlyChecklistIntoBehaviorClaims() {
+    void codeEvidenceSearchPlanUsesRepositoryMapWithoutSeparateReviewCall() {
         OllamaClient ollamaClient = mock(OllamaClient.class);
         RuntimeTuningService runtimeTuningService = mock(RuntimeTuningService.class);
         when(runtimeTuningService.codeEvidenceDecisionModel()).thenReturn(1);
@@ -708,18 +794,73 @@ class RagPipelineServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.PRIMARY),
                 anyInt(), any(Duration.class), any())).thenReturn(
                 new OllamaClient.ChatResult("""
-                        {"usable":true,"confidence":0.9,"queries":["worker controller service repository"],"checklist":[{"claimId":"controller","evidenceGroup":"controller_layer","goal":"controller","queries":["controller"]},{"claimId":"repository","evidenceGroup":"repository_layer","goal":"repository","queries":["repository"]}],"reason":"layers"}
-                        """, "stop", true, 100, 80, "http://ollama", "test", "primary", false),
-                new OllamaClient.ChatResult("""
-                        {"usable":true,"confidence":0.95,"queries":["claim queued work","persist completed response"],"checklist":[{"claimId":"claim","evidenceGroup":"worker_flow","goal":"prove queued work is claimed","queries":["claim queued work"]},{"claimId":"complete","evidenceGroup":"worker_flow","goal":"prove completed response is persisted","queries":["persist completed response"]}],"reason":"behavioral rewrite"}
+                        {"usable":true,"confidence":0.95,"hypothesis":"The behavior may be distributed across claim and persistence components.","hypothesisVersion":1,"checklist":[{"claimId":"claim","goal":"prove queued work is claimed","actor":"worker","action":"claim","object":"queued work","expectedOutcome":"work becomes assigned","scopeHints":["service"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":["claim queued work"]},{"claimId":"complete","goal":"prove completed response is persisted","actor":"worker","action":"persist","object":"completed response","expectedOutcome":"response is stored","scopeHints":["repository"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":["persist completed response"]}],"operations":[{"type":"hybrid_search","query":"claim queued work","area":"claim","evidenceGroup":"claim","operationId":"op-1","claimIds":["claim"],"originEvidenceIds":[]},{"type":"hybrid_search","query":"persist completed response","area":"persist","evidenceGroup":"complete","operationId":"op-2","claimIds":["complete"],"originEvidenceIds":[]}],"reason":"behavioral rewrite"}
                         """, "stop", true, 100, 80, "http://ollama", "test", "primary", false));
 
-        var plan = service.planCodeEvidenceSearch("How does a worker claim work and persist its response?", "flow", "", 4);
+        String repositoryMap = "RepositoryQuestionMap version=1\n"
+                + "[OBSERVED_ANCHORS]\n"
+                + "- path=backend/Worker.java symbol=claimNext\n";
+        var plan = service.planCodeEvidenceSearch(
+                "How does a worker claim work and persist its response?", "flow", repositoryMap, 4);
 
         assertThat(plan.checklist()).extracting(RagPipelineService.CodeEvidenceChecklistItem::evidenceGroup)
-                .containsExactly("worker_flow", "complete");
-        verify(ollamaClient, times(2)).chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.PRIMARY),
+                .containsExactly("claim-1", "claim-2");
+        assertThat(plan.hypothesis()).contains("distributed");
+        assertThat(plan.hypothesisVersion()).isEqualTo(1);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient, times(1)).chatResult(anyString(), promptCaptor.capture(), eq(OllamaClient.ChatRole.PRIMARY),
                 anyInt(), any(Duration.class), any());
+        assertThat(promptCaptor.getValue())
+                .contains("RepositoryQuestionMap version=1", "OBSERVED_ANCHORS", "claimNext");
+    }
+
+    @Test
+    void codeEvidenceCoverageUsesStableEvidenceIds() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        UUID chunkId = UUID.randomUUID();
+        String evidenceId = "test-index:" + chunkId + ":1046-1054";
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any())).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":true,"missingAreas":[],"operations":[],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["queue_claim"],"checklist":[{"claimId":"claim","evidenceGroup":"queue_claim","goal":"prove claim","queries":[]}],"coverageSelections":[{"evidenceGroup":"queue_claim","evidenceIds":["%s"],"evidenceIndexes":[],"supportedClaims":["claimNext claims queued work"],"pipelineStage":"runtime"}],"reason":"direct evidence"}
+                """.formatted(evidenceId), "stop", true, 120, 80, "http://ollama", "test", "auxiliary", false));
+
+        var plan = service.planCodeEvidenceFollowUp(
+                "How is queued work claimed?", "flow", List.of(followUpCandidate(chunkId)), 2);
+
+        assertThat(plan.enough()).isTrue();
+        assertThat(plan.coverageSelections()).singleElement().satisfies(selection -> {
+            assertThat(selection.evidenceIds()).containsExactly(evidenceId);
+            assertThat(selection.evidenceIndexes()).isEmpty();
+        });
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), prompt.capture(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any());
+        assertThat(prompt.getValue()).contains("evidenceId=" + evidenceId);
+    }
+
+    @Test
+    void claimResultsReviseHypothesisAndOverrideAdvisoryEnoughFlag() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        UUID chunkId = UUID.randomUUID();
+        String evidenceId = "test-index:" + chunkId + ":1046-1054";
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any())).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":false,"hypothesis":"The initial single-method premise is wrong; behavior is distributed.","hypothesisVersion":2,"premiseDisposition":"CORRECTED","claimResults":[{"claimId":"single-method","status":"CONTRADICTED","evidenceIds":["%s"],"supportedClaim":"No single fallback method performs the complete behavior.","limitations":[],"supersededByClaimId":"distributed-flow"},{"claimId":"distributed-flow","status":"SUPPORTED","evidenceIds":["%s"],"supportedClaim":"The observed implementation distributes the behavior across components.","limitations":[],"supersededByClaimId":""}],"missingAreas":[],"operations":[],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["single_method","distributed_flow"],"checklist":[{"claimId":"single-method","evidenceGroup":"single_method","goal":"test the initial premise","queries":[]},{"claimId":"distributed-flow","evidenceGroup":"distributed_flow","goal":"prove the observed distributed behavior","queries":[]}],"coverageSelections":[],"reason":"new direct evidence corrected the hypothesis"}
+                """.formatted(evidenceId, evidenceId), "stop", true, 180, 120,
+                "http://ollama", "test", "auxiliary", false));
+
+        var plan = service.planCodeEvidenceFollowUp(
+                "How does the fallback work?", "flow", List.of(followUpCandidate(chunkId)), 2);
+
+        assertThat(plan.enough()).isTrue();
+        assertThat(plan.hypothesisVersion()).isEqualTo(2);
+        assertThat(plan.premiseDisposition()).isEqualTo("CORRECTED");
+        assertThat(plan.claimResults()).extracting(RagPipelineService.CodeClaimResult::status)
+                .containsExactly("CONTRADICTED", "SUPPORTED");
+        assertThat(plan.coverageSelections()).hasSize(2)
+                .allSatisfy(selection -> assertThat(selection.evidenceIds()).containsExactly(evidenceId));
     }
 
     private CodeSearchResult followUpCandidate(UUID chunkId) {
@@ -741,7 +882,7 @@ class RagPipelineServiceTest {
                 1054,
                 "public Optional<LocalAgentQueuedToolRequest> claimNext(...) { ... }",
                 0.82,
-                Map.of("language", "java")
+                Map.of("language", "java", "indexVersion", "test-index")
         );
     }
 }

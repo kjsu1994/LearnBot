@@ -38,6 +38,27 @@ import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
 class CodeRagServiceTest {
+
+    @Test
+    void retrievalOperationIdentityIgnoresClaimGroupingButPreservesGraphTraversalSemantics() {
+        RagPipelineService.CodeSearchOperation first = new RagPipelineService.CodeSearchOperation(
+                "traverse_graph", "", "graph", "claim-a", "", "", "chunk-1",
+                null, null, null, List.of("CALLS", "REFERENCES"), "OUT", 2
+        );
+        RagPipelineService.CodeSearchOperation regrouped = new RagPipelineService.CodeSearchOperation(
+                "traverse_graph", "", "graph", "claim-b", "", "", "chunk-1",
+                null, null, null, List.of("REFERENCES", "CALLS"), "OUT", 2
+        );
+        RagPipelineService.CodeSearchOperation differentTraversal = new RagPipelineService.CodeSearchOperation(
+                "traverse_graph", "", "graph", "claim-a", "", "", "chunk-1",
+                null, null, null, List.of("CALLS"), "IN", 1
+        );
+
+        assertThat(CodeRagService.retrievalOperationKey(first))
+                .isEqualTo(CodeRagService.retrievalOperationKey(regrouped));
+        assertThat(CodeRagService.retrievalOperationKey(first))
+                .isNotEqualTo(CodeRagService.retrievalOperationKey(differentTraversal));
+    }
     @Test
     void commitQuestionsUseModelRouteInsteadOfServerRegexBypass() {
         CodeSearchService searchService = mock(CodeSearchService.class);
@@ -221,12 +242,12 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"overview\",\"confidence\":0.9,\"queries\":[\"indexing to code rag answer flow\"],\"reason\":\"broad flow question\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"reason\":\"initial evidence lacks answer generation\"}")
+                        chat("{\"enough\":false,\"hypothesis\":\"answer generation needs direct evidence\",\"hypothesisVersion\":1,\"premiseDisposition\":\"UNRESOLVED\",\"terminationRequest\":\"NONE\",\"claimResults\":[{\"claimId\":\"claim-1\",\"status\":\"UNRESOLVED\",\"evidenceIds\":[],\"supportedClaim\":\"\",\"limitations\":[],\"supersededByClaimId\":\"\"}],\"missingAreas\":[\"claim-1\"],\"operations\":[{\"operationId\":\"op-answer\",\"claimIds\":[\"claim-1\"],\"originEvidenceIds\":[],\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"claim-1\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"claim-1\"],\"checklist\":[{\"claimId\":\"claim-1\",\"evidenceGroup\":\"claim-1\",\"goal\":\"prove answer generation\",\"actor\":\"Code RAG\",\"action\":\"generate\",\"object\":\"answer\",\"expectedOutcome\":\"model answer is returned\",\"scopeHints\":[\"service\"],\"requiredEvidenceKinds\":[\"DIRECT_SOURCE\"],\"queries\":[]}],\"coverageSelections\":[],\"reason\":\"initial evidence lacks answer generation\"}")
                 );
         stubRetrievalIterations(
                 ollamaClient,
-                "{\"enough\":false,\"missingAreas\":[\"answer generation\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"answer_generation\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"answer_generation\"],\"reason\":\"initial evidence lacks answer generation\"}",
-                "{\"enough\":true,\"missingAreas\":[],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"answer_generation\"],\"reason\":\"answer generation evidence is now present\"}"
+                "{\"enough\":false,\"hypothesis\":\"answer generation needs direct evidence\",\"hypothesisVersion\":1,\"premiseDisposition\":\"UNRESOLVED\",\"terminationRequest\":\"NONE\",\"claimResults\":[{\"claimId\":\"claim-1\",\"status\":\"UNRESOLVED\",\"evidenceIds\":[],\"supportedClaim\":\"\",\"limitations\":[],\"supersededByClaimId\":\"\"}],\"missingAreas\":[\"claim-1\"],\"operations\":[{\"operationId\":\"op-answer\",\"claimIds\":[\"claim-1\"],\"originEvidenceIds\":[],\"type\":\"keyword_search\",\"query\":\"runtime RAG retrieval context construction model answer generation\",\"area\":\"answer generation\",\"evidenceGroup\":\"claim-1\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"claim-1\"],\"checklist\":[{\"claimId\":\"claim-1\",\"evidenceGroup\":\"claim-1\",\"goal\":\"prove answer generation\",\"actor\":\"Code RAG\",\"action\":\"generate\",\"object\":\"answer\",\"expectedOutcome\":\"model answer is returned\",\"scopeHints\":[\"service\"],\"requiredEvidenceKinds\":[\"DIRECT_SOURCE\"],\"queries\":[]}],\"coverageSelections\":[],\"reason\":\"initial evidence lacks answer generation\"}",
+                "{\"enough\":false,\"hypothesis\":\"answer generation evidence found\",\"hypothesisVersion\":2,\"premiseDisposition\":\"CONFIRMED\",\"terminationRequest\":\"NO_FURTHER_RETRIEVAL\",\"claimResults\":[{\"claimId\":\"claim-1\",\"status\":\"UNRESOLVED\",\"evidenceIds\":[],\"supportedClaim\":\"\",\"limitations\":[],\"supersededByClaimId\":\"\"}],\"missingAreas\":[\"claim-1\"],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"claim-1\"],\"checklist\":[{\"claimId\":\"claim-1\",\"evidenceGroup\":\"claim-1\",\"goal\":\"prove answer generation\",\"actor\":\"Code RAG\",\"action\":\"generate\",\"object\":\"answer\",\"expectedOutcome\":\"model answer is returned\",\"scopeHints\":[\"service\"],\"requiredEvidenceKinds\":[\"DIRECT_SOURCE\"],\"queries\":[]}],\"coverageSelections\":[],\"reason\":\"answer generation evidence is now present\"}"
         );
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
@@ -263,7 +284,7 @@ class CodeRagServiceTest {
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("1 LLM-planned Retrieval Iteration(s)"));
         assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("followUpQueriesUsed=1").contains("answer generation"));
+                assertThat(note).contains("followUpQueriesUsed=1").contains("followUpCandidatesAdded=1"));
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("llm retrieval iteration 2"));
         verify(searchService, atLeastOnce()).cheapSearch(isNull(), argThat(query -> query.contains("runtime RAG retrieval context construction model answer generation")), anyInt(), anyList(), isNull());
@@ -711,7 +732,7 @@ class CodeRagServiceTest {
                 0.98,
                 "fallbackAnswer repairs final answer generation when model output is unavailable",
                 "parser",
-                Map.of("language", "java")
+                Map.of("language", "java", "indexVersion", "test-index")
         );
         CodeSearchResult roslynDiagnostic = resultWithParserAndMetadata(
                 "backend/src/main/java/app/service/RoslynSemanticGraphAnalyzer.java",
@@ -949,7 +970,7 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("flow");
+        assertThat(response.mode()).isEqualTo("overview");
         assertThat(response.evidence()).isNotEmpty();
         assertThat(response.evidence().get(0).chunkId()).isEqualTo(pinnedChunkId);
         assertThat(response.evidence().get(0).metadata()).containsEntry("conversationPinned", true);
@@ -1020,7 +1041,7 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("method");
+        assertThat(response.mode()).isEqualTo("overview");
     }
 
     @Test
@@ -1096,7 +1117,7 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("locate");
+        assertThat(response.mode()).isEqualTo("overview");
     }
 
     @Test
@@ -1164,7 +1185,7 @@ class CodeRagServiceTest {
                 context
         );
 
-        assertThat(response.mode()).isEqualTo("reasoning");
+        assertThat(response.mode()).isEqualTo("overview");
     }
 
     @Test
@@ -1185,7 +1206,7 @@ class CodeRagServiceTest {
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
                 "로그인 로직은 왜 컨트롤러가 아니라 서비스에서 처리해?",
-                "auto",
+                "reasoning",
                 null
         );
 
@@ -1213,7 +1234,7 @@ class CodeRagServiceTest {
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
                 "이 구현 의도가 뭐야?",
-                "auto",
+                "reasoning",
                 null
         );
 
@@ -1240,7 +1261,7 @@ class CodeRagServiceTest {
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
                 "로그인 구현 파일 어디 있어?",
-                "auto",
+                "locate",
                 null
         );
 
@@ -1610,7 +1631,7 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void deterministicCodePlannerAddsPatchIntentQueries() {
+    void plannerFailureDoesNotInjectServerAuthoredPatchQueries() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -1635,11 +1656,8 @@ class CodeRagServiceTest {
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenAnswer(invocation -> {
                     String query = invocation.getArgument(1, String.class);
-                    if (query.contains("target files methods validation tests")) {
-                        return List.of(controller);
-                    }
-                    if (query.contains("bug cause fix location related callers")) {
-                        return List.of(serviceResult);
+                    if (query.equals("Fix the login bug and identify impacted tests")) {
+                        return List.of(controller, serviceResult);
                     }
                     return List.of();
                 });
@@ -1657,11 +1675,9 @@ class CodeRagServiceTest {
         );
 
         assertThat(response.evidence()).hasSize(2);
-        assertThat(response.diagnostics()).anySatisfy(note ->
-                assertThat(note).contains("Code query planner").contains("intent=PATCH_INTENT").contains("auxiliaryQueries=2"));
         verify(searchService).search(isNull(), eq("Fix the login bug and identify impacted tests"), anyInt(), anyList(), isNull());
-        verify(searchService).search(isNull(), argThat(query -> query.contains("target files methods validation tests")), anyInt(), anyList(), isNull());
-        verify(searchService).search(isNull(), argThat(query -> query.contains("bug cause fix location related callers")), anyInt(), anyList(), isNull());
+        verify(searchService, never()).search(isNull(), argThat(query -> query.contains("target files methods validation tests")), anyInt(), anyList(), isNull());
+        verify(searchService, never()).search(isNull(), argThat(query -> query.contains("bug cause fix location related callers")), anyInt(), anyList(), isNull());
     }
 
     @Test
@@ -1939,6 +1955,10 @@ class CodeRagServiceTest {
                 0.77,
                 "chatWithLimit calls the model client to generate the final answer"
         );
+        assertThat(List.of(controller, search, ranking, generation))
+                .allSatisfy(candidate -> assertThat(candidate.metadata()).containsKey("indexVersion"));
+        assertThat(List.of(controller, search, ranking, generation))
+                .allSatisfy(candidate -> assertThat(candidate.metadata()).containsKey("indexVersion"));
 
         when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
                 .thenReturn(List.of(controller, search, ranking, generation));
@@ -2151,13 +2171,13 @@ class CodeRagServiceTest {
         when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY), anyInt(), any()))
                 .thenReturn(
                         chat("{\"route\":\"CODE_OVERVIEW_FLOW\",\"mode\":\"flow\",\"confidence\":0.9,\"queries\":[],\"reason\":\"worker flow\"}"),
-                        chat("{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"claim response persistence\",\"area\":\"claim response persistence\",\"evidenceGroup\":\"queue_claim\"},{\"type\":\"keyword_search\",\"query\":\"unused response query\",\"area\":\"response\",\"evidenceGroup\":\"response_intake\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"need request and response flow\"}"),
+                        chat(workerFlowPlanJson(false)),
                         chat("{\"selected\":[{\"index\":1,\"score\":0.9,\"evidenceKind\":\"direct_code\",\"implementationPhase\":\"SEARCH_EXPANSION\",\"responsibility\":\"data_structure\",\"coverageGroup\":\"queue_claim\",\"mustUse\":true,\"supportedClaims\":[\"claims work\"],\"notSupportedClaims\":[],\"rankReason\":\"claim evidence\",\"reason\":\"claim evidence\"}],\"reason\":\"ok\"}")
                 );
         stubRetrievalIterations(
                 ollamaClient,
-                "{\"enough\":false,\"missingAreas\":[\"queue claim\",\"response intake\"],\"operations\":[{\"type\":\"keyword_search\",\"query\":\"claim response persistence\",\"area\":\"claim response persistence\",\"evidenceGroup\":\"queue_claim\"},{\"type\":\"keyword_search\",\"query\":\"unused response query\",\"area\":\"response\",\"evidenceGroup\":\"response_intake\"}],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"need request and response flow\"}",
-                "{\"enough\":true,\"missingAreas\":[],\"operations\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[\"queue_claim\",\"response_intake\"],\"reason\":\"both evidence groups are present\"}"
+                workerFlowPlanJson(false),
+                workerFlowPlanJson(true)
         );
         when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
                 .thenReturn(chat("The worker claims work and stores the response [1]."));
@@ -2418,6 +2438,15 @@ class CodeRagServiceTest {
     }
 
 
+    private static String workerFlowPlanJson(boolean stop) {
+        String operations = stop ? "[]" : """
+                [{"operationId":"op-claim","claimIds":["claim-1"],"originEvidenceIds":[],"type":"keyword_search","query":"claim response persistence","area":"claim response persistence","evidenceGroup":"claim-1"},{"operationId":"op-response","claimIds":["claim-2"],"originEvidenceIds":[],"type":"keyword_search","query":"unused response query","area":"response","evidenceGroup":"claim-2"}]
+                """.trim();
+        return """
+                {"enough":false,"hypothesis":"worker claim and response flow","hypothesisVersion":1,"premiseDisposition":"UNRESOLVED","terminationRequest":"%s","claimResults":[{"claimId":"claim-1","status":"UNRESOLVED","evidenceIds":[],"supportedClaim":"","limitations":[],"supersededByClaimId":""},{"claimId":"claim-2","status":"UNRESOLVED","evidenceIds":[],"supportedClaim":"","limitations":[],"supersededByClaimId":""}],"missingAreas":["claim-1","claim-2"],"operations":%s,"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["claim-1","claim-2"],"checklist":[{"claimId":"claim-1","evidenceGroup":"claim-1","goal":"prove queued work is claimed","actor":"worker","action":"claim","object":"queued work","expectedOutcome":"work is assigned","scopeHints":["service"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":[]},{"claimId":"claim-2","evidenceGroup":"claim-2","goal":"prove response is stored","actor":"worker","action":"store","object":"response","expectedOutcome":"response is persisted","scopeHints":["repository"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":[]}],"coverageSelections":[],"reason":"need request and response flow"}
+                """.formatted(stop ? "NO_FURTHER_RETRIEVAL" : "NONE", operations).trim();
+    }
+
     private static OllamaClient.ChatResult chat(String content) {
         return new OllamaClient.ChatResult(content, "stop", true, 0, 0, "http://ollama:11434", "qwen3:8b-q4_K_M", "primary", false);
     }
@@ -2480,7 +2509,7 @@ class CodeRagServiceTest {
                 24,
                 content,
                 score,
-                Map.of("language", "java")
+                Map.of("language", "java", "indexVersion", "test-index")
         );
     }
 

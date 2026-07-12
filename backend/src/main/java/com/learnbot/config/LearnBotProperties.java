@@ -592,6 +592,9 @@ public class LearnBotProperties {
             private int codeRetrievalMaxIterations = 3;
 
             @Min(1)
+            private int codeRetrievalDeadlineSeconds = 40;
+
+            @Min(1)
             private int rerankTopN = 20;
 
             @Min(1)
@@ -682,6 +685,14 @@ public class LearnBotProperties {
 
             public void setCodeRetrievalMaxIterations(int codeRetrievalMaxIterations) {
                 this.codeRetrievalMaxIterations = codeRetrievalMaxIterations;
+            }
+
+            public int getCodeRetrievalDeadlineSeconds() {
+                return codeRetrievalDeadlineSeconds;
+            }
+
+            public void setCodeRetrievalDeadlineSeconds(int codeRetrievalDeadlineSeconds) {
+                this.codeRetrievalDeadlineSeconds = codeRetrievalDeadlineSeconds;
             }
 
             public int getRerankTopN() {

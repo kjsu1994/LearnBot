@@ -66,6 +66,7 @@ learnbot:
       self-check-enabled: ${RAG_PIPELINE_SELF_CHECK_ENABLED:true}
       max-iterations: ${RAG_PIPELINE_MAX_ITERATIONS:2}
       code-retrieval-max-iterations: ${RAG_PIPELINE_CODE_RETRIEVAL_MAX_ITERATIONS:3}
+      code-retrieval-deadline-seconds: ${RAG_PIPELINE_CODE_RETRIEVAL_DEADLINE_SECONDS:40}
       rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:20}
       document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:8}
       code-context-limit: ${RAG_PIPELINE_CODE_CONTEXT_LIMIT:12}
@@ -82,8 +83,8 @@ learnbot:
       answer-repair-enabled: ${RAG_PIPELINE_ANSWER_REPAIR_ENABLED:true}
       query-embedding-cache-enabled: ${RAG_PIPELINE_QUERY_EMBEDDING_CACHE_ENABLED:true}
       code-route-timeout-seconds: ${RAG_PIPELINE_CODE_ROUTE_TIMEOUT_SECONDS:35}
-      code-evidence-follow-up-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_MAX_OUTPUT_TOKENS:1024}
-      code-evidence-follow-up-timeout-seconds: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_TIMEOUT_SECONDS:45}
+      code-evidence-follow-up-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_MAX_OUTPUT_TOKENS:1400}
+      code-evidence-follow-up-timeout-seconds: ${RAG_PIPELINE_CODE_EVIDENCE_FOLLOW_UP_TIMEOUT_SECONDS:15}
       code-evidence-adjudication-max-candidates: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_MAX_CANDIDATES:10}
       code-evidence-adjudication-max-output-tokens: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_MAX_OUTPUT_TOKENS:768}
       code-evidence-adjudication-timeout-seconds: ${RAG_PIPELINE_CODE_EVIDENCE_ADJUDICATION_TIMEOUT_SECONDS:35}

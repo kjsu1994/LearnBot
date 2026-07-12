@@ -29,7 +29,7 @@ class CodeEvidenceCoverageGateTest {
         var outcome = gate.evaluate(plan, List.of(evidence("queue_claim")));
 
         assertThat(outcome.sufficient()).isFalse();
-        assertThat(outcome.missingReasons()).containsExactly("missing evidence group: response_intake");
+        assertThat(outcome.missingReasons()).containsExactly("required behavior is not yet verified");
     }
 
     @Test
@@ -77,7 +77,7 @@ class CodeEvidenceCoverageGateTest {
         var outcome = gate.evaluate(plan, List.of(provisional));
 
         assertThat(outcome.sufficient()).isFalse();
-        assertThat(outcome.missingReasons()).containsExactly("missing evidence group: queue_claim");
+        assertThat(outcome.missingReasons()).containsExactly("required behavior is not yet verified");
     }
 
     @Test
@@ -106,6 +106,110 @@ class CodeEvidenceCoverageGateTest {
         assertThat(outcome.missingReasons()).containsExactly("evidence comes from multiple index identities");
     }
 
+    @Test
+    void rejectsValidatedEvidenceWithoutIndexIdentity() {
+        var plan = plan(true, List.of(), List.of("queue_claim"));
+        CodeSearchResult evidence = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Worker.java",
+                "method", "work", "Worker", "work", "app", null, null, 1,
+                1, 20, "void work() {}", 0.8, Map.of(
+                        "llmValidatedEvidenceGroup", "queue_claim",
+                        "llmSupportedClaims", List.of("work is directly implemented")));
+
+        var outcome = gate.evaluate(plan, List.of(evidence));
+
+        assertThat(outcome.sufficient()).isFalse();
+        assertThat(outcome.missingReasons()).containsExactly("validated evidence has no index identity");
+    }
+
+    @Test
+    void rejectsTerminalClaimWhenItsEvidenceWasDroppedFromFinalContext() {
+        CodeSearchResult present = evidence("distributed_flow");
+        var checklist = List.of(new RagPipelineService.CodeEvidenceChecklistItem(
+                "distributed-flow", "distributed_flow", "prove distributed flow", List.of()));
+        var claimResults = List.of(new RagPipelineService.CodeClaimResult(
+                "distributed-flow", "SUPPORTED", List.of("index-current:missing:1-20"),
+                "behavior is distributed", List.of(), ""));
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, true, "verified", List.of(), List.of(), List.of(), List.of("distributed_flow"),
+                checklist, List.of(), List.of(), "distributed hypothesis", 2, "DISTRIBUTED", claimResults);
+
+        var outcome = gate.evaluate(plan, List.of(present), "index-current");
+
+        assertThat(outcome.sufficient()).isFalse();
+        assertThat(outcome.missingReasons()).contains("prove distributed flow");
+    }
+
+    @Test
+    void acceptsEvidenceBackedContradictedClaimAsAResolvableCorrection() {
+        CodeSearchResult present = evidence("initial_premise");
+        String evidenceId = CodeEvidenceId.from(present);
+        var checklist = List.of(new RagPipelineService.CodeEvidenceChecklistItem(
+                "initial-premise", "initial_premise", "test the premise", List.of()));
+        var claimResults = List.of(new RagPipelineService.CodeClaimResult(
+                "initial-premise", "CONTRADICTED", List.of(evidenceId),
+                "the source directly disproves the initial premise", List.of(), "corrected-flow"));
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, true, "corrected", List.of(), List.of(), List.of(), List.of("initial_premise"),
+                checklist, List.of(), List.of(), "corrected hypothesis", 2, "CORRECTED", claimResults);
+
+        var outcome = gate.evaluate(plan, List.of(present), "index-current");
+
+        assertThat(outcome.sufficient()).isTrue();
+    }
+
+    @Test
+    void rejectsEvidenceOutsidePinnedActiveIndex() {
+        var plan = plan(true, List.of(), List.of("queue_claim"));
+
+        var outcome = gate.evaluate(plan, List.of(evidenceWithIdentity("queue_claim", "index-old")), "index-current");
+
+        assertThat(outcome.sufficient()).isFalse();
+        assertThat(outcome.missingReasons()).containsExactly("evidence does not belong to the pinned active index");
+    }
+
+    @Test
+    void allowsPartialAnswerWhenAtLeastOneClaimHasRetainedDirectEvidence() {
+        CodeSearchResult present = evidence("request_claim");
+        String evidenceId = CodeEvidenceId.from(present);
+        var checklist = List.of(
+                new RagPipelineService.CodeEvidenceChecklistItem(
+                        "request-claim", "request_claim", "prove request claim", List.of()),
+                new RagPipelineService.CodeEvidenceChecklistItem(
+                        "response-store", "response_store", "prove response storage", List.of()));
+        var claimResults = List.of(
+                new RagPipelineService.CodeClaimResult(
+                        "request-claim", "SUPPORTED", List.of(evidenceId),
+                        "the request is claimed", List.of(), ""),
+                new RagPipelineService.CodeClaimResult(
+                        "response-store", "UNRESOLVED", List.of(), "", List.of(), ""));
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "partial", List.of("response storage"), List.of(), List.of(),
+                List.of("request_claim", "response_store"), checklist, List.of(), List.of(),
+                "distributed flow", 2, "DISTRIBUTED", claimResults);
+
+        var outcome = gate.evaluate(plan, List.of(present), "index-current");
+
+        assertThat(outcome.decision()).isEqualTo(CodeEvidenceCoverageGate.Decision.PARTIAL);
+        assertThat(outcome.answerable()).isTrue();
+        assertThat(outcome.resolvedClaimIds()).containsExactly("request-claim");
+        assertThat(outcome.missingReasons()).anyMatch(reason -> reason.contains("response storage"));
+    }
+
+    @Test
+    void reportsDiscoveryWhenCandidatesExistButNoClaimWasValidated() {
+        CodeSearchResult candidate = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Candidate.java",
+                "method", "candidate", "Candidate", "candidate", "app", null, null, 1,
+                1, 20, "void candidate() {}", 0.8, Map.of("indexVersion", "index-current"));
+        var plan = plan(false, List.of("implementation body"), List.of("implementation"));
+
+        var outcome = gate.evaluate(plan, List.of(candidate), "index-current");
+
+        assertThat(outcome.decision()).isEqualTo(CodeEvidenceCoverageGate.Decision.DISCOVERY);
+        assertThat(outcome.answerable()).isFalse();
+    }
+
     private RagPipelineService.CodeEvidenceFollowUpPlan plan(
             boolean enough,
             List<String> missing,
@@ -125,7 +229,8 @@ class CodeEvidenceCoverageGateTest {
                 "method", "work", "Worker", "work", "app", null, null, 1,
                 1, 20, "void work() {}", 0.8, Map.of(
                         "llmValidatedEvidenceGroup", group,
-                        "llmSupportedClaims", List.of("work is directly implemented")));
+                        "llmSupportedClaims", List.of("work is directly implemented"),
+                        "indexVersion", "index-current"));
     }
 
     private CodeSearchResult evidenceWithIdentity(String group, String indexVersion) {
