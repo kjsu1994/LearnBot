@@ -298,7 +298,7 @@ public class CodeRagService {
             streamSink.onStatus("evidence_ready", "답변에 사용할 코드 근거를 정리했습니다.");
             streamSink.onEvidence(buildEvidence(answerResults));
         }
-        if (!responseCoverage.answerable()) {
+        if (shouldBlockAnswerGeneration(responseCoverage, retrieval.terminalStatus())) {
             String answer = insufficientEvidenceAnswer(answerResults, retrieval);
             recordMetrics(questionMode.value(), retrieval, retrievalMs, contextMs, 0, answerResults.size(), 0, 0, true, false, elapsedMs(askStarted));
             return new CodeAskResponse(
@@ -1191,6 +1191,14 @@ public class CodeRagService {
             }
         }
         return usedQueries;
+    }
+
+    static boolean shouldBlockAnswerGeneration(
+            CodeEvidenceCoverageGate.Outcome coverage,
+            String terminalStatus
+    ) {
+        if (coverage == null || !coverage.answerable()) return true;
+        return terminalStatus != null && terminalStatus.startsWith("INVALID_") && !coverage.sufficient();
     }
 
     private CodeSearchResult markLlmExactSymbolEvidence(

@@ -671,16 +671,33 @@ final class RepositoryQuestionMapBuilder {
         }
 
         String originEvidenceIdFor(RagPipelineService.CodeSearchOperation operation) {
-            if (operation == null || !operation.isDirectRead()) return "";
+            List<String> candidates = originEvidenceIdsFor(operation);
+            return candidates.isEmpty() ? "" : candidates.get(0);
+        }
+
+        List<String> originEvidenceIdsFor(RagPipelineService.CodeSearchOperation operation) {
+            if (operation == null || !operation.isDirectRead()) return List.of();
             String path = safe(operation.path());
             String symbol = safe(operation.symbol());
             String chunkId = safe(operation.chunkId());
+            LinkedHashSet<String> candidates = new LinkedHashSet<>();
+
+            FileSymbolInventory exactInventory = symbolInventories.get(path);
+            if (exactInventory != null && !exactInventory.evidenceId().isBlank()) {
+                boolean symbolMatches = symbol.isBlank() || exactInventory.symbols().stream().anyMatch(outline ->
+                        symbol.equals(outline.name()) || symbol.equals(outline.qualifiedName()));
+                boolean chunkMatches = chunkId.isBlank() || exactInventory.symbols().stream().anyMatch(outline ->
+                        outline.chunkId() != null && chunkId.equals(outline.chunkId().toString()));
+                if (symbolMatches && chunkMatches) candidates.add(exactInventory.evidenceId());
+            }
             for (EvidenceEntry entry : evidence.values()) {
                 boolean chunkMatches = !chunkId.isBlank() && entry.chunkId() != null
                         && chunkId.equals(entry.chunkId().toString());
                 boolean symbolMatches = !symbol.isBlank() && path.equals(entry.path())
                         && symbol.equals(entry.symbol());
-                if (chunkMatches || symbolMatches) return entry.evidenceId();
+                boolean pathMatches = !path.isBlank() && symbol.isBlank() && chunkId.isBlank()
+                        && path.equals(entry.path());
+                if (chunkMatches || symbolMatches || pathMatches) candidates.add(entry.evidenceId());
             }
             for (FileSymbolInventory inventory : symbolInventories.values()) {
                 if (!path.isBlank() && !path.equals(inventory.path())) continue;
@@ -689,10 +706,10 @@ final class RepositoryQuestionMapBuilder {
                                 || (!symbol.isBlank() && (symbol.equals(outline.name())
                                 || symbol.equals(outline.qualifiedName()))));
                 if (matches || (!path.isBlank() && symbol.isBlank() && chunkId.isBlank())) {
-                    return inventory.evidenceId();
+                    if (!inventory.evidenceId().isBlank()) candidates.add(inventory.evidenceId());
                 }
             }
-            return "";
+            return candidates.stream().sorted().toList();
         }
 
         String plannerContext() {

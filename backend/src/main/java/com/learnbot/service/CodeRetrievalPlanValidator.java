@@ -30,14 +30,16 @@ final class CodeRetrievalPlanValidator {
         List<PlanValidationError> errors = new ArrayList<>();
 
         for (RagPipelineService.CodeSearchOperation requested : plan.operations()) {
-            RagPipelineService.CodeSearchOperation operation = bindObservedOrigin(requested, repositoryMap);
+            RagPipelineService.CodeSearchOperation operation = normalizeObservedRead(requested, repositoryMap);
+            operation = bindObservedOrigin(operation, repositoryMap);
             PlanValidationCode code = validateOperation(
                     operation, repositoryMap, knownClaims, unresolvedClaims,
                     operationIds, fingerprints, executedOperationKeys == null ? Set.of() : executedOperationKeys);
             if (code == PlanValidationCode.VALID) {
                 executable.add(operation);
             } else {
-                errors.add(new PlanValidationError(code, operation.operationId(), operation.validationError()));
+                errors.add(new PlanValidationError(
+                        code, operation.operationId(), validationDetail(code, operation, repositoryMap)));
             }
         }
         if (!errors.isEmpty()) {
@@ -49,6 +51,24 @@ final class CodeRetrievalPlanValidator {
                     "unresolved claims remain but the plan has no executable operation");
         }
         return new PlanValidationResult(PlanValidationCode.VALID, List.of(), List.copyOf(executable));
+    }
+
+    private RagPipelineService.CodeSearchOperation normalizeObservedRead(
+            RagPipelineService.CodeSearchOperation operation,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
+    ) {
+        if (operation == null || repositoryMap == null
+                || !"read_file_range".equals(operation.type())
+                || (operation.lineStart() != null && operation.lineEnd() != null)
+                || operation.path().isBlank() || operation.symbol().isBlank()
+                || !repositoryMap.observesSymbol(operation.path(), operation.symbol())) {
+            return operation;
+        }
+        return new RagPipelineService.CodeSearchOperation(
+                "read_symbol", operation.query(), operation.area(), operation.evidenceGroup(),
+                operation.path(), operation.symbol(), "", null, null, operation.radius(),
+                operation.relations(), operation.direction(), operation.maxHops(), operation.operationId(),
+                operation.claimIds(), operation.originEvidenceIds());
     }
 
     private RagPipelineService.CodeSearchOperation bindObservedOrigin(
@@ -64,6 +84,21 @@ final class CodeRetrievalPlanValidator {
                 operation.path(), operation.symbol(), operation.chunkId(), operation.lineStart(),
                 operation.lineEnd(), operation.radius(), operation.relations(), operation.direction(),
                 operation.maxHops(), operation.operationId(), operation.claimIds(), List.of(origin));
+    }
+
+    private String validationDetail(
+            PlanValidationCode code,
+            RagPipelineService.CodeSearchOperation operation,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
+    ) {
+        if (!operation.validationError().isBlank()) return operation.validationError();
+        if (code == PlanValidationCode.INVALID_MISSING_ORIGIN && repositoryMap != null) {
+            List<String> candidates = repositoryMap.originEvidenceIdsFor(operation);
+            return candidates.isEmpty()
+                    ? "originEvidenceIds requires an observed evidence ID matching the requested operand"
+                    : "originEvidenceIds requires one of these observed matching IDs: " + candidates;
+        }
+        return "";
     }
 
     private PlanValidationCode validateOperation(
