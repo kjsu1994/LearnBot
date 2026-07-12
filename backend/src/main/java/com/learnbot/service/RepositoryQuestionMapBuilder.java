@@ -30,6 +30,7 @@ final class RepositoryQuestionMapBuilder {
     private static final int MAX_PROMPT_CHARS = 14_000;
     private static final int MAX_INVENTORY_FILES = 16;
     private static final int MAX_SYMBOLS_PER_FILE = 240;
+    private static final int MAX_MAP_NEIGHBORS_PER_UPDATE = 12;
 
     private final CodeRepository repository;
 
@@ -101,14 +102,19 @@ final class RepositoryQuestionMapBuilder {
             return new MapUpdateResult(reset, true);
         }
 
+        List<CodeSearchResult> operationCandidates = safeResults(newCandidates);
+        List<CodeSearchResult> mapNeighbors = loadMapNeighborhood(
+                current.identity().repositoryId(), operationCandidates);
         LinkedHashMap<String, EvidenceEntry> evidence = new LinkedHashMap<>(current.evidence());
         LinkedHashSet<String> added = new LinkedHashSet<>();
         LinkedHashSet<String> updated = new LinkedHashSet<>();
-        for (CodeSearchResult result : safeResults(newCandidates)) {
+        for (CodeSearchResult result : java.util.stream.Stream.concat(
+                operationCandidates.stream(), mapNeighbors.stream()).toList()) {
             if (!matchesIdentity(result, latest)) {
                 continue;
             }
-            EvidenceEntry entry = evidenceEntry(result, current.revision() + 1, "OPERATION");
+            String origin = operationCandidates.contains(result) ? "OPERATION" : "MAP_NEIGHBORHOOD";
+            EvidenceEntry entry = evidenceEntry(result, current.revision() + 1, origin);
             EvidenceEntry previous = evidence.putIfAbsent(entry.evidenceId(), entry);
             if (previous == null) {
                 added.add(entry.evidenceId());
@@ -157,6 +163,33 @@ final class RepositoryQuestionMapBuilder {
                 new MapDelta(current.revision(), nextRevision, List.copyOf(added), List.copyOf(updated), false, progress)
         );
         return new MapUpdateResult(next, false);
+    }
+
+    private List<CodeSearchResult> loadMapNeighborhood(
+            UUID repositoryId,
+            List<CodeSearchResult> operationCandidates
+    ) {
+        if (repository == null || repositoryId == null || operationCandidates == null
+                || operationCandidates.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> seedChunkIds = operationCandidates.stream()
+                .filter(Objects::nonNull)
+                .filter(result -> Boolean.TRUE.equals(metadata(result).get("llmDirectRead")))
+                .map(CodeSearchResult::chunkId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(8)
+                .toList();
+        if (seedChunkIds.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return repository.graphRelatedChunks(
+                    repositoryId, seedChunkIds, List.of(), 1, "BOTH", MAX_MAP_NEIGHBORS_PER_UPDATE);
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
     }
 
     private ActiveCodeIndexIdentity loadIdentity(

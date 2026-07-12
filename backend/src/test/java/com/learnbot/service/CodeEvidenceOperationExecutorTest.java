@@ -104,7 +104,35 @@ class CodeEvidenceOperationExecutorTest {
     }
 
     @Test
-    void readFileRangeExpandsToTheObservedEnclosingStructureWithinTheBound() {
+    void readSymbolResolvesAQualifiedSignatureToTheIndexedSimpleSymbol() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
+        CodeSearchResult completion = result(
+                "src/app/ToolGateway.java", "complete", 104, 121);
+        when(repository.findSymbolDefinitions(
+                eq(null), eq("com.example.ToolGateway.complete(ToolResponse)"), eq(null),
+                eq(8), anyList(), eq(SPACE_ID))).thenReturn(List.of());
+        when(repository.findSymbolDefinitions(
+                eq(null), eq("complete"), eq(null), eq(8), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(completion));
+
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "response persistence", "response_claim",
+                "", "com.example.ToolGateway.complete(ToolResponse)", "", null, null, null);
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
+
+        assertThat(execution.status()).isEqualTo("COMPLETED");
+        assertThat(execution.results()).extracting(CodeSearchResult::methodName)
+                .containsExactly("complete");
+        assertThat(execution.results().get(0).metadata())
+                .containsEntry("symbolEvidenceKind", "DEFINITION")
+                .containsEntry("llmReadOperation", "read_symbol");
+    }
+
+    @Test
+    void readFileRangeDoesNotExpandBeyondTheRequestedRange() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
                 mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
@@ -113,9 +141,6 @@ class CodeEvidenceOperationExecutorTest {
         when(repository.findActiveChunksByPathAndLineRange(
                 eq(null), eq("src/app/Controller.java"), eq(1), eq(100), anyInt(), anyList(), eq(SPACE_ID)))
                 .thenReturn(List.of(enclosing));
-        when(repository.findActiveChunksByPathAndLineRange(
-                eq(null), eq("src/app/Controller.java"), eq(1), eq(231), anyInt(), anyList(), eq(SPACE_ID)))
-                .thenReturn(List.of(enclosing, completion));
         var operation = new RagPipelineService.CodeSearchOperation(
                 "read_file_range", "", "response", "response_persistence",
                 "src/app/Controller.java", "", "", 1, 100, null);
@@ -123,9 +148,9 @@ class CodeEvidenceOperationExecutorTest {
         var execution = executor.execute(null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
 
         assertThat(execution.results()).extracting(CodeSearchResult::methodName)
-                .contains("Controller", "complete");
+                .containsExactly("Controller");
         verify(repository).findActiveChunksByPathAndLineRange(
-                eq(null), eq("src/app/Controller.java"), eq(1), eq(231), anyInt(), anyList(), eq(SPACE_ID));
+                eq(null), eq("src/app/Controller.java"), eq(1), eq(100), anyInt(), anyList(), eq(SPACE_ID));
     }
 
     @Test

@@ -200,7 +200,7 @@ final class CodeEvidenceCoverageGate {
         }
 
         boolean answerable() {
-            return decision == Decision.FULL || decision == Decision.PARTIAL;
+            return decision != Decision.DENY;
         }
     }
 }

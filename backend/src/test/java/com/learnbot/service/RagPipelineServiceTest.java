@@ -360,8 +360,7 @@ class RagPipelineServiceTest {
         );
         assertThat((List<String>) operationSchema.get("required"))
                 .containsExactlyInAnyOrder(
-                        "type", "query", "area", "evidenceGroup", "path", "symbol", "chunkId",
-                        "lineStart", "lineEnd", "radius", "relations", "direction", "maxHops",
+                        "type", "query", "evidenceGroup", "path", "symbol", "chunkId",
                         "operationId", "claimIds", "originEvidenceIds");
         assertThat((Map<String, Object>) operationProperties.get("claimIds"))
                 .containsEntry("minItems", 1);

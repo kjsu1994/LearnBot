@@ -795,9 +795,7 @@ public class CodeRagService {
                 operationObservations.add(operationTrace(operation) + " " + execution.observation());
                 int before = merged.size();
                 for (CodeSearchResult result : execution.results()) {
-                    CodeSearchResult marked = operation.isDirectRead()
-                            ? result
-                            : markLlmIterationEvidence(result, operation);
+                    CodeSearchResult marked = markLlmIterationEvidence(result, operation);
                     merge(merged, marked);
                 }
                 followUpCandidateCount += Math.max(0, merged.size() - before);
@@ -1273,16 +1271,20 @@ public class CodeRagService {
     }
 
     private String evidenceResponsePolicyContext(CodeEvidenceCoverageGate.Outcome outcome) {
-        if (outcome == null || outcome.decision() != CodeEvidenceCoverageGate.Decision.PARTIAL) {
+        if (outcome == null || outcome.decision() == CodeEvidenceCoverageGate.Decision.FULL
+                || outcome.decision() == CodeEvidenceCoverageGate.Decision.DENY) {
             return "";
         }
         String resolved = outcome.resolvedClaimIds().isEmpty()
                 ? "validated evidence groups only"
                 : String.join(", ", outcome.resolvedClaimIds());
         String missing = outcome.missingReasons().stream().limit(6).collect(Collectors.joining("; "));
-        return "\n\nEvidence coverage decision: PARTIAL."
-                + "\nAnswer only the directly supported portion identified by these resolved claims: " + resolved + "."
-                + "\nDo not infer or complete unresolved portions. Add a final section named '확인하지 못한 부분'"
+        return "\n\nEvidence coverage decision: " + outcome.decision() + "."
+                + "\nFirst answer the directly supported portion identified by these resolved claims: " + resolved + "."
+                + "\nYou may describe a likely flow only in a separate section named '근거 기반 추정',"
+                + " explicitly label every such statement as an inference, and cite the candidate evidence."
+                + "\nNever present inferred calls, writes, or state transitions as verified facts."
+                + " Add a final section named '확인하지 못한 부분'"
                 + " and state these limitations: " + (missing.isBlank() ? "remaining claims were not verified" : missing) + ".";
     }
 

@@ -207,7 +207,7 @@ class CodeEvidenceCoverageGateTest {
         var outcome = gate.evaluate(plan, List.of(candidate), "index-current");
 
         assertThat(outcome.decision()).isEqualTo(CodeEvidenceCoverageGate.Decision.DISCOVERY);
-        assertThat(outcome.answerable()).isFalse();
+        assertThat(outcome.answerable()).isTrue();
     }
 
     private RagPipelineService.CodeEvidenceFollowUpPlan plan(

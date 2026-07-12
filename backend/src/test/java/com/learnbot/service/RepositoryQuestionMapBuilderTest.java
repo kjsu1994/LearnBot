@@ -94,6 +94,16 @@ class RepositoryQuestionMapBuilderTest {
         CodeSearchResult discovered = result(
                 repositoryId, indexVersion, UUID.randomUUID(), "backend/CodeGraphBuilder.java", "method",
                 "buildWithDiagnostics", "CodeGraph base = buildBase(); merge(base, semantic);", Map.of("llmDirectRead", true));
+        CodeSearchResult neighbor = result(
+                repositoryId, indexVersion, UUID.randomUUID(), "backend/GraphRepository.java", "method",
+                "persistGraph", "void persistGraph() {}", Map.of(
+                        "retrievalSource", "graph_expansion",
+                        "graphPathNodes", List.of("CodeGraphBuilder.buildWithDiagnostics", "GraphRepository.persistGraph"),
+                        "graphEdgeTypes", List.of("CALLS"),
+                        "graphEvidenceKind", "resolved"));
+        when(repository.graphRelatedChunks(
+                eq(repositoryId), eq(List.of(discovered.chunkId())), eq(List.of()), eq(1), eq("BOTH"), eq(12)))
+                .thenReturn(List.of(neighbor));
         RepositoryQuestionMapBuilder builder = new RepositoryQuestionMapBuilder(repository);
         var initial = builder.build(repositoryId, null, List.of(UUID.randomUUID()), "graph failure", List.of(bootstrap));
 
@@ -105,7 +115,8 @@ class RepositoryQuestionMapBuilderTest {
         assertThat(update.map().evidenceProgress()).isTrue();
         assertThat(update.map().delta().addedEvidenceIds()).contains(CodeEvidenceId.from(discovered));
         assertThat(update.map().plannerContext())
-                .contains("revision=1", "[MAP_DELTA] from=0 to=1", "buildWithDiagnostics")
+                .contains("revision=1", "[MAP_DELTA] from=0 to=1", "buildWithDiagnostics", "persistGraph")
+                .contains("from=CodeGraphBuilder.buildWithDiagnostics type=CALLS to=GraphRepository.persistGraph")
                 .contains("operationId=op-2 status=COMPLETED");
     }
 

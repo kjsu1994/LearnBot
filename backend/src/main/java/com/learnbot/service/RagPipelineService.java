@@ -857,10 +857,11 @@ public class RagPipelineService {
                 Do not answer the user.
                 If key implementation evidence is missing or the evidence is off-topic, request a small number of concrete follow-up search queries.
                 This must work across programming languages and frameworks. Use file paths, symbols, services, controllers, repositories, routes, handlers, hooks, jobs, tasks, and database/query terms from the evidence when useful.
-                JSON schema: {"enough":true,"hypothesis":"revised explanation","hypothesisVersion":2,"premiseDisposition":"DISTRIBUTED","terminationRequest":"NONE","claimResults":[{"claimId":"claim-1","status":"SUPPORTED","evidenceIds":["index:chunk:lines"],"supportedClaim":"bounded fact","limitations":[],"supersededByClaimId":""}],"missingAreas":[],"operations":[],"followUpQueries":[],"queryAreas":[],"requiredEvidenceGroups":["claim-1"],"checklist":[{"claimId":"claim-1","evidenceGroup":"claim-1","goal":"behavior to prove","actor":"component","action":"observable action","object":"affected object","expectedOutcome":"observable result","scopeHints":["observed scope"],"requiredEvidenceKinds":["DIRECT_SOURCE"],"queries":["source query"]}],"coverageSelections":[{"evidenceGroup":"claim-1","evidenceIds":["index:chunk:lines"],"evidenceIndexes":[],"supportedClaims":["bounded fact"],"pipelineStage":"observed_stage"}],"reason":"short reason"}
+                JSON schema: {"enough":true,"hypothesis":"revised explanation","hypothesisVersion":2,"premiseDisposition":"DISTRIBUTED","terminationRequest":"NONE","claimResults":[{"claimId":"claim-1","status":"SUPPORTED","evidenceIds":["index:chunk:lines"],"supportedClaim":"bounded fact","limitations":[]}],"operations":[],"reason":"short reason"}
                 Rules:
                 - Treat the previous hypothesis as provisional. Rebuild it from the current map and newest delta instead of preserving it by default.
                 - Return one claimResults item for every checklist claim. Use only SUPPORTED, CONTRADICTED, or UNRESOLVED.
+                - Keep the response compact. Omit optional arrays when they are empty. Return checklist only when a claim must be added or materially revised; unchanged claims retain their stable IDs on the server.
                 - SUPPORTED and CONTRADICTED require stable evidenceIds and a non-empty bounded supportedClaim. Missing evidence is UNRESOLVED, not CONTRADICTED.
                 - If new direct evidence disproves the previous hypothesis, increment hypothesisVersion, return the corrected hypothesis, and preserve lineage with supersededByClaimId when applicable.
                 - Set premiseDisposition to CONFIRMED, CORRECTED, DISTRIBUTED, or UNRESOLVED. The server derives sufficiency from claimResults; enough is advisory only.
@@ -872,7 +873,7 @@ public class RagPipelineService {
                 - keyword_search finds exact text and identifiers; hybrid_search combines lexical and semantic retrieval; reference_search finds definitions and references.
                 - read_chunk requires chunkId.
                 - read_symbol requires symbol; path is optional but recommended when the evidence identifies it.
-                - list_file_symbols requires path and lists indexed structural symbols in that exact file. Use it when the correct file is known but the concrete symbol or line range is not.
+                - list_file_symbols requires path and lists indexed structural symbols in that exact file. Use it when the correct file is known but the concrete symbol or line range is not. A successful symbol inventory is navigation, not proof: on the next iteration read the most relevant returned symbol for each unresolved action claim.
                 - read_file_range requires path, lineStart, and lineEnd.
                 - read_adjacent requires chunkId; radius is optional.
                 - traverse_graph requires an observed chunkId and one or more relations. Choose direction FORWARD for outgoing relations, REVERSE for incoming relations such as callers or implementations, or BOTH only when direction is genuinely unknown. maxHops is optional and must be 1 to 3.
@@ -1635,8 +1636,7 @@ public class RagPipelineService {
                         "supersededByClaimId", stringSchema()
                 ), List.of("claimId", "status", "evidenceIds", "supportedClaim", "limitations")))),
                 Map.entry("reason", stringSchema())
-        ), List.of("enough", "missingAreas", "operations", "followUpQueries", "queryAreas", "requiredEvidenceGroups",
-                "checklist", "coverageSelections", "hypothesis", "hypothesisVersion",
+        ), List.of("enough", "operations", "hypothesis", "hypothesisVersion",
                 "premiseDisposition", "terminationRequest", "claimResults", "reason"));
     }
 
@@ -1692,8 +1692,7 @@ public class RagPipelineService {
 
     private List<String> codeSearchOperationRequiredFields() {
         return List.of(
-                "type", "query", "area", "evidenceGroup", "path", "symbol", "chunkId",
-                "lineStart", "lineEnd", "radius", "relations", "direction", "maxHops",
+                "type", "query", "evidenceGroup", "path", "symbol", "chunkId",
                 "operationId", "claimIds", "originEvidenceIds");
     }
 

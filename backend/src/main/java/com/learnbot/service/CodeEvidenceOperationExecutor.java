@@ -102,7 +102,22 @@ final class CodeEvidenceOperationExecutor {
         String path = operation.path().isBlank() ? null : normalizeRelativePath(operation.path());
         String symbol = operation.symbol().trim();
         List<CodeSearchResult> definitions = repository.findSymbolDefinitions(
-                repositoryId, symbol, path, limit, spaceIds, selectedSpaceId).stream()
+                repositoryId, symbol, path, limit, spaceIds, selectedSpaceId);
+        String canonicalSymbol = canonicalSymbolName(symbol);
+        if (definitions.isEmpty() && !canonicalSymbol.equalsIgnoreCase(symbol)) {
+            definitions = repository.findSymbolDefinitions(
+                    repositoryId, canonicalSymbol, path, limit, spaceIds, selectedSpaceId);
+            String classHint = symbolClassHint(symbol);
+            if (!classHint.isBlank()) {
+                List<CodeSearchResult> classMatches = definitions.stream()
+                        .filter(result -> matchesClassHint(result.className(), classHint))
+                        .toList();
+                if (!classMatches.isEmpty()) {
+                    definitions = classMatches;
+                }
+            }
+        }
+        definitions = definitions.stream()
                 .map(result -> markSymbolEvidenceKind(result, "DEFINITION"))
                 .toList();
         if (!definitions.isEmpty()) {
@@ -114,6 +129,46 @@ final class CodeEvidenceOperationExecutor {
                 .map(result -> markSymbolEvidenceKind(result, "REFERENCE"))
                 .toList();
         return references.stream().limit(limit).toList();
+    }
+
+    private String canonicalSymbolName(String symbol) {
+        String value = symbol == null ? "" : symbol.trim();
+        int parameters = value.indexOf('(');
+        if (parameters >= 0) {
+            value = value.substring(0, parameters);
+        }
+        value = value.replace("::", ".").replace('#', '.');
+        int separator = value.lastIndexOf('.');
+        if (separator >= 0 && separator + 1 < value.length()) {
+            value = value.substring(separator + 1);
+        }
+        int generic = value.indexOf('<');
+        return (generic > 0 ? value.substring(0, generic) : value).trim();
+    }
+
+    private String symbolClassHint(String symbol) {
+        String value = symbol == null ? "" : symbol.trim();
+        int parameters = value.indexOf('(');
+        if (parameters >= 0) {
+            value = value.substring(0, parameters);
+        }
+        value = value.replace("::", ".").replace('#', '.');
+        int methodSeparator = value.lastIndexOf('.');
+        if (methodSeparator <= 0) {
+            return "";
+        }
+        String owner = value.substring(0, methodSeparator);
+        int ownerSeparator = owner.lastIndexOf('.');
+        return (ownerSeparator >= 0 ? owner.substring(ownerSeparator + 1) : owner).trim();
+    }
+
+    private boolean matchesClassHint(String className, String classHint) {
+        if (className == null || className.isBlank() || classHint == null || classHint.isBlank()) {
+            return false;
+        }
+        String normalized = className.replace('$', '.');
+        return normalized.equalsIgnoreCase(classHint)
+                || normalized.toLowerCase(Locale.ROOT).endsWith("." + classHint.toLowerCase(Locale.ROOT));
     }
 
     private CodeSearchResult markSymbolEvidenceKind(CodeSearchResult result, String kind) {
@@ -143,28 +198,26 @@ final class CodeEvidenceOperationExecutor {
         if (lineEnd - lineStart + 1 > MAX_LINE_SPAN) {
             throw new IllegalArgumentException("requested line range exceeds " + MAX_LINE_SPAN + " lines");
         }
-        int rangeReadLimit = Math.max(limit, 64);
-        List<CodeSearchResult> initial = repository.findActiveChunksByPathAndLineRange(
+        int rangeReadLimit = Math.max(limit, MAX_DIRECT_RESULTS);
+        List<CodeSearchResult> overlapping = repository.findActiveChunksByPathAndLineRange(
                 repositoryId, path, lineStart, lineEnd, rangeReadLimit, spaceIds, selectedSpaceId);
-        int expandedStart = lineStart;
-        int expandedEnd = lineEnd;
-        for (CodeSearchResult result : initial) {
-            if (result == null || result.lineStart() > lineEnd || result.lineEnd() < lineStart) {
-                continue;
-            }
-            expandedStart = Math.min(expandedStart, result.lineStart());
-            expandedEnd = Math.max(expandedEnd, result.lineEnd());
-        }
-        if (expandedEnd - expandedStart + 1 > MAX_LINE_SPAN) {
-            expandedStart = lineStart;
-            expandedEnd = lineStart + MAX_LINE_SPAN - 1;
-        }
-        if (expandedStart == lineStart && expandedEnd == lineEnd) {
-            return initial;
-        }
-        List<CodeSearchResult> expanded = repository.findActiveChunksByPathAndLineRange(
-                repositoryId, path, expandedStart, expandedEnd, rangeReadLimit, spaceIds, selectedSpaceId);
-        return expanded.isEmpty() ? initial : expanded;
+        List<CodeSearchResult> exact = overlapping.stream()
+                .filter(result -> result != null && result.lineStart() <= lineEnd && result.lineEnd() >= lineStart)
+                .toList();
+        boolean hasSpecificChunk = exact.stream().anyMatch(result ->
+                result.lineStart() >= lineStart && result.lineEnd() <= lineEnd
+                        && !"class".equals(result.chunkType()));
+        return exact.stream()
+                .filter(result -> !hasSpecificChunk || !"class".equals(result.chunkType()))
+                .sorted(java.util.Comparator
+                        .comparingInt((CodeSearchResult result) -> overlapDistance(result, lineStart, lineEnd))
+                        .thenComparingInt(result -> Math.max(1, result.lineEnd() - result.lineStart() + 1)))
+                .limit(Math.max(1, Math.min(limit, MAX_DIRECT_RESULTS)))
+                .toList();
+    }
+
+    private int overlapDistance(CodeSearchResult result, int lineStart, int lineEnd) {
+        return Math.abs(result.lineStart() - lineStart) + Math.abs(result.lineEnd() - lineEnd);
     }
 
     private List<CodeSearchResult> listFileSymbols(
@@ -338,7 +391,8 @@ final class CodeEvidenceOperationExecutor {
             if (operation == null) {
                 return "operation=unknown status=" + status + " reason=" + reason;
             }
-            String evidence = results.stream().limit(4)
+            int observationLimit = "list_file_symbols".equals(operation.type()) ? 12 : 4;
+            String evidence = results.stream().limit(observationLimit)
                     .map(result -> result.filePath() + ":" + result.lineStart() + "-" + result.lineEnd()
                             + (result.methodName() == null ? "" : "#" + result.methodName()))
                     .reduce((left, right) -> left + "; " + right)
