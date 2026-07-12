@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CodeGraphBuilderTest {
     @Test
@@ -340,6 +341,113 @@ class CodeGraphBuilderTest {
             assertThat(diagnostic.stage()).isEqualTo("JAVA_SEMANTIC");
             assertThat(diagnostic.status()).isEqualTo("FAILED");
         });
+    }
+
+    @Test
+    void acceptsANewLanguageAdapterWithoutChangingTheGraphBuilder(@TempDir Path root) {
+        UUID chunkId = UUID.randomUUID();
+        CodeIntelligenceAnalyzerAdapter pythonAdapter = new CodeIntelligenceAnalyzerAdapter() {
+            @Override public String analyzerId() { return "scip-python-test"; }
+            @Override public String languageId() { return "python"; }
+            @Override public String diagnosticStage() { return "PYTHON_SCIP"; }
+            @Override public String displayName() { return "SCIP Python"; }
+            @Override public String mode() { return "INDEX"; }
+            @Override public CodeIntelligenceAuthority authority() { return CodeIntelligenceAuthority.SCIP_SEMANTIC; }
+            @Override public boolean supports(java.util.List<CodeSearchResult> chunks) { return true; }
+
+            @Override
+            public CodeIntelligenceIr analyze(Path repositoryRoot, java.util.List<CodeSearchResult> chunks) {
+                CodeGraph graph = new CodeGraph(java.util.List.of(
+                        new CodeGraphNode("python:sample.run", "function", "run", "sample.run",
+                                "sample.py", chunkId, Map.of())), java.util.List.of());
+                CodeAnalysisDiagnostic diagnostic = new CodeAnalysisDiagnostic(
+                        diagnosticStage(), displayName(), "SUCCESS", mode(), 1, 1, 0,
+                        0, 0, 1, 0, 1, "ok", Map.of());
+                return CodeIntelligenceIr.fromAnalyzer(
+                        analyzerId(), languageId(), authority(), graph,
+                        java.util.List.of(diagnostic), Map.of());
+            }
+        };
+        CodeGraphBuilder builder = new CodeGraphBuilder(
+                new LearnBotProperties(), java.util.List.of(pythonAdapter));
+
+        CodeGraphBuildResult built = builder.buildWithDiagnostics(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "sample.py", "function",
+                        null, "run", null, null, "def run(): pass")));
+
+        assertThat(built.graph().nodes()).anySatisfy(node -> {
+            assertThat(node.key()).isEqualTo("python:sample.run");
+            assertThat(node.metadata())
+                    .containsEntry("codeIntelligenceLanguage", "python")
+                    .containsEntry("codeIntelligenceAuthority", "SCIP_SEMANTIC");
+        });
+        assertThat(built.diagnostics()).anySatisfy(diagnostic ->
+                assertThat(diagnostic.metadata()).containsEntry("shadowEquivalent", true));
+    }
+
+    @Test
+    void rejectsAnIrCutoverWhenShadowParityLosesGraphIdentity(@TempDir Path root) {
+        CodeIntelligenceAnalyzerAdapter lossyAdapter = new CodeIntelligenceAnalyzerAdapter() {
+            @Override public String analyzerId() { return "lossy"; }
+            @Override public String languageId() { return "test"; }
+            @Override public String diagnosticStage() { return "TEST_IR"; }
+            @Override public String displayName() { return "Lossy adapter"; }
+            @Override public String mode() { return "SHADOW"; }
+            @Override public CodeIntelligenceAuthority authority() { return CodeIntelligenceAuthority.SCIP_SEMANTIC; }
+            @Override public boolean supports(java.util.List<CodeSearchResult> chunks) { return true; }
+
+            @Override
+            public CodeIntelligenceIr analyze(Path repositoryRoot, java.util.List<CodeSearchResult> chunks) {
+                CodeGraph graph = new CodeGraph(java.util.List.of(), java.util.List.of());
+                return new CodeIntelligenceIr(
+                        1, analyzerId(), languageId(), authority(), graph, java.util.List.of(), Map.of(),
+                        new CodeIntelligenceShadowReport(
+                                false, 1, 0, 1, 0, java.util.Set.of("lost-node"), java.util.Set.of("lost-edge")));
+            }
+        };
+        CodeGraphBuilder builder = new CodeGraphBuilder(
+                new LearnBotProperties(), java.util.List.of(lossyAdapter));
+
+        assertThatThrownBy(() -> builder.buildWithDiagnostics(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), "sample.test", "symbol",
+                        null, "run", null, null, "run"))))
+                .isInstanceOf(CodeIntelligenceParityException.class)
+                .hasMessageContaining("missingNodes=[lost-node]")
+                .hasMessageContaining("missingEdges=[lost-edge]");
+    }
+
+    @Test
+    void semanticAdapterReplacesAnEquivalentSyntaxFallbackNode(@TempDir Path root) {
+        String path = "src/Worker.custom";
+        CodeIntelligenceAnalyzerAdapter semanticAdapter = new CodeIntelligenceAnalyzerAdapter() {
+            @Override public String analyzerId() { return "semantic-test"; }
+            @Override public String languageId() { return "custom"; }
+            @Override public String diagnosticStage() { return "CUSTOM_SEMANTIC"; }
+            @Override public String displayName() { return "Custom semantic"; }
+            @Override public String mode() { return "TEST"; }
+            @Override public CodeIntelligenceAuthority authority() { return CodeIntelligenceAuthority.COMPILER_SEMANTIC; }
+            @Override public boolean supports(java.util.List<CodeSearchResult> chunks) { return true; }
+
+            @Override
+            public CodeIntelligenceIr analyze(Path repositoryRoot, java.util.List<CodeSearchResult> chunks) {
+                CodeGraph graph = new CodeGraph(java.util.List.of(new CodeGraphNode(
+                        "method:" + path + ":run", "method", "run", "Worker.run", path,
+                        chunks.get(0).chunkId(), Map.of("semanticDetail", "resolved"))), java.util.List.of());
+                return CodeIntelligenceIr.fromAnalyzer(
+                        analyzerId(), languageId(), authority(), graph, java.util.List.of(), Map.of());
+            }
+        };
+        CodeGraphBuilder builder = new CodeGraphBuilder(
+                new LearnBotProperties(), java.util.List.of(semanticAdapter));
+
+        CodeGraph graph = builder.buildWithDiagnostics(root, java.util.List.of(
+                result(UUID.randomUUID(), UUID.randomUUID(), path, "method",
+                        "Worker", "run", null, null, "run"))).graph();
+
+        assertThat(graph.nodes()).filteredOn(node -> node.key().equals("method:" + path + ":run"))
+                .singleElement().satisfies(node -> assertThat(node.metadata())
+                        .containsEntry("semanticDetail", "resolved")
+                        .containsEntry("codeIntelligenceAuthority", "COMPILER_SEMANTIC"));
     }
 
     @Test

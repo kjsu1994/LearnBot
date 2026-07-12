@@ -24,21 +24,30 @@ public class CodeGraphBuilder {
     private static final int MAX_REFERENCES_PER_CHUNK = 24;
 
     private final LearnBotProperties properties;
-    private final JavaSemanticGraphAnalyzer javaAnalyzer;
-    private final RoslynSemanticGraphAnalyzer roslynAnalyzer;
-    private final JavaClasspathResolver javaClasspathResolver;
+    private final List<CodeIntelligenceAnalyzerAdapter> analyzerAdapters;
 
     public CodeGraphBuilder(LearnBotProperties properties) {
-        this(properties, null, null, null);
+        this(properties, List.of());
     }
 
     @Autowired
-    public CodeGraphBuilder(LearnBotProperties properties, JavaSemanticGraphAnalyzer javaAnalyzer,
-                            RoslynSemanticGraphAnalyzer roslynAnalyzer, JavaClasspathResolver javaClasspathResolver) {
+    public CodeGraphBuilder(
+            LearnBotProperties properties,
+            List<CodeIntelligenceAnalyzerAdapter> analyzerAdapters
+    ) {
         this.properties = properties;
-        this.javaAnalyzer = javaAnalyzer;
-        this.roslynAnalyzer = roslynAnalyzer;
-        this.javaClasspathResolver = javaClasspathResolver;
+        this.analyzerAdapters = analyzerAdapters == null ? List.of() : analyzerAdapters.stream()
+                .sorted(Comparator.comparing(CodeIntelligenceAnalyzerAdapter::analyzerId))
+                .toList();
+    }
+
+    public CodeGraphBuilder(
+            LearnBotProperties properties,
+            JavaSemanticGraphAnalyzer javaAnalyzer,
+            RoslynSemanticGraphAnalyzer roslynAnalyzer,
+            JavaClasspathResolver javaClasspathResolver
+    ) {
+        this(properties, legacyAdapters(javaAnalyzer, roslynAnalyzer, javaClasspathResolver));
     }
 
     public boolean enabled() {
@@ -112,56 +121,103 @@ public class CodeGraphBuilder {
             }
         }
         CodeGraph baseGraph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
-        diagnostics.add(new CodeAnalysisDiagnostic(
+        CodeAnalysisDiagnostic baseDiagnostic = new CodeAnalysisDiagnostic(
                 "BASE_GRAPH", "Chunk graph", "SUCCESS", "DETERMINISTIC", chunks.size(), chunks.size(), 0,
                 baseGraph.edges().size(), 0, baseGraph.nodes().size(), baseGraph.edges().size(),
                 java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
                 "Deterministic chunk graph completed.", Map.of()
-        ));
-        if (javaAnalyzer != null && repositoryRoot != null) {
-            try {
-                JavaClasspathResolution classpath = javaClasspathResolver == null
-                        ? new JavaClasspathResolution(List.of(), CodeAnalysisDiagnostic.skipped(
-                                "JAVA_CLASSPATH", "Static dependency resolver", "CACHE_AND_ALLOWLIST", "Resolver is unavailable."))
-                        : javaClasspathResolver.resolve(repositoryRoot);
-                diagnostics.add(classpath.diagnostic());
-                CodeGraphAnalysisResult result = javaAnalyzer.analyzeWithDiagnostics(repositoryRoot, chunks, classpath.jars());
-                merge(nodes, edges, result.graph());
-                diagnostics.add(result.diagnostic());
-            } catch (RuntimeException ex) {
-                diagnostics.add(failedDiagnostic("JAVA_SEMANTIC", "JavaParser Symbol Solver", ex));
+        );
+        CodeIntelligenceIr baseIr = CodeIntelligenceIr.fromAnalyzer(
+                "chunk-structure", "multi", CodeIntelligenceAuthority.SYNTAX,
+                baseGraph, List.of(baseDiagnostic), Map.of("fallback", true));
+        nodes.clear();
+        baseIr.graph().nodes().forEach(node -> nodes.put(node.key(), node));
+        edges.clear();
+        baseIr.graph().edges().forEach(edge -> edges.put(
+                edge.sourceKey() + "|" + edge.type() + "|" + edge.targetKey(), edge));
+        diagnostics.addAll(baseIr.diagnostics());
+
+        for (CodeIntelligenceAnalyzerAdapter adapter : analyzerAdapters) {
+            if (repositoryRoot == null) {
+                diagnostics.add(CodeAnalysisDiagnostic.skipped(
+                        adapter.diagnosticStage(), adapter.displayName(), adapter.mode(),
+                        "Repository root is unavailable."));
+                continue;
             }
-        } else {
-            diagnostics.add(CodeAnalysisDiagnostic.skipped("JAVA_SEMANTIC", "JavaParser Symbol Solver", "SOURCE", "Analyzer is unavailable."));
-        }
-        if (roslynAnalyzer != null && repositoryRoot != null) {
             try {
-                CodeGraphAnalysisResult result = roslynAnalyzer.analyzeWithDiagnostics(repositoryRoot, chunks);
-                merge(nodes, edges, result.graph());
-                diagnostics.add(result.diagnostic());
+                CodeIntelligenceIr ir = adapter.analyze(repositoryRoot, chunks);
+                if (!ir.shadowReport().equivalent()) {
+                    throw new CodeIntelligenceParityException(
+                            "Code Intelligence IR shadow comparison failed for " + adapter.analyzerId()
+                                    + ": missingNodes=" + ir.shadowReport().missingNodeKeys()
+                                    + ", missingEdges=" + ir.shadowReport().missingEdgeKeys());
+                }
+                merge(nodes, edges, ir.graph());
+                diagnostics.addAll(ir.diagnostics());
+            } catch (CodeIntelligenceParityException ex) {
+                throw ex;
             } catch (RuntimeException ex) {
-                diagnostics.add(failedDiagnostic("CSHARP_ROSLYN", "Roslyn", ex));
+                diagnostics.add(failedDiagnostic(
+                        adapter.diagnosticStage(), adapter.displayName(), adapter.mode(), ex));
             }
-        } else {
-            diagnostics.add(CodeAnalysisDiagnostic.skipped("CSHARP_ROSLYN", "Roslyn", "AUTO", "Analyzer is unavailable."));
         }
         CodeGraph graph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
         return new CodeGraphBuildResult(graph, List.copyOf(diagnostics));
     }
 
-    private CodeAnalysisDiagnostic failedDiagnostic(String stage, String analyzer, RuntimeException ex) {
-        return new CodeAnalysisDiagnostic(stage, analyzer, "FAILED", null, 0, 0, 0, 0, 0, 0, 0, 0,
-                ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "analysis failed" : ex.getMessage()), Map.of());
+    private static List<CodeIntelligenceAnalyzerAdapter> legacyAdapters(
+            JavaSemanticGraphAnalyzer javaAnalyzer,
+            RoslynSemanticGraphAnalyzer roslynAnalyzer,
+            JavaClasspathResolver javaClasspathResolver
+    ) {
+        List<CodeIntelligenceAnalyzerAdapter> adapters = new ArrayList<>();
+        if (javaAnalyzer != null) {
+            adapters.add(new JavaCodeIntelligenceAdapter(javaAnalyzer, javaClasspathResolver));
+        }
+        if (roslynAnalyzer != null) {
+            adapters.add(new RoslynCodeIntelligenceAdapter(roslynAnalyzer));
+        }
+        return List.copyOf(adapters);
+    }
+
+    private CodeAnalysisDiagnostic failedDiagnostic(
+            String stage,
+            String analyzer,
+            String mode,
+            RuntimeException ex
+    ) {
+        return new CodeAnalysisDiagnostic(stage, analyzer, "FAILED", mode, 0, 0, 0, 0, 0, 0, 0, 0,
+                ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "analysis failed" : ex.getMessage()),
+                Map.of("codeIntelligenceSchemaVersion", CodeIntelligenceIr.CURRENT_SCHEMA_VERSION));
     }
 
     private void merge(Map<String, CodeGraphNode> nodes, Map<String, CodeGraphEdge> edges, CodeGraph graph) {
         if (graph == null) {
             return;
         }
-        graph.nodes().forEach(node -> nodes.putIfAbsent(node.key(), node));
-        graph.edges().forEach(edge -> edges.putIfAbsent(
-                edge.sourceKey() + "|" + edge.type() + "|" + edge.targetKey(), edge
-        ));
+        graph.nodes().forEach(node -> nodes.merge(node.key(), node, this::strongerNode));
+        graph.edges().forEach(edge -> edges.merge(
+                edge.sourceKey() + "|" + edge.type() + "|" + edge.targetKey(), edge,
+                this::strongerEdge));
+    }
+
+    private CodeGraphNode strongerNode(CodeGraphNode existing, CodeGraphNode candidate) {
+        return intelligenceAuthority(candidate.metadata()).rank() > intelligenceAuthority(existing.metadata()).rank()
+                ? candidate : existing;
+    }
+
+    private CodeGraphEdge strongerEdge(CodeGraphEdge existing, CodeGraphEdge candidate) {
+        int authorityComparison = Integer.compare(
+                intelligenceAuthority(candidate.metadata()).rank(),
+                intelligenceAuthority(existing.metadata()).rank());
+        if (authorityComparison > 0) return candidate;
+        if (authorityComparison < 0) return existing;
+        return candidate.confidence() > existing.confidence() ? candidate : existing;
+    }
+
+    private CodeIntelligenceAuthority intelligenceAuthority(Map<String, Object> metadata) {
+        Object value = metadata == null ? null : metadata.get("codeIntelligenceAuthority");
+        return CodeIntelligenceAuthority.from(value == null ? "" : String.valueOf(value));
     }
 
     private Map<String, List<CodeSearchResult>> symbolIndex(List<CodeSearchResult> chunks) {

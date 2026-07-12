@@ -182,6 +182,7 @@ class RepositoryQuestionMapBuilderTest {
         assertThat(map.plannerContext())
                 .hasSizeLessThanOrEqualTo(28_000)
                 .contains("[FILE_SYMBOL_INVENTORIES]", "shown=200 total=200 complete=true")
+                .contains("authorities=[COMPILER_SEMANTIC] analyzers=[java]")
                 .contains("completeToolResponse");
         assertThat(map.containsEvidenceId("symbol-200")).isTrue();
     }

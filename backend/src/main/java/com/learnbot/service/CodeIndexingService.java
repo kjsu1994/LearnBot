@@ -40,8 +40,8 @@ public class CodeIndexingService {
     private static final Logger log = LoggerFactory.getLogger(CodeIndexingService.class);
     static final String CODE_PARSER_SIGNATURE = "code-symbol-v5";
     static final String CODE_CHUNK_PROFILE = "symbolic-main-v4";
-    static final String INDEX_SCHEMA_VERSION = "code-index-v2";
-    static final String ANALYZER_VERSION = "javaparser-3.26.3_roslyn-4.11";
+    static final String INDEX_SCHEMA_VERSION = "code-index-v3-ir1";
+    static final String ANALYZER_VERSION = "javaparser-3.26.3_roslyn-4.11_ci-ir-1";
     static final String PROJECT_CONTEXT_PARSER_SIGNATURE = "project-context-v2";
     static final String PROJECT_CONTEXT_CHUNK_PROFILE = "project-context-v2";
 
@@ -596,7 +596,7 @@ public class CodeIndexingService {
             } catch (RuntimeException ex) {
                 recordNonFatalFailure(record.id(), jobId, "CODE_GRAPH_DIAGNOSTICS", ex);
             }
-        } catch (CodeIndexCancelledException ex) {
+        } catch (CodeIndexCancelledException | CodeIntelligenceParityException ex) {
             throw ex;
         } catch (RuntimeException ex) {
             recordNonFatalFailure(record.id(), jobId, "CODE_GRAPH", ex);

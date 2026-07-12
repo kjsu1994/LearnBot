@@ -41,13 +41,7 @@ public class RagPipelineService {
             "keyword_search", "hybrid_search", "reference_search",
             "read_chunk", "read_symbol", "list_file_symbols", "read_file_range", "read_adjacent", "traverse_graph"
     );
-    private static final List<String> CODE_GRAPH_RELATION_TYPES = List.of(
-            "DEFINES", "CONTAINS", "CALLS", "REFERENCES", "EXTENDS", "IMPLEMENTS", "OVERRIDES",
-            "ACCEPTS", "RETURNS", "THROWS", "READS_FIELD", "WRITES_FIELD", "ANNOTATED_BY",
-            "INJECTS", "USES_ENTITY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT", "HANDLES_EVENT",
-            "BINDS_TO", "DECLARES_CONTROL", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT",
-            "CODE_BEHIND", "PARTIAL_OF"
-    );
+    private static final List<String> CODE_GRAPH_RELATION_TYPES = CodeIntelligenceRelationCatalog.all();
 
     private final OllamaClient ollamaClient;
     private final LearnBotProperties properties;
@@ -513,6 +507,8 @@ public class RagPipelineService {
             String attemptUserPrompt = attempt == 0
                     ? userPrompt
                     : userPrompt + "\n\nThe previous structured response was invalid or truncated. Return only one complete JSON object.";
+            attemptUserPrompt = boundedStructuredUserPrompt(
+                    operation, attemptSystemPrompt, attemptUserPrompt, tokenLimit, schema);
             OllamaClient.ChatResult result = structuredChatResult(
                     operation,
                     attemptSystemPrompt,
@@ -541,6 +537,58 @@ public class RagPipelineService {
             }
         }
         throw new IllegalArgumentException(operation + " response did not contain valid JSON", lastFailure);
+    }
+
+    String boundedStructuredUserPrompt(
+            String operation,
+            String systemPrompt,
+            String userPrompt,
+            int outputTokens,
+            Map<String, Object> schema
+    ) {
+        String safeUser = safe(userPrompt);
+        int contextTokens = Math.max(2048, contextWindow());
+        int schemaTokens;
+        try {
+            schemaTokens = estimateStructuredTokens(objectMapper.writeValueAsString(schema));
+        } catch (Exception ignored) {
+            schemaTokens = estimateStructuredTokens(String.valueOf(schema));
+        }
+        int fixedTokens = estimateStructuredTokens(systemPrompt) + schemaTokens
+                + Math.max(1, outputTokens) + 256;
+        int userTokenBudget = Math.max(256, contextTokens - fixedTokens);
+        if (estimateStructuredTokens(safeUser) <= userTokenBudget) {
+            return safeUser;
+        }
+        int charBudget = Math.max(384, userTokenBudget * 2);
+        String bounded = boundedHeadAndTail(safeUser, charBudget);
+        while (estimateStructuredTokens(bounded) > userTokenBudget && charBudget > 384) {
+            charBudget = Math.max(384, (int) (charBudget * 0.78));
+            bounded = boundedHeadAndTail(safeUser, charBudget);
+        }
+        log.info("Structured prompt bounded operation={} contextTokens={} fixedTokens={} userTokensBefore={} userTokensAfter={}",
+                safe(operation), contextTokens, fixedTokens, estimateStructuredTokens(safeUser),
+                estimateStructuredTokens(bounded));
+        return bounded;
+    }
+
+    private String boundedHeadAndTail(String value, int charBudget) {
+        int headLength = Math.min(value.length(), Math.max(240, (int) (charBudget * 0.62)));
+        int tailLength = Math.min(value.length() - headLength, Math.max(120, charBudget - headLength));
+        return value.substring(0, headLength)
+                + "\n\n[CONTEXT_MIDDLE_OMITTED_TO_FIT_TOKEN_BUDGET]\n\n"
+                + value.substring(value.length() - tailLength);
+    }
+
+    private int estimateStructuredTokens(String value) {
+        if (value == null || value.isBlank()) return 0;
+        int ascii = 0;
+        int nonAscii = 0;
+        for (int index = 0; index < value.length(); index++) {
+            if (value.charAt(index) <= 0x7f) ascii++;
+            else nonAscii++;
+        }
+        return Math.max(1, (int) Math.ceil(ascii / 4.0) + (int) Math.ceil(nonAscii / 1.5));
     }
 
     private OllamaClient.ChatResult structuredChatResult(
@@ -841,6 +889,8 @@ public class RagPipelineService {
                 - For any concrete behavior claim, prefer the method or artifact that directly implements that behavior over a coordinator that only calls it.
                 - Use tests only when the question asks about tests or when they are clearly supporting evidence.
                 - Prefer direct evidence over indirect summaries when both are available.
+                - Respect analyzer provenance when candidates expose it: COMPILER_SEMANTIC is stronger than SCIP_SEMANTIC, then LSP_SEMANTIC, SYNTAX, LEXICAL, and LLM_INFERRED. Never let a weaker duplicate displace a stronger equivalent.
+                - A readable direct source body can prove statements visibly present in that body. Cross-symbol calls or references not visible in the excerpt require a semantic relation or must be labeled inferred.
                 - Classify what the candidate actually proves, not what nearby terms suggest.
                 - Graph relationship evidence can support inferred relationships, but must not be treated as a direct code statement.
                 - Set mustUse=true only for candidates that are essential to answer the main question.
@@ -893,6 +943,8 @@ public class RagPipelineService {
                 - A class-level or broad orchestration chunk does not prove a concrete action when the question asks how that action is performed. Request the concrete method or persistence implementation.
                 - A class declaration, constructor, dependency field, approval flow, status lookup, or similarly adjacent operation proves only itself. Never map it to a requested action unless the excerpt directly contains that action's call, state transition, query, write, or return path.
                 - Evidence satisfies a requested behavior only when the relevant actor, object, action, direction, state transition, and side effect agree. Shared vocabulary or architecture roles alone are not enough.
+                - Symbol inventory authority is navigation provenance, not behavior proof. Prefer COMPILER_SEMANTIC over SCIP_SEMANTIC, LSP_SEMANTIC, SYNTAX, LEXICAL, and LLM_INFERRED when equivalent handles conflict.
+                - Direct source text may prove the operations visibly present in it regardless of parser tier, but an invisible cross-symbol transition requires an observed semantic relation or remains inferred.
                 - If a checklist item is only represented by a broad orchestrator and a concrete phase method is needed, request a follow-up query for the concrete implementation method.
                 - For pipeline questions, separate coordinator/orchestrator evidence from concrete callee evidence when possible. A coordinator is useful flow evidence, but concrete phase claims are stronger when supported by their callee method.
                 - For a single-method behavior question, an exact requested method body with readable implementation is sufficient for that method's behavior claim. Do not require unrelated callers, controllers, repositories, or lifecycle phases unless the question explicitly asks for them.
@@ -930,6 +982,8 @@ public class RagPipelineService {
                 - When repository-map hints and observed bootstrap candidates disagree, search by the requested behavior and use the observed candidates; do not force the map hint into every query.
                 - Use distinct queries for distinct required phases or layers.
                 - Build the checklist from the user's requested claims, phases, layers, and artifacts.
+                - Preserve the user's action wording and direction in each claim. Do not silently translate pull, claim, receive, dequeue, push, enqueue, save, or return into a different action.
+                - Treat analyzer authority as navigation confidence: COMPILER_SEMANTIC, SCIP_SEMANTIC, LSP_SEMANTIC, SYNTAX, LEXICAL, then LLM_INFERRED. Request direct source before asserting behavior from inventory alone.
                 - The hypothesis is provisional. State what the current repository map suggests, including when behavior may be distributed across components.
                 - Preserve each distinct action or verb requested by the user as its own checklist claim. Architectural layers are scopes to search, not substitutes for the requested behaviors.
                 - Describe every claim with actor, action, object, expectedOutcome, and optional scopeHints. Architectural layers are scope hints, never standalone claims.

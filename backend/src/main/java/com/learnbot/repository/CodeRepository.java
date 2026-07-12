@@ -17,6 +17,7 @@ import com.learnbot.service.ActiveCodeIndexIdentity;
 import com.learnbot.service.CodeGraph;
 import com.learnbot.service.CodeGraphEdge;
 import com.learnbot.service.CodeGraphNode;
+import com.learnbot.service.CodeIntelligenceRelationCatalog;
 import com.learnbot.service.CodeGraphEnrichmentJob;
 import com.learnbot.service.CodeAnalysisDiagnostic;
 import com.learnbot.service.CodeFileRecord;
@@ -1446,9 +1447,14 @@ public class CodeRepository {
                            COALESCE(c.line_start, 0) AS line_start,
                            COALESCE(c.line_end, 0) AS line_end,
                            n.chunk_id,
-                           COALESCE(NULLIF(n.metadata->>'analyzer', ''),
-                                    NULLIF(n.metadata->>'language', ''), 'semantic-graph') AS analyzer,
-                           'COMPILER_SEMANTIC' AS authority
+                           COALESCE(NULLIF(n.metadata->>'codeIntelligenceAnalyzer', ''),
+                                    NULLIF(n.metadata->>'analyzer', ''),
+                                    NULLIF(n.metadata->>'language', ''), 'legacy-graph') AS analyzer,
+                           COALESCE(NULLIF(n.metadata->>'codeIntelligenceAuthority', ''),
+                                    CASE
+                                      WHEN NULLIF(n.metadata->>'analyzer', '') IS NOT NULL THEN 'COMPILER_SEMANTIC'
+                                      ELSE 'UNKNOWN'
+                                    END) AS authority
                     FROM code_graph_nodes n
                     JOIN code_repositories r ON r.id = n.repository_id AND r.deleted_at IS NULL
                     LEFT JOIN code_chunks c ON c.id = n.chunk_id AND c.active
@@ -1892,11 +1898,7 @@ public class CodeRepository {
             return List.of();
         }
         List<String> safeEdgeTypes = edgeTypes == null || edgeTypes.isEmpty()
-                ? List.of("CALLS", "REFERENCES", "HANDLES_EVENT", "BINDS_TO", "CONTAINS", "DEFINES",
-                        "EXTENDS", "IMPLEMENTS", "OVERRIDES", "INJECTS", "RETURNS", "ACCEPTS", "THROWS",
-                        "ANNOTATED_BY", "READS_FIELD", "WRITES_FIELD", "USES_ENTITY", "MAPS_TO_TABLE", "EXPOSES_ENDPOINT",
-                        "DECLARES_BEAN", "TRANSACTION_BOUNDARY", "REPOSITORY_FOR", "QUERIES_ENTITY",
-                        "DECLARES_CONTROL", "USES_COMMAND", "COMMAND_EXECUTES", "DATA_CONTEXT", "CODE_BEHIND", "PARTIAL_OF")
+                ? CodeIntelligenceRelationCatalog.all()
                 : edgeTypes;
         String safeDirection = Set.of("FORWARD", "REVERSE", "BOTH").contains(direction) ? direction : "BOTH";
         int safeMaxHop = Math.max(1, Math.min(maxHop, 4));

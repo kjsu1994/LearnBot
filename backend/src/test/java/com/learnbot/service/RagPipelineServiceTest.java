@@ -862,6 +862,24 @@ class RagPipelineServiceTest {
                 .allSatisfy(selection -> assertThat(selection.evidenceIds()).containsExactly(evidenceId));
     }
 
+    @Test
+    void structuredPromptBudgetPreservesTheQuestionAndLatestObservations() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getOllama().setContextWindow(4096);
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), properties);
+        String oversized = "HEAD_QUESTION\n" + "중간근거".repeat(12_000) + "\nTAIL_LATEST_OBSERVATION";
+
+        String bounded = service.boundedStructuredUserPrompt(
+                "test", "system", oversized, 512,
+                Map.of("type", "object", "properties", Map.of("enough", Map.of("type", "boolean"))));
+
+        assertThat(bounded)
+                .startsWith("HEAD_QUESTION")
+                .contains("[CONTEXT_MIDDLE_OMITTED_TO_FIT_TOKEN_BUDGET]")
+                .endsWith("TAIL_LATEST_OBSERVATION");
+        assertThat(bounded.length()).isLessThan(oversized.length());
+    }
+
     private CodeSearchResult followUpCandidate(UUID chunkId) {
         return new CodeSearchResult(
                 chunkId,

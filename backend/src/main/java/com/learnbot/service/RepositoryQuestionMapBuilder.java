@@ -354,15 +354,7 @@ final class RepositoryQuestionMapBuilder {
     }
 
     private String languageForPath(String path) {
-        String lower = safe(path).toLowerCase(java.util.Locale.ROOT);
-        if (lower.endsWith(".java")) return "java";
-        if (lower.endsWith(".cs")) return "csharp";
-        if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
-        if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
-        if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
-        if (lower.endsWith(".py")) return "python";
-        if (lower.endsWith(".go")) return "go";
-        return "other";
+        return CodeLanguageCatalog.languageForPath(path);
     }
 
     private void addEvidence(
@@ -772,9 +764,14 @@ final class RepositoryQuestionMapBuilder {
                 }
                 boolean viewComplete = inventory.complete() && symbolLines.size() == inventory.symbols().size();
                 String continuation = viewComplete ? "" : "map-view:" + inventory.path() + ":" + symbolLines.size();
+                String authorities = inventory.symbols().stream().map(CodeSymbolOutline::authority)
+                        .filter(value -> value != null && !value.isBlank()).distinct().sorted().toList().toString();
+                String analyzers = inventory.symbols().stream().map(CodeSymbolOutline::analyzer)
+                        .filter(value -> value != null && !value.isBlank()).distinct().sorted().toList().toString();
                 String header = "- evidenceId=" + inventory.evidenceId() + " path=" + inventory.path()
                         + " shown=" + symbolLines.size() + " total=" + inventory.totalCount()
-                        + " complete=" + viewComplete + " continuation=" + continuation + "\n";
+                        + " complete=" + viewComplete + " continuation=" + continuation
+                        + " authorities=" + authorities + " analyzers=" + analyzers + "\n";
                 if (!appendRecord(output, header)) return;
                 for (String line : symbolLines) appendRecord(output, line);
                 if (!viewComplete && !appendRecord(output,
