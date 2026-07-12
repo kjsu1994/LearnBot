@@ -38,7 +38,7 @@ public class RagPipelineService {
     private static final int MAX_EVIDENCE_CANDIDATE_CONTEXT_CHARS = 4_800;
     private static final int MAX_SEMANTIC_LABEL_CHARS = 64;
     private static final List<String> CODE_SEARCH_OPERATION_TYPES = List.of(
-            "keyword_search", "hybrid_search", "reference_search",
+            "keyword_search", "hybrid_search", "reference_search", "find_endpoint",
             "read_chunk", "read_symbol", "list_file_symbols", "read_file_range", "read_adjacent", "traverse_graph"
     );
     private static final List<String> CODE_GRAPH_RELATION_TYPES = CodeIntelligenceRelationCatalog.all();
@@ -470,11 +470,21 @@ public class RagPipelineService {
                 .map(this::normalizeEvidenceGroup)
                 .filter(group -> !"unknown".equals(group))
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        LinkedHashSet<String> operated = plan.operations().stream()
-                .map(CodeSearchOperation::evidenceGroup)
-                .map(this::normalizeEvidenceGroup)
-                .filter(group -> !"unknown".equals(group))
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Map<String, String> groupsByClaim = plan.checklist().stream().collect(java.util.stream.Collectors.toMap(
+                CodeEvidenceChecklistItem::claimId,
+                item -> normalizeEvidenceGroup(item.evidenceGroup()),
+                (left, right) -> left,
+                LinkedHashMap::new));
+        LinkedHashSet<String> operated = new LinkedHashSet<>();
+        for (CodeSearchOperation operation : plan.operations()) {
+            String operationGroup = normalizeEvidenceGroup(operation.evidenceGroup());
+            if (!"unknown".equals(operationGroup)) operated.add(operationGroup);
+            operation.claimIds().stream()
+                    .map(groupsByClaim::get)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(group -> !"unknown".equals(group))
+                    .forEach(operated::add);
+        }
         return plan.requiredEvidenceGroups().stream()
                 .map(this::normalizeEvidenceGroup)
                 .filter(group -> !"unknown".equals(group))
@@ -498,8 +508,9 @@ public class RagPipelineService {
         RuntimeException lastFailure = null;
         int maxAttempts = "code evidence adjudication".equals(operation) ? 1 : 2;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            int structuredMinimum = operation.startsWith("code evidence") ? 1536 : 1;
             int tokenLimit = attempt == 0
-                    ? Math.max(1, maxOutputTokens)
+                    ? Math.max(structuredMinimum, maxOutputTokens)
                     : Math.min(2048, Math.max(maxOutputTokens + 256, maxOutputTokens * 2));
             String attemptSystemPrompt = attempt == 0
                     ? systemPrompt
@@ -509,6 +520,7 @@ public class RagPipelineService {
                     : userPrompt + "\n\nThe previous structured response was invalid or truncated. Return only one complete JSON object.";
             attemptUserPrompt = boundedStructuredUserPrompt(
                     operation, attemptSystemPrompt, attemptUserPrompt, tokenLimit, schema);
+            CodeRagLlmCallBudget.acquirePlanning(operation);
             OllamaClient.ChatResult result = structuredChatResult(
                     operation,
                     attemptSystemPrompt,
@@ -554,17 +566,18 @@ public class RagPipelineService {
         } catch (Exception ignored) {
             schemaTokens = estimateStructuredTokens(String.valueOf(schema));
         }
+        int safeContextTokens = Math.max(1536, (int) Math.floor(contextTokens * 0.72));
         int fixedTokens = estimateStructuredTokens(systemPrompt) + schemaTokens
                 + Math.max(1, outputTokens) + 256;
-        int userTokenBudget = Math.max(256, contextTokens - fixedTokens);
+        int userTokenBudget = Math.max(256, safeContextTokens - fixedTokens);
         if (estimateStructuredTokens(safeUser) <= userTokenBudget) {
             return safeUser;
         }
         int charBudget = Math.max(384, userTokenBudget * 2);
-        String bounded = boundedHeadAndTail(safeUser, charBudget);
+        String bounded = boundedStructuredRecords(safeUser, charBudget);
         while (estimateStructuredTokens(bounded) > userTokenBudget && charBudget > 384) {
             charBudget = Math.max(384, (int) (charBudget * 0.78));
-            bounded = boundedHeadAndTail(safeUser, charBudget);
+            bounded = boundedStructuredRecords(safeUser, charBudget);
         }
         log.info("Structured prompt bounded operation={} contextTokens={} fixedTokens={} userTokensBefore={} userTokensAfter={}",
                 safe(operation), contextTokens, fixedTokens, estimateStructuredTokens(safeUser),
@@ -572,12 +585,97 @@ public class RagPipelineService {
         return bounded;
     }
 
-    private String boundedHeadAndTail(String value, int charBudget) {
-        int headLength = Math.min(value.length(), Math.max(240, (int) (charBudget * 0.62)));
-        int tailLength = Math.min(value.length() - headLength, Math.max(120, charBudget - headLength));
-        return value.substring(0, headLength)
-                + "\n\n[CONTEXT_MIDDLE_OMITTED_TO_FIT_TOKEN_BUDGET]\n\n"
-                + value.substring(value.length() - tailLength);
+    private String boundedStructuredRecords(String value, int charBudget) {
+        String[] records = logicalStructuredRecords(value);
+        if (records.length <= 2) {
+            int headLength = Math.min(value.length(), Math.max(240, (int) (charBudget * 0.62)));
+            int tailLength = Math.min(value.length() - headLength, Math.max(120, charBudget - headLength));
+            return value.substring(0, headLength)
+                    + "\n[CONTEXT_MIDDLE_OMITTED_TO_FIT_TOKEN_BUDGET]\n"
+                    + value.substring(value.length() - tailLength);
+        }
+        boolean[] selected = new boolean[records.length];
+        int headBudget = Math.max(160, (int) (charBudget * 0.42));
+        int tailBudget = Math.max(120, (int) (charBudget * 0.28));
+        int used = selectFromStart(records, selected, headBudget);
+        used += selectFromEnd(records, selected, tailBudget);
+        int priorityBudget = Math.max(0, charBudget - used - 64);
+        for (int index = 0; index < records.length && priorityBudget > 0; index++) {
+            if (selected[index] || !highPriorityStructuredRecord(records[index])) continue;
+            int cost = records[index].length() + 1;
+            if (cost <= priorityBudget) {
+                selected[index] = true;
+                priorityBudget -= cost;
+            }
+        }
+        StringBuilder output = new StringBuilder();
+        boolean omitted = false;
+        for (int index = 0; index < records.length; index++) {
+            if (!selected[index]) {
+                omitted = true;
+                continue;
+            }
+            if (omitted && !output.isEmpty()) {
+                output.append("[CONTEXT_RECORDS_OMITTED_TO_FIT_TOKEN_BUDGET]\n");
+            }
+            output.append(records[index]);
+            if (index + 1 < records.length) output.append('\n');
+            omitted = false;
+        }
+        return output.toString();
+    }
+
+    private String[] logicalStructuredRecords(String value) {
+        String[] lines = value.split("\\R", -1);
+        List<String> records = new ArrayList<>();
+        for (int index = 0; index < lines.length;) {
+            if (!lines[index].matches("\\d+\\. evidenceId=.*")) {
+                records.add(lines[index++]);
+                continue;
+            }
+            StringBuilder candidate = new StringBuilder(lines[index++]);
+            while (index < lines.length && !lines[index].isBlank()
+                    && !lines[index].matches("\\d+\\. evidenceId=.*")) {
+                candidate.append('\n').append(lines[index++]);
+            }
+            if (index < lines.length && lines[index].isBlank()) {
+                candidate.append('\n');
+                index++;
+            }
+            records.add(candidate.toString());
+        }
+        return records.toArray(String[]::new);
+    }
+
+    private int selectFromStart(String[] records, boolean[] selected, int budget) {
+        int used = 0;
+        for (int index = 0; index < records.length; index++) {
+            int cost = records[index].length() + 1;
+            if (used > 0 && used + cost > budget) break;
+            selected[index] = true;
+            used += cost;
+        }
+        return used;
+    }
+
+    private int selectFromEnd(String[] records, boolean[] selected, int budget) {
+        int used = 0;
+        for (int index = records.length - 1; index >= 0; index--) {
+            int cost = records[index].length() + 1;
+            if (used > 0 && used + cost > budget) break;
+            if (!selected[index]) used += cost;
+            selected[index] = true;
+        }
+        return used;
+    }
+
+    private boolean highPriorityStructuredRecord(String value) {
+        String record = safe(value);
+        return record.contains("evidenceId=") || record.contains("claimId")
+                || record.contains("operationId=") || record.contains("status=")
+                || record.startsWith("Question:") || record.startsWith("Retrieval iteration:")
+                || record.startsWith("Previous operation observations:")
+                || (record.startsWith("[") && record.endsWith("]"));
     }
 
     private int estimateStructuredTokens(String value) {
@@ -790,7 +888,10 @@ public class RagPipelineService {
         return items;
     }
 
-    private List<CodeEvidenceChecklistItem> stabilizeInitialClaims(List<CodeEvidenceChecklistItem> drafts) {
+    private List<CodeEvidenceChecklistItem> stabilizeInitialClaims(
+            List<CodeEvidenceChecklistItem> drafts,
+            List<CodeSearchOperation> operations
+    ) {
         List<CodeEvidenceChecklistItem> claims = new ArrayList<>();
         int index = 1;
         for (CodeEvidenceChecklistItem draft : drafts) {
@@ -800,8 +901,18 @@ public class RagPipelineService {
             String claimId = "claim-" + index++;
             String goal = firstNonBlank(draft.goal(),
                     (draft.actor() + " " + draft.action() + " " + draft.object() + " " + draft.expectedOutcome()).trim());
+            String evidenceGroup = operations.stream()
+                    .filter(operation -> operation.claimIds().contains(draft.claimId()))
+                    .map(CodeSearchOperation::evidenceGroup)
+                    .map(this::normalizeEvidenceGroup)
+                    .filter(group -> !"unknown".equals(group))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        String draftGroup = normalizeEvidenceGroup(draft.evidenceGroup());
+                        return "unknown".equals(draftGroup) ? normalizeEvidenceGroup(claimId) : draftGroup;
+                    });
             claims.add(new CodeEvidenceChecklistItem(
-                    claimId, claimId, goal, draft.queries(), draft.actor(), draft.action(), draft.object(),
+                    claimId, evidenceGroup, goal, draft.queries(), draft.actor(), draft.action(), draft.object(),
                     draft.expectedOutcome(), draft.scopeHints(), draft.requiredEvidenceKinds()));
         }
         return List.copyOf(claims);
@@ -915,12 +1026,13 @@ public class RagPipelineService {
                 - SUPPORTED and CONTRADICTED require stable evidenceIds and a non-empty bounded supportedClaim. Missing evidence is UNRESOLVED, not CONTRADICTED.
                 - If new direct evidence disproves the previous hypothesis, increment hypothesisVersion, return the corrected hypothesis, and preserve lineage with supersededByClaimId when applicable.
                 - Set premiseDisposition to CONFIRMED, CORRECTED, DISTRIBUTED, or UNRESOLVED. The server derives sufficiency from claimResults; enough is advisory only.
-                - Use operations for follow-up retrieval. Allowed types are keyword_search, hybrid_search, reference_search, read_chunk, read_symbol, list_file_symbols, read_file_range, read_adjacent, and traverse_graph.
+                - Use operations for follow-up retrieval. Allowed types are keyword_search, hybrid_search, reference_search, find_endpoint, read_chunk, read_symbol, list_file_symbols, read_file_range, read_adjacent, and traverse_graph.
                 - Give every operation a stable operationId and one or more claimIds it is intended to prove. Always include originEvidenceIds: use the observed IDs for direct reads and graph traversal, and an empty array for search operations.
                 - Always return the operations array. If unresolved claims remain and retrieval budget is available, it must contain at least one executable operation.
                 - Return an empty operations array only with terminationRequest NO_FURTHER_RETRIEVAL, CLARIFICATION_REQUIRED, BUDGET_EXHAUSTED, or NO_NOVEL_PATH. Otherwise use NONE.
-                - keyword_search, hybrid_search, and reference_search require query. Never return shell commands, SQL, regex programs, or tool invocation syntax as a query.
+                - keyword_search, hybrid_search, reference_search, and find_endpoint require query. Never return shell commands, SQL, regex programs, or tool invocation syntax as a query.
                 - keyword_search finds exact text and identifiers; hybrid_search combines lexical and semantic retrieval; reference_search finds definitions and references.
+                - find_endpoint accepts an observed or user-provided normalized route such as /api/items/{id}; it resolves language-specific endpoint metadata through the common EXPOSES_ENDPOINT graph relation.
                 - read_chunk requires chunkId.
                 - read_symbol requires symbol; path is optional but recommended when the evidence identifies it.
                 - list_file_symbols requires path and lists indexed structural symbols in that exact file. Use it when the correct file is known but the concrete symbol or line range is not. A successful symbol inventory is navigation, not proof: on the next iteration read the most relevant returned symbol for each unresolved action claim.
@@ -1117,7 +1229,9 @@ public class RagPipelineService {
                     .map(this::normalizeEvidenceGroup)
                     .filter(group -> !"unknown".equals(group))
                     .forEach(requiredGroups::add);
-            requiredGroups.addAll(legacyRequiredGroups);
+            if (!v2Decision || revisedChecklist.isEmpty()) {
+                requiredGroups.addAll(legacyRequiredGroups);
+            }
             List<String> groups = requiredGroups.stream().limit(8).toList();
             List<CodeEvidenceCoverageSelection> coverageSelections = parseCodeEvidenceCoverageSelections(
                     parsed.get("coverageSelections"), 14);
@@ -1319,9 +1433,9 @@ public class RagPipelineService {
             double confidence = Math.max(0.0, Math.min(1.0, parseDouble(parsed.get("confidence"), usable ? 0.5 : 0.0)));
             int queryLimit = Math.max(1, Math.min(6, maxQueries));
             List<CodeEvidenceChecklistItem> drafts = parseChecklist(parsed.get("checklist"), maxQueries);
-            List<CodeEvidenceChecklistItem> checklist = stabilizeInitialClaims(drafts);
-            List<CodeSearchOperation> operations = remapInitialOperations(
-                    parseCodeSearchOperations(parsed.get("operations"), queryLimit), drafts, checklist);
+            List<CodeSearchOperation> draftOperations = parseCodeSearchOperations(parsed.get("operations"), queryLimit);
+            List<CodeEvidenceChecklistItem> checklist = stabilizeInitialClaims(drafts, draftOperations);
+            List<CodeSearchOperation> operations = remapInitialOperations(draftOperations, drafts, checklist);
             List<String> queries = operations.stream()
                     .filter(CodeSearchOperation::isSearch)
                     .map(CodeSearchOperation::query)
@@ -1793,7 +1907,14 @@ public class RagPipelineService {
                     .filter(id -> stableClaims.stream().anyMatch(claim -> claim.claimId().equals(id)))
                     .distinct()
                     .toList();
-            String group = claimIds.isEmpty() ? operation.evidenceGroup() : claimIds.get(0);
+            String group = claimIds.stream()
+                    .map(id -> stableClaims.stream()
+                            .filter(claim -> claim.claimId().equals(id))
+                            .map(CodeEvidenceChecklistItem::evidenceGroup)
+                            .findFirst().orElse(""))
+                    .filter(value -> !value.isBlank())
+                    .findFirst()
+                    .orElse(operation.evidenceGroup());
             return new CodeSearchOperation(
                     operation.type(), operation.query(), operation.area(), group,
                     operation.path(), operation.symbol(), operation.chunkId(), operation.lineStart(),
@@ -2450,7 +2571,8 @@ public class RagPipelineService {
         public boolean isSearch() {
             return "keyword_search".equals(type)
                     || "hybrid_search".equals(type)
-                    || "reference_search".equals(type);
+                    || "reference_search".equals(type)
+                    || "find_endpoint".equals(type);
         }
 
         public boolean isDirectRead() {
@@ -2464,7 +2586,7 @@ public class RagPipelineService {
 
         public String validationError() {
             return switch (type) {
-                case "keyword_search", "hybrid_search", "reference_search" -> query.isBlank() ? "query is required" : "";
+                case "keyword_search", "hybrid_search", "reference_search", "find_endpoint" -> query.isBlank() ? "query is required" : "";
                 case "read_chunk" -> chunkId.isBlank() ? "chunkId is required" : "";
                 case "read_symbol" -> symbol.isBlank() ? "symbol is required" : "";
                 case "list_file_symbols" -> path.isBlank() ? "path is required" : "";

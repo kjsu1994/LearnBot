@@ -60,7 +60,8 @@ public class CodeRagService {
     );
     private static final Set<String> BOOLEAN_PROVENANCE_KEYS = Set.of(
             "llmFollowUpEvidence", "llmRetrievalIterationEvidence", "llmDirectRead", "llmReadFulfilled",
-            "llmChecklistGroupRequired", "llmSearchPlanEvidence", "llmCoverageRequired", "llmValidatedEvidence"
+            "llmChecklistGroupRequired", "llmSearchPlanEvidence", "llmCoverageRequired", "llmValidatedEvidence",
+            "deterministicEndpointEvidence"
     );
 
     private final CodeSearchService searchService;
@@ -150,7 +151,7 @@ public class CodeRagService {
 
     public CodeAskResponse ask(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit) {
         ollamaClient.beginPrimaryRequest();
-        try {
+        try (CodeRagLlmCallBudget.Scope ignored = openCodeRagLlmBudget()) {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
@@ -159,7 +160,7 @@ public class CodeRagService {
 
     public CodeAskResponse askConversational(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext) {
         ollamaClient.beginPrimaryRequest();
-        try {
+        try (CodeRagLlmCallBudget.Scope ignored = openCodeRagLlmBudget()) {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, null);
         } finally {
             ollamaClient.finishPrimaryRequest();
@@ -168,7 +169,7 @@ public class CodeRagService {
 
     public CodeAskResponse askStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, CodeAnswerStreamSink streamSink) {
         ollamaClient.beginPrimaryRequest();
-        try {
+        try (CodeRagLlmCallBudget.Scope ignored = openCodeRagLlmBudget()) {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, null, streamSink);
         } finally {
             ollamaClient.finishPrimaryRequest();
@@ -177,7 +178,7 @@ public class CodeRagService {
 
     public CodeAskResponse askConversationalStreaming(UUID repositoryId, UUID selectedSpaceId, List<UUID> spaceIds, String question, String mode, Integer limit, RagConversationContext conversationContext, CodeAnswerStreamSink streamSink) {
         ollamaClient.beginPrimaryRequest();
-        try {
+        try (CodeRagLlmCallBudget.Scope ignored = openCodeRagLlmBudget()) {
             return askPrioritized(repositoryId, selectedSpaceId, spaceIds, question, mode, limit, conversationContext, streamSink);
         } finally {
             ollamaClient.finishPrimaryRequest();
@@ -298,7 +299,9 @@ public class CodeRagService {
             streamSink.onStatus("evidence_ready", "답변에 사용할 코드 근거를 정리했습니다.");
             streamSink.onEvidence(buildEvidence(answerResults));
         }
-        if (shouldBlockAnswerGeneration(responseCoverage, retrieval.terminalStatus())) {
+        if (shouldBlockAnswerGeneration(
+                responseCoverage, retrieval.terminalStatus(),
+                pipelineService.supportsCombinedCodePlanning() ? retrieval.followUpPlan() : null)) {
             String answer = insufficientEvidenceAnswer(answerResults, retrieval);
             recordMetrics(questionMode.value(), retrieval, retrievalMs, contextMs, 0, answerResults.size(), 0, 0, true, false, elapsedMs(askStarted));
             return new CodeAskResponse(
@@ -339,7 +342,7 @@ public class CodeRagService {
             finalChatResult = chatResult;
             answer = chatResult.content();
             answerDoneReason = chatResult.doneReason();
-            if (isLengthStop(answerDoneReason)) {
+            if (isLengthStop(answerDoneReason) && CodeRagLlmCallBudget.hasCapacity()) {
                 long continuationStarted = System.nanoTime();
                 LengthContinuation continuation = streamSink == null
                         ? continueLengthLimitedAnswer(systemPrompt, userPrompt, answer, questionMode, answerResults.size())
@@ -354,7 +357,8 @@ public class CodeRagService {
             }
             String qualityReason = qualityFailureReason(answer, answerResults.size(), answerDoneReason);
             answerQualityTrace = AnswerQualityTrace.fromInitial(answer, answerDoneReason, answerResults, qualityReason);
-            if (qualityReason != null && pipelineService.maxIterations() > 1) {
+            if (qualityReason != null && pipelineService.maxIterations() > 1
+                    && CodeRagLlmCallBudget.hasCapacity()) {
                 String retryPrompt = userPrompt
                         + "\n\nPrevious answer failed quality check: " + qualityReason + "."
                         + "\nRewrite the answer using only the cited code context. Cite every factual claim with [n].";
@@ -677,6 +681,7 @@ public class CodeRagService {
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 6 : limit + 4);
         CodeQueryPlan deterministicPlan = codeQueryPlan(question, questionMode);
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        collectEndpointEvidence(repositoryId, selectedSpaceId, spaceIds, question, searchLimit, merged);
         int graphExpansionAdded = expandGraphEvidenceOnce(repositoryId, question, questionMode, limit, merged);
         RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap = questionMapBuilder.build(
                 repositoryId, selectedSpaceId, spaceIds, question, merged.values());
@@ -696,7 +701,7 @@ public class CodeRagService {
                 initialTypedPlan, repositoryMap, Set.of());
         int plannedCandidateCount = collectSearchPlanEvidence(
                 repositoryId, selectedSpaceId, spaceIds, questionMode, searchLimit, searchPlan,
-                initialPlanValidation.valid() ? initialPlanValidation.executableOperations() : List.of(), merged);
+                initialPlanValidation.executableOperations(), merged);
         log.info("Code RAG search plan attempted={} usable={} confidence={} operations={} checklistClaims={} candidatesAdded={} validation={} reason={} question={}",
                 searchPlan.attempted(), searchPlan.usable(), searchPlan.confidence(), searchPlan.queries(),
                 searchPlan.checklist().stream().map(RagPipelineService.CodeEvidenceChecklistItem::claimId).toList(),
@@ -738,7 +743,7 @@ public class CodeRagService {
         List<String> operationObservations = new ArrayList<>();
         LinkedHashSet<String> executedOperations = new LinkedHashSet<>();
         LinkedHashSet<String> iterationQueries = new LinkedHashSet<>();
-        int maxAdditionalIterations = Math.min(2, Math.max(0, pipelineService.codeRetrievalMaxIterations() - 1));
+        int maxAdditionalIterations = Math.min(3, Math.max(0, pipelineService.codeRetrievalMaxIterations() - 1));
         int completedAdditionalIterations = 0;
         int previousMeaningfulEvidenceCount = meaningfulEvidenceCount(results);
         int previousValidatedClaimCount = validatedClaimCount(results);
@@ -759,7 +764,10 @@ public class CodeRagService {
                         "phase=VALIDATE_PLAN status=" + error.code()
                                 + " operationId=" + safe(error.operationId(), "")
                                 + " detail=" + safe(error.detail(), "")));
-                if (contractRepairAttempts++ < 1 && System.nanoTime() < retrievalDeadlineNanos) {
+                if (!planValidation.executableOperations().isEmpty()) {
+                    operationObservations.add("phase=VALIDATE_PLAN status=PARTIAL_EXECUTION validOperations="
+                            + planValidation.executableOperations().size());
+                } else if (contractRepairAttempts++ < 1 && System.nanoTime() < retrievalDeadlineNanos) {
                     operationObservations.add("phase=REPAIR_PLAN status=REQUESTED validation=" + planValidation.code());
                     followUpPlan = enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
                             question,
@@ -773,9 +781,10 @@ public class CodeRagService {
                     ), repositoryMap);
                     results = applyValidatedCoverageSelections(followUpPlan, results, merged);
                     continue;
+                } else {
+                    operationObservations.add("phase=REPAIR_PLAN status=FAILED validation=" + planValidation.code());
+                    break;
                 }
-                operationObservations.add("phase=REPAIR_PLAN status=FAILED validation=" + planValidation.code());
-                break;
             }
             for (RagPipelineService.CodeSearchOperation requestedOperation : planValidation.executableOperations()) {
                 RagPipelineService.CodeSearchOperation operation = resolveOperationOperands(requestedOperation, results);
@@ -824,7 +833,8 @@ public class CodeRagService {
             }
             results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
             assessment = pipelineService.assessCode(question, results, minCodeEvidence(questionMode), iteration);
-            followUpPlan = enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
+            RagPipelineService.CodeEvidenceFollowUpPlan previousPlan = followUpPlan;
+            followUpPlan = preservePlanOnPlanningFailure(previousPlan, enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
                     question,
                     questionMode.value(),
                     results,
@@ -833,7 +843,7 @@ public class CodeRagService {
                     operationObservations,
                     iteration,
                     hypothesisMapContext(repositoryMap, followUpPlan.hypothesis(), followUpPlan.hypothesisVersion())
-            ), repositoryMap);
+            ), repositoryMap));
             results = applyValidatedCoverageSelections(followUpPlan, results, merged);
             queryPlan = new RagPipelineService.QueryPlan(
                     RagPipelineService.Domain.CODE,
@@ -913,6 +923,45 @@ public class CodeRagService {
                 combinedRouteDecision);
     }
 
+    private void collectEndpointEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String question,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        if (codeRepository == null) return;
+        for (String route : CodeEndpointQueryVariants.routes(question)) {
+            for (CodeSearchResult result : codeRepository.findEndpointChunks(
+                    repositoryId, route, limit, spaceIds, selectedSpaceId)) {
+                Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+                metadata.put("deterministicEndpointEvidence", true);
+                metadata.put("evidenceRankReason", "Exact normalized endpoint route from EXPOSES_ENDPOINT graph metadata");
+                merge(merged, boost(withMetadata(result, metadata), 0.45));
+            }
+        }
+    }
+
+    private RagPipelineService.CodeEvidenceFollowUpPlan preservePlanOnPlanningFailure(
+            RagPipelineService.CodeEvidenceFollowUpPlan previous,
+            RagPipelineService.CodeEvidenceFollowUpPlan next
+    ) {
+        if (previous == null || next == null || !next.claimResults().isEmpty()
+                || !next.reason().contains("planner failed")) return next;
+        String termination = next.reason().contains("budget exhausted") ? "BUDGET_EXHAUSTED" : next.terminationRequest();
+        return new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, next.reason(), previous.missingAreas(), List.of(), List.of(),
+                previous.requiredEvidenceGroups(), previous.checklist(), List.of(), previous.coverageSelections(),
+                previous.hypothesis(), previous.hypothesisVersion(), previous.premiseDisposition(),
+                previous.claimResults(), termination);
+    }
+
+    private CodeRagLlmCallBudget.Scope openCodeRagLlmBudget() {
+        int maxCalls = pipelineService.supportsCombinedCodePlanning() ? 6 : Integer.MAX_VALUE;
+        return CodeRagLlmCallBudget.open(maxCalls, 1);
+    }
+
     private RagPipelineService.CodeEvidenceFollowUpPlan enforceDirectClaimProof(
             RagPipelineService.CodeEvidenceFollowUpPlan plan,
             RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
@@ -985,11 +1034,18 @@ public class CodeRagService {
     ) {
         if (plan == null || plan.enough() || plan.operations().isEmpty()) return false;
         Set<String> uncovered = uncoveredEvidenceGroups(plan);
+        Set<String> unresolvedClaims = plan.checklist().stream()
+                .map(RagPipelineService.CodeEvidenceChecklistItem::claimId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        plan.claimResults().stream()
+                .filter(RagPipelineService.CodeClaimResult::terminalWithEvidence)
+                .map(RagPipelineService.CodeClaimResult::claimId)
+                .forEach(unresolvedClaims::remove);
         for (RagPipelineService.CodeSearchOperation requested : plan.operations()) {
             RagPipelineService.CodeSearchOperation operation = resolveOperationOperands(requested, candidates);
             String group = normalizeEvidenceGroupValue(operation.evidenceGroup());
-            if (!group.isBlank() && !"unknown".equals(group)
-                    && uncovered.contains(group)
+            boolean targetsUnresolvedClaim = operation.claimIds().stream().anyMatch(unresolvedClaims::contains);
+            if ((targetsUnresolvedClaim || (!group.isBlank() && !"unknown".equals(group) && uncovered.contains(group)))
                     && operation.validationError().isBlank()
                     && !executedOperations.contains(retrievalOperationKey(operation))) {
                 return true;
@@ -1015,6 +1071,7 @@ public class CodeRagService {
         }
         List<CodeSearchResult> marked = new ArrayList<>(candidates);
         for (RagPipelineService.CodeEvidenceCoverageSelection selection : plan.coverageSelections()) {
+            if (selection.supportedClaims().isEmpty()) continue;
             String group = normalizeEvidenceGroupValue(selection.evidenceGroup());
             if (group.isBlank() || "unknown".equals(group)) {
                 continue;
@@ -1195,9 +1252,14 @@ public class CodeRagService {
 
     static boolean shouldBlockAnswerGeneration(
             CodeEvidenceCoverageGate.Outcome coverage,
-            String terminalStatus
+            String terminalStatus,
+            RagPipelineService.CodeEvidenceFollowUpPlan plan
     ) {
         if (coverage == null || !coverage.answerable()) return true;
+        if (plan != null && plan.attempted() && !plan.checklist().isEmpty() && !plan.claimResults().isEmpty()
+                && plan.claimResults().stream().noneMatch(RagPipelineService.CodeClaimResult::terminalWithEvidence)) {
+            return true;
+        }
         return terminalStatus != null && terminalStatus.startsWith("INVALID_") && !coverage.sufficient();
     }
 
@@ -1593,9 +1655,12 @@ public class CodeRagService {
             int limit,
             Map<UUID, CodeSearchResult> merged
     ) {
-        List<CodeSearchResult> results = collectEvidence(repositoryId, selectedSpaceId, spaceIds, query, questionMode, limit);
-        for (CodeSearchResult result : results) {
-            merge(merged, result);
+        for (String effectiveQuery : CodeEndpointQueryVariants.expand(query)) {
+            List<CodeSearchResult> results = collectEvidence(
+                    repositoryId, selectedSpaceId, spaceIds, effectiveQuery, questionMode, limit);
+            for (CodeSearchResult result : results) {
+                merge(merged, result);
+            }
         }
     }
 
@@ -1663,9 +1728,24 @@ public class CodeRagService {
         Map<String, Object> metadata = new LinkedHashMap<>(marked.metadata() == null ? Map.of() : marked.metadata());
         metadata.put("llmEvidenceCoverageGroup", operation.evidenceGroup());
         metadata.put("llmChecklistGroup", operation.evidenceGroup());
-        metadata.put("llmChecklistGroupRequired", true);
+        if (operationProducesFocusedEvidence(operation, result)) {
+            metadata.put("llmChecklistGroupRequired", true);
+        }
         metadata.put("llmRetrievalIterationEvidence", true);
         return withMetadata(marked, metadata);
+    }
+
+    static boolean operationProducesFocusedEvidence(
+            RagPipelineService.CodeSearchOperation operation,
+            CodeSearchResult result
+    ) {
+        return operation != null && switch (operation.type()) {
+            case "read_symbol" -> result != null && !operation.symbol().isBlank()
+                    && (operation.symbol().equals(result.methodName())
+                    || operation.symbol().equals(result.symbolName()));
+            case "find_endpoint", "read_chunk", "read_file_range", "read_adjacent", "traverse_graph" -> true;
+            default -> false;
+        };
     }
 
     private int expandGraphEvidenceOnce(
@@ -1714,9 +1794,7 @@ public class CodeRagService {
     ) {
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
         int selectionLimit = candidateSlateLimit(limit);
-        List<CodeSearchResult> selected = ranked.stream()
-                .limit(selectionLimit)
-                .toList();
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.select(ranked, selectionLimit);
         selected = ensureMarkedChecklistGroupCoverage(ranked, selected, selectionLimit);
         return selected;
     }
@@ -1788,9 +1866,22 @@ public class CodeRagService {
         boolean claimSelectionsValidated = followUpPlan != null && followUpPlan.enough()
                 && !followUpPlan.coverageSelections().isEmpty()
                 && coverageGate.evaluate(followUpPlan, ranked).sufficient();
-        RagPipelineService.CodeEvidenceAdjudication adjudication = claimSelectionsValidated
+        CodeEvidenceCoverageGate.Outcome rankedCoverage = followUpPlan == null
+                ? null : coverageGate.evaluate(followUpPlan, ranked);
+        boolean hasVerifiedClaims = followUpPlan != null && followUpPlan.claimResults().stream()
+                .anyMatch(RagPipelineService.CodeClaimResult::terminalWithEvidence);
+        boolean v2ClaimDecision = pipelineService.supportsCombinedCodePlanning()
+                && followUpPlan != null && !followUpPlan.claimResults().isEmpty();
+        boolean verifiedSelectionsRetained = rankedCoverage != null && !rankedCoverage.resolvedClaimIds().isEmpty();
+        boolean skipAdjudication = claimSelectionsValidated
+                || (v2ClaimDecision && !hasVerifiedClaims)
+                || verifiedSelectionsRetained;
+        RagPipelineService.CodeEvidenceAdjudication adjudication = skipAdjudication
                 ? new RagPipelineService.CodeEvidenceAdjudication(false, false,
-                        "claim-level coverage selections already validated", ranked)
+                        v2ClaimDecision && !hasVerifiedClaims
+                                ? "no verified claim is available for adjudication"
+                                : "verifier-selected claim evidence is retained",
+                        ranked)
                 : pipelineService.adjudicateCodeEvidence(question, questionMode.value(), ranked, limit, checklist);
         if (adjudication.used()) {
             ranked = adjudication.results();
@@ -2497,8 +2588,11 @@ public class CodeRagService {
     }
 
     private OllamaClient.ChatResult chatWithLimit(String systemPrompt, String userPrompt, int maxOutputTokens) {
+        CodeRagLlmCallBudget.acquireGeneration("answer generation");
         OllamaClient.ChatResult result = ollamaClient.chatResult(systemPrompt, userPrompt, maxOutputTokens);
-        return result == null ? ollamaClient.chatResult(systemPrompt, userPrompt) : result;
+        if (result != null) return result;
+        CodeRagLlmCallBudget.acquireGeneration("answer generation fallback");
+        return ollamaClient.chatResult(systemPrompt, userPrompt);
     }
 
     private LengthContinuation continueLengthLimitedAnswer(
@@ -2663,6 +2757,7 @@ public class CodeRagService {
 
     private OllamaClient.ChatResult stream(String systemPrompt, String userPrompt, CodeAnswerStreamSink streamSink, StringBuilder streamedAnswer, int maxOutputTokens) {
         AtomicReference<OllamaClient.ChatStreamDelta> finalDelta = new AtomicReference<>();
+        CodeRagLlmCallBudget.acquireGeneration("streaming answer generation");
         ollamaClient.streamChat(systemPrompt, userPrompt, maxOutputTokens)
                 .bufferTimeout(256, java.time.Duration.ofMillis(35))
                 .filter(batch -> !batch.isEmpty())
@@ -2791,6 +2886,8 @@ public class CodeRagService {
 
     private boolean isRequiredContextEvidence(CodeSearchResult result) {
         return isRequiredConversationPinned(result)
+                || Boolean.TRUE.equals(metadataBoolean(result, "deterministicEndpointEvidence"))
+                || Boolean.TRUE.equals(metadataBoolean(result, "llmValidatedEvidence"))
                 || Boolean.TRUE.equals(metadataBoolean(result, "llmEvidenceSlateMustUse"))
                 || Boolean.TRUE.equals(metadataBoolean(result, "llmChecklistGroupRequired"));
     }
