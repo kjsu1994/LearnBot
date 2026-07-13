@@ -589,7 +589,7 @@ public class LearnBotProperties {
             private int maxIterations = 2;
 
             @Min(1)
-            private int codeRetrievalMaxIterations = 3;
+            private int codeRetrievalMaxIterations = 6;
 
             @Min(1)
             private int codeRetrievalDeadlineSeconds = 40;

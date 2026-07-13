@@ -1223,6 +1223,112 @@ public class CodeRepository {
                 .addValue("repositoryId", repositoryId), this::mapSearchResult);
     }
 
+    public List<CodeSearchResult> findEndpointChunks(
+            UUID repositoryId,
+            String route,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        String normalizedRoute = normalizeEndpointRoute(route);
+        if (normalizedRoute.isBlank()) return List.of();
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata || jsonb_build_object(
+                           'endpointRoute', COALESCE(n.metadata->>'route', ''),
+                           'httpMethod', COALESCE(n.metadata->>'httpMethod', ''),
+                           'graphRelation', 'EXPOSES_ENDPOINT'
+                       ) AS metadata,
+                       1.35 AS score
+                FROM code_graph_nodes n
+                JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE n.active
+                  AND n.node_type = 'endpoint'
+                  AND lower(COALESCE(n.metadata->>'route', '')) = lower(:route)
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.file_path, c.line_start
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("route", normalizedRoute)
+                .addValue("limit", Math.max(1, Math.min(limit, 50)))
+                .addValue("spaceIds", authorizedSpaceIds(spaceIds))
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
+    public List<CodeSearchResult> listEndpointChunks(
+            UUID repositoryId,
+            int limit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        return jdbc.query("""
+                SELECT c.id AS chunk_id,
+                       c.repository_id,
+                       c.file_id,
+                       r.name AS repository_name,
+                       c.file_path,
+                       c.chunk_type,
+                       c.symbol_name,
+                       c.class_name,
+                       c.method_name,
+                       c.namespace_name,
+                       c.control_name,
+                       c.event_name,
+                       c.chunk_index,
+                       c.line_start,
+                       c.line_end,
+                       c.content,
+                       c.metadata || jsonb_build_object(
+                           'endpointRoute', COALESCE(n.metadata->>'route', ''),
+                           'httpMethod', COALESCE(n.metadata->>'httpMethod', ''),
+                           'graphRelation', 'EXPOSES_ENDPOINT'
+                       ) AS metadata,
+                       0.95 AS score
+                FROM code_graph_nodes n
+                JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE n.active
+                  AND n.node_type = 'endpoint'
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY c.file_path, c.line_start
+                LIMIT :limit
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("limit", Math.max(1, Math.min(limit, 250)))
+                .addValue("spaceIds", authorizedSpaceIds(spaceIds))
+                .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
+    }
+
+    private String normalizeEndpointRoute(String value) {
+        String route = value == null ? "" : value.trim();
+        if (route.isBlank()) return "";
+        int query = route.indexOf('?');
+        if (query >= 0) route = route.substring(0, query);
+        route = route.replace('\\', '/').replaceAll("/+", "/");
+        return route.startsWith("/") ? route : "/" + route;
+    }
+
     public Optional<ActiveCodeIndexIdentity> findActiveIndexIdentity(
             UUID repositoryId,
             List<UUID> spaceIds,

@@ -75,8 +75,12 @@ final class CodeRetrievalPlanValidator {
             RagPipelineService.CodeSearchOperation operation,
             RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
     ) {
-        if (operation == null || !operation.isDirectRead() || !operation.originEvidenceIds().isEmpty()
-                || repositoryMap == null) return operation;
+        if (operation == null || !operation.isDirectRead() || repositoryMap == null) return operation;
+        boolean suppliedOriginsAreValid = !operation.originEvidenceIds().isEmpty()
+                && operation.originEvidenceIds().stream().allMatch(repositoryMap::containsEvidenceId)
+                && (operation.path().isBlank() || operation.originEvidenceIds().stream()
+                .anyMatch(id -> repositoryMap.originSupportsPath(id, operation.path())));
+        if (suppliedOriginsAreValid) return operation;
         String origin = repositoryMap.originEvidenceIdFor(operation);
         if (origin.isBlank()) return operation;
         return new RagPipelineService.CodeSearchOperation(

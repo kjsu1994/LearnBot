@@ -357,7 +357,6 @@ try {
     "--case-delay-ms", "0",
   ], { env: {
     LEARNBOT_TEST_REPOSITORY_ID: "11111111-1111-1111-1111-111111111111",
-    LEARNBOT_TEST_EXPECTED_COMMIT: "0123456789abcdef0123456789abcdef01234567",
     LEARNBOT_TEST_EXPECTED_FINGERPRINT: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     LEARNBOT_TEST_EXPECTED_SOURCE_TYPE: "LOCAL",
   } });
@@ -385,14 +384,13 @@ try {
     "--live-fixtures-report", environmentLiveFixturesPath,
   ], { env: {
     LEARNBOT_TEST_REPOSITORY_ID: "11111111-1111-1111-1111-111111111111",
-    LEARNBOT_TEST_EXPECTED_COMMIT: "ffffffffffffffffffffffffffffffffffffffff",
-    LEARNBOT_TEST_EXPECTED_FINGERPRINT: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    LEARNBOT_TEST_EXPECTED_FINGERPRINT: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     LEARNBOT_TEST_EXPECTED_SOURCE_TYPE: "LOCAL",
   } });
   assert.equal(mismatchedEnvironmentResult.status, 1);
   assert.equal(mismatchedEnvironmentResult.stderr.includes("INVALID_ENVIRONMENT"), true);
-  assert.equal(mismatchedEnvironmentResult.stderr.includes("INDEXED_COMMIT_MISMATCH")
-    || mismatchedEnvironmentResult.stderr.includes("expected ffffffff"), true);
+  assert.equal(mismatchedEnvironmentResult.stderr.includes("CONTENT_FINGERPRINT_MISMATCH")
+    || mismatchedEnvironmentResult.stderr.includes("expected fingerprint ffffffff"), true);
   assert.equal(environmentRepositoryIdSeen, null);
   assert.equal(fs.existsSync(mismatchedEnvironmentReportPath), false);
 

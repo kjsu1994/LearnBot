@@ -299,6 +299,9 @@ public class CodeEvidenceRanker {
         int span = Math.max(1, result.lineEnd() - result.lineStart() + 1);
         boolean concreteSymbol = !safe(result.methodName(), "").isBlank()
                 || !safe(result.symbolName(), "").isBlank();
+        if (concreteSymbol && span <= 3) return 0.04;
+        if (concreteSymbol && span <= 8) return 0.07;
+        if (concreteSymbol && span <= 20) return 0.10;
         if (concreteSymbol && span <= 400) return 0.12;
         if (!concreteSymbol && span > 1500) return -0.35;
         if (!concreteSymbol && span > 500) return -0.20;

@@ -38,6 +38,18 @@ final class CodeEvidenceOperationExecutor {
             GraphSearchIntent graphIntent,
             int limit
     ) {
+        return execute(repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, limit, "");
+    }
+
+    Execution execute(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            RagPipelineService.CodeSearchOperation operation,
+            GraphSearchIntent graphIntent,
+            int limit,
+            String retrievalIntent
+    ) {
         if (operation == null) {
             return Execution.invalid(null, "operation is required");
         }
@@ -48,19 +60,21 @@ final class CodeEvidenceOperationExecutor {
         int safeLimit = Math.max(1, Math.min(limit, MAX_DIRECT_RESULTS));
         try {
             List<CodeSearchResult> results = switch (operation.type()) {
-                case "keyword_search" -> searchService.cheapSearch(
-                        repositoryId, operation.query(), safeLimit, spaceIds, selectedSpaceId);
-                case "hybrid_search" -> searchService.searchWithoutGraph(
-                        repositoryId, operation.query(), safeLimit, spaceIds, selectedSpaceId, graphIntent);
+                case "keyword_search" -> searchVariants(
+                        repositoryId, selectedSpaceId, spaceIds, operation.query(), safeLimit, graphIntent, false, retrievalIntent);
+                case "hybrid_search" -> searchVariants(
+                        repositoryId, selectedSpaceId, spaceIds, operation.query(), safeLimit, graphIntent, true, retrievalIntent);
                 case "reference_search" -> {
                     var references = referenceService.findReferences(
                             repositoryId, selectedSpaceId, spaceIds, operation.query(), safeLimit);
                     yield java.util.stream.Stream.concat(
                             references.definitions().stream(), references.references().stream()).toList();
                 }
+                case "find_endpoint" -> findEndpoint(
+                        repositoryId, selectedSpaceId, spaceIds, operation.query(), safeLimit, graphIntent, retrievalIntent);
                 case "read_chunk" -> readChunk(repositoryId, selectedSpaceId, spaceIds, operation);
                 case "read_symbol" -> readSymbol(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
-                case "list_file_symbols" -> listFileSymbols(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
+                case "list_file_symbols" -> listFileSymbols(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit, retrievalIntent);
                 case "read_file_range" -> readFileRange(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
                 case "read_adjacent" -> readAdjacent(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
                 case "traverse_graph" -> traverseGraph(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
@@ -78,6 +92,71 @@ final class CodeEvidenceOperationExecutor {
         } catch (RuntimeException ex) {
             return new Execution(operation, "FAILED", List.of(), ex.getClass().getSimpleName() + ": " + safeMessage(ex));
         }
+    }
+
+    private List<CodeSearchResult> findEndpoint(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String route,
+            int limit,
+            GraphSearchIntent graphIntent,
+            String retrievalIntent
+    ) {
+        List<CodeSearchResult> exact = repository == null
+                ? List.of()
+                : repository.findEndpointChunks(repositoryId, route, limit, spaceIds, selectedSpaceId);
+        if (!exact.isEmpty()) return exact;
+        List<CodeSearchResult> endpointCandidates = repository == null
+                ? List.of()
+                : CodeEndpointQueryVariants.rankCandidates(
+                        route,
+                        repository.listEndpointChunks(repositoryId, 250, spaceIds, selectedSpaceId),
+                        limit);
+        if (!endpointCandidates.isEmpty()) return endpointCandidates;
+        return searchVariants(repositoryId, selectedSpaceId, spaceIds, route, limit, graphIntent, true, retrievalIntent);
+    }
+
+    private List<CodeSearchResult> searchVariants(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String query,
+            int limit,
+            GraphSearchIntent graphIntent,
+            boolean hybrid,
+            String retrievalIntent
+    ) {
+        LinkedHashMap<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        for (String variant : CodeEndpointQueryVariants.expand(query)) {
+            List<CodeSearchResult> results = hybrid
+                    ? searchService.searchWithoutGraph(repositoryId, variant, limit, spaceIds, selectedSpaceId, graphIntent)
+                    : searchService.cheapSearch(repositoryId, variant, limit, spaceIds, selectedSpaceId);
+            for (CodeSearchResult result : results == null ? List.<CodeSearchResult>of() : results) {
+                if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
+            }
+        }
+        String intent = String.join(" ", safe(retrievalIntent), safe(query)).trim();
+        List<CodeSearchResult> initiallyRanked = CodeLexicalEvidenceSelector.rank(intent, List.copyOf(merged.values()), limit);
+        if (repository != null) {
+            LinkedHashMap<UUID, CodeSearchResult> expanded = new LinkedHashMap<>(merged);
+            for (String path : initiallyRanked.stream()
+                    .filter(result -> result.filePath() != null && !result.filePath().isBlank())
+                    .filter(result -> (result.methodName() == null || result.methodName().isBlank())
+                            && result.lineEnd() - result.lineStart() + 1 >= 80)
+                    .map(CodeSearchResult::filePath)
+                    .distinct()
+                    .limit(3)
+                    .toList()) {
+                List<CodeSearchResult> symbols = repository.listActiveSymbolsByPath(
+                        repositoryId, path, 80, spaceIds, selectedSpaceId);
+                for (CodeSearchResult symbol : CodeLexicalEvidenceSelector.rank(intent, symbols, 8)) {
+                    if (symbol != null && symbol.chunkId() != null) expanded.putIfAbsent(symbol.chunkId(), symbol);
+                }
+            }
+            return CodeLexicalEvidenceSelector.rank(intent, List.copyOf(expanded.values()), limit);
+        }
+        return initiallyRanked;
     }
 
     private List<CodeSearchResult> readChunk(
@@ -225,12 +304,16 @@ final class CodeEvidenceOperationExecutor {
             UUID selectedSpaceId,
             List<UUID> spaceIds,
             RagPipelineService.CodeSearchOperation operation,
-            int limit
+            int limit,
+            String retrievalIntent
     ) {
         requireRepository();
         String path = normalizeRelativePath(operation.path());
-        return repository.listActiveSymbolsByPath(
-                repositoryId, path, Math.max(limit, MAX_DIRECT_RESULTS), spaceIds, selectedSpaceId);
+        List<CodeSearchResult> symbols = repository.listActiveSymbolsByPath(
+                repositoryId, path, 80, spaceIds, selectedSpaceId);
+        String intent = String.join(" ", safe(retrievalIntent), safe(operation.query()),
+                safe(operation.evidenceGroup()), safe(operation.area())).trim();
+        return CodeLexicalEvidenceSelector.rank(intent, symbols, Math.max(limit, MAX_DIRECT_RESULTS));
     }
 
     private List<CodeSearchResult> readAdjacent(
@@ -371,6 +454,10 @@ final class CodeEvidenceOperationExecutor {
                 : ex.getMessage();
     }
 
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
     record Execution(
             RagPipelineService.CodeSearchOperation operation,
             String status,
@@ -409,7 +496,7 @@ final class CodeEvidenceOperationExecutor {
 
         private String operationTarget(RagPipelineService.CodeSearchOperation operation) {
             String target = switch (operation.type()) {
-                case "keyword_search", "hybrid_search", "reference_search" ->
+                case "keyword_search", "hybrid_search", "reference_search", "find_endpoint" ->
                         operand("query", operation.query());
                 case "read_chunk" -> operand("chunkId", operation.chunkId());
                 case "read_symbol" -> joinOperands(

@@ -102,6 +102,24 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void replacesAStaleModelOriginWithCurrentObservedProvenanceForTheSameOperand() {
+        String path = "src/Gateway.java";
+        var map = observedMap(path, "complete");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "implementation", "claim-1", path, "complete", "",
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of("stale:id"));
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).singleElement().satisfies(executable -> {
+            assertThat(executable.originEvidenceIds()).hasSize(1);
+            assertThat(executable.originEvidenceIds()).doesNotContain("stale:id");
+            assertThat(map.containsEvidenceId(executable.originEvidenceIds().get(0))).isTrue();
+        });
+    }
+
+    @Test
     void changesARangeReadWithoutObservedLinesToAnObservedSymbolRead() {
         String path = "src/Gateway.java";
         var map = observedMap(path, "complete");

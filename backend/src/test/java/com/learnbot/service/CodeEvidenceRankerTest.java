@@ -216,6 +216,27 @@ class CodeEvidenceRankerTest {
         assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("build");
     }
 
+    @Test
+    void prefersSubstantiveOverloadBodyOverThinForwarder() {
+        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
+        CodeSearchResult forwarder = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/OllamaClient.java",
+                "method", "chatResult", "OllamaClient", "chatResult", null, null, null, 1,
+                10, 12, "ChatResult chatResult(String prompt) { return chatResult(prompt, PRIMARY); }", 0.8, Map.of());
+        CodeSearchResult implementation = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/OllamaClient.java",
+                "method", "chatResult", "OllamaClient", "chatResult", null, null, null, 2,
+                20, 52, "ChatResult chatResult(...) { for (Candidate candidate : candidates) { try { return call(candidate); } catch (RuntimeException ex) { last = ex; } } throw last; }",
+                0.8, Map.of());
+
+        List<CodeSearchResult> ranked = ranker.rank(
+                "Does chatResult try another candidate after a failure?",
+                CodeRagService.CodeQuestionMode.REASONING,
+                List.of(forwarder, implementation));
+
+        assertThat(ranked).first().extracting(CodeSearchResult::lineStart).isEqualTo(20);
+    }
+
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
         UUID chunkId = UUID.randomUUID();
         return new CodeSearchResult(

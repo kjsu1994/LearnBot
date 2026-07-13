@@ -190,7 +190,7 @@ public class RagPipelineService {
     }
 
     public int codeRetrievalMaxIterations() {
-        return Math.max(1, Math.min(3, pipeline().getCodeRetrievalMaxIterations()));
+        return Math.max(1, Math.min(8, pipeline().getCodeRetrievalMaxIterations()));
     }
 
     public int codeRetrievalDeadlineSeconds() {
@@ -508,7 +508,9 @@ public class RagPipelineService {
         RuntimeException lastFailure = null;
         int maxAttempts = "code evidence adjudication".equals(operation) ? 1 : 2;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
-            int structuredMinimum = operation.startsWith("code evidence") ? 1536 : 1;
+            int structuredMinimum = "code evidence retrieval iteration".equals(operation)
+                    ? 2048
+                    : operation.startsWith("code evidence") ? 1536 : 1;
             int tokenLimit = attempt == 0
                     ? Math.max(structuredMinimum, maxOutputTokens)
                     : Math.min(2048, Math.max(maxOutputTokens + 256, maxOutputTokens * 2));
@@ -566,7 +568,7 @@ public class RagPipelineService {
         } catch (Exception ignored) {
             schemaTokens = estimateStructuredTokens(String.valueOf(schema));
         }
-        int safeContextTokens = Math.max(1536, (int) Math.floor(contextTokens * 0.72));
+        int safeContextTokens = Math.max(1536, (int) Math.floor(contextTokens * 0.85));
         int fixedTokens = estimateStructuredTokens(systemPrompt) + schemaTokens
                 + Math.max(1, outputTokens) + 256;
         int userTokenBudget = Math.max(256, safeContextTokens - fixedTokens);
@@ -1141,6 +1143,11 @@ public class RagPipelineService {
             CodeSearchResult result = candidates.get(index);
             CodeSourceClassifier.SourceProfile profile = CodeSourceClassifier.classify(result);
             StringBuilder candidate = new StringBuilder();
+            boolean directRead = metadataFlag(result, "llmDirectRead")
+                    || metadataFlag(result, "llmReadFulfilled");
+            int candidateExcerptChars = directRead
+                    ? Math.min(1200, Math.max(760, result.content() == null ? 0 : result.content().length()))
+                    : mapProvided ? Math.min(280, previewExcerptChars) : previewExcerptChars;
             candidate.append(index + 1).append(". evidenceId=").append(CodeEvidenceId.from(result))
                     .append(" file=").append(safe(result.filePath()))
                     .append(" chunkId=").append(result.chunkId() == null ? "" : result.chunkId())
@@ -1153,7 +1160,7 @@ public class RagPipelineService {
                     .append(safe(result.symbolName())).append("\n")
                     .append("Excerpt:\n")
                     .append(EvidenceExcerptSelector.select(
-                            question, result, mapProvided ? Math.min(280, previewExcerptChars) : previewExcerptChars).text())
+                            question, result, candidateExcerptChars).text())
                     .append("\n\n");
             if (prompt.length() + candidate.length() > MAX_EVIDENCE_CANDIDATE_CONTEXT_CHARS) {
                 break;
@@ -1164,6 +1171,12 @@ public class RagPipelineService {
         return prompt.toString();
     }
 
+    private boolean metadataFlag(CodeSearchResult result, String key) {
+        if (result == null || result.metadata() == null) return false;
+        Object value = result.metadata().get(key);
+        return value instanceof Boolean flag ? flag : value != null && Boolean.parseBoolean(String.valueOf(value));
+    }
+
     private String codeEvidenceIterationContext(List<String> operationObservations, int iteration) {
         StringBuilder prompt = new StringBuilder("\n\nRetrieval iteration: ")
                 .append(Math.max(1, iteration));
@@ -1171,7 +1184,9 @@ public class RagPipelineService {
                 ? List.of()
                 : operationObservations.stream()
                 .filter(this::notBlank)
-                .map(observation -> trimForPrompt(observation, 240))
+                .map(observation -> trimForPrompt(
+                        observation,
+                        observation.contains("observedSymbols=") ? 900 : 320))
                 .limit(12)
                 .toList();
         if (!observations.isEmpty()) {

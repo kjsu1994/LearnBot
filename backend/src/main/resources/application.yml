@@ -65,7 +65,7 @@ learnbot:
       rewrite-enabled: ${RAG_PIPELINE_REWRITE_ENABLED:true}
       self-check-enabled: ${RAG_PIPELINE_SELF_CHECK_ENABLED:true}
       max-iterations: ${RAG_PIPELINE_MAX_ITERATIONS:2}
-      code-retrieval-max-iterations: ${RAG_PIPELINE_CODE_RETRIEVAL_MAX_ITERATIONS:3}
+      code-retrieval-max-iterations: ${RAG_PIPELINE_CODE_RETRIEVAL_MAX_ITERATIONS:6}
       code-retrieval-deadline-seconds: ${RAG_PIPELINE_CODE_RETRIEVAL_DEADLINE_SECONDS:40}
       rerank-top-n: ${RAG_PIPELINE_RERANK_TOP_N:20}
       document-context-limit: ${RAG_PIPELINE_DOCUMENT_CONTEXT_LIMIT:8}

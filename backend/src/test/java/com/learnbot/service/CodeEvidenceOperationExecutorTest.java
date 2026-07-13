@@ -70,7 +70,7 @@ class CodeEvidenceOperationExecutorTest {
         CodeSearchResult first = result("src/app/Worker.cs", "Start", 20, 40);
         CodeSearchResult second = result("src/app/Worker.cs", "Complete", 42, 70);
         when(repository.listActiveSymbolsByPath(
-                eq(null), eq("src/app/Worker.cs"), eq(24), anyList(), eq(SPACE_ID)))
+                eq(null), eq("src/app/Worker.cs"), eq(80), anyList(), eq(SPACE_ID)))
                 .thenReturn(List.of(first, second));
 
         var operation = new RagPipelineService.CodeSearchOperation(
@@ -80,10 +80,37 @@ class CodeEvidenceOperationExecutorTest {
 
         assertThat(execution.status()).isEqualTo("COMPLETED");
         assertThat(execution.results()).extracting(CodeSearchResult::methodName)
-                .containsExactly("Start", "Complete");
+                .containsExactlyInAnyOrder("Start", "Complete");
         assertThat(execution.results()).allSatisfy(result ->
                 assertThat(result.metadata()).containsEntry("llmReadOperation", "list_file_symbols"));
         assertThat(execution.observation()).contains("target={path=src/app/Worker.cs}");
+    }
+
+    @Test
+    void listFileSymbolsRanksTheWholeBoundedInventoryAgainstThePlannerClaim() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
+        java.util.ArrayList<CodeSearchResult> symbols = new java.util.ArrayList<>();
+        for (int index = 0; index < 30; index++) {
+            symbols.add(result("src/app/Worker.java", "unrelatedStep" + index, 10 + index * 3, 12 + index * 3));
+        }
+        CodeSearchResult claim = result("src/app/Worker.java", "claimNext", 400, 430);
+        symbols.add(claim);
+        when(repository.listActiveSymbolsByPath(
+                eq(null), eq("src/app/Worker.java"), eq(80), anyList(), eq(SPACE_ID)))
+                .thenReturn(symbols);
+
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "list_file_symbols", "", "queued request", "queue_claim",
+                "src/app/Worker.java", "", "", null, null, null);
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8,
+                "Trace how an agent claims the next queued request");
+
+        assertThat(execution.results()).extracting(CodeSearchResult::methodName)
+                .contains("claimNext");
+        assertThat(execution.results().get(0).methodName()).isEqualTo("claimNext");
     }
 
     @Test
@@ -165,6 +192,57 @@ class CodeEvidenceOperationExecutorTest {
         assertThat(execution.status()).isEqualTo("INVALID");
         assertThat(execution.reason()).isEqualTo("chunkId is required");
         assertThat(execution.observation()).contains("status=INVALID").contains("chunkId is required");
+    }
+
+    @Test
+    void findEndpointUsesCommonEndpointGraphMetadataBeforeTextFallback() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                searchService, repository, mock(CodeReferenceService.class));
+        CodeSearchResult endpoint = result("src/app/Api.java", "ask", 20, 35);
+        when(repository.findEndpointChunks(
+                eq(null), eq("/api/code/ask"), eq(8), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(endpoint));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "find_endpoint", "/api/code/ask", "request entry", "request_entry");
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
+
+        assertThat(execution.status()).isEqualTo("COMPLETED");
+        assertThat(execution.results()).extracting(CodeSearchResult::methodName).containsExactly("ask");
+        verify(searchService, never()).searchWithoutGraph(
+                eq(null), eq("/api/code/ask"), anyInt(), anyList(), eq(SPACE_ID), eq(GraphSearchIntent.FLOW));
+    }
+
+    @Test
+    void findEndpointRanksEndpointInventoryBeforeUnstructuredTextFallback() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                searchService, repository, mock(CodeReferenceService.class));
+        CodeSearchResult generic = endpointResult(
+                "src/web/RagController.java", "RagController", "/api/rag/ask",
+                "return ragService.ask(question);");
+        CodeSearchResult code = endpointResult(
+                "src/web/CodeController.java", "CodeController", "/api/code/ask",
+                "return codeRagService.askConversational(question);");
+        String query = "Code RAG ask API controller and service call";
+        when(repository.findEndpointChunks(eq(null), eq(query), eq(8), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of());
+        when(repository.listEndpointChunks(eq(null), eq(250), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(generic, code));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "find_endpoint", query, "request entry", "request_entry");
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
+
+        assertThat(execution.results()).extracting(CodeSearchResult::filePath)
+                .startsWith("src/web/CodeController.java");
+        verify(searchService, never()).searchWithoutGraph(
+                eq(null), eq(query), anyInt(), anyList(), eq(SPACE_ID), eq(GraphSearchIntent.FLOW));
     }
 
     @Test
@@ -264,5 +342,16 @@ class CodeEvidenceOperationExecutorTest {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", path,
                 "method", method, "Worker", method, "app", null, null, 1,
                 start, end, "void " + method + "() {}", 0.8, Map.of("language", "java"));
+    }
+
+    private CodeSearchResult endpointResult(
+            String path, String className, String route, String content
+    ) {
+        CodeSearchResult base = result(path, "ask", 10, 30);
+        return new CodeSearchResult(
+                base.chunkId(), base.repositoryId(), base.fileId(), base.repositoryName(), base.filePath(),
+                base.chunkType(), base.symbolName(), className, base.methodName(), base.namespaceName(),
+                base.controlName(), base.eventName(), base.chunkIndex(), base.lineStart(), base.lineEnd(),
+                content, base.score(), Map.of("endpointRoute", route));
     }
 }

@@ -35,8 +35,9 @@ final class CodeEvidenceCoverageGate {
                 continue;
             }
             Map<String, Object> metadata = result.metadata() == null ? Map.of() : result.metadata();
-            addGroup(coveredGroups, metadata.get("llmValidatedEvidenceGroup"));
-            if (metadata.containsKey("llmValidatedEvidenceGroup")) {
+            boolean explicitlyValidated = Boolean.TRUE.equals(metadata.get("llmValidatedEvidence"));
+            if (explicitlyValidated) {
+                addGroup(coveredGroups, metadata.get("llmValidatedEvidenceGroup"));
                 if (!hasSupportedClaim(metadata)) {
                     return new Outcome(Decision.DENY,
                             List.of("validated evidence has no directly supported claim"), requiredGroups, List.of());

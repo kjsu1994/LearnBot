@@ -23,6 +23,15 @@ import static org.mockito.Mockito.when;
 
 class RagPipelineServiceTest {
     @Test
+    void codeRetrievalIterationsAllowBoundedMultiHopNavigation() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setCodeRetrievalMaxIterations(6);
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), properties);
+
+        assertThat(service.codeRetrievalMaxIterations()).isEqualTo(6);
+    }
+
+    @Test
     void queryRewriteFallsBackToDeterministicQueriesWhenModelReturnsInvalidJson() {
         OllamaClient ollamaClient = mock(OllamaClient.class);
         RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
@@ -626,7 +635,10 @@ class RagPipelineServiceTest {
         assertThat(plan.usable()).isTrue();
         assertThat(plan.checklist()).hasSize(2);
         assertThat(plan.checklist().get(0).claimId()).isEqualTo("claim-1");
-        assertThat(plan.checklist().get(1).evidenceGroup()).isEqualTo("claim-2");
+        assertThat(plan.checklist().get(0).evidenceGroup()).isEqualTo("request_entrypoint");
+        assertThat(plan.checklist().get(1).evidenceGroup()).isEqualTo("graph_expansion");
+        assertThat(plan.operations()).extracting(RagPipelineService.CodeSearchOperation::evidenceGroup)
+                .containsExactly("request_entrypoint", "graph_expansion");
         assertThat(plan.checklist().get(1).queries()).containsExactly("CodeSearchService expandGraph graphRelatedChunks");
         ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient, times(1)).chatResult(
@@ -803,7 +815,7 @@ class RagPipelineServiceTest {
                 "How does a worker claim work and persist its response?", "flow", repositoryMap, 4);
 
         assertThat(plan.checklist()).extracting(RagPipelineService.CodeEvidenceChecklistItem::evidenceGroup)
-                .containsExactly("claim-1", "claim-2");
+                .containsExactly("claim", "complete");
         assertThat(plan.hypothesis()).contains("distributed");
         assertThat(plan.hypothesisVersion()).isEqualTo(1);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -875,9 +887,51 @@ class RagPipelineServiceTest {
 
         assertThat(bounded)
                 .startsWith("HEAD_QUESTION")
-                .contains("[CONTEXT_MIDDLE_OMITTED_TO_FIT_TOKEN_BUDGET]")
+                .contains("[CONTEXT_RECORDS_OMITTED_TO_FIT_TOKEN_BUDGET]")
                 .endsWith("TAIL_LATEST_OBSERVATION");
         assertThat(bounded.length()).isLessThan(oversized.length());
+    }
+
+    @Test
+    void structuredPromptBudgetKeepsEvidenceHeaderSymbolsAndExcerptAtomic() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getOllama().setContextWindow(4096);
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), properties);
+        String evidence = "7. evidenceId=index:chunk:10-40 file=src/Service.java lines=10-40\n"
+                + "Symbols: Service execute\n"
+                + "Excerpt:\n"
+                + "DIRECT_IMPLEMENTATION_BODY calls search expand rank generate\n\n";
+        String oversized = "Question:\ntrace the flow\n" + "noise-line\n".repeat(4_000)
+                + evidence + "TAIL_LATEST_OBSERVATION";
+
+        String bounded = service.boundedStructuredUserPrompt(
+                "code evidence retrieval iteration", "system", oversized, 512,
+                Map.of("type", "object", "properties", Map.of("enough", Map.of("type", "boolean"))));
+
+        assertThat(bounded)
+                .contains("evidenceId=index:chunk:10-40")
+                .contains("Symbols: Service execute")
+                .contains("DIRECT_IMPLEMENTATION_BODY calls search expand rank generate");
+    }
+
+    @Test
+    void operationClaimIdsCoverStableChecklistGroupWhenModelUsesSemanticGroupAlias() {
+        OllamaClient ollamaClient = mock(OllamaClient.class);
+        RagPipelineService service = new RagPipelineService(ollamaClient, new LearnBotProperties());
+        when(ollamaClient.chatResult(anyString(), anyString(), eq(OllamaClient.ChatRole.AUXILIARY),
+                anyInt(), any(Duration.class), any())).thenReturn(new OllamaClient.ChatResult("""
+                {"enough":false,"hypothesis":"entry remains unresolved","hypothesisVersion":2,"premiseDisposition":"UNRESOLVED","terminationRequest":"NONE","requiredEvidenceGroups":["controller_entry_point"],"claimResults":[{"claimId":"claim-1","status":"UNRESOLVED","evidenceIds":[],"supportedClaim":"","limitations":[]}],"operations":[{"type":"find_endpoint","query":"/api/items","evidenceGroup":"entry_point","operationId":"find-entry","claimIds":["claim-1"],"originEvidenceIds":[]}],"reason":"retrieve endpoint"}
+                """, "stop", true, 100, 80, "http://ollama", "test", "auxiliary", false));
+        var checklist = List.of(new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "request_entry", "prove request entry", List.of("/api/items")));
+
+        var plan = service.planCodeEvidenceFollowUp(
+                "How does /api/items enter?", "flow", List.of(followUpCandidate(UUID.randomUUID())), 2, checklist);
+
+        assertThat(plan.operations()).singleElement().satisfies(operation ->
+                assertThat(operation.claimIds()).containsExactly("claim-1"));
+        assertThat(plan.requiredEvidenceGroups()).containsExactly("request_entry");
+        assertThat(plan.reason()).doesNotContain("no executable operation");
     }
 
     private CodeSearchResult followUpCandidate(UUID chunkId) {

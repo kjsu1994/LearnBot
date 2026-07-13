@@ -59,6 +59,33 @@ class CodeRagServiceTest {
         assertThat(CodeRagService.retrievalOperationKey(first))
                 .isNotEqualTo(CodeRagService.retrievalOperationKey(differentTraversal));
     }
+
+    @Test
+    void retrievalOperationIdentityIgnoresIrrelevantModelDefaultsForFileNavigation() {
+        RagPipelineService.CodeSearchOperation first = new RagPipelineService.CodeSearchOperation(
+                "list_file_symbols", "", "navigation", "create_flow", "src/Service.java", "", "",
+                null, null, null, List.of(), "BOTH", null, "list-1", List.of("claim-1"), List.of());
+        RagPipelineService.CodeSearchOperation repeatedWithIrrelevantDefaults = new RagPipelineService.CodeSearchOperation(
+                "list_file_symbols", "ignored query", "other area", "delete_flow", "src/Service.java", "ignored", "ignored",
+                1, 1, 3, List.of("CALLS"), "FORWARD", 2, "list-2", List.of("claim-2"), List.of());
+
+        assertThat(CodeRagService.retrievalOperationKey(first))
+                .isEqualTo(CodeRagService.retrievalOperationKey(repeatedWithIrrelevantDefaults));
+    }
+
+    @Test
+    void symbolInventoryObservationExposesNavigationHandlesForTheNextPlannerStep() {
+        RagPipelineService.CodeSearchOperation operation = new RagPipelineService.CodeSearchOperation(
+                "list_file_symbols", "", "navigation", "storage", "src/Repository.java", "", "",
+                null, null, null, List.of(), "BOTH", null, "list", List.of("claim-1"), List.of());
+        CodeSearchResult create = result("src/Repository.java", "method", "create", 0.8, "void create() {}");
+        CodeSearchResult softDelete = result("src/Repository.java", "method", "softDelete", 0.8, "void softDelete() {}");
+
+        assertThat(CodeRagService.operationResultHandles(operation, List.of(create, softDelete)))
+                .contains("observedSymbols=")
+                .contains("create")
+                .contains("softDelete");
+    }
     @Test
     void commitQuestionsUseModelRouteInsteadOfServerRegexBypass() {
         CodeSearchService searchService = mock(CodeSearchService.class);

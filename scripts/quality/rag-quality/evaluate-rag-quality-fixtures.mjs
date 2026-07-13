@@ -495,19 +495,21 @@ async function validateLiveCodeEnvironment(fixtureDocument) {
     const commitResolution = resolveEnvironmentPlaceholders(version?.expectedCommitSha);
     const fingerprintResolution = resolveEnvironmentPlaceholders(version?.expectedContentFingerprint);
     const sourceTypeResolution = resolveEnvironmentPlaceholders(version?.expectedSourceType);
-    if (idResolution.missing.length || commitResolution.missing.length || fingerprintResolution.missing.length || sourceTypeResolution.missing.length) {
+    const expectedSourceType = String(sourceTypeResolution.value ?? "").trim().toUpperCase();
+    const commitMissing = expectedSourceType === "GIT" ? commitResolution.missing : [];
+    if (idResolution.missing.length || commitMissing.length || fingerprintResolution.missing.length || sourceTypeResolution.missing.length) {
       issues.push({
         code: "VERSION_ENV_REQUIRED",
         language,
-        message: `${language}: missing ${[...idResolution.missing, ...commitResolution.missing, ...fingerprintResolution.missing, ...sourceTypeResolution.missing].join(", ")}`,
+        message: `${language}: missing ${[...idResolution.missing, ...commitMissing, ...fingerprintResolution.missing, ...sourceTypeResolution.missing].join(", ")}`,
       });
       continue;
     }
     const expectedCommitSha = normalizeCommit(commitResolution.value);
     const expectedContentFingerprint = normalizeCommit(fingerprintResolution.value);
-    const expectedSourceType = String(sourceTypeResolution.value ?? "").trim().toUpperCase();
-    if (!idResolution.value || !expectedCommitSha || !expectedContentFingerprint || !expectedSourceType) {
-      issues.push({ code: "VERSION_VALUE_REQUIRED", language, message: `${language}: repositoryId, expectedCommitSha, expectedContentFingerprint, and expectedSourceType are required` });
+    const commitRequired = expectedSourceType === "GIT";
+    if (!idResolution.value || (commitRequired && !expectedCommitSha) || !expectedContentFingerprint || !expectedSourceType) {
+      issues.push({ code: "VERSION_VALUE_REQUIRED", language, message: `${language}: repositoryId, expectedContentFingerprint, expectedSourceType, and a GIT expectedCommitSha are required` });
       continue;
     }
     const repository = (Array.isArray(repositories) ? repositories : []).find((item) => String(item?.id) === idResolution.value);
@@ -518,7 +520,7 @@ async function validateLiveCodeEnvironment(fixtureDocument) {
     const indexedCommitSha = normalizeCommit(repository.lastIndexedCommit ?? repository.sourceHash);
     const indexedContentFingerprint = normalizeCommit(repository.contentFingerprint);
     const indexedSourceType = String(repository.sourceType ?? "").trim().toUpperCase();
-    if (!indexedCommitSha || !commitsMatch(indexedCommitSha, expectedCommitSha)) {
+    if (commitRequired && (!indexedCommitSha || !commitsMatch(indexedCommitSha, expectedCommitSha))) {
       issues.push({
         code: "INDEXED_COMMIT_MISMATCH",
         language,

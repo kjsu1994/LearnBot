@@ -86,7 +86,9 @@ class CodeEvidenceCoverageGateTest {
         CodeSearchResult evidence = new CodeSearchResult(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Graph.java",
                 "method", "build", "Graph", "build", "app", null, null, 1,
-                1, 20, "void build() {}", 0.8, Map.of("llmValidatedEvidenceGroup", "graph_failure"));
+                1, 20, "void build() {}", 0.8, Map.of(
+                        "llmValidatedEvidence", true,
+                        "llmValidatedEvidenceGroup", "graph_failure"));
 
         var outcome = gate.evaluate(plan, List.of(evidence));
 
@@ -114,6 +116,7 @@ class CodeEvidenceCoverageGateTest {
                 "method", "work", "Worker", "work", "app", null, null, 1,
                 1, 20, "void work() {}", 0.8, Map.of(
                         "llmValidatedEvidenceGroup", "queue_claim",
+                        "llmValidatedEvidence", true,
                         "llmSupportedClaims", List.of("work is directly implemented")));
 
         var outcome = gate.evaluate(plan, List.of(evidence));
@@ -210,6 +213,20 @@ class CodeEvidenceCoverageGateTest {
         assertThat(outcome.answerable()).isTrue();
     }
 
+    @Test
+    void ignoresAProvisionalGroupThatWasNeverExplicitlyValidated() {
+        var plan = plan(true, List.of(), List.of("graph_failure"));
+        CodeSearchResult provisional = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Graph.java",
+                "method", "build", "Graph", "build", "app", null, null, 1,
+                1, 20, "void build() {}", 0.8, Map.of("llmValidatedEvidenceGroup", "graph_failure"));
+
+        var outcome = gate.evaluate(plan, List.of(provisional));
+
+        assertThat(outcome.decision()).isEqualTo(CodeEvidenceCoverageGate.Decision.DISCOVERY);
+        assertThat(outcome.missingReasons()).containsExactly("required behavior is not yet verified");
+    }
+
     private RagPipelineService.CodeEvidenceFollowUpPlan plan(
             boolean enough,
             List<String> missing,
@@ -229,6 +246,7 @@ class CodeEvidenceCoverageGateTest {
                 "method", "work", "Worker", "work", "app", null, null, 1,
                 1, 20, "void work() {}", 0.8, Map.of(
                         "llmValidatedEvidenceGroup", group,
+                        "llmValidatedEvidence", true,
                         "llmSupportedClaims", List.of("work is directly implemented"),
                         "indexVersion", "index-current"));
     }
@@ -239,6 +257,7 @@ class CodeEvidenceCoverageGateTest {
                 "method", "work", "Worker", "work", "app", null, null, 1,
                 1, 20, "void work() {}", 0.8, Map.of(
                         "llmValidatedEvidenceGroup", group,
+                        "llmValidatedEvidence", true,
                         "llmSupportedClaims", List.of("direct claim for " + group),
                         "indexVersion", indexVersion));
     }
