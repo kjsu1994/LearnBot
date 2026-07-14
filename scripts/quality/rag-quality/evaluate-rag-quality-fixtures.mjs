@@ -22,6 +22,8 @@ const server = readArg("--server", "http://localhost:8083").replace(/\/+$/, "");
 const liveFixturesPath = path.resolve(
   readArg("--live-fixtures-report", path.join(root, ".tmp", "quality", `rag-live-fixtures-${timestamp()}.json`)),
 );
+assertCleanOutputPath("--report", reportPath);
+assertCleanOutputPath("--live-fixtures-report", liveFixturesPath);
 const requestTimeoutMs = Number(readArg("--timeout-ms", "30000"));
 const parsedCaseDelayMs = Number(readArg("--case-delay-ms", "0"));
 const caseDelayMs = Number.isFinite(parsedCaseDelayMs) && parsedCaseDelayMs > 0
@@ -29,9 +31,22 @@ const caseDelayMs = Number.isFinite(parsedCaseDelayMs) && parsedCaseDelayMs > 0
   : 0;
 const loginId = readArg("--login-id", process.env.LEARNBOT_QUALITY_LOGIN_ID ?? "");
 const password = readArg("--password", process.env.LEARNBOT_QUALITY_PASSWORD ?? "");
+const selectedCaseIdsFile = readArg("--case-ids-file", "").trim();
 const selectedCaseIds = new Set(
   readArg("--case-ids", "").split(",").map((value) => value.trim()).filter(Boolean),
 );
+if (selectedCaseIdsFile && selectedCaseIds.size > 0) {
+  throw new Error("--case-ids-file and --case-ids cannot be used together");
+}
+if (selectedCaseIdsFile) {
+  const resolvedCaseIdsFile = path.resolve(selectedCaseIdsFile);
+  assertCleanOutputPath("--case-ids-file", resolvedCaseIdsFile);
+  fs.readFileSync(resolvedCaseIdsFile, "utf8")
+    .split(/[\r\n,]+/)
+    .map((value) => value.trim())
+    .filter((value) => value && !value.startsWith("#"))
+    .forEach((caseId) => selectedCaseIds.add(caseId));
+}
 const DEFAULT_INSUFFICIENT_ANSWER_TERMS = [
   "답변에 필요한 코드 근거를 충분히 확인하지 못했습니다",
   "코드 근거가 부족",
@@ -39,11 +54,21 @@ const DEFAULT_INSUFFICIENT_ANSWER_TERMS = [
   "insufficient evidence",
   "not found",
   "cannot find",
+  "does not exist",
+  "존재하지 않",
+  "확인되지 않",
+  "찾을 수 없",
 ];
 let authCookie = "";
 
 function timestamp() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+}
+
+function assertCleanOutputPath(argumentName, outputPath) {
+  if (/[\u0000-\u001f]/.test(String(outputPath ?? ""))) {
+    throw new Error(`${argumentName} contains a control character or line break; pass the path as one shell argument`);
+  }
 }
 
 function normalize(value) {
@@ -352,6 +377,7 @@ const finishedAt = new Date();
 const report = {
   schema: "learnbot.quality.rag-score.v1",
   fixturesPath,
+  selectedCaseIdsFile: selectedCaseIdsFile ? path.resolve(selectedCaseIdsFile) : null,
   liveMode,
   server: liveMode ? server : null,
   startedAt: startedAt.toISOString(),

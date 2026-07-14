@@ -70,4 +70,73 @@ class JavaSemanticGraphAnalyzerTest {
             assertThat(edge.targetKey()).contains("Worker#count");
         });
     }
+
+    @Test
+    void resolvesCrossFileCallsInModernJavaSource() throws Exception {
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("ItemStore.java"), """
+                package example;
+
+                interface ItemStore {
+                    Item load(String id);
+                }
+
+                record Item(String id) {}
+                """);
+        Files.writeString(sourceRoot.resolve("ItemCoordinator.java"), """
+                package example;
+
+                class ItemCoordinator {
+                    private final ItemStore store;
+
+                    ItemCoordinator(ItemStore store) {
+                        this.store = store;
+                    }
+
+                    Item execute(String id, int mode) {
+                        String selected = switch (mode) {
+                            case 1 -> id.trim();
+                            default -> id;
+                        };
+                        return store.load(selected);
+                    }
+                }
+                """);
+
+        CodeGraphAnalysisResult result = new JavaSemanticGraphAnalyzer()
+                .analyzeWithDiagnostics(repositoryRoot, List.of());
+
+        assertThat(result.diagnostic().failedFiles()).isZero();
+        assertThat(result.diagnostic().metadata())
+                .containsKey("languageLevel");
+        assertThat(result.graph().edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("CALLS");
+            assertThat(edge.sourceKey()).contains("ItemCoordinator.execute");
+            assertThat(edge.targetKey()).contains("ItemStore.load");
+        });
+    }
+
+    @Test
+    void reportsUnresolvedCallsAsPartialAnalysis() throws Exception {
+        Path source = repositoryRoot.resolve("src/main/java/example/IncompleteWorker.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, """
+                package example;
+
+                class IncompleteWorker {
+                    void run() {
+                        unavailableDependency();
+                    }
+                }
+                """);
+
+        CodeGraphAnalysisResult result = new JavaSemanticGraphAnalyzer()
+                .analyzeWithDiagnostics(repositoryRoot, List.of());
+
+        assertThat(result.diagnostic().status()).isEqualTo("PARTIAL");
+        assertThat(result.diagnostic().unresolvedRelations()).isEqualTo(1);
+        assertThat(result.diagnostic().metadata())
+                .containsEntry("unresolvedMethodCalls", 1);
+    }
 }

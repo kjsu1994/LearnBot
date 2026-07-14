@@ -206,61 +206,58 @@ LEARNBOT_CODE_GRAPH_DEPENDENCY_TIMEOUT_SECONDS=120
 
 Code GraphRAG evidence ranking is deterministic and enabled by default. It combines hybrid search score, query term matches, graph path score, relationship type, graph depth, question intent, structured code evidence, and diversity penalties into `evidenceScore` metadata while preserving the original search `score`.
 
-Roslyn `AUTO` mode selects `SAFE_SOLUTION`, `SAFE_PROJECT`, or `SIMPLE` from repository contents. `SAFE_*` modes parse project and solution descriptors statically; MSBuild targets, source generators, and repository code are never executed. Legacy `PROJECT` and `SOLUTION` config values are accepted as aliases for `SAFE_PROJECT` and `SAFE_SOLUTION`. A future `MSBUILD_WORKSPACE` mode must run only in an explicitly enabled isolated worker with network, time, and memory limits. Java dependency resolution also parses Maven/Gradle declarations without running the build. It uses the persistent `.dependency-cache` under the code workspace and only downloads release artifacts from configured HTTPS repository allow lists.
+Roslyn `AUTO` mode selects `SAFE_SOLUTION`, `SAFE_PROJECT`, or `SIMPLE` from repository contents. `SAFE_PROJECT` and `SAFE_SOLUTION` load project metadata through the bundled Roslyn `MSBuildWorkspace` and fall back to the bounded simple parser when workspace loading fails. Legacy `PROJECT` and `SOLUTION` config values are accepted as aliases for `SAFE_PROJECT` and `SAFE_SOLUTION`. Repository build commands and source generators are not launched as a separate build step by LearnBot. Java dependency resolution parses Maven/Gradle declarations without running the repository build, uses the persistent `.dependency-cache` under the code workspace, and only downloads release artifacts from configured HTTPS repository allow lists.
 
 The optional LLM stage runs as a durable post-index enrichment job after the deterministic graph is active. Pending work survives restarts, retries up to three times, and is skipped when a newer index replaces it. It only accepts known graph node keys and approved relationship types, and records output with lower confidence. If JavaParser, dependency resolution, Roslyn, the LLM, or graph retrieval fails, indexing/search continues with the available deterministic graph or the existing keyword/vector search.
 
-Each indexing job records `SUCCESS`, `PARTIAL`, `FAILED`, or `SKIPPED` diagnostics for the base graph, Java classpath, Java semantic analysis, Roslyn, and LLM enrichment. The Code workspace exposes these under **遺꾩꽍 吏꾨떒**. They are also available from:
+Each indexing job records `SUCCESS`, `PARTIAL`, `FAILED`, or `SKIPPED` diagnostics for the base graph, Java classpath, Java semantic analysis, Roslyn, and LLM enrichment. The Code workspace exposes these under **분석 진단**. They are also available from:
 
 ```text
 GET /api/code/repositories/{repositoryId}/jobs/{jobId}/diagnostics
 ```
 
-Existing active indexes remain readable after an upgrade. Reindex each repository to create qualified signature nodes, expanded relationships, and multi-hop paths using the new analyzers. A failed reindex does not replace the previous active index.
+Existing active indexes remain readable after an upgrade. Reindex a repository when its analyzer version or index schema version is older than the version required by the current image; this creates qualified signature nodes, expanded relationships, authority metadata, and multi-hop paths using the current analyzers. A failed reindex does not replace the previous active index.
 
 The backend deployment image includes both Java 17 and the .NET 8 runtime required by Roslyn. Build deployment images with the GPU Compose overlay shown in the Run section; GPU access is assigned to Ollama, while source analysis remains CPU-based.
 
 ### Code RAG retrieval flow and regression checklist
 
-Current Code RAG retrieval is hybrid: the server first runs a narrow seed search for the user's original question, then the LLM planner adds focused search directions and an evidence checklist. Deterministic server fallback remains bounded and is used only when the LLM plan is unusable, low-confidence, or too small.
+Current Code RAG retrieval is hybrid and iterative. The server performs bounded seed and endpoint retrieval, builds a versioned repository map, and asks the LLM planner for atomic claims and typed evidence operations. The server validates and executes only observed operands, expands indexed graph relations, ranks and diversifies candidates, and mechanically checks that required claim evidence remains in the final prompt. No production rule contains a benchmark question, repository name, target file, or expected answer.
 
 ```text
 POST /api/code/ask
 -> CodeController.ask
--> CodeRagService.ask / askConversational / askStreaming
+   - resolves access scope and optional conversation context
+-> CodeRagService.ask / askConversational
 -> CodeRagService.askPrioritized
--> RagPipelineService.routeCodeRagIntent
--> CodeRagService.collectEvidenceForQuery
-   - seed search for the user's original question
--> RagPipelineService.planCodeEvidenceSearch
-   - uses indexed repo-map/project-context chunks when available
-   - returns search queries plus an evidence checklist
--> CodeRagService.collectSearchPlanEvidence
-   - runs LLM plan queries and checklist queries with cheap keyword/symbol search
--> server fallback search only when the LLM plan is unusable, low-confidence, or too small
-   - literal/conversation/deterministic/overview fallback queries
--> CodeRagService.expandGraphEvidenceOnce
-   - runs graph expansion once over the merged high-ranked evidence
--> CodeEvidenceRanker.rank
-   - deterministic candidate ordering prior
--> RagPipelineService.planCodeEvidenceFollowUp
-   - checks whether each evidence checklist item is covered
--> CodeRagService.collectFollowUpEvidenceForQuery
-   - bounded follow-up search using cheap keyword/symbol search before heavier fallbacks
--> RagPipelineService.adjudicateCodeEvidence
-   - LLM selects final evidence from the candidate slate
-   - receives the same evidence checklist
+-> CodeRagService.retrieveCodeEvidence
+   -> CodeSearchService / CodeRepository seed, endpoint, lexical, and reference retrieval
+   -> CodeRagService.expandGraphEvidenceOnce
+      -> CodeSearchService.expandGraph
+      -> CodeRepository.graphRelatedChunks
+   -> RepositoryQuestionMapBuilder
+   -> RagPipelineService.planCodeEvidenceSearch
+      - combined planning returns route, atomic claims, and typed operations
+   -> CodeEvidenceOperationExecutor
+      - validates claim/origin/operand provenance and executes bounded reads/search/traversal
+   -> CodeEvidenceRanker.rank
+   -> CodeEvidenceSelectionPolicy and CodeEvidenceFileDiversity
+   -> RagPipelineService.planCodeEvidenceFollowUp / planCodeEvidenceIteration
+      - unresolved claims can request another bounded operation round
 -> CodeRagService.buildBudgetedContext
+-> CodeEvidenceCoverageGate
+   - verifies evidence identity, direct proof, and final-context retention
 -> CodeRagService.chatWithLimit
 -> OllamaClient.chatResult
+-> answer quality validation, bounded repair, or evidence-fidelity fallback
 -> CodeAskResponse
 ```
 
-The route query must not replace the user's original question. It is appended as retrieval hints so phase words such as `search`, `graph expansion`, `evidence ranking`, and `answer generation` stay visible to planning and answer generation.
+When combined planning is available, routing is returned by the initial repository planner instead of consuming a standalone route-model call. The original user question remains the answer question; an effective conversational question and route hints are retrieval context only.
 
-The evidence checklist is intentionally generic. It is generated by the LLM from the user's question and may include groups such as `request_intake`, `orchestration`, `graph_traversal`, `evidence_ranking`, `answer_context`, `answer_generation`, `graph_persistence`, `framework_semantics`, and `persistence_update`. The server executes the plan, ranks candidates, enforces bounded fallback, and preserves the checklist through follow-up and adjudication; it should not hard-code one-off answers for specific questions.
+The evidence checklist and atomic claims are intentionally generic. They are generated from the user's question, while the server supplies stable claim IDs, validates operation provenance, executes bounded retrieval, and applies a mechanical coverage gate. Exact endpoint matches, lexical symbols, observed calls/types, implementation completeness, graph authority, and file diversity are generic ranking signals rather than project-specific answer rules.
 
-The LLM is the planner and evidence judge; the server is the bounded executor. Planner and adjudication prompts should distinguish coordinator/orchestrator evidence from concrete callee evidence when possible. A central service method can prove orchestration, but search, graph traversal, ranking, persistence, transaction, answer-context, and model-call claims are stronger when supported by the method/repository/client that performs that phase. If only an orchestrator is present and a concrete phase claim matters, follow-up should ask for the concrete implementation rather than treating the orchestrator as proof for every phase. This is a preference, not a hard rejection rule: an orchestrator can still be useful evidence when its excerpt directly shows the relevant behavior or no better concrete candidate is available.
+The LLM is the semantic planner and claim verifier; the server is the bounded executor and provenance gate. A central service method can prove orchestration, but a concrete search, graph traversal, ranking, persistence, transaction, answer-context, or model-call claim should use the implementation that performs that phase. In combined planning, verifier-selected evidence can be used directly; legacy or incomplete selections may still use a bounded adjudication path.
 
 Use these questions after backend rebuild/restart and repository indexing to check Code RAG answer quality. A good answer should cite the listed components together, not just mention a high-level orchestrator.
 
@@ -290,9 +287,9 @@ Expected flow:
 ```text
 CodeController
 -> CodeRagService
--> CodeSearchService / CodeRepository
--> CodeEvidenceRanker
 -> RagPipelineService
+-> CodeSearchService / CodeRepository
+-> CodeEvidenceRanker / evidence selection / coverage gate
 -> OllamaClient
 ```
 
@@ -424,16 +421,57 @@ Expected citation mix:
 
 When evaluating these answers, direct source-code evidence and inferred graph evidence should be described separately. If the retrieved context only proves an orchestrator method, the answer should not claim it proves every internal phase unless direct evidence for those phases is also cited.
 
+### Code RAG live E2E quality benchmark
+
+The live quality benchmark sends fixture questions through the real `/api/code/ask` endpoint, active repository index, configured model provider, retrieval loop, evidence ranking, answer generation, and response evaluator. It is therefore a live E2E RAG quality evaluation, not only a deterministic API smoke test.
+
+- `scripts/quality/rag-quality/code-live-fixtures.template.json` contains the question, repository placeholder, expected files/symbols, required claim groups, forbidden claims, answer mode, and latency limit.
+- `scripts/quality/rag-quality/balanced-20.case-ids.txt` selects the current Java 10 and C# 10 development cohort without passing one long PowerShell argument.
+- `balanced-10`, `balanced-20`, and `balanced-30` are development sets because their results can be used to improve production behavior. They are not holdouts.
+- A case passes only when every configured strong gate passes. The resulting strict case pass rate is not yet a separate claim-evidence semantic-accuracy measurement.
+- The current development sequence is `balanced-20`, then ten additional non-duplicate Korean complex questions for `balanced-30`, then a production freeze and sealed holdouts on previously unused Java and C# repositories.
+- Do not add a fixture ID, repository, path, symbol, framework, question wording, or expected answer to production logic to improve a benchmark score.
+
+Set the login and repository identity environment variables described by the fixture template, then run the fixed 20-case cohort from PowerShell:
+
+```powershell
+$arguments20 = @(
+    "scripts/quality/rag-quality/evaluate-rag-quality-fixtures.mjs"
+    "--fixtures"
+    "scripts/quality/rag-quality/code-live-fixtures.template.json"
+    "--live"
+    "--server"
+    "http://localhost:8083"
+    "--case-ids-file"
+    "scripts/quality/rag-quality/balanced-20.case-ids.txt"
+    "--timeout-ms"
+    "120000"
+    "--case-delay-ms"
+    "30000"
+    "--report"
+    ".tmp/quality/b20-report.json"
+    "--live-fixtures-report"
+    ".tmp/quality/b20-capture.json"
+)
+
+& node $arguments20
+```
+
+The current development gates are at least 16/20 overall, 8/10 Java, 8/10 C#, and at least 90 percent required-claim, expected-file, expected-symbol, and implementation-body coverage by language. A completed development run does not prove generalization; final completion also requires unused Java and C# repository holdouts after production code, prompts, retrieval/ranking policies, and evaluator criteria are frozen.
+
+Index identity matters. As of the 2026-07-14 audit, `LocalLearnBot` uses `code-index-v3-ir1`, while `WPF-Samples` still uses `code-index-v2`. Reindex and repin the C# fixture identity before treating a C# run as current-IR validation. The target request contract is one initial retrieval round plus at most two additional rounds and no more than five successful LLM calls including answer generation; these limits must be enforced and measured before the sealed holdout run.
+
 ## Model Changes
 
 Change models with environment variables:
 
 ```bash
-LLM_MODEL=ornith:9b, qwen3:4b-instruct
+PRIMARY_LLM_MODEL=ornith:9b
+AUXILIARY_LLM_MODEL=qwen3:4b-instruct
 EMBEDDING_MODEL=bge-m3
 ```
 
-Changing the chat model is a config change. Vector search still works without the chat LLM as long as the embedding model is available. If the embedding model is unavailable, search falls back to keyword search.
+These values are the local Ollama defaults. An administrator can select a configured remote provider for live requests without changing the embedding index; quality reports should record the actual runtime provider and model rather than infer them from these defaults. Changing the chat model is a config change. Vector search still works without the chat LLM as long as the embedding model is available. If the embedding model is unavailable, search falls back to keyword search.
 
 Changing the embedding model can change vector dimensions, so existing documents must be reindexed and the pgvector column dimension must match the new model.
 
@@ -800,3 +838,21 @@ learnbot agent status
 
 The install helper publishes `local-agent/` to `%USERPROFILE%\.learnbot\bin` by default. It can optionally add that directory to the user's PATH. This remains a framework-dependent pilot install and does not create a Windows Service, MSI, updater, or background process manager.
 After publishing, `scripts/local-agent.ps1` uses the installed `%USERPROFILE%\.learnbot\bin\learnbot.exe` automatically when it exists; otherwise it falls back to `learnbot` on PATH or `dotnet run --project local-agent`.
+
+### Current Code RAG quality checkpoint (2026-07-14)
+
+The fresh `balanced-20` baseline remains 13/20 until a new live report is produced. The current improvement work is limited to generic, repository-derived behavior: canonical semantic-graph identities, resolving graph placeholders to real definitions, import-aware fallback type resolution, bounded symbol discovery inside relevant files, structural evidence preservation, and evidence-grounded answer fidelity. Production logic must not contain fixture IDs, repository names, expected paths or symbols, literal benchmark questions, or language-specific state-mutation keyword lists. As of 2026-07-15, the running analyzer identity is `javaparser-3.26.3-java21_roslyn-4.11_ci-ir-1`; existing active indexes require a successful reindex before they contain its corrected Java `CALLS` edges.
+
+The Java index `47c53e82-0068-49f3-b821-7770817cbc80` with fingerprint `72cb56bbfc50e3422660cbf1b85e4c0ec004cd718339814bf2f2b6712fa417c7` and the C# index `88dba036-0c7d-45fd-a751-7496e7ea1eaa` with fingerprint `ad2f55bb9d8f50906aae115c0e4bcee58e48f533f65ec9cd8a35ddee9115cbe6` are historical pre-fix identities until reindexing completes. A source-level diagnostic confirmed that the Java parser fix restores the previously missing internal call chains. Next validation order: reindex Java, inspect the new semantic diagnostic and analyzer identity, rerun focused failures, then rerun `balanced-20`; do not report a new score before those artifacts exist.
+
+The first `ci-ir5-focused7` rerun passed 3/7. Citation recall and evidence coverage were 100%, while the remaining failures showed that retrieved implementation methods could be lost from the final evidence slate and that an incidental endpoint candidate could over-constrain answer fidelity. Endpoint route fidelity now activates only when the question contains an explicit route literal. A subsequent same-file structural-companion experiment reduced the focused result to 1/7 because unrelated methods occupied bounded final-evidence slots; the experiment was removed instead of being kept merely because its unit tests passed. After rollback, the related regression suite passes 118/118 and the backend has been rebuilt. The rollback Live E2E score is not yet measured.
+
+The three-case rollback probe passed 1/3. Exact-file coverage recovered to 100% and the C# focus-event case passed again. The remaining failures exposed two narrower generic issues: an exact selected endpoint route was available but omitted from generation, and a successful symbol inventory exposed a target name without an executable address for the next retrieval iteration. Selected endpoint facts are now supplied to generation without making an unrequested route mandatory, and `list_file_symbols` observations now carry bounded evidence ID, path, symbol, line, and chunk handles. Core tests pass 80/80 and the backend has been rebuilt; the post-handle live score is not yet measured.
+
+The post-handle probe passed 1/3, while required-claim coverage improved to 83.3% and expected file/symbol coverage reached 100%. A subsequent `ci-ir5-endpoint-graph2` probe passed 0/2: endpoint ranking over-rewarded one term repeated across route/class/path fields, answer-side route detection forced an unrequested complete route and replaced a grounded internal-behavior answer with fallback, and a same-file graph companion experiment failed to recover the missing implementation body. Both regressive experiments were removed. Endpoint candidates now prioritize coverage of distinct question terms, and bounded observed navigation follows unqualified calls found in retrieved implementation bodies to their indexed definitions. The corrected probe recovered to 1/2, and the next exact-definition probe remained 1/2 while reaching 100% required-claim and expected-file coverage. Its answer correctly described both completion branches and activation, but broad class/file chunks consumed bounded navigation slots with unrelated exact definitions, leaving two implementation bodies out of citation evidence. Observed navigation now uses method/event implementation bodies when available and falls back to broad containers only when no implementation evidence exists. Exact-name limits remain bounded, and fuzzy siblings or same-file neighbors are excluded. These rules use only repository-observed structure and contain no fixture or project identities. Related tests pass 104/104, the backend image has been rebuilt and started, and the next two-case Live E2E remains unmeasured.
+
+### Authoritative rollback checkpoint (2026-07-14)
+
+Production backend code has been restored to commit `ec3cfaf`, the source revision that previously passed 8/10 on `balanced-10` and 13/20 on the earlier mixed-language `balanced-20`. All later production-code experiments are preserved in `stash@{0}` under `pre-rollback-rag-experiments-2026-07-14` and are not part of the running backend. Only documentation, evaluator support, evaluator tests, and the balanced case selector remain as working-tree changes.
+
+All 20 selected questions are now written in Korean while code identifiers remain unchanged. Therefore, 13/20 is a historical source baseline rather than a directly comparable score for the new all-Korean cohort. The next fresh `balanced-20` run establishes the all-Korean baseline. Do not reapply stashed experiments or reindex automatically based on that single run; analyze failures as generic retrieval, graph, ranking, evidence, or generation defects first.

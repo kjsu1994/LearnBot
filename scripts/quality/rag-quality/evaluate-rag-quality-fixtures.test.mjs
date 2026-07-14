@@ -11,6 +11,8 @@ const scriptPath = path.join(scriptDir, "evaluate-rag-quality-fixtures.mjs");
 const fixturesPath = path.join(scriptDir, "fixtures.json");
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "learnbot-rag-quality-"));
 const offlineReportPath = path.join(tempDir, "rag-quality-offline.json");
+const caseIdsPath = path.join(tempDir, "case-ids.txt");
+const caseIdsReportPath = path.join(tempDir, "rag-quality-case-ids.json");
 const reportPath = path.join(tempDir, "rag-quality-live.json");
 const liveFixturesPath = path.join(tempDir, "rag-live-fixtures.json");
 const authReportPath = path.join(tempDir, "rag-quality-live-auth.json");
@@ -133,6 +135,19 @@ try {
   assert.equal(offlineReport.summary.gateFailures.expectedFiles, 0);
   assert.equal(offlineReport.summary.gateFailures.expectedSymbols, 0);
 
+  fs.writeFileSync(caseIdsPath, "code-local-agent-tool-api-flow\n", "utf8");
+  const caseIdsResult = await runNode([
+    scriptPath,
+    "--fixtures", fixturesPath,
+    "--case-ids-file", caseIdsPath,
+    "--report", caseIdsReportPath,
+  ]);
+  assert.equal(caseIdsResult.status, 0, caseIdsResult.stderr || caseIdsResult.stdout);
+  const caseIdsReport = JSON.parse(fs.readFileSync(caseIdsReportPath, "utf8"));
+  assert.equal(caseIdsReport.selectedCaseIdsFile, caseIdsPath);
+  assert.equal(caseIdsReport.summary.totalCases, 1);
+  assert.equal(caseIdsReport.results[0].id, "code-local-agent-tool-api-flow");
+
   const { port } = server.address();
   const result = await runNode([
     scriptPath,
@@ -245,7 +260,7 @@ try {
         answerMode: "insufficient",
         citationRequired: false,
         acceptedAnswerTerms: ["not found", "insufficient evidence"],
-        observed: { answer: "The method was not found in the repository.", citationIds: [], evidence: [], latencyMs: 10 },
+        observed: { answer: "해당 메서드는 저장소에 존재하지 않습니다.", citationIds: [], evidence: [], latencyMs: 10 },
         maxLatencyMs: 100,
       },
     ],

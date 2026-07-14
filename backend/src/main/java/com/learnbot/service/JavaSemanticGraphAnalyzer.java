@@ -90,8 +90,10 @@ public class JavaSemanticGraphAnalyzer {
             ));
         }
         List<Path> sourceRoots = javaSourceRoots(repositoryRoot);
+        ParserConfiguration sourceParserConfiguration = new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE);
         CombinedTypeSolver typeSolver = new CombinedTypeSolver(new ReflectionTypeSolver(false));
-        sourceRoots.forEach(root -> typeSolver.add(new JavaParserTypeSolver(root)));
+        sourceRoots.forEach(root -> typeSolver.add(new JavaParserTypeSolver(root, sourceParserConfiguration)));
         if (dependencyJars != null) {
             dependencyJars.forEach(jar -> {
                 try {
@@ -101,7 +103,9 @@ public class JavaSemanticGraphAnalyzer {
                 }
             });
         }
-        JavaParser parser = new JavaParser(new ParserConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver)));
+        JavaParser parser = new JavaParser(new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE)
+                .setSymbolResolver(new JavaSymbolSolver(typeSolver)));
         List<ParsedFile> files = parseFiles(repositoryRoot, sourceRoots, parser);
         int attemptedFiles = countJavaFiles(sourceRoots);
         if (files.isEmpty()) {
@@ -117,6 +121,7 @@ public class JavaSemanticGraphAnalyzer {
         ChunkLookup chunkLookup = new ChunkLookup(chunks);
         Set<String> entityTypes = new LinkedHashSet<>();
         Map<String, List<AnnotationExpr>> typeTransactionAnnotations = new LinkedHashMap<>();
+        CallResolutionStats callResolutionStats = new CallResolutionStats();
 
         for (ParsedFile file : files) {
             for (TypeDeclaration<?> declaration : file.unit().findAll(TypeDeclaration.class)) {
@@ -151,17 +156,27 @@ public class JavaSemanticGraphAnalyzer {
 
         for (ParsedFile file : files) {
             for (CallableDeclaration<?> callable : file.unit().findAll(CallableDeclaration.class)) {
-                addCallable(nodes, edges, file, callable, chunkLookup, entityTypes, typeTransactionAnnotations);
+                addCallable(nodes, edges, file, callable, chunkLookup, entityTypes, typeTransactionAnnotations,
+                        callResolutionStats);
             }
         }
         CodeGraph graph = new CodeGraph(List.copyOf(nodes.values()), List.copyOf(edges.values()));
         int failedFiles = Math.max(0, attemptedFiles - files.size());
+        boolean partial = failedFiles > 0 || callResolutionStats.unresolved > 0;
         return new CodeGraphAnalysisResult(graph, new CodeAnalysisDiagnostic(
-                "JAVA_SEMANTIC", "JavaParser Symbol Solver", failedFiles == 0 ? "SUCCESS" : "PARTIAL", "SOURCE",
-                attemptedFiles, files.size(), failedFiles, graph.edges().size(), 0,
+                "JAVA_SEMANTIC", "JavaParser Symbol Solver", partial ? "PARTIAL" : "SUCCESS", "SOURCE",
+                attemptedFiles, files.size(), failedFiles, graph.edges().size(), callResolutionStats.unresolved,
                 graph.nodes().size(), graph.edges().size(), elapsedMillis(started),
-                failedFiles == 0 ? "Java semantic analysis completed." : "Some Java files could not be parsed.",
-                Map.of("sourceRoots", sourceRoots.size(), "dependencyJars", dependencyJars == null ? 0 : dependencyJars.size())
+                partial
+                        ? "Java semantic analysis completed with parse or call-resolution gaps."
+                        : "Java semantic analysis completed.",
+                Map.of(
+                        "sourceRoots", sourceRoots.size(),
+                        "dependencyJars", dependencyJars == null ? 0 : dependencyJars.size(),
+                        "languageLevel", ParserConfiguration.LanguageLevel.BLEEDING_EDGE.name(),
+                        "resolvedMethodCalls", callResolutionStats.resolved,
+                        "unresolvedMethodCalls", callResolutionStats.unresolved
+                )
         ));
     }
 
@@ -218,7 +233,8 @@ public class JavaSemanticGraphAnalyzer {
             CallableDeclaration<?> callable,
             ChunkLookup chunks,
             Set<String> entityTypes,
-            Map<String, List<AnnotationExpr>> typeTransactionAnnotations
+            Map<String, List<AnnotationExpr>> typeTransactionAnnotations,
+            CallResolutionStats callResolutionStats
     ) {
         String owner = callable.findAncestor(TypeDeclaration.class)
                 .map(type -> qualifiedTypeName(file.unit(), type))
@@ -274,11 +290,13 @@ public class JavaSemanticGraphAnalyzer {
                 addNode(nodes, new CodeGraphNode(targetKey, "method", resolved.getName(), targetSignature,
                         null, null, Map.of("language", "java", "external", true)));
                 addEdge(edges, key, targetKey, "CALLS", 1.0, chunkId, "java_symbol_solver");
+                callResolutionStats.resolved++;
                 String targetOwner = resolved.declaringType().getQualifiedName();
                 if (entityTypes.contains(targetOwner)) {
                     addEdge(edges, key, typeKey(targetOwner), "USES_ENTITY", 0.98, chunkId, "java_symbol_solver");
                 }
             } catch (RuntimeException ignored) {
+                callResolutionStats.unresolved++;
                 // Unresolved calls are deliberately left for deterministic REFERENCES/optional LLM fallback.
             }
         }
@@ -579,9 +597,12 @@ public class JavaSemanticGraphAnalyzer {
                 paths.filter(path -> Files.isRegularFile(path) && path.toString().endsWith(".java"))
                         .forEach(path -> {
                             try {
-                                parser.parse(path).getResult().ifPresent(unit -> result.add(
-                                        new ParsedFile(repositoryRoot.relativize(path).toString().replace('\\', '/'), unit)
-                                ));
+                                var parsed = parser.parse(path);
+                                if (parsed.isSuccessful()) {
+                                    parsed.getResult().ifPresent(unit -> result.add(
+                                            new ParsedFile(repositoryRoot.relativize(path).toString().replace('\\', '/'), unit)
+                                    ));
+                                }
                             } catch (IOException ignored) {
                                 // A malformed or unreadable file does not block other Java sources.
                             }
@@ -940,6 +961,11 @@ public class JavaSemanticGraphAnalyzer {
     private CodeGraph empty() { return new CodeGraph(List.of(), List.of()); }
 
     private record ParsedFile(String relativePath, CompilationUnit unit) {}
+
+    private static final class CallResolutionStats {
+        private int resolved;
+        private int unresolved;
+    }
 
     private static final class ChunkLookup {
         private final Map<String, List<CodeSearchResult>> byPath = new HashMap<>();

@@ -105,3 +105,32 @@ Design implications:
 - In agent loop automation, do not fake intelligence with server-authored content shortcuts. The LLM must decide the target, diagnosis, edit intent, and replacement content from observed context. The server may select execution targets, bound context, validate schemas, materialize LLM-authored structured edits into diffs, enforce approval gates, run safety checks, and report blockers. The server must not hardcode task-specific code, prose, HTML/CSS, file names, language-specific patches, or canned "fix" content to make a demo pass. If the LLM output is missing, malformed, truncated, unsafe, or insufficient, improve the loop structure, context packaging, retry strategy, validation, or user-facing blocker report instead of silently substituting server-written changes.
 
 Quality remains the core product value: prefer a slower but grounded and recoverable workflow over a fast workflow that produces weak answers or unsafe code changes.
+
+5. Generic RAG Quality and Anti-Overfitting
+
+Code RAG is a general repository-question-answering system. Production behavior must remain independent of a benchmark fixture, one repository, one question, one expected answer, one programming language, or one framework.
+
+Production retrieval, graph expansion, evidence ranking, context selection, answer generation, and validation must not contain:
+
+- fixture or case IDs;
+- benchmark question text or expected-answer text;
+- repository or project names added to make a quality case pass;
+- expected file paths, class names, method names, symbols, routes, or citations from a development case;
+- language- or framework-specific keyword lists, patches, score bonuses, or fallback answers introduced only for a tested example;
+- server-authored claims that substitute for missing retrieval evidence or missing model reasoning.
+
+Evaluation fixtures may contain questions, expected files, symbols, claims, and answer modes because they are test specifications. Production code must never read, import, reference, or reproduce those expectations to alter an answer. A passing test is evidence only when the production behavior is derived from repository data and general contracts.
+
+Allowed improvements must be reusable and evidence-derived, such as:
+
+- normalized structural identities and language-neutral graph relations;
+- repository-observed endpoint, symbol, path, line, chunk, call, reference, and provenance metadata;
+- bounded retrieval and context policies based on evidence authority, relevance, coverage, and diversity;
+- typed operation contracts, executable handles, validation, retry, and explicit insufficiency behavior;
+- generic prompt and evaluator corrections that apply to unseen repositories and equivalent question types.
+
+Do not keep a generic-looking rule merely because it contains no literal fixture name. If it promotes unrelated evidence, consumes bounded context slots, weakens another cohort, or improves only the tuned cases, treat it as overfitting or a regression and remove or redesign it.
+
+Use development sets to find and diagnose common failure classes, not to prove generality. After the development gate passes, freeze production retrieval, ranking, prompts, validation, and evaluator criteria, then verify them on previously unused Java and C# repositories with non-duplicate holdout questions. If holdout results are used to tune production behavior, that repository becomes development data and a new untouched holdout is required.
+
+Report fresh measured results honestly. Do not claim an accuracy target, regression recovery, or generic quality improvement from unit tests, stale captures, offline rescoring alone, or an unmeasured deployment.
