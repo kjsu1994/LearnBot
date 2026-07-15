@@ -1,5 +1,7 @@
 package com.learnbot.service;
 
+import com.learnbot.service.coderag.evidence.CodeEvidenceRanker;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeAskResponse;
@@ -156,7 +158,7 @@ class CodeRagServiceTest {
                 null
         );
         CodeSearchResult result = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.86,
@@ -209,7 +211,7 @@ class CodeRagServiceTest {
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
         CodeSearchResult result = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.86,
@@ -259,7 +261,7 @@ class CodeRagServiceTest {
                 "runIndex scans files, parses chunks, embeds content, and stores chunks"
         );
         CodeSearchResult answering = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.80,
@@ -306,7 +308,7 @@ class CodeRagServiceTest {
                 .extracting(CodeEvidence::filePath)
                 .contains(
                         "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
-                        "backend/src/main/java/com/learnbot/service/CodeRagService.java"
+                        "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java"
         );
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("1 LLM-planned Retrieval Iteration(s)"));
@@ -1023,14 +1025,14 @@ class CodeRagServiceTest {
         );
         UUID pinnedChunkId = UUID.randomUUID();
         CodeSearchResult result = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.72
         );
         CodeSearchResult pinned = resultWithId(
                 pinnedChunkId,
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.25,
@@ -1078,7 +1080,7 @@ class CodeRagServiceTest {
         OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.72
@@ -1116,7 +1118,7 @@ class CodeRagServiceTest {
         OllamaClient ollamaClient = mockOllamaClient();
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, new LearnBotProperties());
         CodeSearchResult result = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.72
@@ -1317,7 +1319,7 @@ class CodeRagServiceTest {
         UUID requiredChunkId = UUID.randomUUID();
         CodeSearchResult required = resultWithId(
                 requiredChunkId,
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.20,
@@ -1738,7 +1740,7 @@ class CodeRagServiceTest {
                 "runIndex scans code files, parses chunks, embeds them, and stores code chunks"
         );
         CodeSearchResult ragService = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.70,
@@ -1764,7 +1766,7 @@ class CodeRagServiceTest {
                 .extracting(evidence -> evidence.filePath())
                 .containsExactlyInAnyOrder(
                         "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
-                        "backend/src/main/java/com/learnbot/service/CodeRagService.java"
+                        "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java"
                 );
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("sourceRoles={main=2}").doesNotContain("runtimeRoles="));
@@ -1788,7 +1790,7 @@ class CodeRagServiceTest {
                 "document rag answer generation flow"
         );
         CodeSearchResult exactCodeService = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.70,
@@ -1817,7 +1819,7 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence())
                 .extracting(evidence -> evidence.filePath())
-                .containsExactly("backend/src/main/java/com/learnbot/service/CodeRagService.java");
+                .containsExactly("backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java");
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("llmAdjudicated=1"));
     }
@@ -1833,7 +1835,7 @@ class CodeRagServiceTest {
         properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
         CodeSearchResult top = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.90,
@@ -1866,7 +1868,7 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence())
                 .extracting(evidence -> evidence.filePath())
-                .containsExactly("backend/src/main/java/com/learnbot/service/CodeRagService.java");
+                .containsExactly("backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java");
         assertThat(response.diagnostics()).anySatisfy(note ->
                 assertThat(note).contains("llmAdjudicated=0"));
     }
@@ -1882,11 +1884,11 @@ class CodeRagServiceTest {
         properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(true);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
         CodeSearchResult coverageHelper = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
-                "ensureLlmPlannedCoverage",
+                "ensureLlmChecklistGroupCoverage",
                 0.95,
-                "ensureLlmPlannedCoverage adjusts selected evidence after retrieval"
+                "ensureLlmChecklistGroupCoverage adjusts selected evidence after retrieval"
         );
         CodeSearchResult graphStorage = result(
                 "backend/src/main/java/com/learnbot/repository/CodeRepository.java",
@@ -1969,14 +1971,14 @@ class CodeRagServiceTest {
                 "expandGraph performs graph expansion from retrieved seed chunks"
         );
         CodeSearchResult ranking = result(
-                "backend/src/main/java/com/learnbot/service/CodeEvidenceRanker.java",
+                "backend/src/main/java/com/learnbot/service/coderag/evidence/CodeEvidenceRanker.java",
                 "method",
                 "rank",
                 0.78,
                 "rank scores retrieved code evidence before answer context construction"
         );
         CodeSearchResult generation = result(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "chatWithLimit",
                 0.77,
@@ -2253,7 +2255,7 @@ class CodeRagServiceTest {
                 "line_window"
         );
         CodeSearchResult askPrioritized = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "askPrioritized",
                 0.42,
@@ -2261,7 +2263,7 @@ class CodeRagServiceTest {
                 "javaparser"
         );
         CodeSearchResult retrieveEvidence = resultWithParser(
-                "backend/src/main/java/com/learnbot/service/CodeRagService.java",
+                "backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java",
                 "method",
                 "retrieveCodeEvidence",
                 0.41,

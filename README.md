@@ -229,29 +229,44 @@ POST /api/code/ask
 -> CodeController.ask
    - resolves access scope and optional conversation context
 -> CodeRagService.ask / askConversational
--> CodeRagService.askPrioritized
--> CodeRagService.retrieveCodeEvidence
+   - backward-compatible controller facade
+-> CodeRagOrchestrator.askPrioritized
+   -> CodeQuestionRouter
+      - resolves conversation-aware question, route, mode, and bounded result limit
+   -> CodeRagOrchestrator.retrieveCodeEvidence
    -> CodeSearchService / CodeRepository seed, endpoint, lexical, and reference retrieval
-   -> CodeRagService.expandGraphEvidenceOnce
+   -> CodeRagOrchestrator.expandGraphEvidenceOnce
       -> CodeSearchService.expandGraph
       -> CodeRepository.graphRelatedChunks
    -> RepositoryQuestionMapBuilder
    -> RagPipelineService.planCodeEvidenceSearch
       - combined planning returns route, atomic claims, and typed operations
+   -> CodeRetrievalPlanValidator
+      - rejects unobserved operands and duplicate operations before execution
    -> CodeEvidenceOperationExecutor
       - validates claim/origin/operand provenance and executes bounded reads/search/traversal
    -> CodeEvidenceRanker.rank
    -> CodeEvidenceSelectionPolicy and CodeEvidenceFileDiversity
    -> RagPipelineService.planCodeEvidenceFollowUp / planCodeEvidenceIteration
       - unresolved claims can request another bounded operation round
--> CodeRagService.buildBudgetedContext
+-> EvidenceExtractorRegistry
+   -> EndpointEvidenceExtractor / AssignmentEvidenceExtractor / TransactionEvidenceExtractor
+   -> NavigationEvidenceExtractor / PersistenceEvidenceExtractor
+   -> CodeEvidenceAccumulator -> Code Intelligence IR -> CodeEvidenceAdjudicator
+-> CodeContextAssembler
+   - orders evidence, renders excerpts, and enforces the prompt budget
 -> CodeEvidenceCoverageGate
    - verifies evidence identity, direct proof, and final-context retention
--> CodeRagService.chatWithLimit
--> OllamaClient.chatResult
--> answer quality validation, bounded repair, or evidence-fidelity fallback
+-> CodeAnswerGenerator / OllamaCodeAnswerGenerator
+-> CodeAnswerVerifier
+   - accepts, retries, blocks, or selects the evidence-fidelity fallback
+-> CodeRagDiagnosticsBuilder
 -> CodeAskResponse
 ```
+
+`CodeRetrievalCoordinator` and `CodeRetrievalLoop` define and test the bounded retrieval-loop boundary, including operation fingerprints, limits, stagnation, deadlines, and failure isolation. The production iterative retrieval body still runs inside `CodeRagOrchestrator` while that boundary is migrated under parity tests and the Live E2E quality gate; do not treat the new class names alone as proof that the full production loop has already moved.
+
+Question-type evidence rules must be added through the `EvidenceExtractor` SPI instead of as new branches in `CodeRagOrchestrator`. Extractors run at the post-operation and pre-answer stages and emit the shared Code Intelligence IR (`CodeEvidenceIr`, facts, constraints, signals, items, and navigation handles). Accumulation and adjudication consume that IR without depending on a benchmark question or repository.
 
 When combined planning is available, routing is returned by the initial repository planner instead of consuming a standalone route-model call. The original user question remains the answer question; an effective conversational question and route hints are retrieval context only.
 
@@ -271,10 +286,13 @@ Expected citation mix:
 
 - `CodeController`
 - `CodeRagService`
+- `CodeRagOrchestrator`
+- `CodeQuestionRouter`
 - `CodeSearchService`
 - `CodeEvidenceRanker`
 - `RagPipelineService`
-- `OllamaClient`
+- `CodeContextAssembler`
+- `CodeAnswerGenerator` / `OllamaClient`
 
 For the graph-specific version:
 
@@ -287,10 +305,12 @@ Expected flow:
 ```text
 CodeController
 -> CodeRagService
+-> CodeRagOrchestrator / CodeQuestionRouter
 -> RagPipelineService
 -> CodeSearchService / CodeRepository
--> CodeEvidenceRanker / evidence selection / coverage gate
--> OllamaClient
+-> CodeEvidenceRanker / EvidenceExtractor SPI / evidence selection / coverage gate
+-> CodeContextAssembler
+-> CodeAnswerGenerator / CodeAnswerVerifier / OllamaClient
 ```
 
 2. Indexing to graph storage
@@ -349,11 +369,12 @@ GraphRAG로 확장된 근거와 직접 코드 근거는 답변에서 어떻게 �
 
 Expected citation mix:
 
-- `CodeRagService`
+- `CodeRagOrchestrator` graph-expansion and evidence-assembly path
+- `CodeContextAssembler`
 - `graphEvidence=inferred`
 - `graphEvidenceKind`
 - `graphConfidence`
-- diagnostics text that reports graph evidence
+- `CodeRagDiagnosticsBuilder` diagnostics text that reports graph evidence
 
 6. Auth API flow and transaction boundary
 
@@ -417,13 +438,16 @@ Expected citation mix:
 - `CodeGraphBuilder` analyzer failure handling and diagnostics
 - Java/Roslyn analyzer diagnostic result when relevant
 - `CodeSearchService` keyword/vector fallback behavior
-- `CodeRagService` diagnostics/fallback answer path
+- `CodeRagOrchestrator` fallback path
+- `CodeAnswerVerifier`, `CodeEvidenceFidelityFallback`, and `CodeRagDiagnosticsBuilder`
 
 When evaluating these answers, direct source-code evidence and inferred graph evidence should be described separately. If the retrieved context only proves an orchestrator method, the answer should not claim it proves every internal phase unless direct evidence for those phases is also cited.
 
 ### Code RAG live E2E quality benchmark
 
 The live quality benchmark sends fixture questions through the real `/api/code/ask` endpoint, active repository index, configured model provider, retrieval loop, evidence ranking, answer generation, and response evaluator. It is therefore a live E2E RAG quality evaluation, not only a deterministic API smoke test.
+
+After changing Code RAG implementation packages, rebuild and restart the backend, then reindex and repin every benchmark repository before running Live E2E. The refactor moved implementation symbols from `CodeRagService.java` into `service/coderag/**`; an older active index can still return stale implementation chunks from the facade path and cannot validate the current orchestration, extractor, IR, answer, or diagnostics boundaries.
 
 - `scripts/quality/rag-quality/code-live-fixtures.template.json` contains the question, repository placeholder, expected files/symbols, required claim groups, forbidden claims, answer mode, and latency limit.
 - `scripts/quality/rag-quality/balanced-20.case-ids.txt` selects the current Java 10 and C# 10 development cohort without passing one long PowerShell argument.
@@ -841,7 +865,7 @@ After publishing, `scripts/local-agent.ps1` uses the installed `%USERPROFILE%\.l
 
 ### Current Code RAG quality checkpoint (2026-07-14)
 
-The fresh `balanced-20` baseline remains 13/20 until a new live report is produced. The current improvement work is limited to generic, repository-derived behavior: canonical semantic-graph identities, resolving graph placeholders to real definitions, import-aware fallback type resolution, bounded symbol discovery inside relevant files, structural evidence preservation, and evidence-grounded answer fidelity. Production logic must not contain fixture IDs, repository names, expected paths or symbols, literal benchmark questions, or language-specific state-mutation keyword lists. As of 2026-07-15, the running analyzer identity is `javaparser-3.26.3-java21_roslyn-4.11_ci-ir-1`; existing active indexes require a successful reindex before they contain its corrected Java `CALLS` edges.
+The fresh `balanced-20` baseline remains 13/20 until a new live report is produced. The current improvement work is limited to generic, repository-derived behavior: canonical semantic-graph identities, resolving graph placeholders to real definitions, import-aware fallback type resolution, bounded symbol discovery inside relevant files, structural evidence preservation, and evidence-grounded answer fidelity. Production logic must not contain fixture IDs, repository names, expected paths or symbols, literal benchmark questions, or language-specific state-mutation keyword lists. As of 2026-07-15, the running analyzer identity is `javaparser-3.26.3-java21_roslyn-4.11_ci-ir-2`; existing active indexes require a successful reindex before they contain its corrected Java `CALLS` edges and concrete call-target chunks.
 
 The Java index `47c53e82-0068-49f3-b821-7770817cbc80` with fingerprint `72cb56bbfc50e3422660cbf1b85e4c0ec004cd718339814bf2f2b6712fa417c7` and the C# index `88dba036-0c7d-45fd-a751-7496e7ea1eaa` with fingerprint `ad2f55bb9d8f50906aae115c0e4bcee58e48f533f65ec9cd8a35ddee9115cbe6` are historical pre-fix identities until reindexing completes. A source-level diagnostic confirmed that the Java parser fix restores the previously missing internal call chains. Next validation order: reindex Java, inspect the new semantic diagnostic and analyzer identity, rerun focused failures, then rerun `balanced-20`; do not report a new score before those artifacts exist.
 

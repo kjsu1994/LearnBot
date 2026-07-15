@@ -941,7 +941,23 @@ public class JavaSemanticGraphAnalyzer {
     private String methodKey(String signature) { return "method:java:" + signature; }
 
     private void addNode(Map<String, CodeGraphNode> nodes, CodeGraphNode node) {
-        nodes.putIfAbsent(node.key(), node);
+        nodes.merge(node.key(), node, this::preferConcreteNode);
+    }
+
+    private CodeGraphNode preferConcreteNode(CodeGraphNode existing, CodeGraphNode candidate) {
+        boolean existingExternal = Boolean.TRUE.equals(existing.metadata().get("external"));
+        boolean candidateExternal = Boolean.TRUE.equals(candidate.metadata().get("external"));
+        if (existingExternal && !candidateExternal) {
+            return candidate;
+        }
+        if (existing.chunkId() == null && candidate.chunkId() != null) {
+            return candidate;
+        }
+        if ((existing.filePath() == null || existing.filePath().isBlank())
+                && candidate.filePath() != null && !candidate.filePath().isBlank()) {
+            return candidate;
+        }
+        return existing;
     }
 
     private void addEdge(Map<String, CodeGraphEdge> edges, String source, String target, String type,

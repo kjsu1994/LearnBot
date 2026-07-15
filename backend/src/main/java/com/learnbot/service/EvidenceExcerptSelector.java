@@ -14,7 +14,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class EvidenceExcerptSelector {
+public final class EvidenceExcerptSelector {
 
     private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}_-]{2,}");
     private static final Pattern QUOTED = Pattern.compile("[\"']([^\"']{4,})[\"']");
@@ -24,7 +24,7 @@ final class EvidenceExcerptSelector {
     private EvidenceExcerptSelector() {
     }
 
-    static Excerpt select(String question, CodeSearchResult result, int maxChars) {
+    public static Excerpt select(String question, CodeSearchResult result, int maxChars) {
         String content = result == null || result.content() == null ? "" : result.content();
         int budget = Math.max(120, maxChars);
         int sourceStart = result == null ? 0 : Math.max(0, result.lineStart());
@@ -442,8 +442,8 @@ final class EvidenceExcerptSelector {
                 sourceStart + Math.max(0, (int) text.lines().count() - 1));
     }
 
-    record Excerpt(String text, String kind, boolean contentComplete, boolean omittedByBudget,
-                   int lineStart, int lineEnd) {
+    public record Excerpt(String text, String kind, boolean contentComplete, boolean omittedByBudget,
+                          int lineStart, int lineEnd) {
     }
 
     private record Window(int start, int end, double score) {

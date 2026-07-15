@@ -1,5 +1,7 @@
 package com.learnbot.service;
 
+import com.learnbot.service.coderag.evidence.extractor.CodeEndpointQueryVariants;
+
 import com.learnbot.dto.CodeSearchResult;
 
 import java.util.ArrayList;

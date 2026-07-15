@@ -1,11 +1,14 @@
 package com.learnbot.service;
 
+import com.learnbot.dto.CodeSearchResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -138,5 +141,78 @@ class JavaSemanticGraphAnalyzerTest {
         assertThat(result.diagnostic().unresolvedRelations()).isEqualTo(1);
         assertThat(result.diagnostic().metadata())
                 .containsEntry("unresolvedMethodCalls", 1);
+    }
+
+    @Test
+    void replacesCallTargetPlaceholderWhenDeclarationIsVisitedLater() throws Exception {
+        Path source = repositoryRoot.resolve("src/main/java/example/Flow.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, """
+                package example;
+
+                class Flow {
+                    private final Store store = null;
+
+                    String execute() {
+                        return store.load();
+                    }
+                }
+
+                interface Store {
+                    String load();
+                }
+                """);
+        UUID repositoryId = UUID.randomUUID();
+        UUID executeChunkId = UUID.randomUUID();
+        UUID loadChunkId = UUID.randomUUID();
+        List<CodeSearchResult> chunks = List.of(
+                result(repositoryId, executeChunkId, "src/main/java/example/Flow.java", "Flow", "execute", 6, 8),
+                result(repositoryId, loadChunkId, "src/main/java/example/Flow.java", "Store", "load", 11, 12)
+        );
+
+        CodeGraph graph = new JavaSemanticGraphAnalyzer().analyze(repositoryRoot, chunks);
+
+        assertThat(graph.nodes()).filteredOn(node -> node.key().contains("example.Store.load"))
+                .singleElement().satisfies(node -> {
+                    assertThat(node.filePath()).isEqualTo("src/main/java/example/Flow.java");
+                    assertThat(node.chunkId()).isEqualTo(loadChunkId);
+                    assertThat(node.metadata()).doesNotContainEntry("external", true);
+                });
+        assertThat(graph.edges()).anySatisfy(edge -> {
+            assertThat(edge.type()).isEqualTo("CALLS");
+            assertThat(edge.sourceKey()).contains("example.Flow.execute");
+            assertThat(edge.targetKey()).contains("example.Store.load");
+        });
+    }
+
+    private CodeSearchResult result(
+            UUID repositoryId,
+            UUID chunkId,
+            String filePath,
+            String className,
+            String methodName,
+            int lineStart,
+            int lineEnd
+    ) {
+        return new CodeSearchResult(
+                chunkId,
+                repositoryId,
+                UUID.randomUUID(),
+                "sample",
+                filePath,
+                "method",
+                methodName,
+                className,
+                methodName,
+                "example",
+                null,
+                null,
+                0,
+                lineStart,
+                lineEnd,
+                methodName,
+                1.0,
+                Map.of()
+        );
     }
 }

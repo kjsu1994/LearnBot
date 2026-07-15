@@ -1,5 +1,8 @@
 package com.learnbot.service;
 
+import com.learnbot.service.coderag.evidence.CodeEvidenceId;
+import com.learnbot.service.coderag.orchestration.CodeRagLlmCallBudget;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -330,7 +333,7 @@ public class RagPipelineService {
         return planCodeEvidenceIteration(question, mode, candidates, maxQueries, List.of(), List.of(), 1, "");
     }
 
-    boolean supportsCombinedCodePlanning() {
+    public boolean supportsCombinedCodePlanning() {
         return runtimeTuningService != null;
     }
 
@@ -2684,7 +2687,7 @@ public class RagPipelineService {
             reason = reason == null ? "" : reason;
         }
 
-        static CodeRagRouteDecision fallback(String reason) {
+        public static CodeRagRouteDecision fallback(String reason) {
             return new CodeRagRouteDecision(CodeRagRoute.CODE_SEARCH, "", 0.0, List.of(), "", "", "", reason, true, true);
         }
     }

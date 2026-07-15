@@ -1,5 +1,7 @@
 package com.learnbot.service;
 
+import com.learnbot.service.coderag.evidence.CodeEvidenceCoverageGate;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
