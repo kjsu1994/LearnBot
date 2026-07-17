@@ -35,6 +35,7 @@ public final class RepositoryQuestionMapBuilder {
     private static final int MAX_FAILURES = 8;
     private static final int MAX_OBSERVATIONS = 16;
     private static final int MAX_PROMPT_CHARS = 14_000;
+    private static final int MAX_IMPLEMENTATION_EXCERPT_CHARS = 1_200;
     private static final int MAX_INVENTORY_FILES = 16;
     private static final int MAX_SYMBOLS_PER_FILE = 240;
     private final CodeRepository repository;
@@ -358,8 +359,27 @@ public final class RepositoryQuestionMapBuilder {
                 CodeEvidenceId.from(result), kind, authority,
                 safe(result.filePath()), firstNonBlank(result.methodName(), result.symbolName(), result.className()),
                 result.lineStart(), result.lineEnd(), result.chunkId(), result.score(), revision,
-                origin, truncate(result.content(), "IMPLEMENTATION_BODY".equals(kind) ? 900 : 560), result
+                origin, "IMPLEMENTATION_BODY".equals(kind)
+                        ? implementationPlannerExcerpt(result.content())
+                        : truncate(result.content(), 560), result
         );
+    }
+
+    /** Keeps bounded structural coverage of long callables without assuming a language or framework. */
+    private String implementationPlannerExcerpt(String value) {
+        String content = safe(value).trim();
+        if (content.length() <= MAX_IMPLEMENTATION_EXCERPT_CHARS) return content;
+        String middleMarker = "\n... [middle excerpt] ...\n";
+        String tailMarker = "\n... [tail excerpt] ...\n";
+        int segment = Math.max(1, (MAX_IMPLEMENTATION_EXCERPT_CHARS
+                - middleMarker.length() - tailMarker.length()) / 3);
+        int middleStart = Math.max(0, (content.length() - segment) / 2);
+        int tailStart = Math.max(0, content.length() - segment);
+        return content.substring(0, segment)
+                + middleMarker
+                + content.substring(middleStart, Math.min(content.length(), middleStart + segment))
+                + tailMarker
+                + content.substring(tailStart);
     }
 
     private String evidenceKind(CodeSearchResult result, String origin) {
@@ -742,10 +762,19 @@ public final class RepositoryQuestionMapBuilder {
                         .append(" updated=").append(delta.updatedEvidenceIds())
                         .append(" progress=").append(delta.evidenceProgress()).append('\n');
             }
-            appendSymbolInventories(output);
-            appendEvidence(output, "DIRECT_BODIES_AND_DEFINITIONS", List.of("IMPLEMENTATION_BODY", "DEFINITION"), 6);
-            appendEvidence(output, "PROJECT_CONTEXT", List.of("PROJECT_CONTEXT"), 4);
-            appendEvidence(output, "REFERENCES_AND_NAVIGATION", List.of("LEXICAL_OCCURRENCE", "NAVIGATION_HINT"), 4);
+            if (revision > 0) {
+                appendEvidence(output, "DIRECT_BODIES_AND_DEFINITIONS",
+                        List.of("IMPLEMENTATION_BODY", "DEFINITION"), 6,
+                        MAX_IMPLEMENTATION_EXCERPT_CHARS);
+                appendSymbolInventories(output);
+            } else {
+                appendSymbolInventories(output);
+                appendEvidence(output, "DIRECT_BODIES_AND_DEFINITIONS",
+                        List.of("IMPLEMENTATION_BODY", "DEFINITION"), 6, 360);
+            }
+            appendEvidence(output, "PROJECT_CONTEXT", List.of("PROJECT_CONTEXT"), 4, 360);
+            appendEvidence(output, "REFERENCES_AND_NAVIGATION",
+                    List.of("LEXICAL_OCCURRENCE", "NAVIGATION_HINT"), 4, 360);
             appendRecord(output, "\n[RELATIONS]\n");
             for (RelationEvidence relation : relations.stream().limit(MAX_RELATIONS).toList()) {
                 appendRecord(output, "- evidenceId=" + relation.evidenceId() + " from=" + relation.from()
@@ -814,8 +843,14 @@ public final class RepositoryQuestionMapBuilder {
             return true;
         }
 
-        private void appendEvidence(StringBuilder output, String section, List<String> kinds, int limit) {
-            output.append("\n[").append(section).append("]\n");
+        private void appendEvidence(
+                StringBuilder output,
+                String section,
+                List<String> kinds,
+                int limit,
+                int excerptLimit
+        ) {
+            if (!appendRecord(output, "\n[" + section + "]\n")) return;
             List<EvidenceEntry> ranked = evidence.values().stream()
                     .filter(entry -> kinds.contains(entry.kind()))
                     .sorted(Comparator.comparingInt((EvidenceEntry entry) -> promptAuthorityRank(entry.authority())).reversed()
@@ -840,12 +875,13 @@ public final class RepositoryQuestionMapBuilder {
                 }
             }
             for (EvidenceEntry entry : selected) {
-                appendRecord(output, "- evidenceId=" + entry.evidenceId() + " kind=" + entry.kind()
+                String record = "- evidenceId=" + entry.evidenceId() + " kind=" + entry.kind()
                         + " authority=" + entry.authority() + " path=" + entry.path()
                         + " symbol=" + entry.symbol() + " lines=" + entry.lineStart() + '-' + entry.lineEnd()
                         + " chunkId=" + (entry.chunkId() == null ? "" : entry.chunkId())
                         + " origin=" + entry.origin() + " discoveredRevision=" + entry.discoveredRevision()
-                        + "\n  excerpt=" + truncate(entry.excerpt(), 360) + "\n");
+                        + "\n  excerpt=" + truncate(entry.excerpt(), Math.max(1, excerptLimit)) + "\n";
+                if (!appendRecord(output, record)) return;
             }
         }
 

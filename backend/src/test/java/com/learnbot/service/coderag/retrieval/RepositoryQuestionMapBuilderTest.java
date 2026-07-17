@@ -203,6 +203,49 @@ class RepositoryQuestionMapBuilderTest {
         assertThat(map.containsEvidenceId("symbol-200")).isTrue();
     }
 
+    @Test
+    void operationRevisionPrioritizesBoundedHeadMiddleTailImplementationEvidence() {
+        CodeRepository repository = mock(CodeRepository.class);
+        UUID repositoryId = UUID.randomUUID();
+        UUID indexVersion = UUID.randomUUID();
+        ActiveCodeIndexIdentity identity = new ActiveCodeIndexIdentity(
+                repositoryId, null, indexVersion, "fingerprint", "analyzer", "schema", "READY", "1", "1");
+        when(repository.findActiveIndexIdentity(eq(repositoryId), any(), any()))
+                .thenReturn(java.util.Optional.of(identity));
+        when(repository.findActiveChunksByPath(
+                eq(repositoryId), eq("__learnbot__/project-context.md"), eq(8), any(), any()))
+                .thenReturn(List.of());
+        when(repository.listAnalysisDiagnostics(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listJobFailures(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listActiveSymbolOutlinesByPaths(eq(repositoryId), any(), anyInt(), any(), any()))
+                .thenReturn(List.of());
+        CodeSearchResult bootstrap = result(
+                repositoryId, indexVersion, UUID.randomUUID(), "src/Seed.java", "method", "seed",
+                "void seed() {}", Map.of());
+        String longBody = "HEAD_MARKER();\n" + "a".repeat(1_500)
+                + "\nMIDDLE_MARKER();\n" + "b".repeat(1_500) + "\nTAIL_MARKER();";
+        CodeSearchResult directRead = result(
+                repositoryId, indexVersion, UUID.randomUUID(), "src/Worker.java", "method", "executeWork",
+                longBody, Map.of("llmDirectRead", true));
+        RepositoryQuestionMapBuilder builder = new RepositoryQuestionMapBuilder(repository);
+        var initial = builder.build(
+                repositoryId, null, List.of(UUID.randomUUID()), "작업 실행 흐름", List.of(bootstrap));
+
+        var updated = builder.update(
+                initial, null, List.of(UUID.randomUUID()), List.of(directRead), List.of("read completed")).map();
+        String context = updated.plannerContext();
+
+        assertThat(updated.revision()).isEqualTo(1);
+        assertThat(context)
+                .hasSizeLessThanOrEqualTo(14_000)
+                .contains("HEAD_MARKER", "MIDDLE_MARKER", "TAIL_MARKER")
+                .contains("... [middle excerpt] ...", "... [tail excerpt] ...");
+        assertThat(context.indexOf("[DIRECT_BODIES_AND_DEFINITIONS]"))
+                .isLessThan(context.indexOf("[FILE_SYMBOL_INVENTORIES]"));
+        assertThat(initial.plannerContext().indexOf("[FILE_SYMBOL_INVENTORIES]"))
+                .isLessThan(initial.plannerContext().indexOf("[DIRECT_BODIES_AND_DEFINITIONS]"));
+    }
+
     private CodeSearchResult result(
             UUID repositoryId,
             UUID indexVersion,

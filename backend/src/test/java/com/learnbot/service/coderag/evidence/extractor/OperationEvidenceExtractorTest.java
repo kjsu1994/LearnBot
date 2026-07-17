@@ -2,6 +2,9 @@ package com.learnbot.service.coderag.evidence.extractor;
 
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.CodeIntelligenceAuthority;
+import com.learnbot.service.coderag.evidence.CodeEvidenceRetentionPlan;
+import com.learnbot.service.coderag.evidence.CodeEvidenceSelectionPolicy;
+import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
@@ -52,6 +55,7 @@ class OperationEvidenceExtractorTest {
             assertThat(signal.sourceEvidenceId()).isEqualTo(ir.evidenceItems().get(0).evidenceId());
             assertThat(signal.reason()).doesNotContain("settings", "mutation", "worker_flow");
         });
+        assertThat(ir.constraints()).isEmpty();
 
         var preAnswer = extractor.extract(new CodeEvidenceExtractionContext(
                 "How is work claimed?", EvidenceExtractionStage.PRE_ANSWER, List.of(source)));
@@ -109,6 +113,67 @@ class OperationEvidenceExtractorTest {
                 .containsExactly("SEARCH_SOURCE", "UNANCHORED_SOURCE",
                         "NO_ORIGIN_SOURCE", "UNKNOWN_OPERATION_SOURCE");
         assertThat(ir.signals()).isEmpty();
+        assertThat(ir.constraints()).isEmpty();
+    }
+
+    @Test
+    void exactSymbolReadProducesRequiredIrProofAndSurvivesTightSelection() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        CodeEvidenceOperationProvenance exactRead = new CodeEvidenceOperationProvenance(
+                "read_symbol", "op-read-symbol", List.of("claim-1"), "execution_flow",
+                List.of("index:origin:1-20"), "",
+                "src/app/Worker.java", "Worker.claimNext()", "",
+                null, null, null, List.of(), "BOTH", null);
+        CodeSearchResult exact = result(
+                UUID.randomUUID(), "void claimNext() { execute(); }", exactRead,
+                Map.of("symbolEvidenceKind", "DEFINITION", "callableBodyPresent", true));
+        CodeSearchResult broad = result(UUID.randomUUID(), "BROAD_CONTAINER", null, Map.of());
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How is work claimed?", EvidenceExtractionStage.POST_OPERATION, List.of(exact)));
+
+        assertThat(ir.constraints()).singleElement().satisfies(constraint -> {
+            assertThat(constraint.type()).isEqualTo(CodeEvidenceConstraint.Type.DIRECT_PROOF_REQUIRED);
+            assertThat(constraint.targetId()).isEqualTo(ir.evidenceItems().get(0).evidenceId());
+            assertThat(constraint.reason()).doesNotContain("Worker", "claimNext", "execution_flow");
+        });
+        CodeEvidenceRetentionPlan retentionPlan = CodeEvidenceRetentionPlan.from(ir);
+        assertThat(retentionPlan.lookup(ir.evidenceItems().get(0).evidenceId())).get()
+                .extracting(CodeEvidenceRetentionPlan.Entry::level)
+                .isEqualTo(CodeEvidenceRetentionPlan.Level.REQUIRED);
+        assertThat(CodeEvidenceSelectionPolicy.selectFinalEvidenceWithRetention(
+                List.of(broad, exact), List.of(broad), 1, retentionPlan))
+                .containsExactly(exact);
+    }
+
+    @Test
+    void mismatchedOrBodylessSymbolAndNavigationReadsNeverBecomeRequiredProof() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        CodeEvidenceOperationProvenance requestedSymbol = new CodeEvidenceOperationProvenance(
+                "read_symbol", "op-read-symbol", List.of("claim-1"), "execution_flow",
+                List.of("index:origin:1-20"), "",
+                "src/app/Worker.java", "Worker.claimNext", "",
+                null, null, null, List.of(), "BOTH", null);
+        CodeEvidenceOperationProvenance navigation = new CodeEvidenceOperationProvenance(
+                "list_file_symbols", "op-list-symbols", List.of("claim-1"), "execution_flow",
+                List.of("index:origin:1-20"), "", "src/app/Worker.java", "", "",
+                null, null, null, List.of(), "BOTH", null);
+        CodeSearchResult mismatched = result(
+                UUID.randomUUID(), "void other() {}", requestedSymbol,
+                Map.of("symbolEvidenceKind", "DEFINITION"),
+                "src/app/Worker.java", "other", "other");
+        CodeSearchResult bodyless = result(
+                UUID.randomUUID(), "void claimNext();", requestedSymbol,
+                Map.of("symbolEvidenceKind", "DEFINITION", "callableBodyPresent", false));
+        CodeSearchResult inventory = result(
+                UUID.randomUUID(), "SYMBOL_INVENTORY", navigation, Map.of());
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How is work claimed?", EvidenceExtractionStage.POST_OPERATION,
+                List.of(mismatched, bodyless, inventory)));
+
+        assertThat(ir.signals()).hasSize(3);
+        assertThat(ir.constraints()).isEmpty();
     }
 
     @Test
@@ -141,6 +206,7 @@ class OperationEvidenceExtractorTest {
         });
         assertThat(ir.signals()).singleElement().satisfies(signal ->
                 assertThat(signal.type()).isEqualTo(CodeEvidenceSignal.Type.DIRECT_OBSERVATION));
+        assertThat(ir.constraints()).isEmpty();
     }
 
     private CodeSearchResult result(
@@ -159,5 +225,22 @@ class OperationEvidenceExtractorTest {
                 chunkId, UUID.randomUUID(), UUID.randomUUID(), "repo", "src/app/Worker.java",
                 "method", "claimNext", "Worker", "claimNext", "app", null, null, 1,
                 10, 30, content, 0.8, Map.copyOf(metadata));
+    }
+
+    private CodeSearchResult result(
+            UUID chunkId,
+            String content,
+            CodeEvidenceOperationProvenance provenance,
+            Map<String, Object> extraMetadata,
+            String path,
+            String symbolName,
+            String methodName
+    ) {
+        CodeSearchResult base = result(chunkId, content, provenance, extraMetadata);
+        return new CodeSearchResult(
+                base.chunkId(), base.repositoryId(), base.fileId(), base.repositoryName(), path,
+                base.chunkType(), symbolName, base.className(), methodName, base.namespaceName(),
+                base.controlName(), base.eventName(), base.chunkIndex(), base.lineStart(), base.lineEnd(),
+                base.content(), base.score(), base.metadata());
     }
 }

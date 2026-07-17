@@ -1,5 +1,7 @@
 package com.learnbot.service.coderag.retrieval;
 
+import com.learnbot.dto.CodeSymbolOutline;
+import com.learnbot.service.CodeIntelligenceAuthority;
 import com.learnbot.service.RagPipelineService;
 
 import java.util.ArrayList;
@@ -102,7 +104,8 @@ public final class CodeRetrievalPlanValidator {
         for (RagPipelineService.CodeSearchOperation operation : base.executableOperations()) {
             if (!operation.isSearch()
                     || anchoredOperations.contains(operation)
-                    || isBoundedClaimCompanion(operation, claims, claimsWithAnchoredQuery, companionCounts)) {
+                    || isBoundedClaimCompanion(operation, claims, claimsWithAnchoredQuery, companionCounts)
+                    || isObservedCompositeCallableQuery(operation, repositoryMap)) {
                 executable.add(operation);
                 continue;
             }
@@ -116,6 +119,58 @@ public final class CodeRetrievalPlanValidator {
         }
         return new PlanValidationResult(
                 errors.get(0).code(), List.copyOf(errors), List.copyOf(executable));
+    }
+
+    /**
+     * Bridges multilingual questions to source vocabulary only through a callable
+     * that the active repository map already observed. A composite callable name
+     * is required so generic verbs and broad type/container names cannot bypass
+     * the question/claim anchoring contract.
+     */
+    private boolean isObservedCompositeCallableQuery(
+            RagPipelineService.CodeSearchOperation operation,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
+    ) {
+        if (operation == null || !operation.isSearch() || operation.query().isBlank()
+                || repositoryMap == null || repositoryMap.symbolInventories().isEmpty()) {
+            return false;
+        }
+        return repositoryMap.symbolInventories().values().stream()
+                .flatMap(inventory -> inventory.symbols().stream())
+                .filter(this::isTrustedCallableOutline)
+                .map(CodeSymbolOutline::name)
+                .map(this::canonicalSymbol)
+                .filter(symbol -> distinctiveTokens(symbol).size() >= 2)
+                .anyMatch(symbol -> containsExactIdentifier(operation.query(), symbol));
+    }
+
+    private boolean isTrustedCallableOutline(CodeSymbolOutline outline) {
+        if (outline == null) return false;
+        String kind = outline.kind() == null ? "" : outline.kind().trim().toLowerCase(Locale.ROOT);
+        return ("method".equals(kind) || "constructor".equals(kind))
+                && CodeIntelligenceAuthority.from(outline.authority()).rank()
+                >= CodeIntelligenceAuthority.SYNTAX.rank();
+    }
+
+    private boolean containsExactIdentifier(String query, String symbol) {
+        if (query == null || query.isBlank() || symbol == null || symbol.isBlank()) return false;
+        Pattern exact = Pattern.compile(
+                "(?<![\\p{L}\\p{N}_$])" + Pattern.quote(symbol) + "(?![\\p{L}\\p{N}_$])",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        return exact.matcher(query).find();
+    }
+
+    private String canonicalSymbol(String value) {
+        String symbol = value == null ? "" : value.trim();
+        int parameters = symbol.indexOf('(');
+        if (parameters >= 0) symbol = symbol.substring(0, parameters);
+        symbol = symbol.replace("::", ".").replace('#', '.');
+        int separator = symbol.lastIndexOf('.');
+        if (separator >= 0 && separator + 1 < symbol.length()) {
+            symbol = symbol.substring(separator + 1);
+        }
+        int generic = symbol.indexOf('<');
+        return (generic > 0 ? symbol.substring(0, generic) : symbol).trim();
     }
 
     private boolean isQuestionAnchorForAllClaims(

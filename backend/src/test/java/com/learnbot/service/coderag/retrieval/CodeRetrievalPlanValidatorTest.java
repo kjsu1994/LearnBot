@@ -397,6 +397,82 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void initialPlanAcceptsAnObservedCompositeCallableAsAMultilingualSourceBridge() {
+        var map = observedMap("src/Highlighter.cs", "UpdateHighlight");
+        var claim = new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "focus_update", "포커스 변경 뒤 강조 표시를 갱신한다", List.of(),
+                "클라이언트", "갱신한다", "강조 표시", "새 포커스가 표시된다",
+                List.of(), List.of("DIRECT_SOURCE"));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "UpdateHighlight method implementation", "focus behavior", "focus_update",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "observed-callable", List.of("claim-1"), List.of());
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "test", List.of("claim-1"), List.of(), List.of(), List.of("focus_update"),
+                List.of(claim), List.of(operation), List.of(), "hypothesis", 1,
+                "UNRESOLVED", List.of(), "NONE");
+
+        var result = validator.validateInitial(
+                "키보드 포커스가 바뀌면 강조 표시가 어떻게 갱신돼?", plan, map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).containsExactly(operation);
+    }
+
+    @Test
+    void observedContainersAndSinglePartCallablesDoNotBypassQuestionAnchoring() {
+        var containerMap = observedMapWithOutlineKind(
+                "src/AdminController.java", "AdminController", "class");
+        var simpleCallableMap = observedMap("src/Settings.java", "update");
+        var claim = new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "reference_flow", "resolve symbol references", List.of(),
+                "resolver", "resolve", "references", "references are returned",
+                List.of(), List.of("DIRECT_SOURCE"));
+        var containerQuery = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "AdminController service calls", "administration", "reference_flow",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "container", List.of("claim-1"), List.of());
+        var genericVerbQuery = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "update settings", "administration", "reference_flow",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "generic", List.of("claim-1"), List.of());
+
+        var containerResult = validator.validateInitial(
+                "Trace how symbol references are resolved and returned.",
+                planWithClaim(claim, List.of(containerQuery)), containerMap, Set.of());
+        var genericResult = validator.validateInitial(
+                "Trace how symbol references are resolved and returned.",
+                planWithClaim(claim, List.of(genericVerbQuery)), simpleCallableMap, Set.of());
+
+        assertThat(containerResult.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH);
+        assertThat(containerResult.executableOperations()).isEmpty();
+        assertThat(genericResult.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH);
+        assertThat(genericResult.executableOperations()).isEmpty();
+    }
+
+    @Test
+    void observedCallableRequiresAnExactIdentifierBoundary() {
+        var map = observedMap("src/Highlighter.cs", "UpdateHighlight");
+        var claim = new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "focus_update", "update focus marker", List.of(),
+                "client", "update", "focus marker", "focus marker changes",
+                List.of(), List.of("DIRECT_SOURCE"));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "UpdateHighlighting implementation", "focus", "focus_update",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "substring", List.of("claim-1"), List.of());
+
+        var result = validator.validateInitial(
+                "포커스 표시를 바꾸는 흐름", planWithClaim(claim, List.of(operation)), map, Set.of());
+
+        assertThat(result.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH);
+        assertThat(result.executableOperations()).isEmpty();
+    }
+
+    @Test
     void initialPlanDoesNotTreatNonEnglishActorAndScopeWordsAsBehaviorAnchors() {
         var claim = new RagPipelineService.CodeEvidenceChecklistItem(
                 "claim-1", "reference_flow", "심볼 참조를 찾는다", List.of(),
@@ -627,6 +703,14 @@ class CodeRetrievalPlanValidatorTest {
         return observedMap(path, symbol, Map.of());
     }
 
+    private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedMapWithOutlineKind(
+            String path,
+            String symbol,
+            String outlineKind
+    ) {
+        return observedMap(path, symbol, Map.of(), "class", "Gateway", "Gateway", "", outlineKind);
+    }
+
     private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedMap(
             String path,
             String symbol,
@@ -644,6 +728,20 @@ class CodeRetrievalPlanValidatorTest {
             String candidateClass,
             String candidateMethod
     ) {
+        return observedMap(path, symbol, extraMetadata, chunkType, candidateSymbol,
+                candidateClass, candidateMethod, "method");
+    }
+
+    private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedMap(
+            String path,
+            String symbol,
+            Map<String, Object> extraMetadata,
+            String chunkType,
+            String candidateSymbol,
+            String candidateClass,
+            String candidateMethod,
+            String outlineKind
+    ) {
         UUID repositoryId = UUID.randomUUID();
         UUID indexVersion = UUID.randomUUID();
         UUID chunkId = UUID.randomUUID();
@@ -658,7 +756,7 @@ class CodeRetrievalPlanValidatorTest {
         when(repository.listJobFailures(repositoryId, indexVersion)).thenReturn(List.of());
         when(repository.listActiveSymbolOutlinesByPaths(eq(repositoryId), any(), anyInt(), any(), any()))
                 .thenReturn(List.of(new CodeSymbolOutline(
-                        "symbol-complete", path, "method", symbol, "Gateway." + symbol,
+                        "symbol-complete", path, outlineKind, symbol, "Gateway." + symbol,
                         10, 30, chunkId, "java", "COMPILER_SEMANTIC", 1)));
         Map<String, Object> metadata = new LinkedHashMap<>(extraMetadata);
         metadata.put("indexVersion", indexVersion.toString());
@@ -669,6 +767,16 @@ class CodeRetrievalPlanValidatorTest {
                 Map.copyOf(metadata));
         return new RepositoryQuestionMapBuilder(repository).build(
                 repositoryId, null, List.of(UUID.randomUUID()), symbol, List.of(candidate));
+    }
+
+    private RagPipelineService.CodeEvidenceFollowUpPlan planWithClaim(
+            RagPipelineService.CodeEvidenceChecklistItem claim,
+            List<RagPipelineService.CodeSearchOperation> operations
+    ) {
+        return new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "test", List.of(claim.claimId()), List.of(), List.of(),
+                List.of(claim.evidenceGroup()), List.of(claim), operations, List.of(),
+                "hypothesis", 1, "UNRESOLVED", List.of(), "NONE");
     }
 
     private RagPipelineService.CodeEvidenceFollowUpPlan plan(
