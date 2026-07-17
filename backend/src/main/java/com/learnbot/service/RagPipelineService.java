@@ -1035,9 +1035,10 @@ public class RagPipelineService {
                 - Give every operation a stable operationId and one or more claimIds it is intended to prove. Always include originEvidenceIds: use the observed IDs for direct reads and graph traversal, and an empty array for search operations.
                 - Always return the operations array. If unresolved claims remain and retrieval budget is available, it must contain at least one executable operation.
                 - Return an empty operations array only with terminationRequest NO_FURTHER_RETRIEVAL, CLARIFICATION_REQUIRED, BUDGET_EXHAUSTED, or NO_NOVEL_PATH. Otherwise use NONE.
+                - A plausible current hypothesis alone never justifies NO_FURTHER_RETRIEVAL. If the same required claim is UNRESOLVED and the current map or observations expose an untried direct-read or graph handle linked to that claim, return an executable operation with terminationRequest NONE. Use NO_FURTHER_RETRIEVAL when no claim-linked observed handle remains that can test an unresolved required claim.
                 - keyword_search, hybrid_search, reference_search, and find_endpoint require query. Never return shell commands, SQL, regex programs, or tool invocation syntax as a query.
                 - keyword_search finds exact text and identifiers; hybrid_search combines lexical and semantic retrieval; reference_search finds definitions and references.
-                - find_endpoint accepts an observed or user-provided normalized route such as /api/items/{id}; it resolves language-specific endpoint metadata through the common EXPOSES_ENDPOINT graph relation.
+                - find_endpoint accepts either an observed/user-provided normalized route such as /api/items/{id}, or a natural-language endpoint lookup description grounded in the user's request and observed evidence. Never invent a route, path, symbol, handler, controller, or other concrete identifier for its query.
                 - read_chunk requires chunkId.
                 - read_symbol requires symbol; path is optional but recommended when the evidence identifies it.
                 - list_file_symbols requires path and lists indexed structural symbols in that exact file. Use it when the correct file is known but the concrete symbol or line range is not. A successful symbol inventory is navigation, not proof: on the next iteration read the most relevant returned symbol for each unresolved action claim.
@@ -1063,7 +1064,7 @@ public class RagPipelineService {
                 - Symbol inventory authority is navigation provenance, not behavior proof. Prefer COMPILER_SEMANTIC over SCIP_SEMANTIC, LSP_SEMANTIC, SYNTAX, LEXICAL, and LLM_INFERRED when equivalent handles conflict.
                 - Direct source text may prove the operations visibly present in it regardless of parser tier, but an invisible cross-symbol transition requires an observed semantic relation or remains inferred.
                 - If a checklist item is only represented by a broad orchestrator and a concrete phase method is needed, request a follow-up query for the concrete implementation method.
-                - For pipeline questions, separate coordinator/orchestrator evidence from concrete callee evidence when possible. A coordinator is useful flow evidence, but concrete phase claims are stronger when supported by their callee method.
+                - When the user requests a multi-stage pipeline or lifecycle, keep separate claims only for the distinct stages requested by the user. Do not add a stage merely because current evidence happens to contain it. A coordinator is useful flow evidence, but it does not replace concrete callee evidence for a requested stage.
                 - For a single-method behavior question, an exact requested method body with readable implementation is sufficient for that method's behavior claim. Do not require unrelated callers, controllers, repositories, or lifecycle phases unless the question explicitly asks for them.
                 - When the exact requested symbol and its implementation appear in a candidate, map that candidate in coverageSelections instead of declaring the same behavior group missing.
                 - The user's wording may assume a conventional implementation that the source does not use. An exact method body is sufficient to correct that premise and explain what the code actually does. Never demand an imagined event unsubscription, persistence call, framework hook, or other conventional mechanism absent from the method.
@@ -1077,10 +1078,10 @@ public class RagPipelineService {
                 - Create a new evidenceGroup only for a genuinely missing claim that is not represented by the initial checklist, and keep that identifier stable in later operations and adjudication.
                 - coverageSelections maps each directly proven evidenceGroup to one or more stable evidenceIds from Current evidence candidates. evidenceIndexes are accepted only for backward compatibility.
                 - Every coverageSelections item must include one or more concrete supportedClaims and a pipelineStage directly demonstrated by the selected excerpts.
-                - Similar vocabulary does not prove a transition between components or stages. Require a direct call, state transition, relation, or data flow for cross-component claims.
+                - Disconnected nodes and similar vocabulary do not prove a transition between components or stages. Require a direct call visible in source, an observed CALLS or other relevant relation, or an explicit state/data transition for every cross-component flow claim.
                 - When enough=true, every requiredEvidenceGroup must have a coverageSelections entry with at least one direct evidence index. If that mapping cannot be made, set enough=false and request the missing operation.
                 - When enough=false, every requiredEvidenceGroup not present in coverageSelections must have at least one executable operation with the exact same evidenceGroup. Do not spend operations only on already-covered groups.
-                - Keep follow-up queries short, concrete, and source-code oriented.
+                - Keep follow-up queries short, concrete, and source-code oriented, and preserve distinctive user vocabulary. Only when lexical overlap between user vocabulary and observed source identifiers is low, you may add one separate conventional source-vocabulary query for the same unresolved behavior without inventing a concrete identifier.
                 """;
     }
 
@@ -1095,6 +1096,7 @@ public class RagPipelineService {
                 Rules:
                 - Prefer exact API paths, class names, method names, file paths, framework roles, and operation names observed in the user question or bootstrap retrieval candidates.
                 - Preserve distinctive user vocabulary in at least one query per checklist item instead of replacing it entirely with generic architecture terms.
+                - Only when lexical overlap between user vocabulary and observed source identifiers is low, you may add one separate conventional source-vocabulary query for the same requested behavior. Preserve the original user vocabulary in another query, and do not include a concrete symbol, type, or path unless that identifier was observed.
                 - Do not invent likely class or method names. Repository-map names are navigation hints, not proof of responsibility. Anchor a concrete identifier only when it appears in the question or an observed bootstrap candidate whose excerpt matches the requested behavior.
                 - When repository-map hints and observed bootstrap candidates disagree, search by the requested behavior and use the observed candidates; do not force the map hint into every query.
                 - Use distinct queries for distinct required phases or layers.
@@ -1108,13 +1110,12 @@ public class RagPipelineService {
                 - Use each draft claimId in operation claimIds. The server replaces draft IDs with stable request-local IDs.
                 - Return typed operations in the first plan. Search operations may have empty originEvidenceIds; direct-read and graph operations must cite observed map evidence IDs.
                 - Classify the route and mode in this same response. This replaces a separate router call; route selection and retrieval operations must agree.
-                - A class declaration, constructor, dependency field, or nearby but different workflow cannot satisfy a behavioral checklist item. Queries must target methods containing the requested call, state transition, query, write, or return path.
+                - A class declaration, constructor, dependency field, or nearby but different workflow cannot satisfy a behavioral checklist item. Disconnected class or method nodes do not prove a cross-component flow: require a direct call visible in source or an observed CALLS or other relevant relation, and otherwise plan retrieval for that connection.
                 - Preserve the actor, object, action, direction, state transition, and side effect requested by the user. Do not substitute a nearby workflow that differs on those fields.
                 - Give each checklist item a concise stable snake_case evidenceGroup derived from what that item must prove. Do not select it from a fixed taxonomy, and reuse one identifier for the same claim.
                 - Keep checklist queries source-code oriented and specific enough to retrieve concrete implementation methods.
                 - For each checklist item, include likely concrete callee terms in queries when the question asks how a phase is implemented. Examples of generic callee terms include controller/handler, service/orchestrator, repository/storage, graph traversal/related chunks, rank/score, context/prompt builder, and model/client call.
-                - If the question asks for a multi-step pipeline, create separate checklist items for the coordinator and important concrete phases when evidence is needed for those phases.
-                - Separate distinct execution stages into distinct checklist claims when the question crosses those stages.
+                - When the question explicitly requests a multi-stage pipeline or lifecycle, split only the distinct stages requested by the question into separate claims. Do not add a stage merely because bootstrap evidence happens to contain it.
                 - Do not generate broad generic queries like "code implementation" unless no specific clue exists.
                 - Do not include prose, bullets, or explanations outside JSON.
                 """;
@@ -1644,7 +1645,7 @@ public class RagPipelineService {
                 You rewrite user questions into retrieval queries for a RAG system.
                 Return strict JSON only. No Markdown.
                 JSON schema: {"queries":["query 1","query 2"],"keywords":["term 1","term 2"],"reason":"short reason"}
-                Keep queries short and concrete. Preserve Korean terms and add English technical synonyms only when useful.
+                Keep queries short and concrete. Preserve distinctive user terms and add conventional technical synonyms only when useful.
                 Do not answer the question.
                 Domain: """ + domainHint;
     }

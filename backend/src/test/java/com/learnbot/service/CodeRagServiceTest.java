@@ -341,9 +341,9 @@ class CodeRagServiceTest {
         );
 
         assertThat(response.mode()).isEqualTo("overview");
-        assertThat(response.evidence()).hasSize(1);
         assertThat(response.confidence()).isIn("높음", "보통");
-        assertThat(response.answer()).contains("검색된 코드 근거");
+        assertGenericEvidenceOnlyFallback(
+                response, "backend/src/main/java/com/learnbot/web/AuthController.java");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("LLM 호출이 실패"));
     }
 
@@ -371,7 +371,7 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void overviewRewritesTooShortModelAnswerIntoNaturalSummary() {
+    void overviewRewritesTooShortModelAnswerIntoEvidenceOnlyFallback() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -392,9 +392,10 @@ class CodeRagServiceTest {
                 6
         );
 
-        assertThat(response.answer()).contains("검색된 코드 근거 기준");
-        assertThat(response.answer()).contains("주요 구성");
-        assertThat(response.answer()).contains("[1]");
+        assertGenericEvidenceOnlyFallback(
+                response,
+                "backend/src/main/java/com/learnbot/web/CodeController.java",
+                "backend/src/main/java/com/learnbot/service/CodeRagService.java");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
     }
 
@@ -436,6 +437,166 @@ class CodeRagServiceTest {
     }
 
     @Test
+    void answerScopedIrExcludesBudgetDroppedAssignmentsFromPromptAndVerification() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mockOllamaClient();
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(3);
+        properties.getRag().getPipeline().setPromptTokenBudgetBalanced(512);
+        properties.getRag().getPipeline().setMaxIterations(2);
+        CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+
+        CodeSearchResult selected = result(
+                "backend/src/main/java/app/SelectedAssignment.java",
+                "method",
+                "assignSelected",
+                0.99,
+                "selected.config.currentValue = provider.resolveValue(user);\n"
+                        + "selected currentValue provider resolveValue implementation context ".repeat(80)
+        );
+        CodeSearchResult supporting = result(
+                "backend/src/main/java/app/AssignmentSupport.java",
+                "method",
+                "supportAssignment",
+                0.85,
+                ("selected currentValue assignment support and "
+                        + "dropped resultValue forbiddenSource compute compatibility context ").repeat(80)
+        );
+        CodeSearchResult budgetDropped = result(
+                "backend/src/main/java/app/DroppedAssignment.java",
+                "method",
+                "assignDropped",
+                0.05,
+                "dropped.secret.resultValue = forbiddenSource.compute(dropInput);\n"
+                        + "dropped resultValue forbiddenSource compute implementation context ".repeat(80)
+        );
+
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(selected, supporting, budgetDropped));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+
+        String initialAnswer =
+                "The selected currentValue uses provider resolveValue during assignment [1].";
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt()))
+                .thenReturn(chat(initialAnswer));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How is selected currentValue assigned?",
+                "method",
+                3
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture(), anyInt());
+        String initialPrompt = promptCaptor.getValue();
+        int typedFactsStart = initialPrompt.indexOf(
+                "Trusted typed facts from selected source evidence");
+        int sourceContextStart = initialPrompt.indexOf("\n\nSource-code context:");
+        assertThat(typedFactsStart).isGreaterThanOrEqualTo(0);
+        assertThat(sourceContextStart).isGreaterThan(typedFactsStart);
+        assertThat(initialPrompt.substring(typedFactsStart, sourceContextStart))
+                .contains("- `selected.config.currentValue: "
+                        + "ASSIGNS_EXPRESSION=provider.resolveValue(user)` [1]")
+                .doesNotContain("dropped.secret.resultValue");
+
+        assertThat(response.answer()).isEqualTo(initialAnswer);
+        assertThat(response.evidence())
+                .extracting(CodeEvidence::filePath)
+                .contains(
+                        "backend/src/main/java/app/SelectedAssignment.java",
+                        "backend/src/main/java/app/AssignmentSupport.java"
+                )
+                .doesNotContain("backend/src/main/java/app/DroppedAssignment.java");
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note).contains("selected=2, budgetDropped=1"));
+        assertThat(response.diagnostics()).anySatisfy(note ->
+                assertThat(note)
+                        .contains("RAG quality trace:")
+                        .contains("fallback=false")
+                        .contains("retry=false"));
+    }
+
+    @Test
+    void answerScopedIrExcludesAssignmentOmittedInsideSelectedChunk() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeReferenceService referenceService = mock(CodeReferenceService.class);
+        OllamaClient ollamaClient = mockOllamaClient();
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(2);
+        properties.getRag().getPipeline().setPromptTokenBudgetBalanced(512);
+        properties.getRag().getPipeline().setMaxIterations(2);
+        CodeRagService service = new CodeRagService(
+                searchService, referenceService, ollamaClient, properties);
+
+        String selectedContent = "visible.settings.currentValue = provider.resolveValue(user);\n"
+                + "visible currentValue configuration context\n".repeat(160)
+                + "internal.secret.resultValue = forbiddenSource.compute(hiddenInput);";
+        CodeSearchResult selected = result(
+                "backend/src/main/java/app/VisibleConfiguration.java",
+                "method",
+                "configureVisible",
+                0.99,
+                selectedContent
+        );
+        CodeSearchResult supporting = result(
+                "backend/src/main/java/app/ConfigurationProvider.java",
+                "method",
+                "resolveValue",
+                0.80,
+                "Object resolveValue(User user) { return user.currentValue(); }"
+        );
+        when(searchService.search(isNull(), anyString(), anyInt(), anyList(), isNull()))
+                .thenReturn(List.of(selected, supporting));
+        when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
+
+        String answer = "The provided excerpt assigns visible.settings.currentValue from "
+                + "provider.resolveValue(user) [1]. It does not establish an internal "
+                + "forbiddenSource assignment [1].";
+        when(ollamaClient.chatResult(anyString(), anyString(), anyInt())).thenReturn(chat(answer));
+
+        CodeAskResponse response = service.ask(
+                null,
+                null,
+                List.of(SecurityRepository.DEFAULT_SPACE_ID),
+                "How does configureVisible assign visible currentValue?",
+                "method",
+                2
+        );
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).chatResult(anyString(), promptCaptor.capture(), anyInt());
+        String prompt = promptCaptor.getValue();
+        int typedFactsStart = prompt.indexOf("Trusted typed facts from selected source evidence");
+        int sourceContextStart = prompt.indexOf("\n\nSource-code context:");
+        assertThat(typedFactsStart).isGreaterThanOrEqualTo(0);
+        assertThat(prompt.substring(typedFactsStart, sourceContextStart))
+                .contains("visible.settings.currentValue: "
+                        + "ASSIGNS_EXPRESSION=provider.resolveValue(user)` [1]")
+                .doesNotContain("internal.secret.resultValue");
+        assertThat(prompt.substring(sourceContextStart))
+                .contains("VisibleConfiguration.java:10-16")
+                .contains("sourceLines=10-24")
+                .contains("excerptLines=10-16")
+                .contains("visible.settings.currentValue = provider.resolveValue(user);")
+                .doesNotContain("internal.secret.resultValue");
+
+        assertThat(response.answer()).isEqualTo(answer);
+        assertThat(response.evidence().get(0).lineStart()).isEqualTo(10);
+        assertThat(response.evidence().get(0).lineEnd()).isEqualTo(16);
+        assertThat(response.evidence().get(0).preview())
+                .contains("visible.settings.currentValue = provider.resolveValue(user);")
+                .doesNotContain("internal.secret.resultValue");
+    }
+
+    @Test
     void marksExcerptCompletenessAndKeepsCoreFlowMethodFullWhenBudgetAllows() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
@@ -443,6 +604,7 @@ class CodeRagServiceTest {
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
+        String expansionAudit = "                    auditExpansionStep();\n".repeat(70);
         String expandGraphContent = """
                 private List<CodeSearchResult> expandGraph(UUID repositoryId, String query, List<CodeSearchResult> ranked,
                                                            int limit, GraphSearchIntent intent) {
@@ -454,6 +616,8 @@ class CodeRagServiceTest {
                     for (CodeSearchResult related : repository.graphRelatedChunks(repositoryId, seeds, graphEdgeTypes(query, intent), 2, "BOTH", limit)) {
                         merge(expanded, boost(related, graphBoost(query, related)));
                     }
+                """ + expansionAudit + """
+                    recordExpansionCompleted(expanded.size());
                     return expanded.values().stream().sorted(Comparator.comparingDouble(CodeSearchResult::score).reversed()).toList();
                 }
                 """;
@@ -469,7 +633,7 @@ class CodeRagServiceTest {
         when(searchService.identifiersFrom(anyString())).thenReturn(List.of());
         when(ollamaClient.chatResult(anyString(), anyString())).thenReturn(chat("expandGraph expands graph-related chunks [1]."));
 
-        service.ask(
+        CodeAskResponse response = service.ask(
                 null,
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
@@ -485,10 +649,14 @@ class CodeRagServiceTest {
                 .contains("contentComplete=true")
                 .contains("repository.graphRelatedChunks")
                 .contains("return expanded.values()");
+        assertThat(expandGraphContent.length()).isGreaterThan(1600);
+        assertThat(response.evidence()).isNotEmpty();
+        assertThat(response.evidence().get(0).preview())
+                .contains("recordExpansionCompleted", "return expanded.values()");
     }
 
     @Test
-    void locateRewritesUncitedModelAnswerIntoActionableFallback() {
+    void locateRewritesUncitedModelAnswerIntoEvidenceOnlyFallback() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -508,10 +676,32 @@ class CodeRagServiceTest {
                 10
         );
 
-        assertThat(response.answer()).contains("후보 위치");
-        assertThat(response.answer()).contains("AuthController.java");
-        assertThat(response.answer()).contains("[1]");
+        assertGenericEvidenceOnlyFallback(
+                response,
+                "backend/src/main/java/com/learnbot/web/AuthController.java",
+                "backend/src/main/java/com/learnbot/service/AuthService.java");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
+    }
+
+    private void assertGenericEvidenceOnlyFallback(CodeAskResponse response, String... expectedPaths) {
+        assertThat(response.evidence()).extracting(CodeEvidence::filePath).containsExactly(expectedPaths);
+        Integer[] expectedCitations = java.util.stream.IntStream.rangeClosed(1, expectedPaths.length)
+                .boxed()
+                .toArray(Integer[]::new);
+        assertThat(response.evidence()).extracting(CodeEvidence::citationNumber)
+                .containsExactly(expectedCitations);
+        assertThat(response.answer()).contains("retained code evidence and typed exact facts");
+        for (int index = 0; index < response.evidence().size(); index++) {
+            CodeEvidence evidence = response.evidence().get(index);
+            String renderedExcerpt = evidence.preview().replaceAll("\\s+", " ").trim();
+            assertThat(response.answer()).contains(
+                    "source `" + evidence.filePath() + "`",
+                    renderedExcerpt,
+                    "[" + (index + 1) + "]");
+        }
+        assertThat(response.answer()).doesNotContain(
+                "주요 구성", "후보 위치", "구현 의도",
+                "executionOrder=", "happensAfter=", "happensBefore=");
     }
 
     private CodeSearchResult result(String filePath, String chunkType, String methodName, double score) {
@@ -550,7 +740,9 @@ class CodeRagServiceTest {
         assertThat(response.evidence().get(0).filePath()).contains("AuthService");
         assertThat(response.evidence().get(0).metadata()).containsKeys("evidenceScore", "evidenceRankReason", "graphReliability");
         assertThat(response.evidence().get(0).metadata()).doesNotContainKey("evidenceScoreParts");
-        assertThat(String.valueOf(response.evidence().get(0).metadata().get("evidenceRankReason"))).contains("graph CALLS");
+        assertThat(String.valueOf(response.evidence().get(0).metadata().get("evidenceRankReason")))
+                .contains("graph evidence")
+                .doesNotContain("CALLS");
     }
 
     @Test
@@ -583,7 +775,7 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void answerContextLabelsGenericEvidenceResponsibilities() {
+    void answerContextDoesNotInjectHeuristicPurposeOrPhaseMetadata() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -647,18 +839,22 @@ class CodeRagServiceTest {
                 .doesNotContain("evidencePhase=SEARCH_EXPANSION")
                 .doesNotContain("evidencePhase=RANKING")
                 .doesNotContain("evidencePhase=ANSWER_GENERATION")
+                .doesNotContain("executionOrder=")
+                .doesNotContain("happensAfter=")
+                .doesNotContain("happensBefore=")
                 .doesNotContain("citationKind=direct_code")
                 .doesNotContain("evidenceResponsibility=implementation_flow");
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsKey("debugHeuristicEvidencePhase")
-                        .containsEntry("debugHeuristicCitationKind", "direct_code")
-                        .containsKey("debugHeuristicEvidenceResponsibility")
-                        .doesNotContainKeys("evidencePhase", "citationKind", "evidenceResponsibility"));
+        assertThat(response.evidence()).extracting(CodeEvidence::citationNumber)
+                .containsExactly(1, 2, 3, 4);
+        assertThat(response.evidence()).allSatisfy(evidence -> {
+            assertThat(evidence.preview()).contains("File: " + evidence.filePath());
+            assertThat(evidence.metadata()).doesNotContainKeys(
+                    "debugHeuristicEvidencePhase", "evidencePhase", "llmImplementationPhase");
+        });
     }
 
     @Test
-    void answerContextSeparatesGenericFallbackScopes() {
+    void answerContextDoesNotInferFallbackScopesFromSourceText() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -727,26 +923,17 @@ class CodeRagServiceTest {
                 .doesNotContain("evidenceResponsibility=analysis_diagnostic")
                 .doesNotContain("evidenceResponsibility=search_fallback")
                 .doesNotContain("evidenceResponsibility=answer_fallback");
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
-                        .containsEntry("debugHeuristicEvidenceResponsibility", "analysis_diagnostic")
-                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("debugFallbackScope", "SEARCH_EXPANSION")
-                        .containsEntry("debugHeuristicEvidenceResponsibility", "search_fallback")
-                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
-        assertThat(response.evidence())
-                .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("debugFallbackScope", "ANSWER_GENERATION")
-                        .containsEntry("debugHeuristicEvidenceResponsibility", "answer_fallback")
-                        .doesNotContainKeys("fallbackScope", "evidenceResponsibility"));
+        assertThat(response.evidence()).extracting(CodeEvidence::citationNumber)
+                .containsExactly(1, 2, 3, 4);
+        assertThat(response.evidence()).allSatisfy(evidence -> {
+            assertThat(evidence.preview()).contains("File: " + evidence.filePath());
+            assertThat(evidence.metadata()).doesNotContainKeys("debugFallbackScope", "fallbackScope");
+        });
     }
 
 
     @Test
-    void javaGraphFailureQuestionPrefersMatchingDiagnosticStageOverRoslynDiagnostic() {
+    void explicitAnalysisDiagnosticMetadataIsPreservedWithoutFallbackScopeInference() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
@@ -772,7 +959,9 @@ class CodeRagServiceTest {
                 "roslyn_semantic_model",
                 Map.of(
                         "language", "csharp",
+                        "analysisDiagnosticScope", "GRAPH_ANALYSIS",
                         "analysisDiagnosticStage", "CSHARP_ROSLYN",
+                        "analysisDiagnosticLanguage", "csharp",
                         "analysisDiagnosticAnalyzer", "Roslyn",
                         "analysisDiagnosticStatus", "FAILED"
                 )
@@ -786,7 +975,9 @@ class CodeRagServiceTest {
                 "javaparser",
                 Map.of(
                         "language", "java",
+                        "analysisDiagnosticScope", "GRAPH_ANALYSIS",
                         "analysisDiagnosticStage", "JAVA_SEMANTIC",
+                        "analysisDiagnosticLanguage", "java",
                         "analysisDiagnosticAnalyzer", "JavaParser Symbol Solver",
                         "analysisDiagnosticStatus", "FAILED"
                 )
@@ -809,10 +1000,12 @@ class CodeRagServiceTest {
 
         assertThat(response.evidence())
                 .anySatisfy(evidence -> assertThat(evidence.metadata())
-                        .containsEntry("debugFallbackScope", "GRAPH_ANALYSIS")
+                        .containsEntry("analysisDiagnosticScope", "GRAPH_ANALYSIS")
                         .containsEntry("analysisDiagnosticStage", "JAVA_SEMANTIC")
                         .containsEntry("analysisDiagnosticLanguage", "java")
-                        .containsEntry("analysisDiagnosticAnalyzer", "JavaParser Symbol Solver"));
+                        .containsEntry("analysisDiagnosticAnalyzer", "JavaParser Symbol Solver")
+                        .containsEntry("analysisDiagnosticStatus", "FAILED")
+                        .doesNotContainKey("debugFallbackScope"));
     }
 
     @Test
@@ -1242,7 +1435,11 @@ class CodeRagServiceTest {
         ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).chatResult(systemPrompt.capture(), anyString());
         assertThat(response.mode()).isEqualTo("reasoning");
-        assertThat(systemPrompt.getValue()).contains("inferred design intent");
+        assertThat(systemPrompt.getValue())
+                .contains("inferred design intent")
+                .doesNotContain(
+                        "Preserve exact endpoint routes",
+                        "preserve every visible literal assignment");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("REASONING"));
     }
 
@@ -1268,8 +1465,8 @@ class CodeRagServiceTest {
         );
 
         assertThat(response.mode()).isEqualTo("reasoning");
-        assertThat(response.answer()).contains("구현 의도");
-        assertThat(response.answer()).contains("[1]");
+        assertGenericEvidenceOnlyFallback(
+                response, "backend/src/main/java/com/learnbot/service/AuthService.java");
         assertThat(response.diagnostics()).anySatisfy(note -> assertThat(note).contains("검색 근거 기반 답변으로 대체"));
     }
 
@@ -1295,7 +1492,8 @@ class CodeRagServiceTest {
         );
 
         assertThat(response.mode()).isEqualTo("locate");
-        assertThat(response.answer()).contains("후보 위치");
+        assertGenericEvidenceOnlyFallback(
+                response, "backend/src/main/java/com/learnbot/service/AuthService.java");
     }
 
     @Test
@@ -1757,7 +1955,7 @@ class CodeRagServiceTest {
                 null,
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
-                "내 서비스의 인덱싱부터 RAG 답변까지 흐름을 설명해줘",
+                "Explain the latest indexing-to-RAG answer architecture",
                 "overview",
                 4
         );
@@ -1914,7 +2112,7 @@ class CodeRagServiceTest {
                         chat("{\"enough\":true,\"missingAreas\":[],\"followUpQueries\":[],\"queryAreas\":[],\"requiredEvidenceGroups\":[],\"reason\":\"enough for adjudication\"}"),
                         chat("""
                         {"selected":[
-                          {"index":3,"score":0.98,"evidenceKind":"direct_code","implementationPhase":"GRAPH_STORAGE","responsibility":"graph_persistence","coverageGroup":"graph_persistence","mustUse":true,"supportedClaims":["stores graph nodes and edges"],"notSupportedClaims":["performs coverage planning"],"rankReason":"direct storage SQL","reason":"storage implementation"},
+                          {"index":2,"score":0.98,"evidenceKind":"direct_code","implementationPhase":"GRAPH_STORAGE","responsibility":"graph_persistence","coverageGroup":"graph_persistence","mustUse":true,"supportedClaims":["stores graph nodes and edges"],"notSupportedClaims":["performs coverage planning"],"rankReason":"direct storage SQL","reason":"storage implementation"},
                           {"index":1,"score":0.90,"evidenceKind":"direct_code","implementationPhase":"INDEXING","responsibility":"framework_semantics","coverageGroup":"framework_semantics","mustUse":true,"supportedClaims":["builds endpoint graph edges"],"notSupportedClaims":["persists graph tables"],"rankReason":"direct analyzer implementation","reason":"spring graph analyzer"}
                         ],"reason":"storage and analyzer evidence are stronger than helper coverage code"}
                         """));
@@ -2230,12 +2428,13 @@ class CodeRagServiceTest {
     }
 
     @Test
-    void ragFlowSelectionReplacesLineWindowsWithStructuredEvidenceWhenAvailable() {
+    void callFlowModeReplacesLineWindowsWithStructuredEvidenceWhenAvailable() {
         CodeSearchService searchService = mock(CodeSearchService.class);
         CodeReferenceService referenceService = mock(CodeReferenceService.class);
         OllamaClient ollamaClient = mockOllamaClient();
         LearnBotProperties properties = new LearnBotProperties();
         properties.getRag().getPipeline().setRewriteEnabled(false);
+        properties.getRag().getPipeline().setCodeContextLimit(4);
         CodeRagService service = new CodeRagService(searchService, referenceService, ollamaClient, properties);
 
         CodeSearchResult indexingWindow = resultWithParser(
@@ -2298,7 +2497,7 @@ class CodeRagServiceTest {
                 null,
                 List.of(SecurityRepository.DEFAULT_SPACE_ID),
                 "Explain indexing to RAG response flow",
-                "overview",
+                "flow",
                 6
         );
 
@@ -2308,8 +2507,8 @@ class CodeRagServiceTest {
         long structured = response.evidence().stream()
                 .filter(evidence -> List.of("method", "function", "class", "record", "constructor").contains(evidence.chunkType()))
                 .count();
-        assertThat(structured).isGreaterThanOrEqualTo(4);
-        assertThat(lineWindows).isLessThanOrEqualTo(2);
+        assertThat(structured).isEqualTo(4);
+        assertThat(lineWindows).isZero();
         assertThat(response.evidence())
                 .extracting(CodeEvidence::methodName)
                 .contains("askPrioritized", "retrieveCodeEvidence");

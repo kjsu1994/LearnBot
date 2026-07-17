@@ -1,6 +1,7 @@
 package com.learnbot.service.coderag.answer;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -15,8 +16,8 @@ import static com.learnbot.service.coderag.answer.CodeAnswerVerification.Failure
  * Validates generated answers without owning generation, retry, or fallback behavior.
  *
  * <p>The built-in checks preserve the existing Code RAG minimum answer and citation rules.
- * A caller can provide the runtime pipeline quality policy, while exact-fact checking is
- * hidden behind a replaceable boundary so typed evidence can supersede the legacy rules.</p>
+ * A caller can provide the runtime pipeline quality policy. Exact-fact checking consumes
+ * only the typed evidence IR supplied with the final rendered answer context.</p>
  */
 public final class CodeAnswerVerifier {
     private static final int MINIMUM_ANSWER_CHARS = 30;
@@ -30,30 +31,12 @@ public final class CodeAnswerVerifier {
     );
 
     private final AnswerQualityPolicy answerQualityPolicy;
-    private final ExactFactVerifier exactFactVerifier;
-
-    /**
-     * Creates a strict standalone verifier backed by the current exact-fact compatibility
-     * bridge. Runtime wiring that supports a configurable self-check should use
-     * {@link #legacyCompatible(AnswerQualityPolicy)}.
-     */
     public CodeAnswerVerifier() {
-        this(CodeAnswerVerifier::strictQualityFailure, CodeEvidenceFactFidelityBridge::missingReason);
+        this(CodeAnswerVerifier::strictQualityFailure);
     }
 
-    public CodeAnswerVerifier(
-            AnswerQualityPolicy answerQualityPolicy,
-            ExactFactVerifier exactFactVerifier
-    ) {
+    public CodeAnswerVerifier(AnswerQualityPolicy answerQualityPolicy) {
         this.answerQualityPolicy = answerQualityPolicy == null ? AnswerQualityPolicy.accepting() : answerQualityPolicy;
-        this.exactFactVerifier = exactFactVerifier == null ? ExactFactVerifier.accepting() : exactFactVerifier;
-    }
-
-    /**
-     * Uses the caller's existing runtime quality policy and the legacy fact-fidelity bridge.
-     */
-    public static CodeAnswerVerifier legacyCompatible(AnswerQualityPolicy answerQualityPolicy) {
-        return new CodeAnswerVerifier(answerQualityPolicy, CodeEvidenceFactFidelityBridge::missingReason);
     }
 
     public CodeAnswerVerification verify(
@@ -63,7 +46,18 @@ public final class CodeAnswerVerifier {
             String doneReason,
             boolean retryAvailable
     ) {
-        return verify(question, answer, evidence, doneReason, retryAvailable, true);
+        return verify(question, answer, evidence, doneReason, retryAvailable, true, CodeEvidenceIr.empty());
+    }
+
+    public CodeAnswerVerification verify(
+            String question,
+            String answer,
+            List<CodeSearchResult> evidence,
+            String doneReason,
+            boolean retryAvailable,
+            CodeEvidenceIr evidenceIr
+    ) {
+        return verify(question, answer, evidence, doneReason, retryAvailable, true, evidenceIr);
     }
 
     public CodeAnswerVerification verify(
@@ -73,6 +67,19 @@ public final class CodeAnswerVerifier {
             String doneReason,
             boolean retryAvailable,
             boolean generationAllowed
+    ) {
+        return verify(question, answer, evidence, doneReason, retryAvailable,
+                generationAllowed, CodeEvidenceIr.empty());
+    }
+
+    public CodeAnswerVerification verify(
+            String question,
+            String answer,
+            List<CodeSearchResult> evidence,
+            String doneReason,
+            boolean retryAvailable,
+            boolean generationAllowed,
+            CodeEvidenceIr evidenceIr
     ) {
         List<CodeSearchResult> safeEvidence = evidence == null ? List.of() : List.copyOf(evidence);
         String safeAnswer = answer == null ? "" : answer;
@@ -105,17 +112,16 @@ public final class CodeAnswerVerifier {
             return repairable(classifyBaseFailure(baseReason), baseReason, citationQuality, retryAvailable);
         }
 
-        String exactFactReason;
+        String typedFactReason;
         try {
-            exactFactReason = normalizeReason(exactFactVerifier.missingReason(
-                    question == null ? "" : question, safeAnswer, safeEvidence));
+            typedFactReason = normalizeReason(CodeEvidenceIrFidelity.missingReason(safeAnswer, evidenceIr));
         } catch (RuntimeException ex) {
             return repairable(FailureKind.VERIFIER_ERROR,
-                    "exact fact verifier failed: " + ex.getClass().getSimpleName(),
+                    "typed evidence fidelity verifier failed: " + ex.getClass().getSimpleName(),
                     citationQuality, retryAvailable);
         }
-        if (!exactFactReason.isEmpty()) {
-            return repairable(FailureKind.EXACT_FACT, exactFactReason, citationQuality, retryAvailable);
+        if (!typedFactReason.isEmpty()) {
+            return repairable(FailureKind.EXACT_FACT, typedFactReason, citationQuality, retryAvailable);
         }
 
         return new CodeAnswerVerification(Disposition.ACCEPT, FailureKind.NONE, "", citationQuality);
@@ -277,12 +283,4 @@ public final class CodeAnswerVerifier {
         }
     }
 
-    @FunctionalInterface
-    public interface ExactFactVerifier {
-        String missingReason(String question, String answer, List<CodeSearchResult> evidence);
-
-        static ExactFactVerifier accepting() {
-            return (question, answer, evidence) -> null;
-        }
-    }
 }

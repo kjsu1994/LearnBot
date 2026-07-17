@@ -50,6 +50,11 @@ public final class CodeEndpointQueryVariants {
         return List.copyOf(routes);
     }
 
+    /** Returns whether the question contains an explicit normalized route operand. */
+    public static boolean hasEndpointIntent(String query) {
+        return !routes(query).isEmpty();
+    }
+
     public static List<CodeSearchResult> rankCandidates(String query, List<CodeSearchResult> candidates, int limit) {
         List<String> queryTerms = terms(query);
         if (queryTerms.isEmpty() || candidates == null || candidates.isEmpty()) return List.of();
@@ -64,7 +69,7 @@ public final class CodeEndpointQueryVariants {
                         .thenComparing(scored -> scored.result().filePath())
                         .thenComparingInt(scored -> scored.result().lineStart()))
                 .limit(Math.max(1, limit))
-                .map(CodeEndpointQueryVariants::markCandidate)
+                .map(CodeEndpointQueryVariants::boostCandidate)
                 .toList();
     }
 
@@ -102,18 +107,15 @@ public final class CodeEndpointQueryVariants {
         return new ScoredEndpoint(candidate, score, distinctiveMatches);
     }
 
-    private static CodeSearchResult markCandidate(ScoredEndpoint scored) {
+    private static CodeSearchResult boostCandidate(ScoredEndpoint scored) {
         CodeSearchResult result = scored.result();
-        Map<String, Object> metadata = new java.util.LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
-        metadata.put("deterministicEndpointCandidate", true);
-        metadata.put("endpointCandidateScore", scored.score());
-        metadata.put("evidenceRankReason", "Endpoint graph candidate ranked by route, symbol, path, and source lexical coverage");
         double boost = Math.min(0.45, scored.score() / 40.0);
         return new CodeSearchResult(
                 result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
                 result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
                 result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
-                result.content(), result.score() + boost, Map.copyOf(metadata));
+                result.content(), result.score() + boost,
+                result.metadata() == null ? Map.of() : Map.copyOf(result.metadata()));
     }
 
     private static List<String> terms(String value) {

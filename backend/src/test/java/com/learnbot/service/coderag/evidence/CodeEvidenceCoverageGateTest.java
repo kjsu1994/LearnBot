@@ -146,6 +146,35 @@ class CodeEvidenceCoverageGateTest {
     }
 
     @Test
+    void incompletePromptExcerptCannotResolveAClaimEvenWhenItsEvidenceIdWasRetained() {
+        CodeSearchResult incomplete = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Worker.java",
+                "method", "work", "Worker", "work", "app", null, null, 1,
+                10, 12, "void work() { validate(); }", 0.8, Map.of(
+                        "llmValidatedEvidenceGroup", "response_storage",
+                        "llmValidatedEvidence", true,
+                        "llmSupportedClaims", List.of("the response is persisted"),
+                        "contentComplete", false,
+                        "omittedByBudget", true,
+                        "indexVersion", "index-current"));
+        String retainedId = CodeEvidenceId.from(incomplete);
+        var checklist = List.of(new RagPipelineService.CodeEvidenceChecklistItem(
+                "response-store", "response_storage", "prove response storage", List.of()));
+        var claimResults = List.of(new RagPipelineService.CodeClaimResult(
+                "response-store", "SUPPORTED", List.of(retainedId),
+                "the response is persisted", List.of(), ""));
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, true, "verified", List.of(), List.of(), List.of(), List.of("response_storage"),
+                checklist, List.of(), List.of(), "response flow", 2, "DISTRIBUTED", claimResults);
+
+        var outcome = gate.evaluate(plan, List.of(incomplete), "index-current");
+
+        assertThat(outcome.sufficient()).isFalse();
+        assertThat(outcome.resolvedClaimIds()).isEmpty();
+        assertThat(outcome.missingReasons()).contains("prove response storage");
+    }
+
+    @Test
     void acceptsEvidenceBackedContradictedClaimAsAResolvableCorrection() {
         CodeSearchResult present = evidence("initial_premise");
         String evidenceId = CodeEvidenceId.from(present);

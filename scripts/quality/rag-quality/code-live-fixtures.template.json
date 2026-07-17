@@ -153,8 +153,8 @@
         "backend/src/main/java/com/learnbot/service/CodeIndexingService.java",
         "backend/src/main/java/com/learnbot/repository/CodeRepository.java"
       ],
-      "expectedSymbols": ["runIndex", "completeSuccessfulIndex", "activateIndex"],
-      "requiredClaims": ["runIndex", "completeSuccessfulIndex", "active_index_version"],
+      "expectedSymbols": ["runIndex", "completeSuccessfulIndex", "setActiveIndex"],
+      "requiredClaims": ["runIndex", "completeSuccessfulIndex", "setActiveIndex"],
       "maxLatencyMs": 60000
     },
     {
@@ -255,11 +255,11 @@
       "category": "answer-orchestration",
       "domain": "code",
       "repositoryId": "${LEARNBOT_JAVA_REPOSITORY_ID}",
-      "question": "CodeRagService.askPrioritized가 검색부터 컨텍스트 구성과 답변 생성까지 처리하는 흐름을 추적해줘.",
+      "question": "CodeRagOrchestrator.askPrioritized가 검색부터 컨텍스트 구성과 답변 생성까지 처리하는 흐름을 추적해줘.",
       "expectedCitationIds": [],
-      "expectedFiles": ["backend/src/main/java/com/learnbot/service/CodeRagService.java"],
-      "expectedSymbols": ["askPrioritized"],
-      "requiredClaims": ["askPrioritized", "retrieveCodeEvidence", "buildBudgetedContext"],
+      "expectedFiles": ["backend/src/main/java/com/learnbot/service/coderag/orchestration/CodeRagOrchestrator.java"],
+      "expectedSymbols": ["askPrioritized", "retrieveCodeEvidence", "chatWithLimit"],
+      "requiredClaims": ["askPrioritized", "retrieveCodeEvidence", "contextAssembler.assemble", "answerGenerator.generate"],
       "maxLatencyMs": 60000
     },
     {
@@ -647,7 +647,7 @@
       "answerability": "answerable",
       "domain": "code",
       "repositoryId": "${LEARNBOT_JAVA_REPOSITORY_ID}",
-      "question": "첫 번째 채팅 모델 호출이 실패했을 때 바로 끝나는지 다른 후보를 시도하는지 코드 근거로 확인해줘.",
+      "question": "비스트리밍 OllamaClient.chatResult 호출에서 첫 번째 후보 모델이 실패하면 바로 끝나는지 다음 후보 모델을 시도하는지 코드 근거로 확인해줘.",
       "expectedCitationIds": [],
       "expectedFiles": ["backend/src/main/java/com/learnbot/service/OllamaClient.java"],
       "expectedSymbols": ["chatResult"],

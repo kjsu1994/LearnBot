@@ -7,6 +7,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,8 @@ public class EndpointEvidenceExtractor implements EvidenceExtractor {
         List<CodeEvidenceConstraint> constraints = new ArrayList<>();
         List<CodeEvidenceSignal> signals = new ArrayList<>();
         int limit = context.maxItemsPerExtractor();
+        String requiredRoute = requiredExactRoute(context);
+        boolean exactConstraintAdded = false;
 
         for (CodeSearchResult result : EvidenceExtractionSupport.bounded(context.evidence(), limit)) {
             String rawRoute = EvidenceExtractionSupport.metadata(result, "endpointRoute");
@@ -61,19 +64,22 @@ public class EndpointEvidenceExtractor implements EvidenceExtractor {
             kinds.add(CodeEvidenceItem.Kind.ENDPOINT);
             kinds.add(CodeEvidenceItem.Kind.DIRECT_SOURCE);
             if (graphRelation) kinds.add(CodeEvidenceItem.Kind.GRAPH_RELATION);
+            CodeIntelligenceAuthority authority = EvidenceExtractionSupport.directSyntaxAuthority(result);
             CodeEvidenceItem item = new CodeEvidenceItem(CodeEvidenceItem.evidenceId(result), result, kinds,
-                    EvidenceExtractionSupport.authority(result));
+                    authority);
             items.add(item);
 
             String route = EvidenceExtractionSupport.normalizeRoute(rawRoute);
             if (!route.isBlank() && facts.size() < limit) {
-                CodeIntelligenceAuthority authority = EvidenceExtractionSupport.authority(result);
                 CodeEvidenceFact routeFact = CodeEvidenceFact.of(item.evidenceId(),
                         EvidenceExtractionSupport.subject(result), RELATION, route,
                         CodeEvidenceFact.Exactness.NORMALIZED, 1.0, authority);
                 facts.add(routeFact);
-                constraints.add(new CodeEvidenceConstraint(CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED,
-                        routeFact.factId(), "Preserve the endpoint route represented by direct evidence."));
+                if (!exactConstraintAdded && route.equals(requiredRoute)) {
+                    constraints.add(new CodeEvidenceConstraint(CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED,
+                            routeFact.factId(), "Preserve the endpoint route selected by explicit or operation provenance."));
+                    exactConstraintAdded = true;
+                }
 
                 String method = EvidenceExtractionSupport.metadata(result, "httpMethod").toUpperCase(Locale.ROOT);
                 if (!method.isBlank() && facts.size() < limit) {
@@ -89,5 +95,34 @@ public class EndpointEvidenceExtractor implements EvidenceExtractor {
                     "Endpoint structure was extracted without changing the search score."));
         }
         return new CodeEvidenceIr(items, facts, constraints, signals, List.of(), List.of());
+    }
+
+    private String requiredExactRoute(CodeEvidenceExtractionContext context) {
+        Set<String> evidenceRoutes = routes(context.evidence());
+        Set<String> explicitRoutes = CodeEndpointQueryVariants.routes(context.question()).stream()
+                .map(EvidenceExtractionSupport::normalizeRoute)
+                .filter(route -> !route.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (explicitRoutes.size() == 1) {
+            String explicitRoute = explicitRoutes.iterator().next();
+            if (evidenceRoutes.contains(explicitRoute)) return explicitRoute;
+        }
+
+        Set<String> operationRoutes = context.evidence().stream()
+                .filter(result -> CodeEvidenceOperationProvenance.from(result).stream()
+                        .anyMatch(value -> "find_endpoint".equals(value.operationType())))
+                .map(result -> EvidenceExtractionSupport.normalizeRoute(
+                        EvidenceExtractionSupport.metadata(result, "endpointRoute")))
+                .filter(route -> !route.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return operationRoutes.size() == 1 ? operationRoutes.iterator().next() : "";
+    }
+
+    private Set<String> routes(List<CodeSearchResult> evidence) {
+        return evidence.stream()
+                .map(result -> EvidenceExtractionSupport.normalizeRoute(
+                        EvidenceExtractionSupport.metadata(result, "endpointRoute")))
+                .filter(route -> !route.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 }

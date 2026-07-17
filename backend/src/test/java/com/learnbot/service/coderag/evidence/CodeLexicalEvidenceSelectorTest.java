@@ -18,10 +18,14 @@ class CodeLexicalEvidenceSelectorTest {
                 "List<Settings> candidates = candidates(role); for (int index = 0; index < candidates.size(); index++) { tryCall(); } ");
         CodeSearchResult unrelated = result("embed", 80, 110, "return embedding;");
 
-        assertThat(CodeLexicalEvidenceSelector.rank(
-                "Determine whether a failed chat call tries another candidate", List.of(wrapper, unrelated, implementation), 3))
-                .extracting(CodeSearchResult::lineStart)
-                .startsWith(140);
+        List<CodeSearchResult> ranked = CodeLexicalEvidenceSelector.rank(
+                "Determine whether a failed chat call tries another candidate",
+                List.of(wrapper, unrelated, implementation), 3);
+
+        assertThat(ranked).extracting(CodeSearchResult::lineStart).startsWith(140);
+        assertThat(ranked).allSatisfy(result -> assertThat(result.metadata())
+                .containsKeys("retrievalIntentScore", "evidenceRankReason")
+                .doesNotContainKey("deterministicLexicalCandidate"));
     }
 
     private CodeSearchResult result(String method, int start, int end, String content) {

@@ -283,6 +283,8 @@ public class CodeChunkParser {
         String className = node.findAncestor(TypeDeclaration.class)
                 .map(type -> ((TypeDeclaration<?>) type).getNameAsString())
                 .orElse(null);
+        boolean callableBodyPresent = node instanceof ConstructorDeclaration
+                || node instanceof MethodDeclaration method && method.getBody().isPresent();
         chunks.add(buildChunk(
                 chunks.size(),
                 chunkType,
@@ -296,7 +298,10 @@ public class CodeChunkParser {
                 range.end(),
                 relativePath,
                 slice(lines, range.start() - 1, range.end() - 1),
-                metadata("java", "javaparser", metadataValues("class", className, "method", methodName))
+                metadata("java", "javaparser", metadataValues(
+                        "class", className,
+                        "method", methodName,
+                        "callableBodyPresent", callableBodyPresent))
         ));
     }
 

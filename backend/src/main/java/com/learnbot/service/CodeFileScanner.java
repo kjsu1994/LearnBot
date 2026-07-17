@@ -22,7 +22,7 @@ public class CodeFileScanner {
             "composer.lock", "poetry.lock", "go.sum", "cargo.lock"
     );
     private static final Set<String> EXCLUDED_DIRS = Set.of(
-            ".git", "bin", "obj", ".vs", ".idea", ".gradle", "node_modules",
+            ".git", ".tmp", "bin", "obj", ".vs", ".idea", ".gradle", "node_modules",
             "dist", "build", "target", "out", "vendor", "third_party", "external"
     );
     private static final Set<String> EXCLUDED_EXTENSIONS = Set.of(

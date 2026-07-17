@@ -2,17 +2,23 @@ package com.learnbot.service.coderag.answer;
 
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.EvidenceExcerptSelector;
+import com.learnbot.service.CodeIntelligenceAuthority;
+import com.learnbot.service.coderag.evidence.CodeEvidenceId;
+import com.learnbot.service.coderag.model.CodeAnalysisDiagnosticMetadata;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * Builds the source-code context supplied to Code RAG answer generation.
+ * Builds source-code evidence context supplied to answer generation.
  *
  * <p>This component owns evidence ordering, excerpt rendering, streaming compaction, and
  * prompt-budget trimming. Retrieval and evidence adjudication must finish before calling it.</p>
@@ -22,11 +28,8 @@ public final class CodeContextAssembler {
     private static final int DEFAULT_CONTEXT_CHARS = 1200;
     private static final int REASONING_CONTEXT_CHARS = 1000;
     private static final Set<String> COVERAGE_STOP_WORDS = Set.of(
-            "the", "and", "for", "from", "with", "that", "this", "into", "onto", "where", "what", "when", "how",
-            "does", "code", "source", "file", "files", "class", "method", "implementation", "implements", "logic",
-            "flow", "pipeline", "service", "services", "request", "response", "result", "results", "objects",
-            "locate", "find", "based", "current", "related", "using", "used", "user",
-            "backend", "frontend", "main", "java", "learnbot", "src"
+            "the", "and", "for", "from", "with", "that", "this", "into", "onto",
+            "where", "what", "when", "which", "who", "why", "how", "does", "are", "was", "were"
     );
 
     private final boolean evidenceRankingDebug;
@@ -45,12 +48,16 @@ public final class CodeContextAssembler {
         List<CodeSearchResult> original = safeRequest.results();
         List<CodeSearchResult> selected = new ArrayList<>(original);
         boolean allowFullCoreEvidence = true;
-        String context = safeRequest.compactForStreaming()
-                ? buildStreamingContext(safeRequest.question(), mode, selected, allowFullCoreEvidence)
-                : buildContext(safeRequest.question(), mode, selected, allowFullCoreEvidence);
+        RenderedContext rendered = safeRequest.compactForStreaming()
+                ? renderStreamingContext(safeRequest.question(), mode, selected, allowFullCoreEvidence)
+                : renderContext(safeRequest.question(), mode, selected, allowFullCoreEvidence);
+        String context = rendered.context();
         int budget = promptTokenBudget(
                 safeRequest.contextWindow(), safeRequest.configuredPromptTokenBudget());
-        int requiredCount = (int) selected.stream().filter(this::isRequiredContextEvidence).count();
+        Set<String> requiredEvidenceIds = safeRequest.requiredEvidenceIds();
+        int requiredCount = (int) selected.stream()
+                .filter(result -> isRequiredContextEvidence(result, requiredEvidenceIds))
+                .count();
         int minResults = Math.min(selected.size(), Math.max(
                 requiredCount,
                 isConversationPinned(selected) ? 1 : Math.min(2, selected.size())));
@@ -58,29 +65,33 @@ public final class CodeContextAssembler {
         if (allowFullCoreEvidence
                 && estimatedPromptTokens(safeRequest.systemPrompt(), safeRequest.promptPrefix(), context) > budget) {
             allowFullCoreEvidence = false;
-            context = safeRequest.compactForStreaming()
-                    ? buildStreamingContext(safeRequest.question(), mode, selected, false)
-                    : buildContext(safeRequest.question(), mode, selected, false);
+            rendered = safeRequest.compactForStreaming()
+                    ? renderStreamingContext(safeRequest.question(), mode, selected, false)
+                    : renderContext(safeRequest.question(), mode, selected, false);
+            context = rendered.context();
         }
         while (selected.size() > minResults
                 && estimatedPromptTokens(safeRequest.systemPrompt(), safeRequest.promptPrefix(), context) > budget) {
-            removeBudgetCandidate(selected);
-            context = safeRequest.compactForStreaming()
-                    ? buildStreamingContext(safeRequest.question(), mode, selected, false)
-                    : buildContext(safeRequest.question(), mode, selected, false);
+            if (!removeBudgetCandidate(selected, requiredEvidenceIds)) {
+                break;
+            }
+            rendered = safeRequest.compactForStreaming()
+                    ? renderStreamingContext(safeRequest.question(), mode, selected, false)
+                    : renderContext(safeRequest.question(), mode, selected, false);
+            context = rendered.context();
         }
         return new ContextBundle(
-                selected,
+                rendered.results(),
                 context,
                 Math.max(0, original.size() - selected.size()));
     }
 
     public String buildContext(String question, String mode, List<CodeSearchResult> results) {
-        return buildContext(safe(question), Mode.from(mode), safeResults(results), true);
+        return renderContext(safe(question), Mode.from(mode), safeResults(results), true).context();
     }
 
     public String buildStreamingContext(String question, String mode, List<CodeSearchResult> results) {
-        return buildStreamingContext(safe(question), Mode.from(mode), safeResults(results), true);
+        return renderStreamingContext(safe(question), Mode.from(mode), safeResults(results), true).context();
     }
 
     static int promptTokenBudget(int contextWindow, int configuredPromptTokenBudget) {
@@ -101,71 +112,86 @@ public final class CodeContextAssembler {
         return estimateTokens(systemPrompt) + estimateTokens(promptPrefix) + estimateTokens(context);
     }
 
-    private String buildContext(
+    private RenderedContext renderContext(
             String question,
             Mode mode,
             List<CodeSearchResult> results,
             boolean allowFullCoreEvidence
     ) {
         if (results.isEmpty()) {
-            return "No source-code context retrieved.";
+            return RenderedContext.empty();
         }
         int maxChars = mode == Mode.OVERVIEW
                 ? OVERVIEW_CONTEXT_CHARS
                 : mode == Mode.REASONING ? REASONING_CONTEXT_CHARS : DEFAULT_CONTEXT_CHARS;
         String validation = evidenceValidationContext(results);
-        String context = IntStream.range(0, results.size())
+        List<RenderedEvidence> rendered = IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
                     CodeExcerpt excerpt = codeExcerptInfo(
                             question,
                             result,
                             contextCharsFor(question, mode, result, index, maxChars, allowFullCoreEvidence));
-                    return "[" + (index + 1) + "] "
-                            + result.filePath() + ":" + result.lineStart() + "-" + result.lineEnd()
+                    return new RenderedEvidence(result, excerpt, index + 1);
+                })
+                .toList();
+        String context = rendered.stream()
+                .map(item -> {
+                    CodeSearchResult result = item.source();
+                    CodeExcerpt excerpt = item.excerpt();
+                    return "[" + item.citationNumber() + "] "
+                            + result.filePath() + ":" + excerpt.excerptLineStart() + "-" + excerpt.excerptLineEnd()
                             + " type=" + result.chunkType()
                             + nullable(" class=", result.className())
                             + nullable(" method=", result.methodName())
                             + nullable(" control=", result.controlName())
                             + nullable(" event=", result.eventName())
-                            + endpointContext(result)
                             + citationKindContext(result)
-                            + executionOrderContext(result)
                             + analysisDiagnosticContext(result)
                             + graphContext(result)
                             + evidenceRankingContext(result)
-                            + adjudicationClaimContext(result)
+                            + adjudicationClaimContext(result, excerpt)
                             + excerptContext(result, excerpt)
                             + "\n" + excerpt.text();
                 })
                 .collect(Collectors.joining("\n\n"));
-        return validation.isBlank() ? context : validation + "\n\n" + context;
+        return new RenderedContext(
+                rendered.stream().map(this::promptResult).toList(),
+                validation.isBlank() ? context : validation + "\n\n" + context);
     }
 
-    private String buildStreamingContext(
+    private RenderedContext renderStreamingContext(
             String question,
             Mode mode,
             List<CodeSearchResult> results,
             boolean allowFullCoreEvidence
     ) {
         if (results.isEmpty()) {
-            return "No source-code context retrieved.";
+            return RenderedContext.empty();
         }
         int detailedLimit = Math.min(results.size(), detailedStreamingContextLimit(mode, results));
         int detailedChars = streamingDetailedContextChars(mode);
         int compactChars = streamingCompactContextChars(mode);
         String validation = evidenceValidationContext(results);
-        String context = IntStream.range(0, results.size())
+        List<RenderedEvidence> rendered = IntStream.range(0, results.size())
                 .mapToObj(index -> {
                     CodeSearchResult result = results.get(index);
                     boolean detailed = index < detailedLimit || isRequiredConversationPinned(result);
-                    return detailed
-                            ? streamingDetailedContextLine(
-                                    question, mode, result, index, detailedChars, allowFullCoreEvidence)
-                            : streamingCompactContextLine(question, result, index + 1, compactChars);
+                    int maxChars = detailed
+                            ? contextCharsFor(question, mode, result, index, detailedChars, allowFullCoreEvidence)
+                            : compactChars;
+                    return new RenderedEvidence(
+                            result, codeExcerptInfo(question, result, maxChars), index + 1, detailed);
                 })
+                .toList();
+        String context = rendered.stream()
+                .map(item -> item.detailed()
+                        ? streamingDetailedContextLine(item)
+                        : streamingCompactContextLine(item))
                 .collect(Collectors.joining("\n\n"));
-        return validation.isBlank() ? context : validation + "\n\n" + context;
+        return new RenderedContext(
+                rendered.stream().map(this::promptResult).toList(),
+                validation.isBlank() ? context : validation + "\n\n" + context);
     }
 
     private int detailedStreamingContextLimit(Mode mode, List<CodeSearchResult> results) {
@@ -196,58 +222,108 @@ public final class CodeContextAssembler {
         };
     }
 
-    private String streamingDetailedContextLine(
-            String question,
-            Mode mode,
-            CodeSearchResult result,
-            int index,
-            int maxChars,
-            boolean allowFullCoreEvidence
-    ) {
-        CodeExcerpt excerpt = codeExcerptInfo(
-                question,
-                result,
-                contextCharsFor(question, mode, result, index, maxChars, allowFullCoreEvidence));
-        return "[" + (index + 1) + "] " + compactCodeHeader(result)
+    private String streamingDetailedContextLine(RenderedEvidence item) {
+        CodeSearchResult result = item.source();
+        CodeExcerpt excerpt = item.excerpt();
+        return "[" + item.citationNumber() + "] " + compactCodeHeader(result, excerpt)
                 + citationKindContext(result)
-                + executionOrderContext(result)
                 + analysisDiagnosticContext(result)
                 + graphContext(result)
                 + evidenceRankingContext(result)
-                + adjudicationClaimContext(result)
+                + adjudicationClaimContext(result, excerpt)
                 + excerptContext(result, excerpt)
                 + "\n" + excerpt.text();
     }
 
-    private String streamingCompactContextLine(
-            String question,
-            CodeSearchResult result,
-            int citationNumber,
-            int maxChars
-    ) {
-        CodeExcerpt excerpt = codeExcerptInfo(question, result, maxChars);
-        return "[" + citationNumber + "] " + compactCodeHeader(result)
+    private String streamingCompactContextLine(RenderedEvidence item) {
+        CodeSearchResult result = item.source();
+        CodeExcerpt excerpt = item.excerpt();
+        return "[" + item.citationNumber() + "] " + compactCodeHeader(result, excerpt)
                 + excerptContext(result, excerpt)
                 + "\nKey excerpt: " + excerpt.text();
     }
 
-    private String compactCodeHeader(CodeSearchResult result) {
-        return result.filePath() + ":" + result.lineStart() + "-" + result.lineEnd()
+    private CodeSearchResult promptResult(RenderedEvidence item) {
+        CodeSearchResult source = item.source();
+        CodeExcerpt excerpt = item.excerpt();
+        Map<String, Object> metadata = promptMetadata(source, excerpt);
+        return new CodeSearchResult(
+                source.chunkId(), source.repositoryId(), source.fileId(), source.repositoryName(),
+                source.filePath(), source.chunkType(), source.symbolName(), source.className(),
+                source.methodName(), source.namespaceName(), source.controlName(), source.eventName(),
+                source.chunkIndex(), excerpt.excerptLineStart(), excerpt.excerptLineEnd(), excerpt.text(),
+                source.score(), metadata);
+    }
+
+    private Map<String, Object> promptMetadata(CodeSearchResult source, CodeExcerpt excerpt) {
+        Map<String, Object> metadata = new LinkedHashMap<>(
+                source == null || source.metadata() == null ? Map.of() : source.metadata());
+        int sourceLineStart = resultLineStart(source);
+        int sourceLineEnd = resultLineEnd(source);
+        boolean omittedByBudget = excerpt.omittedByBudget()
+                || metadataBoolean(source, "omittedByBudget");
+        boolean contentComplete = excerpt.contentComplete()
+                && !omittedByBudget
+                && !metadataExplicitlyFalse(source, "contentComplete");
+
+        preserveSourceMetadata(metadata, "actualLineStart", "sourceActualLineStart");
+        preserveSourceMetadata(metadata, "actualLineEnd", "sourceActualLineEnd");
+        metadata.put("sourceLineStart", sourceLineStart);
+        metadata.put("sourceLineEnd", sourceLineEnd);
+        metadata.put("actualLineStart", excerpt.excerptLineStart());
+        metadata.put("actualLineEnd", excerpt.excerptLineEnd());
+        metadata.put("excerptLineStart", excerpt.excerptLineStart());
+        metadata.put("excerptLineEnd", excerpt.excerptLineEnd());
+        metadata.put("excerptKind", excerpt.kind());
+        metadata.put("contentComplete", contentComplete);
+        metadata.put("omittedByBudget", omittedByBudget);
+
+        if (!contentComplete) {
+            metadata.put("llmValidatedEvidence", false);
+            metadata.remove("llmValidatedEvidenceGroup");
+            metadata.remove("llmSupportedClaims");
+            metadata.remove("llmNotSupportedClaims");
+        }
+        return Collections.unmodifiableMap(metadata);
+    }
+
+    private void preserveSourceMetadata(Map<String, Object> metadata, String key, String sourceKey) {
+        if (metadata.containsKey(key)) {
+            metadata.putIfAbsent(sourceKey, metadata.get(key));
+        }
+    }
+
+    private boolean metadataExplicitlyFalse(CodeSearchResult result, String key) {
+        if (result == null || result.metadata() == null || !result.metadata().containsKey(key)) {
+            return false;
+        }
+        Object value = result.metadata().get(key);
+        return value instanceof Boolean bool ? !bool : !Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private String compactCodeHeader(CodeSearchResult result, CodeExcerpt excerpt) {
+        return result.filePath() + ":" + excerpt.excerptLineStart() + "-" + excerpt.excerptLineEnd()
                 + " type=" + result.chunkType()
                 + nullable(" class=", result.className())
                 + nullable(" method=", result.methodName())
                 + nullable(" control=", result.controlName())
-                + nullable(" event=", result.eventName())
-                + endpointContext(result);
+                + nullable(" event=", result.eventName());
     }
 
-    private boolean isRequiredContextEvidence(CodeSearchResult result) {
-        return isRequiredConversationPinned(result)
-                || metadataBoolean(result, "deterministicEndpointEvidence")
-                || metadataBoolean(result, "deterministicEndpointBestMatch")
+    private boolean isRequiredContextEvidence(CodeSearchResult result, Set<String> requiredEvidenceIds) {
+        return isTypedRequiredEvidence(result, requiredEvidenceIds)
+                || isConversationPinned(result)
+                || isRequiredConversationPinned(result)
                 || metadataBoolean(result, "llmValidatedEvidence")
                 || metadataBoolean(result, "llmEvidenceSlateMustUse")
                 || metadataBoolean(result, "llmChecklistGroupRequired");
+    }
+
+    private boolean isTypedRequiredEvidence(CodeSearchResult result, Set<String> requiredEvidenceIds) {
+        return result != null
+                && requiredEvidenceIds != null
+                && !requiredEvidenceIds.isEmpty()
+                && requiredEvidenceIds.contains(CodeEvidenceId.from(result));
     }
 
     private boolean isConversationPinned(List<CodeSearchResult> results) {
@@ -266,27 +342,18 @@ public final class CodeContextAssembler {
                 && Boolean.TRUE.equals(result.metadata().get("conversationRequired"));
     }
 
-    private void removeBudgetCandidate(List<CodeSearchResult> selected) {
+    private boolean removeBudgetCandidate(
+            List<CodeSearchResult> selected,
+            Set<String> requiredEvidenceIds
+    ) {
         for (int index = selected.size() - 1; index >= 0; index--) {
             CodeSearchResult candidate = selected.get(index);
-            if (!isConversationPinned(candidate)
-                    && !isRequiredConversationPinned(candidate)
-                    && !metadataBoolean(candidate, "llmEvidenceSlateMustUse")
-                    && !metadataBoolean(candidate, "llmChecklistGroupRequired")) {
+            if (!isRequiredContextEvidence(candidate, requiredEvidenceIds)) {
                 selected.remove(index);
-                return;
+                return true;
             }
         }
-        for (int index = selected.size() - 1; index >= 0; index--) {
-            CodeSearchResult candidate = selected.get(index);
-            if (!isRequiredConversationPinned(candidate)
-                    && !metadataBoolean(candidate, "llmEvidenceSlateMustUse")
-                    && !metadataBoolean(candidate, "llmChecklistGroupRequired")) {
-                selected.remove(index);
-                return;
-            }
-        }
-        selected.remove(selected.size() - 1);
+        return false;
     }
 
     private int contextCharsFor(
@@ -310,7 +377,7 @@ public final class CodeContextAssembler {
     }
 
     private boolean isCoreFullContextCandidate(String question, Mode mode, CodeSearchResult result) {
-        if (result == null || !isDirectCodeEvidence(result) || !isImplementationFlowQuestion(question, mode)) {
+        if (result == null || !isDirectCodeEvidence(result) || !isImplementationFlowQuestion(mode)) {
             return false;
         }
         String symbol = firstNonBlank(
@@ -323,19 +390,15 @@ public final class CodeContextAssembler {
         String query = normalizeCodeText(splitIdentifierTerms(question));
         Set<String> identityTerms = coverageTerms(identity);
         Set<String> queryTerms = coverageTerms(query);
-        return identityTerms.stream().anyMatch(query::contains)
-                || queryTerms.stream().anyMatch(identity::contains);
+        return identityTerms.stream().anyMatch(queryTerms::contains);
     }
 
-    private boolean isImplementationFlowQuestion(String question, Mode mode) {
-        if (mode == Mode.CALL_FLOW || mode == Mode.REASONING || mode == Mode.IMPACT || mode == Mode.UI_EVENT) {
-            return true;
-        }
-        String normalized = normalizeCodeText(question);
-        return containsRoleTerms(
-                normalized,
-                "flow", "pipeline", "process", "through", "calls", "call", "ranking", "expansion",
-                "generation", "handler", "binding", "transaction", "fallback", "complete", "entire");
+    private boolean isImplementationFlowQuestion(Mode mode) {
+        return mode == Mode.EXPLAIN_METHOD
+                || mode == Mode.CALL_FLOW
+                || mode == Mode.REASONING
+                || mode == Mode.IMPACT
+                || mode == Mode.UI_EVENT;
     }
 
     private boolean isDirectCodeEvidence(CodeSearchResult result) {
@@ -355,16 +418,6 @@ public final class CodeContextAssembler {
                 .filter(term -> term.length() >= 3)
                 .filter(term -> !COVERAGE_STOP_WORDS.contains(term))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private String endpointContext(CodeSearchResult result) {
-        if (result == null || result.metadata() == null) {
-            return "";
-        }
-        String route = String.valueOf(result.metadata().getOrDefault("endpointRoute", "")).trim();
-        String method = String.valueOf(result.metadata().getOrDefault("httpMethod", "")).trim();
-        return nullable(" endpointRoute=", route.isBlank() ? null : route)
-                + nullable(" httpMethod=", method.isBlank() ? null : method);
     }
 
     private String graphContext(CodeSearchResult result) {
@@ -409,67 +462,19 @@ public final class CodeContextAssembler {
         return "unknown";
     }
 
-    private String executionOrderContext(CodeSearchResult result) {
-        List<String> phases = evidencePhases(result);
-        return phases.isEmpty() ? "" : " executionOrder=" + executionOrder(phases);
-    }
-
-    private List<String> evidencePhases(CodeSearchResult result) {
-        if (result == null) {
-            return List.of();
-        }
-        String phase = llmImplementationPhase(result);
-        return !phase.isBlank() && !"UNKNOWN".equals(phase) ? List.of(phase) : List.of();
-    }
-
-    private String executionOrder(List<String> phases) {
-        if (phases == null || phases.isEmpty()) {
-            return "unknown";
-        }
-        return phases.stream()
-                .map(phase -> {
-                    int order = phaseOrder(phase);
-                    String previous = phaseByOrder(order - 1);
-                    String next = phaseByOrder(order + 1);
-                    return phase
-                            + (previous.isBlank() ? "" : ".happensAfter=" + previous)
-                            + (next.isBlank() ? "" : ".happensBefore=" + next);
-                })
-                .collect(Collectors.joining("|"));
-    }
-
-    private int phaseOrder(String phase) {
-        return switch (safe(phase)) {
-            case "INDEXING" -> 0;
-            case "GRAPH_STORAGE" -> 1;
-            case "SEARCH_EXPANSION" -> 2;
-            case "RANKING" -> 3;
-            case "ANSWER_GENERATION" -> 4;
-            default -> 99;
-        };
-    }
-
-    private String phaseByOrder(int order) {
-        return switch (order) {
-            case 0 -> "INDEXING";
-            case 1 -> "GRAPH_STORAGE";
-            case 2 -> "SEARCH_EXPANSION";
-            case 3 -> "RANKING";
-            case 4 -> "ANSWER_GENERATION";
-            default -> "";
-        };
-    }
-
     private String analysisDiagnosticContext(CodeSearchResult result) {
-        String status = directAnalysisDiagnosticStatus(result);
-        if (status.isBlank()) {
+        CodeAnalysisDiagnosticMetadata diagnostic = CodeAnalysisDiagnosticMetadata.from(result);
+        if (!diagnostic.present()) {
             return "";
         }
-        return " analysisDiagnosticStatus=" + status
-                + " analysisDiagnosticScope=" + directAnalysisDiagnosticScope(result)
-                + nullable(" analysisDiagnosticStage=", directAnalysisDiagnosticStage(result))
-                + nullable(" analysisDiagnosticLanguage=", directAnalysisDiagnosticLanguage(result))
-                + nullable(" analysisDiagnosticAnalyzer=", directAnalysisDiagnosticAnalyzer(result));
+        return " analysisDiagnosticStatus=" + diagnostic.status()
+                + " analysisDiagnosticScope=" + diagnostic.scope()
+                + nullable(" analysisDiagnosticStage=", diagnostic.stage())
+                + nullable(" analysisDiagnosticLanguage=", diagnostic.language())
+                + nullable(" analysisDiagnosticAnalyzer=", diagnostic.analyzer())
+                + (diagnostic.authority() == CodeIntelligenceAuthority.UNKNOWN
+                        ? ""
+                        : " analysisDiagnosticAuthority=" + diagnostic.authority().name());
     }
 
     private String evidenceValidationContext(List<CodeSearchResult> results) {
@@ -478,90 +483,22 @@ public final class CodeContextAssembler {
         }
         boolean hasClassification = results.stream().anyMatch(this::hasLlmEvidenceClassification);
         boolean hasDiagnostics = results.stream()
-                .anyMatch(result -> !directAnalysisDiagnosticStatus(result).isBlank());
+                .map(CodeAnalysisDiagnosticMetadata::from)
+                .anyMatch(CodeAnalysisDiagnosticMetadata::present);
         if (!hasClassification && !hasDiagnostics) {
             return "";
         }
         List<String> checks = new ArrayList<>();
-        checks.add("Evidence validation: LLM evidence classification describes what each chunk can prove; do not use unclassified chunks as proof for phase-specific claims.");
-        checks.add("rank/evidenceScore are relevance signals, not execution order.");
-        checks.add("Guard clauses and early returns are failure handling only when cited code or diagnostic metadata reports failed, partial, skipped, unavailable, or exception.");
-        checks.add("retrievalSource=graph_expansion means the chunk was found through graph traversal; it is not graph persistence evidence.");
-        checks.add("GRAPH_STORAGE evidence requires code/schema that creates, inserts, updates, deletes, replaces, or activates graph nodes/edges.");
+        checks.add("Evidence validation: classification metadata describes what each excerpt can directly support; ground factual claims in cited content and do not infer unobserved behavior.");
+        checks.add("rank/evidenceScore are retrieval relevance signals and do not establish runtime or causal order.");
+        checks.add("Failure-handling claims require cited content or diagnostics that directly report the relevant status, branch, or exception.");
+        checks.add("Retrieval provenance describes how evidence was found; it does not by itself prove behavior or state changes.");
+        checks.add("Behavioral, ordering, and state-transition claims require cited content that directly shows the asserted relationship.");
         if (hasDiagnostics) {
-            checks.add("analysisDiagnosticStatus is diagnostic metadata for graph/index analysis evidence, not proof of runtime answer-generation fallback.");
-            checks.add("If analysisDiagnosticLanguage or analysisDiagnosticStage does not match a language/framework named in the question, treat it as cross-language supporting evidence rather than the primary answer basis.");
+            checks.add("Diagnostic metadata reports analysis scope, stage, language, status, and authority; it does not by itself prove application runtime behavior.");
+            checks.add("Use diagnostics as primary support only when their scope, stage, and language match the claim; otherwise treat them as supporting context.");
         }
         return String.join(" ", checks);
-    }
-
-    private String directAnalysisDiagnosticStatus(CodeSearchResult result) {
-        if (result == null || result.metadata() == null) {
-            return "";
-        }
-        for (String key : List.of("analysisDiagnosticStatus", "diagnosticStatus", "analysisStatus")) {
-            String normalized = normalizeDiagnosticStatus(stringValue(result.metadata().get(key)));
-            if (!normalized.isBlank()) {
-                return normalized;
-            }
-        }
-        return "";
-    }
-
-    private String directAnalysisDiagnosticScope(CodeSearchResult result) {
-        String scope = metadataString(result, "analysisDiagnosticScope", "diagnosticScope");
-        return scope.isBlank() && !directAnalysisDiagnosticStatus(result).isBlank()
-                ? "GRAPH_ANALYSIS"
-                : scope;
-    }
-
-    private String directAnalysisDiagnosticStage(CodeSearchResult result) {
-        String stage = metadataString(result, "analysisDiagnosticStage", "diagnosticStage", "stage");
-        return stage.isBlank() ? "" : stage.toUpperCase(Locale.ROOT);
-    }
-
-    private String directAnalysisDiagnosticLanguage(CodeSearchResult result) {
-        return normalizeDiagnosticLanguage(metadataString(
-                result, "analysisDiagnosticLanguage", "diagnosticLanguage", "language"));
-    }
-
-    private String directAnalysisDiagnosticAnalyzer(CodeSearchResult result) {
-        return metadataString(result, "analysisDiagnosticAnalyzer", "diagnosticAnalyzer", "analyzer");
-    }
-
-    private String normalizeDiagnosticStatus(String value) {
-        String normalized = normalizeQuestionText(splitIdentifierTerms(value));
-        if (normalized.isBlank()) {
-            return "";
-        }
-        if (containsRoleTerms(normalized, "failed", "failure", "error", "exception")) {
-            return "FAILED";
-        }
-        if (containsRoleTerms(normalized, "partial", "partially", "incomplete")) {
-            return "PARTIAL";
-        }
-        if (containsRoleTerms(normalized, "skipped", "skip", "unavailable", "disabled")) {
-            return "SKIPPED";
-        }
-        if (containsRoleTerms(normalized, "success", "succeeded", "complete", "completed")) {
-            return "SUCCESS";
-        }
-        return "";
-    }
-
-    private String normalizeDiagnosticLanguage(String value) {
-        String normalized = normalizeQuestionText(splitIdentifierTerms(value));
-        if (normalized.isBlank()) {
-            return "";
-        }
-        if (containsRoleTerms(normalized, "java")
-                && !containsRoleTerms(normalized, "javascript", "java script")) {
-            return "java";
-        }
-        if (containsRoleTerms(normalized, "csharp", "c sharp", "c#", "dotnet", "roslyn")) {
-            return "csharp";
-        }
-        return "";
     }
 
     private String evidenceRankingContext(CodeSearchResult result) {
@@ -578,8 +515,14 @@ public final class CodeContextAssembler {
                         : "");
     }
 
-    private String adjudicationClaimContext(CodeSearchResult result) {
+    private String adjudicationClaimContext(CodeSearchResult result, CodeExcerpt excerpt) {
         if (result == null || result.metadata() == null) {
+            return "";
+        }
+        if (!excerpt.contentComplete()
+                || excerpt.omittedByBudget()
+                || metadataExplicitlyFalse(result, "contentComplete")
+                || metadataBoolean(result, "omittedByBudget")) {
             return "";
         }
         return nullable(" llmSupportedClaims=", stringValue(result.metadata().get("llmSupportedClaims")))
@@ -634,17 +577,6 @@ public final class CodeContextAssembler {
         };
     }
 
-    private String llmImplementationPhase(CodeSearchResult result) {
-        if (!hasLlmEvidenceClassification(result)) {
-            return "";
-        }
-        String phase = metadataString(result, "llmImplementationPhase");
-        return switch (phase) {
-            case "INDEXING", "GRAPH_STORAGE", "SEARCH_EXPANSION", "RANKING", "ANSWER_GENERATION", "UNKNOWN" -> phase;
-            default -> "";
-        };
-    }
-
     private boolean isGraphExpanded(CodeSearchResult result) {
         return result != null
                 && result.metadata() != null
@@ -670,16 +602,6 @@ public final class CodeContextAssembler {
             }
         }
         return "";
-    }
-
-    private boolean containsRoleTerms(String value, String... terms) {
-        String safeValue = safe(value);
-        for (String term : terms) {
-            if (safeValue.contains(normalizeQuestionText(splitIdentifierTerms(term)))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private String splitIdentifierTerms(String value) {
@@ -731,6 +653,14 @@ public final class CodeContextAssembler {
         return results == null ? List.of() : List.copyOf(results);
     }
 
+    private static Set<String> safeEvidenceIds(Set<String> evidenceIds) {
+        if (evidenceIds == null || evidenceIds.isEmpty()) return Set.of();
+        return evidenceIds.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value;
     }
@@ -751,7 +681,8 @@ public final class CodeContextAssembler {
             List<CodeSearchResult> results,
             boolean compactForStreaming,
             int contextWindow,
-            int configuredPromptTokenBudget
+            int configuredPromptTokenBudget,
+            Set<String> requiredEvidenceIds
     ) {
         public AssemblyRequest {
             question = safe(question);
@@ -759,6 +690,21 @@ public final class CodeContextAssembler {
             systemPrompt = safe(systemPrompt);
             promptPrefix = safe(promptPrefix);
             results = safeResults(results);
+            requiredEvidenceIds = safeEvidenceIds(requiredEvidenceIds);
+        }
+
+        public AssemblyRequest(
+                String question,
+                String mode,
+                String systemPrompt,
+                String promptPrefix,
+                List<CodeSearchResult> results,
+                boolean compactForStreaming,
+                int contextWindow,
+                int configuredPromptTokenBudget
+        ) {
+            this(question, mode, systemPrompt, promptPrefix, results, compactForStreaming,
+                    contextWindow, configuredPromptTokenBudget, Set.of());
         }
 
         static AssemblyRequest empty() {
@@ -771,6 +717,28 @@ public final class CodeContextAssembler {
             results = safeResults(results);
             context = safe(context);
             droppedCount = Math.max(0, droppedCount);
+        }
+    }
+
+    private record RenderedContext(List<CodeSearchResult> results, String context) {
+        private RenderedContext {
+            results = safeResults(results);
+            context = safe(context);
+        }
+
+        private static RenderedContext empty() {
+            return new RenderedContext(List.of(), "No source-code context retrieved.");
+        }
+    }
+
+    private record RenderedEvidence(
+            CodeSearchResult source,
+            CodeExcerpt excerpt,
+            int citationNumber,
+            boolean detailed
+    ) {
+        private RenderedEvidence(CodeSearchResult source, CodeExcerpt excerpt, int citationNumber) {
+            this(source, excerpt, citationNumber, true);
         }
     }
 

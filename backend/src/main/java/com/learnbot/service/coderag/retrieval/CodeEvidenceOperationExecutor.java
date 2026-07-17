@@ -6,6 +6,7 @@ import com.learnbot.service.GraphSearchIntent;
 import com.learnbot.service.RagPipelineService;
 import com.learnbot.service.coderag.evidence.CodeLexicalEvidenceSelector;
 import com.learnbot.service.coderag.evidence.extractor.CodeEndpointQueryVariants;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
@@ -88,9 +89,10 @@ public final class CodeEvidenceOperationExecutor {
                 default -> List.of();
             };
             List<CodeSearchResult> safeResults = results == null ? List.of() : results;
-            List<CodeSearchResult> marked = operation.isDirectRead()
-                    ? safeResults.stream().map(result -> markDirectRead(result, operation)).toList()
-                    : safeResults;
+            List<CodeSearchResult> marked = safeResults.stream()
+                    .map(result -> markOperationProvenance(result, operation))
+                    .map(result -> operation.isDirectRead() ? markDirectRead(result, operation) : result)
+                    .toList();
             return marked.isEmpty()
                     ? new Execution(operation, "NOT_FOUND", List.of(), "operation returned no active evidence")
                     : new Execution(operation, "COMPLETED", marked, "");
@@ -318,8 +320,7 @@ public final class CodeEvidenceOperationExecutor {
         String path = normalizeRelativePath(operation.path());
         List<CodeSearchResult> symbols = repository.listActiveSymbolsByPath(
                 repositoryId, path, 80, spaceIds, selectedSpaceId);
-        String intent = String.join(" ", safe(retrievalIntent), safe(operation.query()),
-                safe(operation.evidenceGroup()), safe(operation.area())).trim();
+        String intent = safe(retrievalIntent).trim();
         return CodeLexicalEvidenceSelector.rank(intent, symbols, Math.max(limit, MAX_DIRECT_RESULTS));
     }
 
@@ -399,6 +400,27 @@ public final class CodeEvidenceOperationExecutor {
                 result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
                 result.content(), result.score() + 0.25, Map.copyOf(metadata)
         );
+    }
+
+    private CodeSearchResult markOperationProvenance(
+            CodeSearchResult result,
+            RagPipelineService.CodeSearchOperation operation
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
+        String provenanceQuery = operation.isSearch() ? operation.query() : "";
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                operation.type(), operation.operationId(), operation.claimIds(), operation.evidenceGroup(),
+                operation.originEvidenceIds(), provenanceQuery, operation.path(), operation.symbol(),
+                operation.chunkId(), operation.lineStart(), operation.lineEnd(), operation.radius(),
+                operation.relations(), operation.direction(), operation.maxHops());
+        metadata.put(CodeEvidenceOperationProvenance.METADATA_KEY,
+                CodeEvidenceOperationProvenance.merge(
+                        metadata.get(CodeEvidenceOperationProvenance.METADATA_KEY), provenance));
+        return new CodeSearchResult(
+                result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(), result.filePath(),
+                result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
+                result.controlName(), result.eventName(), result.chunkIndex(), result.lineStart(), result.lineEnd(),
+                result.content(), result.score(), Map.copyOf(metadata));
     }
 
     private void requireRepository() {

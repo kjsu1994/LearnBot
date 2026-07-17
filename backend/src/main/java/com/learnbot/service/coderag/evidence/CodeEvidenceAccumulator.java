@@ -3,6 +3,7 @@ package com.learnbot.service.coderag.evidence;
 import com.learnbot.service.coderag.evidence.extractor.EvidenceExtractorRegistry;
 import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import com.learnbot.dto.CodeSearchResult;
 
@@ -30,12 +31,10 @@ public final class CodeEvidenceAccumulator {
     );
     private static final Set<String> BOOLEAN_PROVENANCE_KEYS = Set.of(
             "llmFollowUpEvidence", "llmRetrievalIterationEvidence", "llmDirectRead", "llmReadFulfilled",
-            "llmChecklistGroupRequired", "llmSearchPlanEvidence", "llmCoverageRequired", "llmValidatedEvidence",
-            "deterministicEndpointEvidence", "deterministicEndpointCandidate", "deterministicEndpointBestMatch",
-            "deterministicLexicalCandidate", "deterministicNavigationCandidate", "deterministicNavigationBestMatch"
+            "llmChecklistGroupRequired", "llmSearchPlanEvidence", "llmCoverageRequired", "llmValidatedEvidence"
     );
     private static final Set<String> STRUCTURAL_METADATA_KEYS = Set.of(
-            "endpointRoute", "httpMethod", "graphRelation", "observedNavigationIdentifier"
+            "endpointRoute", "httpMethod", "graphRelation"
     );
 
     private final EvidenceExtractorRegistry extractorRegistry;
@@ -104,6 +103,12 @@ public final class CodeEvidenceAccumulator {
                     && otherValue != null && !String.valueOf(otherValue).isBlank()) {
                 merged.put(key, otherValue);
             }
+        }
+        List<CodeEvidenceOperationProvenance> operationProvenance = CodeEvidenceOperationProvenance.merge(
+                preferredMetadata.get(CodeEvidenceOperationProvenance.METADATA_KEY),
+                otherMetadata.get(CodeEvidenceOperationProvenance.METADATA_KEY));
+        if (!operationProvenance.isEmpty()) {
+            merged.put(CodeEvidenceOperationProvenance.METADATA_KEY, operationProvenance);
         }
         return Map.copyOf(merged);
     }

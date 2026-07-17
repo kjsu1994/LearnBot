@@ -73,6 +73,15 @@ public final class CodeRetrievalCoordinator {
         return planValidator.validate(plan, repositoryMap, executedOperationKeys);
     }
 
+    public CodeRetrievalPlanValidator.PlanValidationResult validateInitialPlan(
+            String question,
+            RagPipelineService.CodeEvidenceFollowUpPlan plan,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap,
+            Set<String> executedOperationKeys
+    ) {
+        return planValidator.validateInitial(question, plan, repositoryMap, executedOperationKeys);
+    }
+
     public CodeEvidenceOperationExecutor.Execution executeOperation(
             UUID repositoryId,
             UUID selectedSpaceId,

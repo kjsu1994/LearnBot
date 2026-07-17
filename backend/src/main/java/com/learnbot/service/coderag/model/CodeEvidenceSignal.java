@@ -7,6 +7,7 @@ public record CodeEvidenceSignal(
         String reason
 ) {
     public enum Type {
+        DIRECT_OBSERVATION,
         ENDPOINT_STRUCTURE,
         EXACT_LITERAL,
         STATE_TRANSITION,

@@ -35,4 +35,23 @@ class CodeFileScannerTest {
                         "node_modules/pkg/index.js"
                 );
     }
+
+    @Test
+    void skipsGeneratedFilesUnderConventionalHiddenTempDirectories() throws Exception {
+        Files.createDirectories(tempDir.resolve("src/main"));
+        Files.writeString(tempDir.resolve("src/main/App.java"), "class App {}");
+        Files.createDirectories(tempDir.resolve(".tmp/quality"));
+        Files.writeString(tempDir.resolve(".tmp/quality/live-capture.json"), "{\"answer\":\"generated\"}");
+        Files.writeString(tempDir.resolve(".tmp/quality/Generated.java"), "class Generated {}");
+
+        CodeFileScanner scanner = new CodeFileScanner(new LearnBotProperties());
+
+        assertThat(scanner.scan(tempDir))
+                .extracting(CodeFileCandidate::relativePath)
+                .contains("src/main/App.java")
+                .doesNotContain(
+                        ".tmp/quality/live-capture.json",
+                        ".tmp/quality/Generated.java"
+                );
+    }
 }

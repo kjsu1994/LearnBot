@@ -2,8 +2,10 @@ package com.learnbot.service.coderag.retrieval;
 
 import com.learnbot.service.CodeReferenceService;
 import com.learnbot.service.CodeSearchService;
+import com.learnbot.service.EvidenceExcerptSelector;
 import com.learnbot.service.GraphSearchIntent;
 import com.learnbot.service.RagPipelineService;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
@@ -47,7 +49,85 @@ class CodeEvidenceOperationExecutorTest {
             assertThat(evidence.metadata()).containsEntry("llmEvidenceCoverageGroup", "queue_claim");
             assertThat(evidence.metadata()).containsEntry("actualLineStart", 20);
             assertThat(evidence.metadata()).containsEntry("actualLineEnd", 60);
+            assertThat(CodeEvidenceOperationProvenance.from(evidence)).singleElement().satisfies(provenance -> {
+                assertThat(provenance.operationType()).isEqualTo("read_file_range");
+                assertThat(provenance.evidenceGroup()).isEqualTo("queue_claim");
+            });
         });
+    }
+
+    @Test
+    void searchResultPreservesAllTypedOperationProvenanceFields() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                searchService, mock(CodeRepository.class), mock(CodeReferenceService.class));
+        CodeSearchResult result = result("src/app/Worker.java", "claimNext", 20, 60);
+        when(searchService.cheapSearch(
+                eq(null), eq("queued work claim"), eq(8), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(result));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "keyword_search", "queued work claim", "queue implementation", "queue_claim",
+                "", "", "", null, null, null, List.of(), "", null,
+                "op-claim", List.of("claim-1", "claim-2"), List.of());
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
+
+        assertThat(execution.status()).isEqualTo("COMPLETED");
+        assertThat(CodeEvidenceOperationProvenance.from(execution.results().get(0)))
+                .containsExactly(new CodeEvidenceOperationProvenance(
+                        "keyword_search", "op-claim", List.of("claim-1", "claim-2"), "queue_claim",
+                        List.of(), "queued work claim", "", "", "", null, null, null,
+                        List.of(), "BOTH", null));
+    }
+
+    @Test
+    void directReadDropsFreeFormQueryFromProvenanceAndExcerptWeighting() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
+        String content = "void claimNext() {\n"
+                + "    targetProof();\n"
+                + "    routineStep();\n".repeat(40)
+                + "    unrelatedPrivilegedSettingsMutation();\n"
+                + "}";
+        int lineEnd = (int) content.lines().count();
+        CodeSearchResult source = result(
+                "src/main/java/app/Worker.java", "claimNext", 1, lineEnd, content);
+        when(repository.findActiveChunksByPathAndLineRange(
+                eq(null), eq("src/main/java/app/Worker.java"), eq(1), eq(lineEnd),
+                anyInt(), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(source));
+
+        var clean = new RagPipelineService.CodeSearchOperation(
+                "read_file_range", "", "", "queue_claim",
+                "src/main/java/app/Worker.java", "Worker.claimNext", "", 1, lineEnd, null,
+                List.of(), "BOTH", null, "direct-range", List.of("claim-1"), List.of("origin-1"));
+        var adversarial = new RagPipelineService.CodeSearchOperation(
+                "read_file_range", "unrelated privileged settings mutation",
+                "unrelated privileged settings mutation", "queue_claim",
+                "src/main/java/app/Worker.java", "Worker.claimNext", "", 1, lineEnd, null,
+                List.of(), "BOTH", null, "direct-range", List.of("claim-1"), List.of("origin-1"));
+
+        CodeSearchResult cleanEvidence = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), clean, GraphSearchIntent.FLOW, 8).results().get(0);
+        CodeSearchResult adversarialEvidence = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), adversarial, GraphSearchIntent.FLOW, 8).results().get(0);
+
+        assertThat(CodeEvidenceOperationProvenance.from(adversarialEvidence))
+                .singleElement()
+                .satisfies(provenance -> {
+                    assertThat(provenance.query()).isBlank();
+                    assertThat(provenance.path()).isEqualTo("src/main/java/app/Worker.java");
+                    assertThat(provenance.symbol()).isEqualTo("Worker.claimNext");
+                    assertThat(provenance.evidenceGroup()).isEqualTo("queue_claim");
+                    assertThat(provenance.claimIds()).containsExactly("claim-1");
+                    assertThat(provenance.originEvidenceIds()).containsExactly("origin-1");
+                    assertThat(provenance.lineStart()).isEqualTo(1);
+                    assertThat(provenance.lineEnd()).isEqualTo(lineEnd);
+                });
+        assertThat(EvidenceExcerptSelector.select("targetProof", adversarialEvidence, 180))
+                .isEqualTo(EvidenceExcerptSelector.select("targetProof", cleanEvidence, 180));
     }
 
     @Test
@@ -116,6 +196,34 @@ class CodeEvidenceOperationExecutorTest {
         assertThat(execution.results()).extracting(CodeSearchResult::methodName)
                 .contains("claimNext");
         assertThat(execution.results().get(0).methodName()).isEqualTo("claimNext");
+    }
+
+    @Test
+    void listFileSymbolsRanksOnlyAgainstTheSanitizedRetrievalIntent() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
+        String path = "src/app/MixedWorker.java";
+        CodeSearchResult poisoned = result(
+                path, "settingsUpdate", 10, 30,
+                "void settingsUpdate() { rotateCredentialsForTenantPolicy(); }");
+        CodeSearchResult desired = result(
+                path, "claimNext", 40, 70,
+                "void claimNext() { claimQueuedWork(); }");
+        when(repository.listActiveSymbolsByPath(
+                eq(null), eq(path), eq(80), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(poisoned, desired));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "list_file_symbols", "settingsUpdate rotate credentials tenant policy",
+                "settingsUpdate rotate credentials tenant policy", "queue_claim",
+                path, "", "", null, null, null);
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8,
+                "claimNext queued work");
+
+        assertThat(execution.results()).extracting(CodeSearchResult::methodName)
+                .startsWith("claimNext");
     }
 
     @Test
@@ -309,7 +417,8 @@ class CodeEvidenceOperationExecutorTest {
         var operation = new RagPipelineService.CodeSearchOperation(
                 "traverse_graph", "", "runtime calls", "call_chain",
                 "", "", seed.chunkId().toString(), null, null, null,
-                List.of("CALLS"), "FORWARD", 2);
+                List.of("CALLS"), "FORWARD", 2, "traverse-runtime",
+                List.of("claim-runtime"), List.of("index:seed:10-30"));
 
         var execution = executor.execute(null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
 
@@ -318,6 +427,11 @@ class CodeEvidenceOperationExecutorTest {
                 .containsExactly(allowed.chunkId());
         assertThat(execution.results()).allSatisfy(result ->
                 assertThat(result.metadata()).containsEntry("llmReadOperation", "traverse_graph"));
+        assertThat(CodeEvidenceOperationProvenance.from(execution.results().get(0)))
+                .containsExactly(new CodeEvidenceOperationProvenance(
+                        "traverse_graph", "traverse-runtime", List.of("claim-runtime"), "call_chain",
+                        List.of("index:seed:10-30"), "", "", "", seed.chunkId().toString(),
+                        null, null, null, List.of("CALLS"), "FORWARD", 2));
         assertThat(execution.observation())
                 .contains("relations=CALLS")
                 .contains("direction=FORWARD")
@@ -343,10 +457,14 @@ class CodeEvidenceOperationExecutorTest {
     }
 
     private CodeSearchResult result(String path, String method, int start, int end) {
+        return result(path, method, start, end, "void " + method + "() {}");
+    }
+
+    private CodeSearchResult result(String path, String method, int start, int end, String content) {
         return new CodeSearchResult(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", path,
                 "method", method, "Worker", method, "app", null, null, 1,
-                start, end, "void " + method + "() {}", 0.8, Map.of("language", "java"));
+                start, end, content, 0.8, Map.of("language", "java"));
     }
 
     private CodeSearchResult endpointResult(

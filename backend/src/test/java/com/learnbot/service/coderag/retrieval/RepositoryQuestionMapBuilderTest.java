@@ -1,7 +1,5 @@
 package com.learnbot.service.coderag.retrieval;
 
-import com.learnbot.service.coderag.evidence.CodeEvidenceId;
-
 import com.learnbot.service.ActiveCodeIndexIdentity;
 import com.learnbot.service.coderag.evidence.CodeEvidenceId;
 
@@ -20,8 +18,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RepositoryQuestionMapBuilderTest {
@@ -79,7 +81,7 @@ class RepositoryQuestionMapBuilderTest {
     }
 
     @Test
-    void updatesMapRevisionWithNewOperationEvidenceAndObservations() {
+    void updatesMapOnlyFromExplicitOperationResultsWithoutImplicitGraphWidening() {
         CodeRepository repository = mock(CodeRepository.class);
         UUID repositoryId = UUID.randomUUID();
         UUID indexVersion = UUID.randomUUID();
@@ -106,23 +108,32 @@ class RepositoryQuestionMapBuilderTest {
                         "graphPathNodes", List.of("CodeGraphBuilder.buildWithDiagnostics", "GraphRepository.persistGraph"),
                         "graphEdgeTypes", List.of("CALLS"),
                         "graphEvidenceKind", "resolved"));
+        CodeSearchResult unrequestedNeighbor = result(
+                repositoryId, indexVersion, UUID.randomUUID(), "backend/HiddenGraphRepository.java", "method",
+                "hiddenPersist", "void hiddenPersist() {}", Map.of("retrievalSource", "graph_expansion"));
         when(repository.graphRelatedChunks(
-                eq(repositoryId), eq(List.of(discovered.chunkId())), eq(List.of()), eq(1), eq("BOTH"), eq(12)))
-                .thenReturn(List.of(neighbor));
+                eq(repositoryId), anyList(), anyList(), anyInt(), anyString(), anyInt()))
+                .thenReturn(List.of(unrequestedNeighbor));
         RepositoryQuestionMapBuilder builder = new RepositoryQuestionMapBuilder(repository);
         var initial = builder.build(repositoryId, null, List.of(UUID.randomUUID()), "graph failure", List.of(bootstrap));
 
         var update = builder.update(initial, null, List.of(UUID.randomUUID()),
-                List.of(discovered), List.of("operationId=op-2 status=COMPLETED"));
+                List.of(discovered, neighbor), List.of("operationId=op-2 status=COMPLETED"));
 
         assertThat(update.identityChanged()).isFalse();
         assertThat(update.map().revision()).isEqualTo(1);
         assertThat(update.map().evidenceProgress()).isTrue();
-        assertThat(update.map().delta().addedEvidenceIds()).contains(CodeEvidenceId.from(discovered));
+        assertThat(update.map().delta().addedEvidenceIds())
+                .contains(CodeEvidenceId.from(discovered), CodeEvidenceId.from(neighbor));
+        assertThat(update.map().observesChunk(neighbor.chunkId().toString())).isTrue();
+        assertThat(update.map().observesChunk(unrequestedNeighbor.chunkId().toString())).isFalse();
         assertThat(update.map().plannerContext())
                 .contains("revision=1", "[MAP_DELTA] from=0 to=1", "buildWithDiagnostics", "persistGraph")
                 .contains("from=CodeGraphBuilder.buildWithDiagnostics type=CALLS to=GraphRepository.persistGraph")
-                .contains("operationId=op-2 status=COMPLETED");
+                .contains("operationId=op-2 status=COMPLETED")
+                .doesNotContain("HiddenGraphRepository", "hiddenPersist");
+        verify(repository, never()).graphRelatedChunks(
+                eq(repositoryId), anyList(), anyList(), anyInt(), anyString(), anyInt());
     }
 
     @Test

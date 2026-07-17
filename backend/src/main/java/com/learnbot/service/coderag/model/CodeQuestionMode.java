@@ -7,7 +7,7 @@ public enum CodeQuestionMode {
     LOCATE("locate", "Find where the requested feature or behavior is implemented. Prioritize files, classes, methods, and line ranges."),
     EXPLAIN_METHOD("method", "Explain the selected or named method. Cover inputs, side effects, called logic, and return/result behavior."),
     CALL_FLOW("flow", "Explain the call flow step by step using only cited code. Keep the sequence compact."),
-    UI_EVENT("ui_event", "Explain WPF/WinForms UI event flow. Connect XAML controls/events to code-behind handlers when evidence exists."),
+    UI_EVENT("ui_event", "Explain UI event flow from cited evidence. Connect controls, events, handlers, bindings, and commands only when their relationship is shown."),
     IMPACT("impact", "Analyze likely impact areas. Separate confirmed evidence from uncertain areas and cite every claim.");
 
     private final String value;

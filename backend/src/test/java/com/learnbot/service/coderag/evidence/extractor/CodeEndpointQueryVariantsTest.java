@@ -25,6 +25,25 @@ class CodeEndpointQueryVariantsTest {
     }
 
     @Test
+    void requiresAnExplicitNormalizedRouteForDeterministicEndpointIntent() {
+        assertThat(CodeEndpointQueryVariants.hasEndpointIntent(
+                "Which controller handles the Code RAG ask API?"))
+                .isFalse();
+        assertThat(CodeEndpointQueryVariants.hasEndpointIntent(
+                "Explain /api/code/ask flow"))
+                .isTrue();
+        assertThat(CodeEndpointQueryVariants.hasEndpointIntent(
+                "Which HTTP endpoint and route handles the request?"))
+                .isFalse();
+        assertThat(CodeEndpointQueryVariants.hasEndpointIntent(
+                "Trace CodeRagService.askPrioritized from retrieval to context assembly"))
+                .isFalse();
+        assertThat(CodeEndpointQueryVariants.hasEndpointIntent(
+                "Explain capital allocation flow"))
+                .isFalse();
+    }
+
+    @Test
     void endpointLookupIsATypedSearchOperation() {
         var operation = new RagPipelineService.CodeSearchOperation(
                 "find_endpoint", "/api/items/{id}", "entry", "request_entry");
@@ -42,11 +61,16 @@ class CodeEndpointQueryVariantsTest {
                 "src/web/CodeController.java", "CodeController", "ask", "/api/code/ask",
                 "return codeRagService.askConversational(request.question());");
 
-        assertThat(CodeEndpointQueryVariants.rankCandidates(
+        List<CodeSearchResult> ranked = CodeEndpointQueryVariants.rankCandidates(
                 "Which controller handles the Code RAG ask API and which service call does it make?",
-                List.of(genericRag, codeRag), 2))
-                .extracting(CodeSearchResult::filePath)
+                List.of(genericRag, codeRag), 2);
+
+        assertThat(ranked).extracting(CodeSearchResult::filePath)
                 .containsExactly("src/web/CodeController.java", "src/web/RagController.java");
+        assertThat(ranked).allSatisfy(result -> assertThat(result.metadata())
+                .containsKey("endpointRoute")
+                .doesNotContainKeys(
+                        "deterministicEndpointCandidate", "endpointCandidateScore", "evidenceRankReason"));
     }
 
     private CodeSearchResult endpoint(String path, String className, String method, String route, String content) {

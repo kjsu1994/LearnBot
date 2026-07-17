@@ -351,7 +351,9 @@ class RagPipelineServiceTest {
         assertThat(systemPromptCaptor.getValue())
                 .contains("list_file_symbols requires path")
                 .contains("read_file_range requires path, lineStart, and lineEnd")
-                .contains("traverse_graph requires an observed chunkId");
+                .contains("traverse_graph requires an observed chunkId")
+                .contains("natural-language endpoint lookup description")
+                .contains("Never invent a route, path, symbol, handler, controller");
 
         Map<String, Object> schema = (Map<String, Object>) formatCaptor.getValue();
         Map<String, Object> rootProperties = (Map<String, Object>) schema.get("properties");
@@ -654,8 +656,15 @@ class RagPipelineServiceTest {
                 .contains("Architectural layers are scope hints")
                 .contains("class declaration, constructor, dependency field")
                 .contains("Preserve the actor, object, action, direction, state transition, and side effect")
+                .contains("lexical overlap between user vocabulary and observed source identifiers is low")
+                .contains("one separate conventional source-vocabulary query")
+                .contains("do not include a concrete symbol, type, or path unless that identifier was observed")
+                .contains("distinct stages requested by the question")
+                .contains("Do not add a stage merely because bootstrap evidence happens to contain it")
+                .contains("Disconnected class or method nodes do not prove a cross-component flow")
+                .contains("direct call visible in source or an observed CALLS")
                 .contains("Do not invent likely class or method names")
-                .doesNotContain("producer enqueue", "approval changes");
+                .doesNotContain("non-English", "producer enqueue", "approval changes");
     }
 
     @Test
@@ -713,9 +722,10 @@ class RagPipelineServiceTest {
         assertThat(plan.checklist()).extracting(RagPipelineService.CodeEvidenceChecklistItem::evidenceGroup)
                 .containsExactly("graph_traversal", "answer_generation");
         assertThat(plan.requiredEvidenceGroups()).contains("graph_traversal", "answer_generation");
+        ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).chatResult(
-                anyString(),
+                systemPromptCaptor.capture(),
                 promptCaptor.capture(),
                 eq(OllamaClient.ChatRole.AUXILIARY),
                 anyInt(),
@@ -726,6 +736,18 @@ class RagPipelineServiceTest {
                 .contains("Required evidence checklist")
                 .contains("graph-expansion")
                 .contains("find concrete graph expansion implementation");
+        assertThat(systemPromptCaptor.getValue())
+                .contains("plausible current hypothesis alone never justifies NO_FURTHER_RETRIEVAL")
+                .contains("same required claim is UNRESOLVED")
+                .contains("untried direct-read or graph handle linked to that claim")
+                .contains("no claim-linked observed handle remains")
+                .contains("distinct stages requested by the user")
+                .contains("Do not add a stage merely because current evidence happens to contain it")
+                .contains("Disconnected nodes and similar vocabulary do not prove")
+                .contains("direct call visible in source, an observed CALLS")
+                .contains("lexical overlap between user vocabulary and observed source identifiers is low")
+                .contains("one separate conventional source-vocabulary query")
+                .contains("without inventing a concrete identifier");
     }
 
     @Test

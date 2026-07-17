@@ -38,6 +38,32 @@ class CodeChunkParserTest {
     }
 
     @Test
+    void marksJavaConstructorsAsBodiesAndDeclarationOnlyMethodsAsNonBodies() {
+        List<ParsedCodeChunk> chunks = parser.parse(
+                "src/main/java/com/example/Widget.java",
+                "java",
+                """
+                        package com.example;
+                        interface Port { void save(); }
+                        class Widget {
+                            Widget(Port port) { this.port = port; }
+                            private Port port;
+                        }
+                        """);
+
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("constructor");
+            assertThat(chunk.methodName()).isEqualTo("Widget");
+            assertThat(chunk.metadata()).containsEntry("callableBodyPresent", true);
+        });
+        assertThat(chunks).anySatisfy(chunk -> {
+            assertThat(chunk.chunkType()).isEqualTo("method");
+            assertThat(chunk.methodName()).isEqualTo("save");
+            assertThat(chunk.metadata()).containsEntry("callableBodyPresent", false);
+        });
+    }
+
+    @Test
     void parsesJava17SyntaxWithoutLineWindowFallback() {
         List<ParsedCodeChunk> chunks = parser.parse(
                 "src/main/java/com/example/RagFlow.java",

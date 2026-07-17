@@ -37,7 +37,8 @@ public final class CodeEvidenceCoverageGate {
                 continue;
             }
             Map<String, Object> metadata = result.metadata() == null ? Map.of() : result.metadata();
-            boolean explicitlyValidated = Boolean.TRUE.equals(metadata.get("llmValidatedEvidence"));
+            boolean explicitlyValidated = Boolean.TRUE.equals(metadata.get("llmValidatedEvidence"))
+                    && hasCompletePromptContent(metadata);
             if (explicitlyValidated) {
                 addGroup(coveredGroups, metadata.get("llmValidatedEvidenceGroup"));
                 if (!hasSupportedClaim(metadata)) {
@@ -67,6 +68,8 @@ public final class CodeEvidenceCoverageGate {
 
         Set<String> availableEvidenceIds = safeEvidence.stream()
                 .filter(java.util.Objects::nonNull)
+                .filter(result -> hasCompletePromptContent(
+                        result.metadata() == null ? Map.of() : result.metadata()))
                 .map(CodeEvidenceId::from)
                 .filter(value -> value != null && !value.isBlank())
                 .collect(java.util.stream.Collectors.toSet());
@@ -145,6 +148,23 @@ public final class CodeEvidenceCoverageGate {
         Object value = metadata.get("llmSupportedClaims");
         return value instanceof Collection<?> values
                 && values.stream().anyMatch(item -> item != null && !String.valueOf(item).isBlank());
+    }
+
+    private boolean hasCompletePromptContent(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return true;
+        }
+        Object contentComplete = metadata.get("contentComplete");
+        if (contentComplete != null && !booleanValue(contentComplete)) {
+            return false;
+        }
+        return !booleanValue(metadata.get("omittedByBudget"));
+    }
+
+    private boolean booleanValue(Object value) {
+        return value instanceof Boolean bool
+                ? bool
+                : value != null && Boolean.parseBoolean(String.valueOf(value));
     }
 
     private void addIdentity(Set<String> identities, Map<String, Object> metadata) {

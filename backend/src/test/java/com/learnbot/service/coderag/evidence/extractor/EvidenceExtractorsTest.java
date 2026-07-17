@@ -3,8 +3,10 @@ package com.learnbot.service.coderag.evidence.extractor;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
+import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeNavigationHandle;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
 import org.junit.jupiter.api.Test;
@@ -18,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EvidenceExtractorsTest {
     @Test
-    void endpointExtractorProducesNormalizedExactFactsWithoutChangingSearchResult() {
+    void endpointExtractorKeepsIncidentalEndpointAsStructureWithoutForcingIt() {
         CodeSearchResult source = result("src/Api.java", "submit", "return service.submit();", Map.of(
                 "indexVersion", "v7",
                 "endpointRoute", "api//orders/{id}?preview=true",
@@ -36,10 +38,71 @@ class EvidenceExtractorsTest {
             assertThat(fact.predicate()).isEqualTo("HTTP_METHOD");
             assertThat(fact.value()).isEqualTo("POST");
         });
-        assertThat(ir.constraints()).extracting(CodeEvidenceConstraint::type)
-                .contains(CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED);
+        assertThat(ir.constraints()).noneMatch(value ->
+                value.type() == CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED);
         assertThat(ir.evidenceItems().get(0).source()).isSameAs(source);
         assertThat(source.score()).isEqualTo(0.42);
+    }
+
+    @Test
+    void endpointExtractorRequiresOnlyTheSingleExplicitRouteMatch() {
+        CodeSearchResult requested = result("src/OrderApi.java", "submit", "return service.submit();", Map.of(
+                "endpointRoute", "/api/orders/{id}", "httpMethod", "post"));
+        CodeSearchResult incidental = result("src/AdminApi.java", "submit", "return admin.submit();", Map.of(
+                "endpointRoute", "/api/admin/orders", "httpMethod", "post"));
+        CodeEvidenceExtractionContext context = new CodeEvidenceExtractionContext(
+                "Which handler serves /api/orders/{id}?", EvidenceExtractionStage.POST_OPERATION,
+                List.of(incidental, requested));
+
+        CodeEvidenceIr ir = new EndpointEvidenceExtractor().extract(context);
+
+        List<String> requiredFactIds = ir.constraints().stream()
+                .filter(value -> value.type() == CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED)
+                .map(CodeEvidenceConstraint::targetId)
+                .toList();
+        assertThat(requiredFactIds).singleElement();
+        assertThat(ir.facts()).filteredOn(fact -> requiredFactIds.contains(fact.factId()))
+                .extracting(CodeEvidenceFact::value)
+                .containsExactly("/api/orders/{id}");
+        assertThat(com.learnbot.service.coderag.answer.CodeEvidenceIrFidelity.promptFacts(ir))
+                .contains("Trusted typed facts from selected source evidence. Preserve required values exactly:")
+                .contains("`SampleType.submit: EXPOSES_ENDPOINT=/api/orders/{id}`");
+    }
+
+    @Test
+    void endpointExtractorUsesUnambiguousFindEndpointOperationProvenance() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "find_endpoint", "find-entry", List.of("claim-entry"), "request_entry");
+        CodeSearchResult source = result("src/OrderApi.java", "submit", "return service.submit();", Map.of(
+                "endpointRoute", "/api/orders/{id}",
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance)));
+        CodeEvidenceExtractionContext context = new CodeEvidenceExtractionContext(
+                "Where is order submission handled?", EvidenceExtractionStage.POST_OPERATION, List.of(source));
+
+        CodeEvidenceIr ir = new EndpointEvidenceExtractor().extract(context);
+
+        assertThat(ir.constraints()).filteredOn(value ->
+                value.type() == CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED).hasSize(1);
+    }
+
+    @Test
+    void endpointExtractorDoesNotChooseTheFirstOfMultipleFindEndpointRoutes() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "find_endpoint", "find-entry", List.of("claim-entry"), "request_entry");
+        CodeSearchResult orders = result("src/OrderApi.java", "submit", "", Map.of(
+                "endpointRoute", "/api/orders",
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance)));
+        CodeSearchResult drafts = result("src/DraftApi.java", "submit", "", Map.of(
+                "endpointRoute", "/api/drafts",
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance)));
+        CodeEvidenceExtractionContext context = new CodeEvidenceExtractionContext(
+                "Where is submission handled?", EvidenceExtractionStage.POST_OPERATION,
+                List.of(orders, drafts));
+
+        CodeEvidenceIr ir = new EndpointEvidenceExtractor().extract(context);
+
+        assertThat(ir.constraints()).noneMatch(value ->
+                value.type() == CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED);
     }
 
     @Test
@@ -62,6 +125,58 @@ class EvidenceExtractorsTest {
         assertThat(ir.constraints()).filteredOn(value -> value.type() == CodeEvidenceConstraint.Type.EXACT_FACT_REQUIRED)
                 .hasSize(2);
         assertThat(ir.evidenceItems().get(0).authority().name()).isEqualTo("SYNTAX");
+    }
+
+    @Test
+    void assignmentExtractorCapturesBoundedMultilineExpressionWithoutChangingLiteralTransitions() {
+        CodeSearchResult source = result("src/Renderer.java", "refresh", """
+                renderState.visible = false;
+                renderState.bounds =
+                        new Region(
+                                source.left - inset,
+                                source.top - inset,
+                                source.width + inset * 2,
+                                source.height + inset * 2
+                        );
+                renderState.visible = true;
+                """, Map.of("indexVersion", "v8"));
+        AssignmentEvidenceExtractor extractor = new AssignmentEvidenceExtractor();
+
+        CodeEvidenceIr ir = extractor.extract(context(source));
+
+        assertThat(extractor.supports(context(source))).isTrue();
+        assertThat(ir.facts()).filteredOn(fact -> fact.predicate().equals("ASSIGNS_LITERAL"))
+                .extracting(fact -> fact.subject() + "=" + fact.value())
+                .containsExactly("renderState.visible=false", "renderState.visible=true");
+        CodeEvidenceFact expression = ir.facts().stream()
+                .filter(fact -> fact.predicate().equals("ASSIGNS_EXPRESSION"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(expression.subject()).isEqualTo("renderState.bounds");
+        assertThat(expression.value())
+                .startsWith("new Region(")
+                .contains("source.left - inset", "source.height + inset * 2")
+                .endsWith(")");
+        assertThat(expression.exactness()).isEqualTo(CodeEvidenceFact.Exactness.EXACT);
+        assertThat(ir.facts()).anySatisfy(fact -> {
+            assertThat(fact.predicate()).isEqualTo("STATE_TRANSITION_CANDIDATE");
+            assertThat(fact.value()).isEqualTo("false -> true");
+        });
+    }
+
+    @Test
+    void assignmentExtractorRejectsExpressionBeyondTheBoundedLineWindow() {
+        String expression = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(index -> "        part" + index + ",")
+                .reduce("renderState.bounds = compose(\n", (left, right) -> left + right + "\n")
+                + ");";
+        CodeSearchResult source = result("src/Renderer.java", "refresh", expression, Map.of());
+        AssignmentEvidenceExtractor extractor = new AssignmentEvidenceExtractor();
+
+        CodeEvidenceIr ir = extractor.extract(context(source));
+
+        assertThat(extractor.supports(context(source))).isFalse();
+        assertThat(ir.facts()).noneMatch(fact -> fact.predicate().equals("ASSIGNS_EXPRESSION"));
     }
 
     @Test

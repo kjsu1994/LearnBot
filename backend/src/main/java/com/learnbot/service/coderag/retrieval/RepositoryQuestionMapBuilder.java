@@ -37,8 +37,6 @@ public final class RepositoryQuestionMapBuilder {
     private static final int MAX_PROMPT_CHARS = 14_000;
     private static final int MAX_INVENTORY_FILES = 16;
     private static final int MAX_SYMBOLS_PER_FILE = 240;
-    private static final int MAX_MAP_NEIGHBORS_PER_UPDATE = 12;
-
     private final CodeRepository repository;
 
     public RepositoryQuestionMapBuilder(CodeRepository repository) {
@@ -110,18 +108,14 @@ public final class RepositoryQuestionMapBuilder {
         }
 
         List<CodeSearchResult> operationCandidates = safeResults(newCandidates);
-        List<CodeSearchResult> mapNeighbors = loadMapNeighborhood(
-                current.identity().repositoryId(), operationCandidates);
         LinkedHashMap<String, EvidenceEntry> evidence = new LinkedHashMap<>(current.evidence());
         LinkedHashSet<String> added = new LinkedHashSet<>();
         LinkedHashSet<String> updated = new LinkedHashSet<>();
-        for (CodeSearchResult result : java.util.stream.Stream.concat(
-                operationCandidates.stream(), mapNeighbors.stream()).toList()) {
+        for (CodeSearchResult result : operationCandidates) {
             if (!matchesIdentity(result, latest)) {
                 continue;
             }
-            String origin = operationCandidates.contains(result) ? "OPERATION" : "MAP_NEIGHBORHOOD";
-            EvidenceEntry entry = evidenceEntry(result, current.revision() + 1, origin);
+            EvidenceEntry entry = evidenceEntry(result, current.revision() + 1, "OPERATION");
             EvidenceEntry previous = evidence.putIfAbsent(entry.evidenceId(), entry);
             if (previous == null) {
                 added.add(entry.evidenceId());
@@ -170,33 +164,6 @@ public final class RepositoryQuestionMapBuilder {
                 new MapDelta(current.revision(), nextRevision, List.copyOf(added), List.copyOf(updated), false, progress)
         );
         return new MapUpdateResult(next, false);
-    }
-
-    private List<CodeSearchResult> loadMapNeighborhood(
-            UUID repositoryId,
-            List<CodeSearchResult> operationCandidates
-    ) {
-        if (repository == null || repositoryId == null || operationCandidates == null
-                || operationCandidates.isEmpty()) {
-            return List.of();
-        }
-        List<UUID> seedChunkIds = operationCandidates.stream()
-                .filter(Objects::nonNull)
-                .filter(result -> Boolean.TRUE.equals(metadata(result).get("llmDirectRead")))
-                .map(CodeSearchResult::chunkId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .limit(8)
-                .toList();
-        if (seedChunkIds.isEmpty()) {
-            return List.of();
-        }
-        try {
-            return repository.graphRelatedChunks(
-                    repositoryId, seedChunkIds, List.of(), 1, "BOTH", MAX_MAP_NEIGHBORS_PER_UPDATE);
-        } catch (RuntimeException ignored) {
-            return List.of();
-        }
     }
 
     private ActiveCodeIndexIdentity loadIdentity(
@@ -627,11 +594,49 @@ public final class RepositoryQuestionMapBuilder {
             EvidenceEntry entry = evidence.get(evidenceId);
             if (entry != null) {
                 return "IMPLEMENTATION_BODY".equals(entry.kind())
-                        && "DIRECT_SOURCE".equals(entry.authority());
+                        && "DIRECT_SOURCE".equals(entry.authority())
+                        && isConcreteImplementationSpan(entry.source());
             }
             return relations.stream().anyMatch(relation -> evidenceId.equals(relation.evidenceId())
                     && ("DIRECT_SOURCE".equals(relation.authority())
                     || "GRAPH_DERIVED".equals(relation.authority())));
+        }
+
+        /** Only a callable identity is concrete behavior proof; other symbols remain navigation or typed-IR input. */
+        private boolean isConcreteImplementationSpan(CodeSearchResult source) {
+            if (source == null) return false;
+            String container = canonicalSymbol(source.className());
+            String method = canonicalSymbol(source.methodName());
+            if (method.isBlank()) return false;
+            if (!hasConcreteCallableBody(source)) return false;
+            if (container.isBlank() || !method.equalsIgnoreCase(container)) return true;
+            String callableKind = safe(source.chunkType()).trim();
+            return "method".equalsIgnoreCase(callableKind)
+                    || "constructor".equalsIgnoreCase(callableKind);
+        }
+
+        private boolean hasConcreteCallableBody(CodeSearchResult source) {
+            Object declared = source.metadata() == null
+                    ? null : source.metadata().get("callableBodyPresent");
+            if (declared != null) return Boolean.parseBoolean(String.valueOf(declared));
+            String content = safe(source.content());
+            if (content.contains("{") || content.contains("=>")) return true;
+            List<String> lines = content.lines().map(String::stripTrailing).toList();
+            for (int index = 0; index + 1 < lines.size(); index++) {
+                if (lines.get(index).stripTrailing().endsWith(":")) {
+                    return lines.subList(index + 1, lines.size()).stream().anyMatch(line -> !line.isBlank());
+                }
+            }
+            return false;
+        }
+
+        private String canonicalSymbol(String value) {
+            String symbol = safe(value).trim();
+            int parameters = symbol.indexOf('(');
+            if (parameters >= 0) symbol = symbol.substring(0, parameters);
+            symbol = symbol.replace("::", ".").replace('#', '.');
+            int separator = symbol.lastIndexOf('.');
+            return separator >= 0 ? symbol.substring(separator + 1) : symbol;
         }
 
         boolean observesPath(String path) {

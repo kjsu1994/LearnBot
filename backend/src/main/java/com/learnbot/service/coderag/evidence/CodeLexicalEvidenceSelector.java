@@ -60,7 +60,6 @@ public final class CodeLexicalEvidenceSelector {
     private static CodeSearchResult mark(Scored scored) {
         CodeSearchResult result = scored.result();
         Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
-        metadata.put("deterministicLexicalCandidate", true);
         metadata.put("retrievalIntentScore", scored.score());
         metadata.put("evidenceRankReason", String.valueOf(metadata.getOrDefault("evidenceRankReason", ""))
                 + (metadata.containsKey("evidenceRankReason") ? "; " : "")

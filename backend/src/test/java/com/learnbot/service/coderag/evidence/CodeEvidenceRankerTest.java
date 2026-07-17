@@ -1,11 +1,11 @@
 package com.learnbot.service.coderag.evidence;
 
-import com.learnbot.service.coderag.model.CodeQuestionMode;
-
 import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.service.coderag.model.CodeQuestionMode;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,282 +15,189 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CodeEvidenceRankerTest {
 
     @Test
-    void ranksSqlResourceAccessAboveGenericStorageEvidence() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult storageWriter = result(
-                "backend/src/main/java/com/example/repository/GraphRepository.java",
-                "method",
-                "replaceGraph",
-                0.30,
-                """
-                        void replaceGraph() {
-                            jdbc.update(\"INSERT INTO code_graph_nodes (id, node_key) VALUES (?, ?)\");
-                            jdbc.update(\"INSERT INTO code_graph_edges (id, source_node_id) VALUES (?, ?)\");
-                        }
-                        """
-        );
-        CodeSearchResult genericStorage = result(
-                "backend/src/main/java/com/example/service/StorageRetentionService.java",
-                "method",
-                "cleanupStorage",
-                0.52,
-                "void cleanupStorage() { vacuumAnalyzeBestEffort(\"code_graph_nodes\"); }"
-        );
+    void legacyQuestionSynonymsDoNotAddEvidenceScore() {
+        CodeEvidenceRanker ranker = ranker();
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "How are code_graph_nodes and code_graph_edges stored during indexing?",
-                CodeQuestionMode.REASONING,
-                List.of(genericStorage, storageWriter)
-        );
-
-        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("replaceGraph");
-        assertThat(ranked.get(0).metadata().get("evidenceRankReason"))
-                .asString()
-                .contains("resource/table access evidence");
+        assertNoExpansion(ranker, "login", "auth authentication signin");
+        assertNoExpansion(ranker, "index", "repository chunk embedding");
+        assertNoExpansion(ranker, "admin", "role authority");
     }
 
     @Test
-    void doesNotBoostLongIdentifierWithoutAccessIntentOrSqlEvidence() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult directMethod = result(
-                "backend/src/main/java/com/example/service/AnswerService.java",
-                "method",
-                "askPrioritized",
-                0.45,
-                "void askPrioritized() { buildContext(); generateAnswer(); }"
-        );
-        CodeSearchResult unrelatedLongIdentifier = result(
-                "backend/src/main/java/com/example/service/OtherService.java",
-                "method",
-                "other",
-                0.44,
-                "void other() { String marker = \"askPrioritized\"; }"
-        );
+    void incidentalToolAndAnnotationNamesDoNotAddScoreOrFlowOrder() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult decorated = result(
+                "src/ZDecoratedHandler.java", "method", "traceNode", null, null, 0.4,
+                "trace request flow @ArbitraryMarker(\"item\") parser marker",
+                Map.of("parser", "custom_parser"));
+        CodeSearchResult plain = result(
+                "src/APlain.java", "method", "traceNode", null, null, 0.4,
+                "trace request flow ordinary marker", Map.of());
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "How does askPrioritized generate an answer?",
-                CodeQuestionMode.REASONING,
-                List.of(unrelatedLongIdentifier, directMethod)
-        );
-
-        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("askPrioritized");
-        assertThat(ranked.get(1).metadata().get("evidenceRankReason"))
-                .asString()
-                .doesNotContain("resource/table access evidence");
+        assertThat(score(ranker, "trace request flow", CodeQuestionMode.CALL_FLOW, decorated))
+                .isEqualTo(score(ranker, "trace request flow", CodeQuestionMode.CALL_FLOW, plain));
+        assertThat(ranker.flowRank(decorated)).isEqualTo(Integer.MAX_VALUE);
+        assertThat(ranker.flowRank(plain)).isEqualTo(Integer.MAX_VALUE);
+        assertThat(ranker.rank("trace request flow", CodeQuestionMode.CALL_FLOW, List.of(decorated))
+                .get(0).metadata().get("evidenceRankReason").toString())
+                .doesNotContain("endpoint");
     }
 
     @Test
-    void prefersControllerWhoseEndpointMappingMatchesRequestedApiPath() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult wrongController = result(
-                "backend/src/main/java/com/example/web/RagController.java",
-                "method",
-                "askStream",
-                0.72,
-                """
-                        @RestController
-                        @RequestMapping("/api/rag")
-                        class RagController {
-                            @PostMapping("/ask/stream")
-                            Object askStream() { return ragService.ask(); }
-                        }
-                        """
-        );
-        CodeSearchResult matchingController = result(
-                "backend/src/main/java/com/example/web/CodeController.java",
-                "method",
-                "ask",
-                0.55,
-                """
-                        @RestController
-                        @RequestMapping("/api/code")
-                        class CodeController {
-                            @PostMapping("/ask")
-                            Object ask() { return codeRagService.ask(); }
-                        }
-                        """
-        );
+    void sqlSyntaxDoesNotCreateAQuestionSpecificBoost() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult sql = result(
+                "src/ZSqlNamed.java", "method", "inspect", null, null, 0.4,
+                "storage ledger SELECT value FROM facts; INSERT INTO facts VALUES (?)", Map.of());
+        CodeSearchResult plain = result(
+                "src/APlain.java", "method", "inspect", null, null, 0.4,
+                "storage ledger ordinary operation", Map.of());
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "How does /api/code/ask flow from Controller to Service?",
-                CodeQuestionMode.CALL_FLOW,
-                List.of(wrongController, matchingController)
-        );
-
-        assertThat(ranked).first().extracting(CodeSearchResult::filePath)
-                .isEqualTo("backend/src/main/java/com/example/web/CodeController.java");
-        assertThat(ranked.get(0).metadata().get("evidenceRankReason"))
-                .asString()
-                .contains("endpoint path aligns with question");
-        assertThat(ranked.get(1).metadata().get("evidenceRankReason"))
-                .asString()
-                .contains("endpoint mismatch");
+        assertThat(score(ranker, "storage ledger", CodeQuestionMode.REASONING, sql))
+                .isEqualTo(score(ranker, "storage ledger", CodeQuestionMode.REASONING, plain));
     }
 
     @Test
-    void deprioritizesTimingHelperOnlyForRuntimeFlowQuestions() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult timingHelper = result(
-                "backend/src/main/java/com/example/service/RagService.java",
-                "method",
-                "addGraphExpansionMs",
-                0.70,
-                "void addGraphExpansionMs(long value) { graphExpansionMs += value; }"
-        );
-        CodeSearchResult implementation = result(
-                "backend/src/main/java/com/example/service/CodeSearchService.java",
-                "method",
-                "expandGraph",
-                0.48,
-                "List<Result> expandGraph() { return repository.graphRelatedChunks(); }"
-        );
+    void flowRankUsesOnlyTypedNonNegativeIntegralMetadata() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult ordered = candidate("src/Z.java", Map.of("executionOrder", 0));
+        CodeSearchResult depth = candidate("src/Y.java", Map.of("graphDepth", 2));
+        CodeSearchResult stringValue = candidate("src/X.java",
+                Map.of("executionOrder", "0", "graphDepth", "1"));
+        CodeSearchResult fractional = candidate("src/W.java", Map.of("executionOrder", 1.5));
 
-        List<CodeSearchResult> flowRanked = ranker.rank(
-                "Explain graph expansion flow in the request pipeline",
-                CodeQuestionMode.CALL_FLOW,
-                List.of(timingHelper, implementation)
-        );
-        assertThat(flowRanked).first().extracting(CodeSearchResult::methodName).isEqualTo("expandGraph");
-
-        List<CodeSearchResult> metricRanked = ranker.rank(
-                "Where is graph expansion timing metric accumulated?",
-                CodeQuestionMode.REASONING,
-                List.of(timingHelper, implementation)
-        );
-        assertThat(metricRanked).first().extracting(CodeSearchResult::methodName).isEqualTo("addGraphExpansionMs");
+        assertThat(ranker.flowRank(ordered)).isZero();
+        assertThat(ranker.flowRank(depth)).isEqualTo(2);
+        assertThat(ranker.flowRank(stringValue)).isEqualTo(Integer.MAX_VALUE);
+        assertThat(ranker.flowRank(fractional)).isEqualTo(Integer.MAX_VALUE);
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.CALL_FLOW, ordered))
+                .isGreaterThan(score(ranker, "trace delta", CodeQuestionMode.CALL_FLOW, depth));
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.CALL_FLOW, depth))
+                .isGreaterThan(score(ranker, "trace delta", CodeQuestionMode.CALL_FLOW, stringValue));
     }
 
     @Test
-    void candidateGraphEdgesHelpUiIntentWithoutOvertakingDirectEvidence() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult directHandler = graphResult(
-                "frontend/src/MainWindow.xaml.cs",
-                "event_handler",
-                "SaveCommandExecute",
-                0.42,
-                "void SaveCommandExecute(object sender, ExecutedRoutedEventArgs e) {}",
-                "COMMAND_EXECUTES",
-                "direct",
-                0.95
-        );
-        CodeSearchResult candidateBinding = graphResult(
-                "frontend/src/MainWindow.xaml",
-                "xaml_control",
-                "SaveButton",
-                0.44,
-                "<Button Command=\"{Binding SaveCommand}\" />",
-                "COMMAND_BINDING",
-                "candidate",
-                0.70
-        );
+    void genericGraphSignalsAndAuthorityIncreaseScoreWithoutRelationNameWeighting() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult plain = candidate("src/Plain.java", Map.of());
+        CodeSearchResult parserNamed = candidate("src/Parser.java", Map.of("parser", "custom_parser"));
+        CodeSearchResult syntax = candidate("src/Syntax.java", Map.of("codeIntelligenceAuthority", "SYNTAX"));
+        CodeSearchResult compiler = candidate("src/Compiler.java", Map.of("codeIntelligenceAuthority", "COMPILER_SEMANTIC"));
+        CodeSearchResult graphAlpha = candidate("src/GraphAlpha.java", Map.of(
+                "graphEdgeType", "RELATION_ALPHA",
+                "graphDepth", 1,
+                "graphPathScore", 0.9,
+                "graphEvidenceKind", "direct",
+                "codeIntelligenceAuthority", "COMPILER_SEMANTIC"));
+        CodeSearchResult graphBeta = candidate("src/GraphBeta.java", Map.of(
+                "graphEdgeType", "RELATION_BETA",
+                "graphDepth", 1,
+                "graphPathScore", 0.9,
+                "graphEvidenceKind", "direct",
+                "codeIntelligenceAuthority", "COMPILER_SEMANTIC"));
+        CodeSearchResult weakGraph = candidate("src/WeakGraph.java", Map.of(
+                "graphEdgeType", "RELATION_GAMMA",
+                "graphDepth", 3,
+                "graphPathScore", 0.2,
+                "graphEvidenceKind", "candidate"));
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "How does the WPF SaveCommand execute?",
-                CodeQuestionMode.UI_EVENT,
-                List.of(candidateBinding, directHandler)
-        );
-
-        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("SaveCommandExecute");
-        assertThat(ranked.get(1).metadata().get("graphReliability")).isEqualTo("strong");
-        assertThat(ranked.get(1).metadata().get("evidenceRankReason"))
-                .asString()
-                .contains("graph COMMAND_BINDING");
+        double plainScore = score(ranker, "trace delta", CodeQuestionMode.REASONING, plain);
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, parserNamed)).isEqualTo(plainScore);
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, syntax)).isGreaterThan(plainScore);
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, compiler))
+                .isGreaterThan(score(ranker, "trace delta", CodeQuestionMode.REASONING, syntax));
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, graphAlpha))
+                .isEqualTo(score(ranker, "trace delta", CodeQuestionMode.REASONING, graphBeta))
+                .isGreaterThan(score(ranker, "trace delta", CodeQuestionMode.REASONING, weakGraph))
+                .isGreaterThan(plainScore);
+        assertThat(ranker.rank("trace delta", CodeQuestionMode.REASONING, List.of(graphAlpha)).get(0)
+                .metadata().get("graphReliability")).isEqualTo("strong");
+        assertThat(ranker.rank("trace delta", CodeQuestionMode.REASONING, List.of(graphAlpha)).get(0)
+                .metadata().get("evidenceRankReason").toString())
+                .contains("graph evidence")
+                .doesNotContain("RELATION_ALPHA");
     }
 
     @Test
-    void prefersConcreteImplementationOverLargeFileLevelChunk() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult wholeFile = new CodeSearchResult(
-                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Pipeline.java",
-                "file", null, "Pipeline", null, null, null, null, 0,
-                1, 2200, "pipeline failure fallback analysis search answer", 0.62, Map.of());
-        CodeSearchResult implementation = new CodeSearchResult(
-                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/GraphBuilder.java",
-                "method", "build", "GraphBuilder", "build", null, null, null, 1,
-                40, 95, "Graph build() { try { return analyze(); } catch (RuntimeException ex) { return baseGraph; } }",
-                0.48, Map.of());
+    void sourceRolePolicyDoesNotChangeWhenQuestionMentionsTests() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult testEvidence = candidate("src/Fixture.java", Map.of("sourceRole", "test"));
+        CodeSearchResult mainEvidence = candidate("src/Fixture.java", Map.of("sourceRole", "main"));
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "How does graph analysis failure preserve a fallback result?",
-                CodeQuestionMode.REASONING,
-                List.of(wholeFile, implementation));
-
-        assertThat(ranked).first().extracting(CodeSearchResult::methodName).isEqualTo("build");
+        assertThat(score(ranker, "trace tests", CodeQuestionMode.REASONING, testEvidence))
+                .isEqualTo(score(ranker, "trace production", CodeQuestionMode.REASONING, testEvidence));
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, mainEvidence))
+                .isGreaterThan(score(ranker, "trace delta", CodeQuestionMode.REASONING, testEvidence));
     }
 
     @Test
-    void prefersSubstantiveOverloadBodyOverThinForwarder() {
-        CodeEvidenceRanker ranker = new CodeEvidenceRanker(new LearnBotProperties());
-        CodeSearchResult forwarder = new CodeSearchResult(
-                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/OllamaClient.java",
-                "method", "chatResult", "OllamaClient", "chatResult", null, null, null, 1,
-                10, 12, "ChatResult chatResult(String prompt) { return chatResult(prompt, PRIMARY); }", 0.8, Map.of());
-        CodeSearchResult implementation = new CodeSearchResult(
-                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/OllamaClient.java",
-                "method", "chatResult", "OllamaClient", "chatResult", null, null, null, 2,
-                20, 52, "ChatResult chatResult(...) { for (Candidate candidate : candidates) { try { return call(candidate); } catch (RuntimeException ex) { last = ex; } } throw last; }",
-                0.8, Map.of());
+    void untypedPresentationChunkNamesAreNeutralButObservedIdentityIsUseful() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult presentationOnly = result(
+                "src/ZPresentationView.data", "presentation_control", null, null, null, 0.4,
+                "trace interaction", Map.of());
+        CodeSearchResult plain = result(
+                "src/APlain.txt", "opaque", null, null, null, 0.4,
+                "trace interaction", Map.of());
+        CodeSearchResult observed = result(
+                "src/Observed.txt", "opaque", null, "ActionControl", "Activated", 0.4,
+                "trace interaction", Map.of());
 
-        List<CodeSearchResult> ranked = ranker.rank(
-                "Does chatResult try another candidate after a failure?",
-                CodeQuestionMode.REASONING,
-                List.of(forwarder, implementation));
-
-        assertThat(ranked).first().extracting(CodeSearchResult::lineStart).isEqualTo(20);
+        double plainScore = score(ranker, "trace interaction", CodeQuestionMode.UI_EVENT, plain);
+        assertThat(score(ranker, "trace interaction", CodeQuestionMode.UI_EVENT, presentationOnly)).isEqualTo(plainScore);
+        assertThat(score(ranker, "trace interaction", CodeQuestionMode.UI_EVENT, observed)).isGreaterThan(plainScore);
     }
 
-    private CodeSearchResult result(String filePath, String chunkType, String methodName, double score, String content) {
-        UUID chunkId = UUID.randomUUID();
+    @Test
+    void relationNamesDoNotChangeStableFileOrdering() {
+        CodeEvidenceRanker ranker = ranker();
+        CodeSearchResult z = candidate("src/Zeta.java", Map.of("graphEdgeType", "RELATION_ZETA"));
+        CodeSearchResult a = candidate("src/Alpha.java", Map.of("graphEdgeType", "RELATION_ALPHA"));
+
+        assertThat(score(ranker, "trace delta", CodeQuestionMode.REASONING, z))
+                .isEqualTo(score(ranker, "trace delta", CodeQuestionMode.REASONING, a));
+        assertThat(ranker.rank("trace delta", CodeQuestionMode.REASONING, List.of(z, a)))
+                .extracting(CodeSearchResult::filePath)
+                .containsExactly("src/Alpha.java", "src/Zeta.java");
+    }
+
+    private void assertNoExpansion(CodeEvidenceRanker ranker, String question, String legacyTerms) {
+        CodeSearchResult legacyNamed = result(
+                "src/ZLegacy.java", "method", "inspect", null, null, 0.4, legacyTerms, Map.of());
+        CodeSearchResult neutral = result(
+                "src/APlain.java", "method", "inspect", null, null, 0.4, "unrelated tokens", Map.of());
+        assertThat(score(ranker, question, CodeQuestionMode.REASONING, legacyNamed))
+                .isEqualTo(score(ranker, question, CodeQuestionMode.REASONING, neutral));
+    }
+
+    private CodeEvidenceRanker ranker() {
+        return new CodeEvidenceRanker(new LearnBotProperties());
+    }
+
+    private double score(CodeEvidenceRanker ranker, String question, CodeQuestionMode mode, CodeSearchResult result) {
+        return ranker.score(ranker.rank(question, mode, List.of(result)).get(0));
+    }
+
+    private CodeSearchResult candidate(String filePath, Map<String, Object> metadata) {
+        return result(filePath, "method", "traceNode", null, null, 0.4, "trace delta", metadata);
+    }
+
+    private CodeSearchResult result(
+            String filePath,
+            String chunkType,
+            String symbol,
+            String control,
+            String event,
+            double searchScore,
+            String content,
+            Map<String, Object> metadata
+    ) {
+        Map<String, Object> fullMetadata = new LinkedHashMap<>();
+        fullMetadata.put("sourceRole", "main");
+        fullMetadata.putAll(metadata);
         return new CodeSearchResult(
-                chunkId,
-                UUID.randomUUID(),
-                UUID.randomUUID(),
-                "repo",
-                filePath,
-                chunkType,
-                methodName,
-                "Example",
-                methodName,
-                null,
-                null,
-                null,
-                0,
-                1,
-                20,
-                content,
-                score,
-                Map.of()
-        );
-    }
-
-    private CodeSearchResult graphResult(String filePath, String chunkType, String methodName, double score, String content,
-                                         String edgeType, String evidenceKind, double pathScore) {
-        UUID chunkId = UUID.randomUUID();
-        return new CodeSearchResult(
-                chunkId,
-                UUID.randomUUID(),
-                UUID.randomUUID(),
-                "repo",
-                filePath,
-                chunkType,
-                methodName,
-                "Example",
-                methodName,
-                null,
-                null,
-                null,
-                0,
-                1,
-                20,
-                content,
-                score,
-                Map.of(
-                        "graphExpanded", true,
-                        "graphEdgeType", edgeType,
-                        "graphDepth", 1,
-                        "graphPathScore", pathScore,
-                        "graphEvidenceKind", evidenceKind
-                )
-        );
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", filePath,
+                chunkType, symbol, symbol == null ? null : "Example", symbol, null, control, event,
+                0, 1, 20, content, searchScore, Map.copyOf(fullMetadata));
     }
 }
