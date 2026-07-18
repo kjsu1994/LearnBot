@@ -106,7 +106,7 @@ class CodeEvidenceOperationExecutorTest {
                 .containsExactly(new CodeEvidenceOperationProvenance(
                         "keyword_search", "op-claim", List.of("claim-1", "claim-2"), "queue_claim",
                         List.of(), "queued work claim", "", "", "", null, null, null,
-                        List.of(), "BOTH", null));
+                        List.of(), "BOTH", null, 1));
     }
 
     @Test

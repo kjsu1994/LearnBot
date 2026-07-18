@@ -37,6 +37,7 @@ public final class CodeEvidenceRetentionPlan {
     public enum Basis {
         CONSTRAINT,
         BOUNDED_GRAPH_PATH,
+        SOURCE_BUNDLE,
         SIGNAL
     }
 
@@ -129,7 +130,11 @@ public final class CodeEvidenceRetentionPlan {
             if (signal == null || signal.strength() < MIN_PREFERRED_SIGNAL_STRENGTH) continue;
             CodeEvidenceItem item = items.get(signal.sourceEvidenceId());
             if (item == null || item.authority().rank() < CodeIntelligenceAuthority.SYNTAX.rank()) continue;
-            Basis basis = isBoundedGraphPath(item) ? Basis.BOUNDED_GRAPH_PATH : Basis.SIGNAL;
+            Basis basis = isBoundedGraphPath(item)
+                    ? Basis.BOUNDED_GRAPH_PATH
+                    : signal.type() == CodeEvidenceSignal.Type.SOURCE_BUNDLE_BOUNDARY
+                    ? Basis.SOURCE_BUNDLE
+                    : Basis.SIGNAL;
             merge(resolved, item.evidenceId(), new Entry(Level.PREFERRED, item.authority(),
                     signalGroups(item, signal), basis));
         }
@@ -156,6 +161,10 @@ public final class CodeEvidenceRetentionPlan {
                             + ":" + direction + ":" + edgeType));
                 }
             }
+            if ("read_source_boundary".equals(provenance.operationType())
+                    && !provenance.operationId().isBlank()) {
+                groups.add(group("source_bundle", provenance.operationId()));
+            }
         }
         groups.removeIf(String::isBlank);
         if (groups.isEmpty()) groups.add(group("signal", signal.type().name()));
@@ -163,23 +172,8 @@ public final class CodeEvidenceRetentionPlan {
     }
 
     private static boolean isBoundedGraphPath(CodeEvidenceItem item) {
-        int graphDepth = item == null || item.source() == null
-                ? -1 : metadataInteger(item.source(), "graphDepth");
-        if (item == null || item.source() == null
-                || !metadataBoolean(item.source(), "graphExpanded")
-                || graphDepth < 1 || graphDepth > 2
-                || metadata(item.source(), "graphDirection").isBlank()
-                || metadata(item.source(), "graphEdgeType").isBlank()
-                || item.source().methodName() == null || item.source().methodName().isBlank()
-                || item.source().content() == null || item.source().content().isBlank()) {
-            return false;
-        }
-        String observedEdge = metadata(item.source(), "graphEdgeType").toUpperCase(Locale.ROOT);
-        return CodeEvidenceOperationProvenance.from(item.source()).stream()
-                .filter(provenance -> "traverse_graph".equals(provenance.operationType()))
-                .filter(provenance -> !provenance.originEvidenceIds().isEmpty())
-                .anyMatch(provenance -> provenance.relations().isEmpty()
-                        || provenance.relations().contains(observedEdge));
+        return item != null
+                && CodeEvidenceOperationProvenance.isBoundedGraphImplementation(item.source());
     }
 
     public static CodeEvidenceRetentionPlan resolve(CodeEvidenceIr ir) {
@@ -269,18 +263,6 @@ public final class CodeEvidenceRetentionPlan {
     private static String metadata(CodeSearchResult source, String key) {
         Object value = source == null || source.metadata() == null ? null : source.metadata().get(key);
         return value == null ? "" : String.valueOf(value).trim();
-    }
-
-    private static boolean metadataBoolean(CodeSearchResult source, String key) {
-        return Boolean.parseBoolean(metadata(source, key));
-    }
-
-    private static int metadataInteger(CodeSearchResult source, String key) {
-        try {
-            return Integer.parseInt(metadata(source, key));
-        } catch (NumberFormatException ignored) {
-            return -1;
-        }
     }
 
     private static String normalizeEvidenceId(String value) {

@@ -33,6 +33,7 @@ import com.learnbot.service.coderag.evidence.CodeEvidenceAdjudicator;
 import com.learnbot.service.coderag.evidence.CodeEvidenceCoverageGate;
 import com.learnbot.service.coderag.evidence.CodeEvidenceFileDiversity;
 import com.learnbot.service.coderag.evidence.CodeEvidenceId;
+import com.learnbot.service.coderag.evidence.CodeEvidenceIrPreselector;
 import com.learnbot.service.coderag.evidence.CodeEvidenceRanker;
 import com.learnbot.service.coderag.evidence.CodeEvidenceRetentionPlan;
 import com.learnbot.service.coderag.evidence.CodeEvidenceSelectionPolicy;
@@ -2941,10 +2942,9 @@ public class CodeRagOrchestrator {
             List<CodeSearchResult> evidence,
             CodeEvidenceIr retainedIr
     ) {
-        List<CodeSearchResult> bounded = evidence == null ? List.of() : evidence.stream()
-                .filter(Objects::nonNull)
-                .limit(PRESELECTION_IR_EVIDENCE_LIMIT)
-                .toList();
+        List<CodeSearchResult> bounded = CodeEvidenceIrPreselector.select(
+                evidence == null ? List.of() : evidence.stream().filter(Objects::nonNull).toList(),
+                PRESELECTION_IR_EVIDENCE_LIMIT);
         CodeEvidenceAccumulator.Accumulation operationEvidence = evidenceAccumulator.accumulate(
                 retainedIr == null ? CodeEvidenceIr.empty() : retainedIr,
                 new CodeEvidenceExtractionContext(
@@ -2965,13 +2965,11 @@ public class CodeRagOrchestrator {
             EvidenceExtractionStage stage,
             Collection<CodeSearchResult> evidence
     ) {
-        List<CodeSearchResult> ranked = evidenceRanker.rank(
+        List<CodeSearchResult> ranked = CodeEvidenceIrPreselector.select(evidenceRanker.rank(
                 question,
                 questionMode == null ? CodeQuestionMode.OVERVIEW : questionMode,
-                evidence == null ? List.of() : evidence.stream().filter(Objects::nonNull).toList())
-                .stream()
-                .limit(PRESELECTION_IR_EVIDENCE_LIMIT)
-                .toList();
+                evidence == null ? List.of() : evidence.stream().filter(Objects::nonNull).toList()),
+                PRESELECTION_IR_EVIDENCE_LIMIT);
         return evidenceAccumulator.accumulate(
                 current == null ? CodeEvidenceIr.empty() : current,
                 new CodeEvidenceExtractionContext(

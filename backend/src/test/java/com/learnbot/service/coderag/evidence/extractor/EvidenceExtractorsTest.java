@@ -1,6 +1,7 @@
 package com.learnbot.service.coderag.evidence.extractor;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.service.coderag.evidence.CodeEvidenceRetentionPlan;
 import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
@@ -336,6 +337,52 @@ class EvidenceExtractorsTest {
         assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
                 .contains("coordinate0", "begin0", "end0", "coordinate7", "begin7", "end7")
                 .doesNotContain("coordinate8", "begin8", "end8");
+    }
+
+    @Test
+    void navigationExtractorReservesBoundedSlotsForTypedGraphImplementationsBeyondSemanticHead() {
+        List<CodeSearchResult> semanticHead = new ArrayList<>();
+        for (int index = 0; index < 8; index++) {
+            semanticHead.add(result(
+                    "src/Semantic" + index + ".java",
+                    "semantic" + index,
+                    "void semantic" + index + "() { unrelated" + index + "(); }",
+                    Map.of("indexVersion", "v1")));
+        }
+
+        List<CodeSearchResult> graphImplementations = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+            CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                    "traverse_graph", "op-graph", List.of("claim-flow"), "service-flow",
+                    List.of("seed-evidence"), "", "", "", UUID.randomUUID().toString(),
+                    null, null, null, List.of("CALLS"), "BOTH", 2);
+            graphImplementations.add(result(
+                    "src/GraphTarget" + index + ".java",
+                    "graphTarget" + index,
+                    "void graphTarget" + index + "() {}",
+                    Map.of(
+                            "indexVersion", "v1",
+                            "graphExpanded", true,
+                            "graphDepth", 1,
+                            "graphDirection", "FORWARD",
+                            "graphEdgeType", "CALLS",
+                            "codeIntelligenceAuthority", "COMPILER_SEMANTIC",
+                            CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance))));
+        }
+
+        List<CodeSearchResult> candidates = new ArrayList<>(semanticHead);
+        candidates.addAll(graphImplementations);
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace the lifecycle",
+                        EvidenceExtractionStage.POST_OPERATION, candidates, 24));
+        CodeEvidenceRetentionPlan retention = CodeEvidenceRetentionPlan.from(ir);
+
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .contains("semantic0", "graphTarget0", "graphTarget1", "graphTarget2", "graphTarget3");
+        assertThat(graphImplementations).allSatisfy(result ->
+                assertThat(retention.lookup(CodeEvidenceItem.evidenceId(result))).get().satisfies(entry ->
+                        assertThat(entry.basis())
+                                .isEqualTo(CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH)));
     }
 
     @Test

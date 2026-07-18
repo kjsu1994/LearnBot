@@ -10,6 +10,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
+import com.learnbot.service.coderag.evidence.CodeEvidenceRetentionPlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -20,6 +21,33 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OperationEvidenceExtractorTest {
+
+    @Test
+    void sourceBoundaryBecomesBoundedPreferredIrWithoutBecomingExactProof() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        CodeEvidenceOperationProvenance boundary = new CodeEvidenceOperationProvenance(
+                "read_source_boundary", "op-flow-source-boundary-1",
+                List.of("claim-flow"), "execution_flow", List.of("index:origin:1-20"),
+                "", "src/app/Worker.java", "initialize", UUID.randomUUID().toString(),
+                10, 30, null, List.of(), "BOTH", null);
+        CodeSearchResult source = result(
+                UUID.randomUUID(), "void initialize() {}", boundary, Map.of());
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How does initialization flow?", EvidenceExtractionStage.POST_OPERATION,
+                List.of(source)));
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(ir);
+
+        assertThat(ir.signals()).singleElement().satisfies(signal -> {
+            assertThat(signal.type()).isEqualTo(CodeEvidenceSignal.Type.SOURCE_BUNDLE_BOUNDARY);
+            assertThat(signal.strength()).isEqualTo(0.9);
+        });
+        assertThat(ir.constraints()).isEmpty();
+        assertThat(plan.lookup(ir.evidenceItems().get(0).evidenceId())).get().satisfies(entry -> {
+            assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+            assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE);
+        });
+    }
 
     @Test
     void directOperationProducesOneSyntaxBackedItemAndDirectObservationSignal() {
@@ -114,6 +142,46 @@ class OperationEvidenceExtractorTest {
                         "NO_ORIGIN_SOURCE", "UNKNOWN_OPERATION_SOURCE");
         assertThat(ir.signals()).isEmpty();
         assertThat(ir.constraints()).isEmpty();
+    }
+
+    @Test
+    void onlyBoundedClaimLinkedSearchHeadsBecomePreferredExplorationEvidence() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        List<CodeSearchResult> searchResults = java.util.stream.IntStream.rangeClosed(1, 4)
+                .mapToObj(rank -> result(
+                        UUID.randomUUID(), "SEARCH_HEAD_" + rank,
+                        new CodeEvidenceOperationProvenance(
+                                "hybrid_search", "op-search", List.of("claim-1"), "execution_flow",
+                                List.of(), "free form query", "", "", "",
+                                null, null, null, List.of(), "BOTH", null, rank),
+                        Map.of()))
+                .toList();
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How does the flow execute?", EvidenceExtractionStage.POST_OPERATION,
+                searchResults));
+
+        assertThat(ir.signals()).hasSize(3).allSatisfy(signal -> {
+            assertThat(signal.type()).isEqualTo(CodeEvidenceSignal.Type.CLAIM_LINKED_SEARCH_HEAD);
+            assertThat(signal.strength()).isEqualTo(0.8);
+            assertThat(signal.reason()).doesNotContain("query", "execution_flow", "claim-1");
+        });
+        assertThat(ir.constraints()).isEmpty();
+
+        CodeEvidenceRetentionPlan retentionPlan = CodeEvidenceRetentionPlan.from(ir);
+        assertThat(searchResults.subList(0, 3)).allSatisfy(result ->
+                assertThat(retentionPlan.lookup(CodeEvidenceItem.evidenceId(result))).get()
+                        .extracting(CodeEvidenceRetentionPlan.Entry::level)
+                        .isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED));
+        assertThat(retentionPlan.lookup(CodeEvidenceItem.evidenceId(searchResults.get(3)))).isEmpty();
+
+        CodeSearchResult semantic = result(UUID.randomUUID(), "SEMANTIC", null, Map.of());
+        List<CodeSearchResult> ranked = new java.util.ArrayList<>();
+        ranked.add(semantic);
+        ranked.addAll(searchResults);
+        assertThat(CodeEvidenceSelectionPolicy.selectFinalEvidenceWithRetention(
+                ranked, List.of(semantic), 4, retentionPlan))
+                .containsExactly(semantic, searchResults.get(0), searchResults.get(1), searchResults.get(2));
     }
 
     @Test

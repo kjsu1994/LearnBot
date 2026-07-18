@@ -379,7 +379,7 @@ class CodeEvidenceSelectionPolicyTest {
     }
 
     @Test
-    void typedGraphRetentionKeepsThreeSiblingCallBodiesAndBoundsEachBranch() {
+    void typedGraphRetentionKeepsFourSiblingCallBodiesWithinTheBoundedBranch() {
         CodeSearchResult semanticFirst = result("src/Overview.java", 1.0, Map.of());
         CodeSearchResult semanticSecond = result("src/Architecture.java", 0.99, Map.of());
         CodeSearchResult firstCall = result("src/Store.java", 0.40, Map.of());
@@ -409,8 +409,34 @@ class CodeEvidenceSelectionPolicyTest {
                 CodeEvidenceRetentionPlan.of(entries), 5);
 
         assertThat(selected).containsExactly(
-                semanticFirst, firstCall, secondCall, thirdCall, reverseCaller);
-        assertThat(selected).doesNotContain(semanticSecond, fourthCall);
+                semanticFirst, firstCall, secondCall, thirdCall, fourthCall);
+        assertThat(selected).doesNotContain(semanticSecond, reverseCaller);
+    }
+
+    @Test
+    void sourceBundleRetentionKeepsAtMostTwoCallableBoundaries() {
+        CodeSearchResult semanticFirst = result("src/Overview.java", 1.0, Map.of());
+        CodeSearchResult semanticSecond = result("src/Architecture.java", 0.9, Map.of());
+        CodeSearchResult firstBoundary = result("src/Runtime.java", 0.3, Map.of());
+        CodeSearchResult lastBoundary = result("src/Runtime.java", 0.2, Map.of());
+        CodeSearchResult extraBoundary = result("src/Runtime.java", 0.1, Map.of());
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new java.util.LinkedHashMap<>();
+        for (CodeSearchResult boundary : List.of(firstBoundary, lastBoundary, extraBoundary)) {
+            entries.put(CodeEvidenceId.from(boundary), new CodeEvidenceRetentionPlan.Entry(
+                    CodeEvidenceRetentionPlan.Level.PREFERRED,
+                    CodeIntelligenceAuthority.SYNTAX,
+                    Set.of("source_bundle:op-flow"),
+                    CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE));
+        }
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                List.of(semanticFirst, semanticSecond, firstBoundary, lastBoundary, extraBoundary),
+                List.of(semanticFirst, semanticSecond),
+                CodeEvidenceRetentionPlan.of(entries), 4);
+
+        assertThat(selected).containsExactly(
+                semanticFirst, semanticSecond, firstBoundary, lastBoundary);
+        assertThat(selected).doesNotContain(extraBoundary);
     }
 
     @Test

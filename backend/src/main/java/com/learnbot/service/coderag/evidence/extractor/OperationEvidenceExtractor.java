@@ -23,6 +23,7 @@ import java.util.Set;
  */
 @Component
 public final class OperationEvidenceExtractor implements EvidenceExtractor {
+    private static final int MAX_CLAIM_LINKED_SEARCH_HEAD_RANK = 3;
 
     @Override
     public String id() {
@@ -66,20 +67,36 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
 
             boolean directObservation = provenance.stream()
                     .anyMatch(OperationEvidenceExtractor::isDirectObservation);
+            boolean sourceBundleBoundary = provenance.stream()
+                    .anyMatch(value -> isDirectObservation(value)
+                            && "read_source_boundary".equals(value.operationType()));
+            boolean claimLinkedSearchHead = provenance.stream()
+                    .anyMatch(value -> isClaimLinkedSearchHead(result, value));
             CodeEvidenceItem item = new CodeEvidenceItem(
                     evidenceId,
                     result,
                     Set.of(CodeEvidenceItem.Kind.DIRECT_SOURCE),
                     EvidenceExtractionSupport.directSyntaxAuthority(result));
-            candidates.merge(evidenceId, new Candidate(item, directObservation),
+            candidates.merge(evidenceId,
+                    new Candidate(item, directObservation, claimLinkedSearchHead),
                     OperationEvidenceExtractor::preferred);
 
             if (directObservation) {
                 signals.putIfAbsent(evidenceId, new CodeEvidenceSignal(
-                        CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
+                        sourceBundleBoundary
+                                ? CodeEvidenceSignal.Type.SOURCE_BUNDLE_BOUNDARY
+                                : CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
                         evidenceId,
-                        1.0,
-                        "A typed direct retrieval operation linked origin evidence to a structural source operand."));
+                        sourceBundleBoundary ? 0.9 : 1.0,
+                        sourceBundleBoundary
+                                ? "A bounded source bundle exposed a callable boundary through typed structural provenance."
+                                : "A typed direct retrieval operation linked origin evidence to a structural source operand."));
+            } else if (claimLinkedSearchHead) {
+                signals.putIfAbsent(evidenceId, new CodeEvidenceSignal(
+                        CodeEvidenceSignal.Type.CLAIM_LINKED_SEARCH_HEAD,
+                        evidenceId,
+                        0.8,
+                        "A bounded head result from a typed claim-linked search exposed direct source evidence."));
             }
             boolean exactDirectProof = provenance.stream()
                     .anyMatch(value -> isExactDirectProof(result, value));
@@ -106,6 +123,17 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
                 && provenance.isDirectOperation()
                 && !provenance.originEvidenceIds().isEmpty()
                 && hasStructuralOperand(provenance);
+    }
+
+    private static boolean isClaimLinkedSearchHead(
+            CodeSearchResult result,
+            CodeEvidenceOperationProvenance provenance
+    ) {
+        return result != null
+                && result.content() != null
+                && !result.content().isBlank()
+                && provenance != null
+                && provenance.isClaimLinkedSearchResultHead(MAX_CLAIM_LINKED_SEARCH_HEAD_RANK);
     }
 
     /**
@@ -205,10 +233,17 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
         if (incoming.directObservation() != current.directObservation()) {
             return incoming.directObservation() ? incoming : current;
         }
+        if (incoming.claimLinkedSearchHead() != current.claimLinkedSearchHead()) {
+            return incoming.claimLinkedSearchHead() ? incoming : current;
+        }
         return incoming.item().authority().rank() > current.item().authority().rank()
                 ? incoming : current;
     }
 
-    private record Candidate(CodeEvidenceItem item, boolean directObservation) {
+    private record Candidate(
+            CodeEvidenceItem item,
+            boolean directObservation,
+            boolean claimLinkedSearchHead
+    ) {
     }
 }

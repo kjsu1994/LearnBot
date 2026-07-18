@@ -310,7 +310,7 @@ class CodeRagOrchestratorInitialOperationTest {
                         .containsExactly(new CodeEvidenceOperationProvenance(
                                 "keyword_search", "initial-search", List.of("claim-1"), "queue_claim",
                                 List.of(), "queued work claim behavior", "", "", "",
-                                null, null, null, List.of(), "BOTH", null)));
+                                null, null, null, List.of(), "BOTH", null, 1)));
         verify(searchService, never()).identifiersFrom("queued work claim behavior");
         verify(codeRepository, never()).findSymbolDefinitions(
                 eq(repositoryId), anyString(), anyString(), anyInt(), anyList(), eq(spaceId));

@@ -13,7 +13,9 @@ public record CodeEvidenceSignal(
         STATE_TRANSITION,
         TRANSACTION_BOUNDARY,
         OBSERVED_NAVIGATION,
-        PERSISTENCE_RELATION
+        PERSISTENCE_RELATION,
+        CLAIM_LINKED_SEARCH_HEAD,
+        SOURCE_BUNDLE_BOUNDARY
     }
 
     public CodeEvidenceSignal {

@@ -7,6 +7,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 import com.learnbot.service.coderag.model.CodeNavigationHandle;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
@@ -30,6 +31,7 @@ public class NavigationEvidenceExtractor implements EvidenceExtractor {
      * retrieval relevance and no language, framework, or question vocabulary is consulted.
      */
     private static final int MAX_NAVIGATION_SOURCE_BUCKETS = 8;
+    private static final int MAX_BOUNDED_GRAPH_SOURCE_BUCKETS = 4;
     private static final int MAX_NAVIGATION_HANDLES = 48;
     private static final int MAX_PRIMARY_SOURCE_CANDIDATES = 32;
     private static final Pattern CONSTRUCTED_TYPE = Pattern.compile(
@@ -77,13 +79,13 @@ public class NavigationEvidenceExtractor implements EvidenceExtractor {
         int sourceLimit = Math.min(
                 MAX_NAVIGATION_SOURCE_BUCKETS,
                 Math.max(1, (limit + 1) / 2));
-        List<CodeSearchResult> sources = preferredSources(context.evidence()).stream()
+        List<CodeSearchResult> sources = preferredSources(context.evidence(), sourceLimit).stream()
                 .limit(sourceLimit)
                 .toList();
         for (CodeSearchResult result : sources) {
             if (handles.size() >= handleLimit) break;
             if (isExpandableDefinition(result)) {
-                addDefinitionHandle(result, items, handles, constraints);
+                addDefinitionHandle(result, items, handles, constraints, signals, signaled);
             }
         }
 
@@ -212,21 +214,38 @@ public class NavigationEvidenceExtractor implements EvidenceExtractor {
                 + candidate.offset() + "\u001f" + candidate.symbol();
     }
 
-    private List<CodeSearchResult> preferredSources(List<CodeSearchResult> evidence) {
+    private List<CodeSearchResult> preferredSources(
+            List<CodeSearchResult> evidence,
+            int sourceLimit
+    ) {
         List<CodeSearchResult> safe = evidence == null ? List.of() : evidence;
         Set<String> implementationPaths = safe.stream()
                 .filter(this::isExpandableDefinition)
                 .map(CodeSearchResult::filePath)
                 .filter(path -> path != null && !path.isBlank())
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-        List<CodeSearchResult> ordered = new ArrayList<>();
-        safe.stream().filter(this::isExpandableDefinition).forEach(ordered::add);
+        List<CodeSearchResult> implementations = safe.stream()
+                .filter(this::isExpandableDefinition)
+                .toList();
+        Map<java.util.UUID, CodeSearchResult> ordered = new LinkedHashMap<>();
+        if (!implementations.isEmpty()) {
+            CodeSearchResult semanticHead = implementations.get(0);
+            ordered.put(semanticHead.chunkId(), semanticHead);
+        }
+        int graphReserve = Math.min(MAX_BOUNDED_GRAPH_SOURCE_BUCKETS,
+                Math.max(0, sourceLimit / 2));
+        implementations.stream()
+                .filter(CodeEvidenceOperationProvenance::isBoundedGraphImplementation)
+                .limit(graphReserve)
+                .forEach(result -> ordered.putIfAbsent(result.chunkId(), result));
+        implementations.forEach(result -> ordered.putIfAbsent(result.chunkId(), result));
         safe.stream()
                 .filter(result -> !isExpandableDefinition(result))
                 .filter(result -> result.filePath() == null
                         || !implementationPaths.contains(result.filePath()))
-                .forEach(ordered::add);
-        return List.copyOf(ordered);
+                .filter(result -> result.chunkId() != null)
+                .forEach(result -> ordered.putIfAbsent(result.chunkId(), result));
+        return List.copyOf(ordered.values());
     }
 
     private boolean isExpandableDefinition(CodeSearchResult result) {
@@ -239,7 +258,9 @@ public class NavigationEvidenceExtractor implements EvidenceExtractor {
             CodeSearchResult result,
             Map<String, CodeEvidenceItem> items,
             Map<String, CodeNavigationHandle> handles,
-            List<CodeEvidenceConstraint> constraints
+            List<CodeEvidenceConstraint> constraints,
+            List<CodeEvidenceSignal> signals,
+            Set<String> signaled
     ) {
         CodeNavigationHandle handle = CodeNavigationHandle.of(
                 CodeNavigationHandle.Kind.DEFINITION,
@@ -252,6 +273,12 @@ public class NavigationEvidenceExtractor implements EvidenceExtractor {
                 EvidenceExtractionSupport.directSyntaxAuthority(result)));
         constraints.add(new CodeEvidenceConstraint(CodeEvidenceConstraint.Type.NAVIGATION_ONLY,
                 handle.handleId(), "A definition chunk is an observed graph seed, not proof of its neighbors."));
+        if (CodeEvidenceOperationProvenance.isBoundedGraphImplementation(result)
+                && signaled.add(evidenceId)) {
+            signals.add(new CodeEvidenceSignal(CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
+                    evidenceId, 1.0,
+                    "An implementation body was reached through a bounded typed graph operation."));
+        }
     }
 
     private void addHandle(

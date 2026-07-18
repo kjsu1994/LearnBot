@@ -28,6 +28,7 @@ public final class CodeEvidenceOperationExecutor {
     private final CodeSearchService searchService;
     private final CodeRepository repository;
     private final CodeReferenceService referenceService;
+    private final CodeSourceBundleExpander sourceBundleExpander;
 
     public CodeEvidenceOperationExecutor(
             CodeSearchService searchService,
@@ -37,6 +38,7 @@ public final class CodeEvidenceOperationExecutor {
         this.searchService = searchService;
         this.repository = repository;
         this.referenceService = referenceService;
+        this.sourceBundleExpander = new CodeSourceBundleExpander(repository);
     }
 
     public Execution execute(
@@ -89,11 +91,16 @@ public final class CodeEvidenceOperationExecutor {
                 case "traverse_graph" -> traverseGraph(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
                 default -> List.of();
             };
+            if (operation.isSearch()) {
+                results = mergeUnique(results, sourceBundleExpander.expand(
+                        repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, results));
+            }
             List<CodeSearchResult> safeResults = enrichEndpointMetadata(
                     repositoryId, selectedSpaceId, spaceIds,
                     results == null ? List.of() : results);
-            List<CodeSearchResult> marked = safeResults.stream()
-                    .map(result -> markOperationProvenance(result, operation))
+            List<CodeSearchResult> marked = java.util.stream.IntStream.range(0, safeResults.size())
+                    .mapToObj(index -> markOperationProvenance(
+                            safeResults.get(index), operation, index + 1))
                     .map(result -> operation.isDirectRead() ? markDirectRead(result, operation) : result)
                     .toList();
             return marked.isEmpty()
@@ -127,6 +134,20 @@ public final class CodeEvidenceOperationExecutor {
                         limit);
         if (!endpointCandidates.isEmpty()) return endpointCandidates;
         return searchVariants(repositoryId, selectedSpaceId, spaceIds, route, limit, graphIntent, true, retrievalIntent);
+    }
+
+    private List<CodeSearchResult> mergeUnique(
+            List<CodeSearchResult> primary,
+            List<CodeSearchResult> additions
+    ) {
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        for (CodeSearchResult result : primary == null ? List.<CodeSearchResult>of() : primary) {
+            if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
+        }
+        for (CodeSearchResult result : additions == null ? List.<CodeSearchResult>of() : additions) {
+            if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
+        }
+        return List.copyOf(merged.values());
     }
 
     private List<CodeSearchResult> enrichEndpointMetadata(
@@ -452,7 +473,8 @@ public final class CodeEvidenceOperationExecutor {
 
     private CodeSearchResult markOperationProvenance(
             CodeSearchResult result,
-            RagPipelineService.CodeSearchOperation operation
+            RagPipelineService.CodeSearchOperation operation,
+            int resultRank
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>(result.metadata() == null ? Map.of() : result.metadata());
         String provenanceQuery = operation.isSearch() ? operation.query() : "";
@@ -460,7 +482,8 @@ public final class CodeEvidenceOperationExecutor {
                 operation.type(), operation.operationId(), operation.claimIds(), operation.evidenceGroup(),
                 operation.originEvidenceIds(), provenanceQuery, operation.path(), operation.symbol(),
                 operation.chunkId(), operation.lineStart(), operation.lineEnd(), operation.radius(),
-                operation.relations(), operation.direction(), operation.maxHops());
+                operation.relations(), operation.direction(), operation.maxHops(),
+                operation.isSearch() ? resultRank : null);
         metadata.put(CodeEvidenceOperationProvenance.METADATA_KEY,
                 CodeEvidenceOperationProvenance.merge(
                         metadata.get(CodeEvidenceOperationProvenance.METADATA_KEY), provenance));
