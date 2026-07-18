@@ -12,6 +12,7 @@ import com.learnbot.service.coderag.model.EvidenceExtractionStage;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -204,14 +205,155 @@ class EvidenceExtractorsTest {
 
         CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
                 new CodeEvidenceExtractionContext("follow the call", EvidenceExtractionStage.POST_OPERATION,
-                        List.of(source), 2));
+                        List.of(source), 3));
 
         assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::kind)
-                .containsExactly(CodeNavigationHandle.Kind.CALL, CodeNavigationHandle.Kind.TYPE);
+                .containsExactly(CodeNavigationHandle.Kind.DEFINITION,
+                        CodeNavigationHandle.Kind.CALL, CodeNavigationHandle.Kind.TYPE);
         assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .containsExactly("call", "gateway.dispatch", "ResultView");
+        assertThat(ir.facts()).extracting(CodeEvidenceFact::predicate)
+                .containsExactly("CALLS_SYMBOL", "CONSTRUCTS_TYPE");
+        assertThat(ir.facts()).extracting(CodeEvidenceFact::subject)
+                .containsOnly("SampleType.call");
+        assertThat(ir.facts()).extracting(CodeEvidenceFact::value)
                 .containsExactly("gateway.dispatch", "ResultView");
-        assertThat(ir.constraints()).hasSize(2).allSatisfy(constraint ->
+        assertThat(ir.constraints()).hasSize(3).allSatisfy(constraint ->
                 assertThat(constraint.type()).isEqualTo(CodeEvidenceConstraint.Type.NAVIGATION_ONLY));
+    }
+
+    @Test
+    void navigationExtractorExposesCallableChunkAsGraphSeedWithoutParsingItsLanguage() {
+        CodeSearchResult source = result("src/Worker.cs", "Handle", "StartWork();", Map.of());
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("follow the lifecycle", EvidenceExtractionStage.POST_OPERATION,
+                        List.of(source), 2));
+
+        assertThat(ir.navigationHandles()).first().satisfies(handle -> {
+            assertThat(handle.kind()).isEqualTo(CodeNavigationHandle.Kind.DEFINITION);
+            assertThat(handle.symbol()).isEqualTo("Handle");
+            assertThat(handle.chunkId()).isEqualTo(source.chunkId());
+            assertThat(handle.sourceEvidenceId()).isEqualTo(CodeEvidenceItem.evidenceId(source));
+        });
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .containsExactly("Handle", "StartWork");
+        assertThat(ir.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.predicate()).isEqualTo("CALLS_SYMBOL");
+            assertThat(fact.value()).isEqualTo("StartWork");
+        });
+    }
+
+    @Test
+    void navigationExtractorFindsSameTypeCallsButIgnoresDeclarationsCommentsAndStrings() {
+        CodeSearchResult source = result("src/Flow.java", "run", """
+                void run() {
+                    // ignoredCall();
+                    String sample = "alsoIgnored()";
+                    retrieveEvidence();
+                    if (ready()) {
+                        generateAnswer();
+                    }
+                }
+                """, Map.of());
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace the flow", EvidenceExtractionStage.POST_OPERATION,
+                        List.of(source), 8));
+
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .containsExactly("run", "retrieveEvidence", "ready", "generateAnswer")
+                .doesNotContain("ignoredCall", "alsoIgnored", "if");
+    }
+
+    @Test
+    void navigationExtractorKeepsQualifiedAndSameScopeCallsInObservedSourceOrder() {
+        CodeSearchResult source = result("src/Flow.cs", "Run", """
+                void Run() {
+                    first.Receive();
+                    Transform();
+                    second.Publish();
+                    Complete();
+                }
+                """, Map.of());
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace the flow", EvidenceExtractionStage.POST_OPERATION,
+                        List.of(source), 5));
+
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .containsExactly("Run", "first.Receive", "Transform", "second.Publish", "Complete");
+    }
+
+    @Test
+    void navigationExtractorRetainsPrimaryDepthAndCompanionCoverageWithinGlobalBound() {
+        String crowdedBody = "void Coordinate() {\n"
+                + java.util.stream.IntStream.range(0, 16)
+                .mapToObj(index -> "stage" + index + "();")
+                .collect(java.util.stream.Collectors.joining("\n"))
+                + "\n}";
+        CodeSearchResult crowded = result("src/Coordinator.java", "Coordinate", crowdedBody, Map.of());
+        CodeSearchResult companion = result("src/Companion.java", "Assist", """
+                void Assist() {
+                    prepare();
+                    finalizeCycle();
+                }
+                """, Map.of());
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace the lifecycle",
+                        EvidenceExtractionStage.POST_OPERATION,
+                        List.of(crowded, companion), 6));
+
+        assertThat(ir.navigationHandles()).hasSize(20);
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .contains(
+                        "Coordinate", "Assist",
+                        "stage0", "stage15",
+                        "prepare", "finalizeCycle");
+    }
+
+    @Test
+    void navigationExtractorBoundsSourceBreadthAndReservesOperandsForRelevantCallables() {
+        List<CodeSearchResult> sources = new ArrayList<>();
+        for (int index = 0; index < 12; index++) {
+            sources.add(result(
+                    "src/Flow" + index + ".java",
+                    "coordinate" + index,
+                    "void coordinate" + index + "() { begin" + index + "(); end" + index + "(); }",
+                    Map.of()));
+        }
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace the lifecycle",
+                        EvidenceExtractionStage.POST_OPERATION,
+                        sources, 24));
+
+        assertThat(ir.navigationHandles()).hasSize(24);
+        assertThat(ir.navigationHandles().stream()
+                .filter(handle -> handle.kind() == CodeNavigationHandle.Kind.DEFINITION))
+                .hasSize(8);
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .contains("coordinate0", "begin0", "end0", "coordinate7", "begin7", "end7")
+                .doesNotContain("coordinate8", "begin8", "end8");
+    }
+
+    @Test
+    void navigationExtractorPrefersCallableBodiesOverBroadContainersForTheSameFile() {
+        CodeSearchResult broad = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/Flow.java",
+                "class", "Flow", "Flow", "", "sample", null, null, 0,
+                1, 500, "class Flow { void unrelated() { broadOnlyCall(); } }", 1.0, Map.of());
+        CodeSearchResult method = result(
+                "src/Flow.java", "run", "void run() { focusedCall(); }", Map.of());
+
+        CodeEvidenceIr ir = new NavigationEvidenceExtractor().extract(
+                new CodeEvidenceExtractionContext("trace run", EvidenceExtractionStage.POST_OPERATION,
+                        List.of(broad, method), 8));
+
+        assertThat(ir.navigationHandles()).extracting(CodeNavigationHandle::symbol)
+                .contains("run", "focusedCall")
+                .doesNotContain("broadOnlyCall");
     }
 
     @Test

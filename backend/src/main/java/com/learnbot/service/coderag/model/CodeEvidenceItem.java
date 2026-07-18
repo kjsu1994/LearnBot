@@ -59,7 +59,10 @@ public record CodeEvidenceItem(
         }
         LinkedHashSet<Kind> mergedKinds = new LinkedHashSet<>(kinds);
         mergedKinds.addAll(other.kinds);
-        CodeEvidenceItem preferred = other.authority.rank() > authority.rank() ? other : this;
+        // Extraction is cumulative: the later snapshot may contain operation provenance that did
+        // not exist when this chunk was first discovered. On equal authority, keep that later
+        // snapshot instead of freezing the first observation for the lifetime of the request.
+        CodeEvidenceItem preferred = other.authority.rank() >= authority.rank() ? other : this;
         CodeIntelligenceAuthority mergedAuthority = other.authority.rank() > authority.rank()
                 ? other.authority : authority;
         return new CodeEvidenceItem(evidenceId, preferred.source, mergedKinds, mergedAuthority);
@@ -69,10 +72,13 @@ public record CodeEvidenceItem(
         if (source == null) return "";
         String indexVersion = metadata(source.metadata(), "indexVersion");
         String chunkId = source.chunkId() == null ? "unknown-chunk" : source.chunkId().toString();
+        int lineStart = metadataInteger(source.metadata(), "sourceLineStart", source.lineStart());
+        int lineEnd = Math.max(lineStart,
+                metadataInteger(source.metadata(), "sourceLineEnd", source.lineEnd()));
         return (indexVersion.isBlank() ? "unknown-index" : indexVersion)
                 + ":" + chunkId
-                + ":" + Math.max(0, source.lineStart())
-                + "-" + Math.max(0, source.lineEnd());
+                + ":" + lineStart
+                + "-" + lineEnd;
     }
 
     public static CodeIntelligenceAuthority authority(CodeSearchResult source) {
@@ -83,5 +89,22 @@ public record CodeEvidenceItem(
     private static String metadata(Map<String, Object> metadata, String key) {
         Object value = metadata == null ? null : metadata.get(key);
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static int metadataInteger(
+            Map<String, Object> metadata,
+            String key,
+            int fallback
+    ) {
+        Object value = metadata == null ? null : metadata.get(key);
+        if (value instanceof Number number) return Math.max(0, number.intValue());
+        if (value != null) {
+            try {
+                return Math.max(0, Integer.parseInt(String.valueOf(value).trim()));
+            } catch (NumberFormatException ignored) {
+                // Fall back to the source result range.
+            }
+        }
+        return Math.max(0, fallback);
     }
 }

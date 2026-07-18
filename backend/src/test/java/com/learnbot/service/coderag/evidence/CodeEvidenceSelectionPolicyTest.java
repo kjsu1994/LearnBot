@@ -356,6 +356,64 @@ class CodeEvidenceSelectionPolicyTest {
     }
 
     @Test
+    void typedOperationGroupCanRetainThreeWorkflowStages() {
+        CodeSearchResult semantic = result("src/Semantic.java", 1.0, Map.of());
+        CodeSearchResult entry = result("src/Entry.java", 0.4, Map.of());
+        CodeSearchResult transition = result("src/Transition.java", 0.3, Map.of());
+        CodeSearchResult terminal = result("src/Terminal.java", 0.2, Map.of());
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new java.util.LinkedHashMap<>();
+        for (CodeSearchResult stage : List.of(entry, transition, terminal)) {
+            entries.put(CodeEvidenceId.from(stage), new CodeEvidenceRetentionPlan.Entry(
+                    CodeEvidenceRetentionPlan.Level.PREFERRED,
+                    CodeIntelligenceAuthority.SYNTAX,
+                    Set.of("operation:workflow")));
+        }
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                List.of(semantic, entry, transition, terminal),
+                List.of(semantic),
+                CodeEvidenceRetentionPlan.of(entries),
+                4);
+
+        assertThat(selected).containsExactly(semantic, entry, transition, terminal);
+    }
+
+    @Test
+    void typedGraphRetentionKeepsThreeSiblingCallBodiesAndBoundsEachBranch() {
+        CodeSearchResult semanticFirst = result("src/Overview.java", 1.0, Map.of());
+        CodeSearchResult semanticSecond = result("src/Architecture.java", 0.99, Map.of());
+        CodeSearchResult firstCall = result("src/Store.java", 0.40, Map.of());
+        CodeSearchResult secondCall = result("src/Store.java", 0.30, Map.of());
+        CodeSearchResult thirdCall = result("src/Store.java", 0.20, Map.of());
+        CodeSearchResult fourthCall = result("src/Store.java", 0.10, Map.of());
+        CodeSearchResult reverseCaller = result("src/Entry.java", 0.05, Map.of());
+        List<CodeSearchResult> ranked = List.of(
+                semanticFirst, semanticSecond, firstCall, secondCall,
+                thirdCall, fourthCall, reverseCaller);
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new java.util.LinkedHashMap<>();
+        for (CodeSearchResult target : List.of(firstCall, secondCall, thirdCall, fourthCall)) {
+            entries.put(CodeEvidenceId.from(target), new CodeEvidenceRetentionPlan.Entry(
+                    CodeEvidenceRetentionPlan.Level.PREFERRED,
+                    CodeIntelligenceAuthority.COMPILER_SEMANTIC,
+                    Set.of("graph_branch:op_flow:forward:calls"),
+                    CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH));
+        }
+        entries.put(CodeEvidenceId.from(reverseCaller), new CodeEvidenceRetentionPlan.Entry(
+                CodeEvidenceRetentionPlan.Level.PREFERRED,
+                CodeIntelligenceAuthority.COMPILER_SEMANTIC,
+                Set.of("graph_branch:op_flow:reverse:calls"),
+                CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH));
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                ranked, List.of(semanticFirst, semanticSecond),
+                CodeEvidenceRetentionPlan.of(entries), 5);
+
+        assertThat(selected).containsExactly(
+                semanticFirst, firstCall, secondCall, thirdCall, reverseCaller);
+        assertThat(selected).doesNotContain(semanticSecond, fourthCall);
+    }
+
+    @Test
     void typedPlanChangesMembershipButPreservesPresentationRankAndHardLimit() {
         CodeSearchResult semantic = result("src/Semantic.java", 1.0, Map.of());
         CodeSearchResult preferred = result("src/Preferred.java", 0.5, Map.of());

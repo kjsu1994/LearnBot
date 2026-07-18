@@ -13,6 +13,7 @@ import com.learnbot.repository.CodeRepository;
 import com.learnbot.service.CodeReferenceService;
 import com.learnbot.service.CodeSearchService;
 import com.learnbot.service.CodeSourceClassifier;
+import com.learnbot.service.CodeIntelligenceAuthority;
 import com.learnbot.service.CommitInsightService;
 import com.learnbot.service.EvidenceExcerptSelector;
 import com.learnbot.service.GraphSearchIntent;
@@ -49,6 +50,9 @@ import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
 import com.learnbot.service.coderag.model.CodeQuestionMode;
 import com.learnbot.service.coderag.retrieval.CodeEvidenceOperationExecutor;
+import com.learnbot.service.coderag.retrieval.CodeGraphClosurePlanner;
+import com.learnbot.service.coderag.retrieval.CodeInitialDiscoveryPlanner;
+import com.learnbot.service.coderag.retrieval.CodeQueryRewritePolicy;
 import com.learnbot.service.coderag.retrieval.CodeRetrievalCoordinator;
 import com.learnbot.service.coderag.retrieval.CodeRetrievalPlanValidator;
 import com.learnbot.service.coderag.retrieval.RepositoryQuestionMapBuilder;
@@ -77,6 +81,7 @@ import java.util.stream.IntStream;
 
 @Service
 public class CodeRagOrchestrator {
+    private static final int MAX_PLAN_CONTRACT_REPAIR_ATTEMPTS = 2;
     private static final Logger log = LoggerFactory.getLogger(CodeRagOrchestrator.class);
     private static final int OVERVIEW_CONTEXT_LIMIT = 12;
     private static final int DEFAULT_CONTEXT_LIMIT = 8;
@@ -97,6 +102,9 @@ public class CodeRagOrchestrator {
     private final CodeEvidenceRanker evidenceRanker;
     private final RagMetricsService ragMetricsService;
     private final CodeRetrievalCoordinator retrievalCoordinator;
+    private final CodeGraphClosurePlanner graphClosurePlanner = new CodeGraphClosurePlanner();
+    private final CodeInitialDiscoveryPlanner initialDiscoveryPlanner = new CodeInitialDiscoveryPlanner();
+    private final CodeQueryRewritePolicy queryRewritePolicy = new CodeQueryRewritePolicy();
     private final RepositoryQuestionMapBuilder questionMapBuilder;
     private final CodeQuestionRouter questionRouter;
     private final CodeContextAssembler contextAssembler;
@@ -290,6 +298,8 @@ public class CodeRagOrchestrator {
         long retrievalMs = elapsedMs(retrievalStarted);
         if (combinedPlanning && retrieval.routeDecision() != null) {
             routeDecision = retrieval.routeDecision();
+            effectiveMode = questionRouter.routedMode(effectiveMode, routeDecision);
+            questionMode = questionRouter.classify(effectiveQuestion, effectiveMode, conversationContext);
             if (routeDecision.route() == RagPipelineService.CodeRagRoute.COMMIT_DIFF && commitInsightService != null) {
                 CodeAskResponse commitResponse = commitInsightService.answer(
                         repositoryId, questionRouter.routedCommitQuestion(originalQuestion, routeDecision));
@@ -352,9 +362,11 @@ public class CodeRagOrchestrator {
         String promptPrefix = questionRouter.questionPrompt(originalQuestion, effectiveQuestion, conversationContext)
                 + conversationFocus(conversationContext);
         List<CodeSearchResult> contextCandidates = answerContextResults(
-                questionMode, effectiveQuestion, results, retrieval.followUpPlan());
+                questionMode, effectiveQuestion, results, retrieval.followUpPlan(),
+                retrieval.evidenceIr());
         CodeEvidenceRetentionPlan contextRetentionPlan = answerEvidenceRetentionPlan(
-                effectiveQuestion, contextCandidates);
+                effectiveQuestion, contextCandidates, retrieval.followUpPlan(),
+                retrieval.evidenceIr());
         Set<String> requiredContextEvidenceIds = requiredEvidenceIds(contextRetentionPlan);
         CodeContextAssembler.ContextBundle contextBundle = contextAssembler.assemble(
                 new CodeContextAssembler.AssemblyRequest(
@@ -574,10 +586,23 @@ public class CodeRagOrchestrator {
         int pinnedCandidateCount = collectPinnedConversationEvidence(repositoryId, selectedSpaceId, spaceIds, question, conversationContext, merged);
         int searchLimit = pipelineService.codeSearchLimit(questionMode == CodeQuestionMode.OVERVIEW ? limit + 6 : limit + 4);
         CodeQueryPlan deterministicPlan = codeQueryPlan(question);
+        RagPipelineService.QueryPlan queryPlan = queryRewritePolicy.needsSourceVocabularyBridge(question)
+                ? pipelineService.buildQueryPlan(question, RagPipelineService.Domain.CODE, List.of())
+                : new RagPipelineService.QueryPlan(
+                        RagPipelineService.Domain.CODE, List.of(question), false, false, false,
+                        "source-vocabulary bridge not needed");
         collectEvidenceForQuery(repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, merged);
+        queryPlan.queries().stream()
+                .filter(query -> query != null && !query.isBlank() && !query.equalsIgnoreCase(question))
+                .distinct()
+                .limit(2)
+                .forEach(query -> collectGraphExpandedEvidenceForQuery(
+                        repositoryId, selectedSpaceId, spaceIds, query, questionMode, searchLimit, merged));
         int graphExpansionAdded = 0;
+        CodeEvidenceIr retrievalEvidenceIr = accumulateRetrievalEvidenceIr(
+                CodeEvidenceIr.empty(), question, questionMode, EvidenceExtractionStage.POST_SEED, merged.values());
         RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap = questionMapBuilder.build(
-                repositoryId, selectedSpaceId, spaceIds, question, merged.values());
+                repositoryId, selectedSpaceId, spaceIds, question, merged.values(), retrievalEvidenceIr);
         String plannerContext = repositoryMap.plannerContext();
         RagPipelineService.CodeEvidenceSearchPlan searchPlan = pipelineService.planCodeEvidenceSearch(
                 question,
@@ -585,60 +610,89 @@ public class CodeRagOrchestrator {
                 plannerContext,
                 4
         );
-        RagPipelineService.CodeEvidenceFollowUpPlan initialTypedPlan = new RagPipelineService.CodeEvidenceFollowUpPlan(
-                searchPlan.attempted(), false, searchPlan.reason(), List.of(), List.of(), List.of(),
-                searchPlan.checklist().stream().map(RagPipelineService.CodeEvidenceChecklistItem::claimId).toList(),
-                searchPlan.checklist(), searchPlan.operations(), List.of(), searchPlan.hypothesis(),
-                searchPlan.hypothesisVersion(), "UNRESOLVED", List.of(), "NONE");
+        RagPipelineService.CodeRagRouteDecision combinedRouteDecision = new RagPipelineService.CodeRagRouteDecision(
+                searchPlan.route(), searchPlan.mode(), searchPlan.confidence(), searchPlan.queries(),
+                searchPlan.commitRef(), searchPlan.targetFile(), searchPlan.targetSymbol(), searchPlan.reason(),
+                searchPlan.attempted(), !searchPlan.usable());
+        CodeQuestionMode plannedQuestionMode = CodeQuestionMode.from(
+                questionRouter.routedMode(questionMode.value(), combinedRouteDecision));
+        List<RagPipelineService.CodeSearchOperation> initialPlanOperations =
+                initialDiscoveryPlanner.augmentDirectReadOnlyPlan(
+                        question, searchPlan.checklist(), searchPlan.operations(), 4);
+        RagPipelineService.CodeEvidenceFollowUpPlan initialTypedPlan = graphClosurePlanner.augment(
+                plannedQuestionMode,
+                new RagPipelineService.CodeEvidenceFollowUpPlan(
+                        searchPlan.attempted(), false, searchPlan.reason(), List.of(), List.of(), List.of(),
+                        searchPlan.checklist().stream()
+                                .map(RagPipelineService.CodeEvidenceChecklistItem::claimId).toList(),
+                        searchPlan.checklist(), initialPlanOperations, List.of(), searchPlan.hypothesis(),
+                        searchPlan.hypothesisVersion(), "UNRESOLVED", List.of(), "NONE"),
+                repositoryMap,
+                Set.of());
         CodeRetrievalPlanValidator.PlanValidationResult initialPlanValidation = retrievalCoordinator.validateInitialPlan(
                 question, initialTypedPlan, repositoryMap, Set.of());
-        int plannedCandidateCount = collectSearchPlanEvidence(
-                repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit, searchPlan,
+        InitialPlanExecution initialExecution = executeInitialPlanEvidence(
+                repositoryId, selectedSpaceId, spaceIds, question, plannedQuestionMode, searchLimit, searchPlan,
                 initialPlanValidation.executableOperations(), merged);
-        log.info("Code RAG search plan attempted={} usable={} confidence={} operations={} checklistClaims={} candidatesAdded={} validation={} reason={} question={}",
-                searchPlan.attempted(), searchPlan.usable(), searchPlan.confidence(), searchPlan.queries(),
+        int plannedCandidateCount = initialExecution.candidatesAdded();
+        LinkedHashSet<String> initialExecutedOperations = new LinkedHashSet<>(
+                initialExecution.executedOperationKeys());
+        log.info("Code RAG search plan attempted={} usable={} confidence={} route={} mode={} operations={} typedOperations={} checklistClaims={} candidatesAdded={} validation={} validationErrors={} reason={} question={}",
+                searchPlan.attempted(), searchPlan.usable(), searchPlan.confidence(),
+                searchPlan.route(), plannedQuestionMode.value(), searchPlan.queries(),
+                initialTypedPlan.operations().stream().map(this::operationTrace).toList(),
                 searchPlan.checklist().stream().map(RagPipelineService.CodeEvidenceChecklistItem::claimId).toList(),
-                plannedCandidateCount, initialPlanValidation.code(), safe(searchPlan.reason(), ""), abbreviate(question, 180));
+                plannedCandidateCount, initialPlanValidation.code(), initialPlanValidation.errors(),
+                safe(searchPlan.reason(), ""), abbreviate(question, 180));
+        retrievalEvidenceIr = accumulateRetrievalEvidenceIr(
+                retrievalEvidenceIr, question, plannedQuestionMode,
+                EvidenceExtractionStage.POST_OPERATION, merged.values());
         repositoryMap = questionMapBuilder.update(
-                repositoryMap, selectedSpaceId, spaceIds, merged.values(), List.of()).map();
-        List<CodeSearchResult> results = rankedCodeEvidence(question, questionMode, merged, limit, null);
+                repositoryMap, selectedSpaceId, spaceIds, question,
+                merged.values(), initialExecution.observations(), retrievalEvidenceIr).map();
+        List<CodeSearchResult> results = rankedCodeEvidence(
+                question, plannedQuestionMode, merged, limit, null);
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
                 question,
                 results,
-                minCodeEvidence(questionMode),
+                minCodeEvidence(plannedQuestionMode),
                 1
         );
-        RagPipelineService.QueryPlan queryPlan = new RagPipelineService.QueryPlan(
-                RagPipelineService.Domain.CODE,
-                conversationAnchorQueries(question, conversationContext).isEmpty()
-                        ? List.of(question)
-                        : java.util.stream.Stream.concat(java.util.stream.Stream.of(question), conversationAnchorQueries(question, conversationContext).stream()).toList(),
-                false,
-                false,
-                false,
-                "initial search"
-        );
+        List<String> conversationQueries = conversationAnchorQueries(question, conversationContext);
+        if (!conversationQueries.isEmpty()) {
+            queryPlan = new RagPipelineService.QueryPlan(
+                    queryPlan.domain(),
+                    java.util.stream.Stream.concat(queryPlan.queries().stream(), conversationQueries.stream())
+                            .filter(value -> value != null && !value.isBlank())
+                            .distinct()
+                            .toList(),
+                    queryPlan.rewriteAttempted(), queryPlan.rewriteUsed(), queryPlan.rewriteFailed(),
+                    queryPlan.reason());
+        }
         int iteration = 1;
         int followUpCandidateCount = 0;
-        RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan = enforceDirectClaimProof(
-                pipelineService.planCodeEvidenceFollowUp(
+        RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan = graphClosurePlanner.augment(
+                plannedQuestionMode, enforceDirectClaimProof(
+                pipelineService.planCodeEvidenceIteration(
                 question,
-                questionMode.value(),
+                plannedQuestionMode.value(),
                 results,
                 2,
                 approvedInitialChecklist(
                         question, searchPlan, initialPlanValidation.executableOperations()),
+                initialExecution.observations(),
+                iteration,
                 hypothesisMapContext(
                         repositoryMap,
                         approvedInitialHypothesis(
                                 question, searchPlan, initialPlanValidation.executableOperations()),
                         searchPlan.hypothesisVersion())
-                ), repositoryMap);
+                ), repositoryMap), repositoryMap, initialExecutedOperations);
         results = applyValidatedCoverageSelections(followUpPlan, results, merged);
         int followUpQueriesUsed = 0;
         boolean followUpStoppedEarly = false;
-        List<String> operationObservations = new ArrayList<>();
-        LinkedHashSet<String> executedOperations = new LinkedHashSet<>();
+        List<String> operationObservations = new ArrayList<>(initialExecution.observations());
+        LinkedHashSet<String> executedOperations = new LinkedHashSet<>(initialExecutedOperations);
         LinkedHashSet<String> iterationQueries = new LinkedHashSet<>();
         int maxAdditionalIterations = Math.max(0, pipelineService.codeRetrievalMaxIterations() - 1);
         int completedAdditionalIterations = 0;
@@ -665,18 +719,20 @@ public class CodeRagOrchestrator {
                 if (!planValidation.executableOperations().isEmpty()) {
                     operationObservations.add("phase=VALIDATE_PLAN status=PARTIAL_EXECUTION validOperations="
                             + planValidation.executableOperations().size());
-                } else if (contractRepairAttempts++ < 1 && System.nanoTime() < retrievalDeadlineNanos) {
+                } else if (contractRepairAttempts++ < MAX_PLAN_CONTRACT_REPAIR_ATTEMPTS
+                        && System.nanoTime() < retrievalDeadlineNanos) {
                     operationObservations.add("phase=REPAIR_PLAN status=REQUESTED validation=" + planValidation.code());
-                    followUpPlan = enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
+                    followUpPlan = graphClosurePlanner.augment(plannedQuestionMode,
+                            enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
                             question,
-                            questionMode.value(),
+                            plannedQuestionMode.value(),
                             results,
                             2,
                             followUpPlan.checklist(),
                             operationObservations,
                             iteration,
                             hypothesisMapContext(repositoryMap, followUpPlan.hypothesis(), followUpPlan.hypothesisVersion())
-                    ), repositoryMap);
+                    ), repositoryMap), repositoryMap, executedOperations);
                     results = applyValidatedCoverageSelections(followUpPlan, results, merged);
                     continue;
                 } else {
@@ -696,7 +752,7 @@ public class CodeRagOrchestrator {
                         selectedSpaceId,
                         spaceIds,
                         operation,
-                        graphSearchIntent(questionMode),
+                        graphSearchIntent(plannedQuestionMode),
                         searchLimit,
                         retrievalOperationIntent(question, operation, followUpPlan.checklist())
                 );
@@ -724,27 +780,33 @@ public class CodeRagOrchestrator {
             }
             completedAdditionalIterations++;
             iteration++;
+            retrievalEvidenceIr = accumulateRetrievalEvidenceIr(
+                    retrievalEvidenceIr, question, plannedQuestionMode,
+                    EvidenceExtractionStage.POST_OPERATION, merged.values());
             RepositoryQuestionMapBuilder.MapUpdateResult mapUpdate = questionMapBuilder.update(
-                    repositoryMap, selectedSpaceId, spaceIds, merged.values(), operationObservations);
+                    repositoryMap, selectedSpaceId, spaceIds, question, merged.values(), operationObservations,
+                    retrievalEvidenceIr);
             repositoryMap = mapUpdate.map();
             if (mapUpdate.identityChanged()) {
                 operationObservations.add("status=INDEX_CHANGED");
                 indexChanged = true;
                 break;
             }
-            results = rankedCodeEvidence(question, questionMode, merged, limit, followUpPlan);
-            assessment = pipelineService.assessCode(question, results, minCodeEvidence(questionMode), iteration);
+            results = rankedCodeEvidence(question, plannedQuestionMode, merged, limit, followUpPlan);
+            assessment = pipelineService.assessCode(
+                    question, results, minCodeEvidence(plannedQuestionMode), iteration);
             RagPipelineService.CodeEvidenceFollowUpPlan previousPlan = followUpPlan;
-            followUpPlan = preservePlanOnPlanningFailure(previousPlan, enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
+            followUpPlan = preservePlanOnPlanningFailure(previousPlan, graphClosurePlanner.augment(
+                    plannedQuestionMode, enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
                     question,
-                    questionMode.value(),
+                    plannedQuestionMode.value(),
                     results,
                     2,
                     followUpPlan.checklist(),
                     operationObservations,
                     iteration,
                     hypothesisMapContext(repositoryMap, followUpPlan.hypothesis(), followUpPlan.hypothesisVersion())
-            ), repositoryMap));
+            ), repositoryMap), repositoryMap, executedOperations));
             results = applyValidatedCoverageSelections(followUpPlan, results, merged);
             queryPlan = new RagPipelineService.QueryPlan(
                     RagPipelineService.Domain.CODE,
@@ -817,14 +879,10 @@ public class CodeRagOrchestrator {
                     operationObservations,
                     selectedPathSummary(results));
         }
-        RagPipelineService.CodeRagRouteDecision combinedRouteDecision = new RagPipelineService.CodeRagRouteDecision(
-                searchPlan.route(), searchPlan.mode(), searchPlan.confidence(), searchPlan.queries(),
-                searchPlan.commitRef(), searchPlan.targetFile(), searchPlan.targetSymbol(), searchPlan.reason(),
-                searchPlan.attempted(), !searchPlan.usable());
         return new CodeRetrieval(results, assessment, queryPlan, deterministicPlan, followUpPlan,
                 followUpQueriesUsed, followUpCandidateCount, iteration, merged.size(), pinnedCandidateCount,
                 pinnedUsedCount, traceId, repositoryMap.indexVersion(), repositoryMap.revision(), terminalStatus,
-                combinedRouteDecision);
+                retrievalEvidenceIr, combinedRouteDecision);
     }
 
     String retrievalOperationIntent(
@@ -874,10 +932,11 @@ public class CodeRagOrchestrator {
             RagPipelineService.CodeEvidenceSearchPlan plan,
             List<RagPipelineService.CodeSearchOperation> approvedOperations
     ) {
-        if (plan == null || approvedOperations == null || approvedOperations.isEmpty()) return List.of();
+        if (plan == null) return List.of();
         Map<String, LinkedHashSet<String>> approvedQueries = new LinkedHashMap<>();
         Map<String, String> approvedGroups = new LinkedHashMap<>();
-        for (RagPipelineService.CodeSearchOperation operation : approvedOperations) {
+        for (RagPipelineService.CodeSearchOperation operation
+                : approvedOperations == null ? List.<RagPipelineService.CodeSearchOperation>of() : approvedOperations) {
             for (String claimId : operation.claimIds()) {
                 if (claimId == null || claimId.isBlank()) continue;
                 LinkedHashSet<String> queries = approvedQueries.computeIfAbsent(
@@ -890,19 +949,26 @@ public class CodeRagOrchestrator {
         }
         Set<String> emittedClaims = new LinkedHashSet<>();
         return plan.checklist().stream()
-                .filter(item -> approvedQueries.containsKey(item.claimId()))
                 .filter(item -> emittedClaims.add(item.claimId()))
-                .map(item -> new RagPipelineService.CodeEvidenceChecklistItem(
-                        item.claimId(),
-                        approvedGroups.getOrDefault(item.claimId(), item.claimId()),
-                        String.join(" ", approvedQueries.get(item.claimId())),
-                        List.copyOf(approvedQueries.get(item.claimId())),
-                        "",
-                        "",
-                        "",
-                        "",
-                        List.of(),
-                        item.requiredEvidenceKinds()))
+                .map(item -> {
+                    LinkedHashSet<String> queries = approvedQueries.get(item.claimId());
+                    boolean approved = queries != null && !queries.isEmpty();
+                    List<String> safeQueries = approved
+                            ? List.copyOf(queries)
+                            : question == null || question.isBlank() ? List.of() : List.of(question.trim());
+                    String safeGoal = approved ? String.join(" ", queries) : safe(question, "");
+                    return new RagPipelineService.CodeEvidenceChecklistItem(
+                            item.claimId(),
+                            approved ? approvedGroups.getOrDefault(item.claimId(), item.claimId()) : item.claimId(),
+                            safeGoal,
+                            safeQueries,
+                            "",
+                            "",
+                            "",
+                            "",
+                            List.of(),
+                            item.requiredEvidenceKinds());
+                })
                 .toList();
     }
 
@@ -930,7 +996,7 @@ public class CodeRagOrchestrator {
 
     private CodeRagLlmCallBudget.Scope openCodeRagLlmBudget() {
         int maxCalls = pipelineService.supportsCombinedCodePlanning()
-                ? pipelineService.codeRetrievalMaxIterations() + 3
+                ? pipelineService.codeRetrievalMaxIterations() + 4
                 : Integer.MAX_VALUE;
         return CodeRagLlmCallBudget.open(maxCalls, 1);
     }
@@ -1153,11 +1219,29 @@ public class CodeRagOrchestrator {
             List<RagPipelineService.CodeSearchOperation> executableOperations,
             Map<UUID, CodeSearchResult> merged
     ) {
+        return executeInitialPlanEvidence(
+                repositoryId, selectedSpaceId, spaceIds, question, questionMode, searchLimit,
+                searchPlan, executableOperations, merged).candidatesAdded();
+    }
+
+    InitialPlanExecution executeInitialPlanEvidence(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String question,
+            CodeQuestionMode questionMode,
+            int searchLimit,
+            RagPipelineService.CodeEvidenceSearchPlan searchPlan,
+            List<RagPipelineService.CodeSearchOperation> executableOperations,
+            Map<UUID, CodeSearchResult> merged
+    ) {
         if (searchPlan == null || !searchPlan.usable()
                 || executableOperations == null || executableOperations.isEmpty()) {
-            return 0;
+            return InitialPlanExecution.empty();
         }
         int before = merged.size();
+        LinkedHashSet<String> executedOperationKeys = new LinkedHashSet<>();
+        List<String> observations = new ArrayList<>();
         int perQueryLimit = Math.max(6, Math.min(searchLimit, 18));
         List<RagPipelineService.CodeEvidenceChecklistItem> approvedChecklist =
                 approvedInitialChecklist(question, searchPlan, executableOperations);
@@ -1166,7 +1250,11 @@ public class CodeRagOrchestrator {
         for (RagPipelineService.CodeSearchOperation operation : executableOperations) {
             RagPipelineService.CodeEvidenceChecklistItem claim = operation.claimIds().stream()
                     .map(claims::get).filter(Objects::nonNull).findFirst().orElse(null);
-            if (claim == null) continue;
+            if (claim == null) {
+                observations.add("phase=INITIAL_PLAN " + operationTrace(operation)
+                        + " status=SKIPPED_UNKNOWN_CLAIM");
+                continue;
+            }
             CodeEvidenceOperationExecutor.Execution execution = retrievalCoordinator.executeOperation(
                     repositoryId,
                     selectedSpaceId,
@@ -1176,12 +1264,39 @@ public class CodeRagOrchestrator {
                     perQueryLimit,
                     initialSearchOperationIntent(question, operation)
             );
-            for (CodeSearchResult result : execution.results().stream().limit(4).toList()) {
+            executedOperationKeys.add(retrievalOperationKey(operation));
+            observations.add("phase=INITIAL_PLAN " + operationTrace(operation)
+                    + operationResultHandles(operation, execution.results())
+                    + " " + execution.observation());
+            int retainedOperationResults = operation.isSearch() ? 4 : perQueryLimit;
+            for (CodeSearchResult result : execution.results().stream()
+                    .limit(retainedOperationResults).toList()) {
+                CodeSearchResult operationMarked = operation.isSearch()
+                        ? result : markLlmIterationEvidence(result, operation);
                 merge(merged, markLlmSearchPlanGroupEvidence(
-                        result, claim, operation.isSearch() ? operation.query() : question));
+                        operationMarked, claim, operation.isSearch() ? operation.query() : question));
             }
         }
-        return Math.max(0, merged.size() - before);
+        return new InitialPlanExecution(
+                Math.max(0, merged.size() - before),
+                List.copyOf(executedOperationKeys),
+                List.copyOf(observations));
+    }
+
+    record InitialPlanExecution(
+            int candidatesAdded,
+            List<String> executedOperationKeys,
+            List<String> observations
+    ) {
+        InitialPlanExecution {
+            candidatesAdded = Math.max(0, candidatesAdded);
+            executedOperationKeys = executedOperationKeys == null ? List.of() : List.copyOf(executedOperationKeys);
+            observations = observations == null ? List.of() : List.copyOf(observations);
+        }
+
+        static InitialPlanExecution empty() {
+            return new InitialPlanExecution(0, List.of(), List.of());
+        }
     }
 
     String initialSearchOperationIntent(
@@ -1518,6 +1633,23 @@ public class CodeRagOrchestrator {
         }
     }
 
+    void collectGraphExpandedEvidenceForQuery(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            String query,
+            CodeQuestionMode questionMode,
+            int limit,
+            Map<UUID, CodeSearchResult> merged
+    ) {
+        List<CodeSearchResult> results = searchService.search(
+                repositoryId, query, Math.max(1, Math.min(30, limit)), spaceIds, selectedSpaceId,
+                graphSearchIntent(questionMode));
+        for (CodeSearchResult result : results == null ? List.<CodeSearchResult>of() : results) {
+            merge(merged, result);
+        }
+    }
+
     private void collectCheapEvidenceForQuery(
             UUID repositoryId,
             UUID selectedSpaceId,
@@ -1544,7 +1676,8 @@ public class CodeRagOrchestrator {
         return "operationId=" + operation.operationId()
                 + " claimIds=" + operation.claimIds()
                 + " originEvidenceIds=" + operation.originEvidenceIds()
-                + " type=" + operation.type();
+                + " type=" + operation.type()
+                + " target={" + retrievalOperationEvidenceIntent(operation) + "}";
     }
 
     public static String operationResultHandles(
@@ -1690,7 +1823,8 @@ public class CodeRagOrchestrator {
             CodeQuestionMode questionMode,
             String question,
             List<CodeSearchResult> results,
-            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
+            CodeEvidenceIr retrievalIr
     ) {
         int configuredLimit = pipelineService.codeContextLimit(
                 questionMode == CodeQuestionMode.OVERVIEW ? OVERVIEW_CONTEXT_LIMIT : DEFAULT_CONTEXT_LIMIT);
@@ -1731,7 +1865,7 @@ public class CodeRagOrchestrator {
                     selectedPathSummary(ranked.stream().filter(this::isLlmEvidenceAdjudicationSelected).toList()),
                     selectedPathSummary(selected),
                     abbreviate(question, 180));
-            return finalizeAnswerEvidence(question, ranked, selected, limit);
+            return finalizeAnswerEvidence(question, ranked, selected, limit, followUpPlan, retrievalIr);
         }
         if (adjudication.attempted()) {
             ranked = adjudication.results();
@@ -1740,17 +1874,20 @@ public class CodeRagOrchestrator {
         selected = sourceAwareEvidenceSelection(questionMode, ranked, selected, limit);
         selected = ensureLlmChecklistGroupCoverage(followUpPlan, ranked, selected, limit);
         selected = preferStructuredEvidence(questionMode, ranked, selected, limit);
-        return finalizeAnswerEvidence(question, ranked, selected, limit);
+        return finalizeAnswerEvidence(question, ranked, selected, limit, followUpPlan, retrievalIr);
     }
 
     private List<CodeSearchResult> finalizeAnswerEvidence(
             String question,
             List<CodeSearchResult> ranked,
             List<CodeSearchResult> selected,
-            int limit
+            int limit,
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
+            CodeEvidenceIr retrievalIr
     ) {
         List<CodeSearchResult> preserved = preservePinnedEvidence(ranked, selected, limit);
-        CodeEvidenceRetentionPlan retentionPlan = answerEvidenceRetentionPlan(question, ranked);
+        CodeEvidenceRetentionPlan retentionPlan = answerEvidenceRetentionPlan(
+                question, ranked, followUpPlan, retrievalIr);
         return CodeEvidenceSelectionPolicy.selectFinalEvidence(
                 ranked, preserved, retentionPlan, limit);
     }
@@ -2719,9 +2856,51 @@ public class CodeRagOrchestrator {
 
     private CodeEvidenceRetentionPlan answerEvidenceRetentionPlan(
             String question,
+            List<CodeSearchResult> evidence,
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
+            CodeEvidenceIr retrievalIr
+    ) {
+        return CodeEvidenceRetentionPlan.from(retrievalIr)
+                .merge(evidenceRetentionPlan(question, evidence))
+                .merge(validatedClaimRetentionPlan(followUpPlan, evidence))
+                .merge(externalRequiredRetentionPlan(evidence));
+    }
+
+    private CodeEvidenceRetentionPlan validatedClaimRetentionPlan(
+            RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan,
             List<CodeSearchResult> evidence
     ) {
-        return evidenceRetentionPlan(question, evidence).merge(externalRequiredRetentionPlan(evidence));
+        if (followUpPlan == null || evidence == null || evidence.isEmpty()) {
+            return CodeEvidenceRetentionPlan.empty();
+        }
+        Map<String, CodeSearchResult> byEvidenceId = evidence.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                        CodeEvidenceId::from,
+                        result -> result,
+                        (left, right) -> evidenceRanker.score(right) > evidenceRanker.score(left)
+                                ? right : left,
+                        LinkedHashMap::new));
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new LinkedHashMap<>();
+        for (RagPipelineService.CodeClaimResult claim : followUpPlan.claimResults()) {
+            if (claim == null || !claim.terminalWithEvidence()) continue;
+            String group = "claim:" + normalizeEvidenceGroupValue(claim.claimId());
+            for (String evidenceId : claim.evidenceIds()) {
+                CodeSearchResult source = byEvidenceId.get(evidenceId);
+                if (source == null) continue;
+                CodeEvidenceRetentionPlan.Entry current = entries.get(evidenceId);
+                LinkedHashSet<String> groups = new LinkedHashSet<>(
+                        current == null ? Set.of() : current.groups());
+                if (!group.endsWith(":")) groups.add(group);
+                CodeIntelligenceAuthority authority = CodeEvidenceItem.authority(source);
+                if (current != null && current.authority().rank() > authority.rank()) {
+                    authority = current.authority();
+                }
+                entries.put(evidenceId, new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.REQUIRED, authority, groups));
+            }
+        }
+        return CodeEvidenceRetentionPlan.of(entries);
     }
 
     private CodeEvidenceRetentionPlan externalRequiredRetentionPlan(List<CodeSearchResult> evidence) {
@@ -2754,11 +2933,20 @@ public class CodeRagOrchestrator {
             String question,
             List<CodeSearchResult> evidence
     ) {
+        return adjudicateBoundedEvidence(question, evidence, CodeEvidenceIr.empty());
+    }
+
+    private CodeEvidenceAdjudicator.Adjudication adjudicateBoundedEvidence(
+            String question,
+            List<CodeSearchResult> evidence,
+            CodeEvidenceIr retainedIr
+    ) {
         List<CodeSearchResult> bounded = evidence == null ? List.of() : evidence.stream()
                 .filter(Objects::nonNull)
                 .limit(PRESELECTION_IR_EVIDENCE_LIMIT)
                 .toList();
         CodeEvidenceAccumulator.Accumulation operationEvidence = evidenceAccumulator.accumulate(
+                retainedIr == null ? CodeEvidenceIr.empty() : retainedIr,
                 new CodeEvidenceExtractionContext(
                         question, EvidenceExtractionStage.POST_OPERATION, bounded,
                         PRESELECTION_IR_EVIDENCE_LIMIT));
@@ -2770,11 +2958,41 @@ public class CodeRagOrchestrator {
         return evidenceAdjudicator.adjudicate(answerEvidence.accumulated());
     }
 
+    private CodeEvidenceIr accumulateRetrievalEvidenceIr(
+            CodeEvidenceIr current,
+            String question,
+            CodeQuestionMode questionMode,
+            EvidenceExtractionStage stage,
+            Collection<CodeSearchResult> evidence
+    ) {
+        List<CodeSearchResult> ranked = evidenceRanker.rank(
+                question,
+                questionMode == null ? CodeQuestionMode.OVERVIEW : questionMode,
+                evidence == null ? List.of() : evidence.stream().filter(Objects::nonNull).toList())
+                .stream()
+                .limit(PRESELECTION_IR_EVIDENCE_LIMIT)
+                .toList();
+        return evidenceAccumulator.accumulate(
+                current == null ? CodeEvidenceIr.empty() : current,
+                new CodeEvidenceExtractionContext(
+                        question, stage, ranked, PRESELECTION_IR_EVIDENCE_LIMIT))
+                .accumulated();
+    }
+
     private CodeEvidenceAdjudicator.Adjudication adjudicateAnswerEvidence(
             String question,
-            List<CodeSearchResult> renderedEvidence
+            List<CodeSearchResult> renderedEvidence,
+            CodeEvidenceIr retrievalIr
     ) {
-        return adjudicateBoundedEvidence(question, renderedEvidence);
+        Set<String> selectedEvidenceIds = (renderedEvidence == null
+                ? List.<CodeSearchResult>of() : renderedEvidence).stream()
+                .filter(Objects::nonNull)
+                .map(CodeEvidenceId::from)
+                .filter(value -> value != null && !value.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+        CodeEvidenceIr retained = (retrievalIr == null ? CodeEvidenceIr.empty() : retrievalIr)
+                .retainNavigationEvidence(selectedEvidenceIds);
+        return adjudicateBoundedEvidence(question, renderedEvidence, retained);
     }
 
     private AnswerPromptSupport answerPromptSupport(
@@ -2784,7 +3002,7 @@ public class CodeRagOrchestrator {
     ) {
         List<CodeSearchResult> safeEvidence = renderedEvidence == null ? List.of() : renderedEvidence;
         CodeEvidenceAdjudicator.Adjudication typedAdjudication = adjudicateAnswerEvidence(
-                question, safeEvidence);
+                question, safeEvidence, retrieval == null ? CodeEvidenceIr.empty() : retrieval.evidenceIr());
         CodeEvidenceCoverageGate.Outcome responseCoverage = coverageGate.evaluate(
                 retrieval == null ? null : retrieval.followUpPlan(),
                 safeEvidence,
@@ -3374,8 +3592,12 @@ public class CodeRagOrchestrator {
             String indexVersion,
             long mapRevision,
             String terminalStatus,
+            CodeEvidenceIr evidenceIr,
             RagPipelineService.CodeRagRouteDecision routeDecision
     ) {
+        private CodeRetrieval {
+            evidenceIr = evidenceIr == null ? CodeEvidenceIr.empty() : evidenceIr;
+        }
     }
 
     private record AnswerPromptSupport(

@@ -1,6 +1,7 @@
 package com.learnbot.service.coderag.orchestration;
 
 import com.learnbot.config.LearnBotProperties;
+import com.learnbot.dto.RagConversationContext;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.service.CodeReferenceService;
@@ -29,6 +30,119 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CodeRagOrchestratorInitialOperationTest {
+    @Test
+    void combinedPlannerModeGovernsAllPostPlanRetrievalPolicies() throws Exception {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        String question = "Trace the execution across components";
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        RagPipelineService pipelineService = mock(RagPipelineService.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagOrchestrator orchestrator = new CodeRagOrchestrator(
+                searchService,
+                codeRepository,
+                mock(CodeReferenceService.class),
+                null,
+                mock(OllamaClient.class),
+                properties,
+                pipelineService,
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        CodeSearchResult seed = genericStructuralResult(
+                repositoryId, 10, 40, Map.of("callableBodyPresent", true));
+        when(searchService.searchWithoutGraph(
+                eq(repositoryId), eq(question), anyInt(), eq(List.of(spaceId)), eq(spaceId),
+                eq(GraphSearchIntent.OVERVIEW)))
+                .thenReturn(List.of(seed));
+        when(pipelineService.codeSearchLimit(anyInt())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(pipelineService.codeRetrievalDeadlineSeconds()).thenReturn(5);
+        when(pipelineService.codeRetrievalMaxIterations()).thenReturn(1);
+        when(pipelineService.planCodeEvidenceSearch(eq(question), eq("overview"), anyString(), anyInt()))
+                .thenReturn(new RagPipelineService.CodeEvidenceSearchPlan(
+                        true, true, 0.9, List.of(), List.of(), "flow selected from repository plan",
+                        "", 1, List.of(), RagPipelineService.CodeRagRoute.CODE_SEARCH,
+                        "flow", "", "", ""));
+        when(pipelineService.assessCode(eq(question), anyList(), anyInt(), anyInt()))
+                .thenReturn(new RagPipelineService.EvidenceAssessment(
+                        true, 1, 0.9, 1, 1.0, List.of("sufficient")));
+        when(pipelineService.planCodeEvidenceIteration(
+                eq(question), eq("flow"), anyList(), anyInt(), anyList(), anyList(), anyInt(), anyString()))
+                .thenReturn(new RagPipelineService.CodeEvidenceFollowUpPlan(
+                        true, true, "complete", List.of(), List.of(), List.of(), List.of(),
+                        List.of(), List.of()));
+
+        var retrieve = CodeRagOrchestrator.class.getDeclaredMethod(
+                "retrieveCodeEvidence", UUID.class, UUID.class, List.class, String.class,
+                CodeQuestionMode.class, int.class, RagConversationContext.class);
+        retrieve.setAccessible(true);
+        retrieve.invoke(
+                orchestrator, repositoryId, spaceId, List.of(spaceId), question,
+                CodeQuestionMode.OVERVIEW, 8, null);
+
+        verify(pipelineService).planCodeEvidenceIteration(
+                eq(question), eq("flow"), anyList(), anyInt(), anyList(), anyList(), eq(1), anyString());
+    }
+
+    @Test
+    void approvedInitialGraphReadRetainsEveryExecutorBoundedResult() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagOrchestrator orchestrator = new CodeRagOrchestrator(
+                searchService,
+                codeRepository,
+                mock(CodeReferenceService.class),
+                null,
+                mock(OllamaClient.class),
+                properties,
+                mock(RagPipelineService.class),
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        CodeSearchResult seed = genericStructuralResult(
+                repositoryId, 10, 40, Map.of("callableBodyPresent", true));
+        List<CodeSearchResult> graphResults = java.util.stream.IntStream.range(0, 6)
+                .mapToObj(index -> genericStructuralResult(
+                        repositoryId, 50 + index * 10, 55 + index * 10,
+                        Map.of("callableBodyPresent", true)))
+                .toList();
+        when(codeRepository.findActiveChunksByIds(
+                eq(repositoryId), anyList(), eq(List.of(spaceId)), eq(spaceId)))
+                .thenAnswer(invocation -> {
+                    List<UUID> ids = invocation.getArgument(1);
+                    return ids.equals(List.of(seed.chunkId())) ? List.of(seed) : graphResults;
+                });
+        when(codeRepository.graphRelatedChunks(
+                eq(repositoryId), eq(List.of(seed.chunkId())), eq(List.of("CALLS")), eq(2),
+                eq("BOTH"), anyInt()))
+                .thenReturn(graphResults);
+        RagPipelineService.CodeEvidenceChecklistItem claim =
+                new RagPipelineService.CodeEvidenceChecklistItem(
+                        "claim-1", "flow", "trace execution", List.of("trace execution"));
+        RagPipelineService.CodeSearchOperation traversal =
+                new RagPipelineService.CodeSearchOperation(
+                        "traverse_graph", "", "execution", "flow", "", "",
+                        seed.chunkId().toString(), null, null, null, List.of("CALLS"), "BOTH", 2,
+                        "initial-graph", List.of("claim-1"), List.of("observed-origin"));
+        RagPipelineService.CodeEvidenceSearchPlan plan =
+                new RagPipelineService.CodeEvidenceSearchPlan(
+                        true, true, 0.9, List.of(), List.of(claim), "bounded graph read",
+                        "", 1, List.of(traversal));
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+
+        CodeRagOrchestrator.InitialPlanExecution execution = orchestrator.executeInitialPlanEvidence(
+                repositoryId, spaceId, List.of(spaceId), "Trace execution",
+                CodeQuestionMode.CALL_FLOW, 12, plan, List.of(traversal), merged);
+
+        assertThat(execution.candidatesAdded()).isEqualTo(6);
+        assertThat(merged.keySet()).containsExactlyInAnyOrderElementsOf(
+                graphResults.stream().map(CodeSearchResult::chunkId).toList());
+    }
+
     @Test
     void seedQueryExecutesOnceWithoutEndpointSpecificExpansion() {
         UUID repositoryId = UUID.randomUUID();
@@ -72,6 +186,35 @@ class CodeRagOrchestratorInitialOperationTest {
                 eq(repositoryId), anyString(), anyInt(), anyList(), eq(spaceId));
         verify(codeRepository, never()).findEndpointChunks(
                 eq(repositoryId), anyString(), anyInt(), anyList(), eq(spaceId));
+    }
+
+    @Test
+    void sourceVocabularyBridgeUsesBoundedActiveGraphExpansion() {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        String query = "symbol reference definitions and usages";
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagOrchestrator orchestrator = new CodeRagOrchestrator(
+                searchService, mock(CodeRepository.class), mock(CodeReferenceService.class), null,
+                mock(OllamaClient.class), properties, mock(RagPipelineService.class),
+                new CodeEvidenceRanker(properties), null);
+        CodeSearchResult graphTarget = genericStructuralResult(
+                repositoryId, 40, 70, Map.of("graphExpanded", true, "graphEdgeType", "CALLS"));
+        when(searchService.search(
+                eq(repositoryId), eq(query), anyInt(), eq(List.of(spaceId)), eq(spaceId),
+                eq(GraphSearchIntent.FLOW))).thenReturn(List.of(graphTarget));
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+
+        orchestrator.collectGraphExpandedEvidenceForQuery(
+                repositoryId, spaceId, List.of(spaceId), query, CodeQuestionMode.CALL_FLOW, 8, merged);
+
+        assertThat(merged.values()).containsExactly(graphTarget);
+        verify(searchService).search(
+                eq(repositoryId), eq(query), anyInt(), eq(List.of(spaceId)), eq(spaceId),
+                eq(GraphSearchIntent.FLOW));
+        verify(searchService, never()).searchWithoutGraph(
+                eq(repositoryId), eq(query), anyInt(), anyList(), eq(spaceId), eq(GraphSearchIntent.FLOW));
     }
 
     @Test
@@ -152,11 +295,16 @@ class CodeRagOrchestratorInitialOperationTest {
                 "worker may claim queued work", 1, List.of(operation, rejectedOperation));
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
 
-        int added = orchestrator.collectSearchPlanEvidence(
+        CodeRagOrchestrator.InitialPlanExecution execution = orchestrator.executeInitialPlanEvidence(
                 repositoryId, spaceId, List.of(spaceId), "How is queued work claimed?",
                 CodeQuestionMode.OVERVIEW, 8, plan, List.of(operation), merged);
 
-        assertThat(added).isEqualTo(1);
+        assertThat(execution.candidatesAdded()).isEqualTo(1);
+        assertThat(execution.executedOperationKeys())
+                .containsExactly("keyword_search|queued work claim behavior");
+        assertThat(execution.observations()).singleElement()
+                .asString()
+                .contains("phase=INITIAL_PLAN", "operationId=initial-search", "status=COMPLETED");
         assertThat(merged.values()).singleElement().satisfies(result ->
                 assertThat(CodeEvidenceOperationProvenance.from(result))
                         .containsExactly(new CodeEvidenceOperationProvenance(
@@ -176,15 +324,26 @@ class CodeRagOrchestratorInitialOperationTest {
 
         assertThat(orchestrator.approvedInitialChecklist(
                 "How is queued work claimed?", plan, List.of(operation)))
-                .singleElement()
-                .satisfies(approved -> {
-                    assertThat(approved.claimId()).isEqualTo("claim-1");
-                    assertThat(approved.queries()).containsExactly("queued work claim behavior");
-                    assertThat(approved.goal()).isEqualTo("queued work claim behavior");
-                    assertThat(approved.actor()).isBlank();
-                    assertThat(approved.action()).isBlank();
-                    assertThat(approved.object()).isBlank();
-                });
+                .satisfiesExactly(
+                        approved -> {
+                            assertThat(approved.claimId()).isEqualTo("claim-1");
+                            assertThat(approved.queries()).containsExactly("queued work claim behavior");
+                            assertThat(approved.goal()).isEqualTo("queued work claim behavior");
+                            assertThat(approved.actor()).isBlank();
+                            assertThat(approved.action()).isBlank();
+                            assertThat(approved.object()).isBlank();
+                        },
+                        fallback -> {
+                            assertThat(fallback.claimId()).isEqualTo("claim-2");
+                            assertThat(fallback.evidenceGroup()).isEqualTo("claim-2");
+                            assertThat(fallback.goal()).isEqualTo("How is queued work claimed?");
+                            assertThat(fallback.queries()).containsExactly("How is queued work claimed?");
+                            assertThat(fallback.goal()).doesNotContain(
+                                    "AdminController", "administrator settings", "unrelated_admin");
+                            assertThat(fallback.actor()).isBlank();
+                            assertThat(fallback.action()).isBlank();
+                            assertThat(fallback.object()).isBlank();
+                        });
 
         assertThat(orchestrator.approvedInitialHypothesis(
                 "How is queued work claimed?", plan, List.of(operation)))

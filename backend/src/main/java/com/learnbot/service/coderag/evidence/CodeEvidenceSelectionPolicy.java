@@ -25,8 +25,12 @@ public final class CodeEvidenceSelectionPolicy {
     );
     private static final int UNPRIORITIZED = 4;
     private static final int MAX_GROUP_REPRESENTATIVES = 2;
+    private static final int MAX_TYPED_RETENTION_GROUP_REPRESENTATIVES = 3;
+    private static final int MAX_DIRECT_GRAPH_BRANCH_REPRESENTATIVES = 3;
     private static final int MAX_GROUPLESS_REPRESENTATIVES_PER_TYPE = 1;
-    private static final int MAX_PREFERRED_REPRESENTATIVES = 3;
+    private static final int MAX_PREFERRED_REPRESENTATIVES = 4;
+    private static final int MAX_SIGNAL_PREFERRED_REPRESENTATIVES = 3;
+    private static final int MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES = 4;
     // Typed facts must not crowd out the semantic slate; three slots still allow a
     // transition split across two chunks plus one independently constrained fact.
     private static final int MAX_TYPED_FACT_SOURCE_REPRESENTATIVES = 3;
@@ -199,9 +203,10 @@ public final class CodeEvidenceSelectionPolicy {
                         .map(entry -> new RetainedCandidate(candidate, entry))
                         .orElse(null))
                 .filter(java.util.Objects::nonNull)
-                .sorted(Comparator
-                        .comparingInt((RetainedCandidate value) -> retentionRank(value.entry().level()))
-                        .thenComparing(Comparator.comparingInt(
+                 .sorted(Comparator
+                         .comparingInt((RetainedCandidate value) -> retentionRank(value.entry().level()))
+                        .thenComparingInt(value -> basisRank(value.entry().basis()))
+                         .thenComparing(Comparator.comparingInt(
                                 (RetainedCandidate value) -> value.entry().authority().rank()).reversed())
                         .thenComparingInt(value -> value.candidate().rank()))
                 .toList();
@@ -210,30 +215,60 @@ public final class CodeEvidenceSelectionPolicy {
         Map<CodeEvidenceRetentionPlan.Level, Integer> grouplessByLevel = new LinkedHashMap<>();
         List<Candidate> retained = new ArrayList<>();
         int preferred = 0;
+        int signalPreferred = 0;
+        int graphPreferred = 0;
         for (RetainedCandidate value : prioritized) {
             if (retained.size() >= limit) break;
             CodeEvidenceRetentionPlan.Entry entry = value.entry();
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED
                     && preferred >= MAX_PREFERRED_REPRESENTATIVES) continue;
-            if (entry.groups().isEmpty()) {
+            boolean boundedGraphPath = entry.basis()
+                    == CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH;
+            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && boundedGraphPath
+                    && graphPreferred >= MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES) continue;
+            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && !boundedGraphPath
+                    && signalPreferred >= MAX_SIGNAL_PREFERRED_REPRESENTATIVES) continue;
+            Set<String> quotaGroups = boundedGraphPath
+                    ? entry.groups().stream()
+                    .filter(group -> group.startsWith("graph_branch:"))
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
+                    : entry.groups();
+            if (quotaGroups.isEmpty()) {
                 int count = grouplessByLevel.getOrDefault(entry.level(), 0);
                 if (count >= MAX_GROUPLESS_REPRESENTATIVES_PER_TYPE) continue;
                 grouplessByLevel.put(entry.level(), count + 1);
             } else {
-                if (entry.groups().stream()
-                        .anyMatch(group -> perGroup.getOrDefault(group, 0) >= MAX_GROUP_REPRESENTATIVES)) {
+                int groupLimit = boundedGraphPath
+                        ? MAX_DIRECT_GRAPH_BRANCH_REPRESENTATIVES
+                        : MAX_TYPED_RETENTION_GROUP_REPRESENTATIVES;
+                if (quotaGroups.stream()
+                        .anyMatch(group -> perGroup.getOrDefault(group, 0)
+                                >= groupLimit)) {
                     continue;
                 }
-                entry.groups().forEach(group -> perGroup.merge(group, 1, Integer::sum));
+                quotaGroups.forEach(group -> perGroup.merge(group, 1, Integer::sum));
             }
             retained.add(value.candidate());
-            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED) preferred++;
+            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED) {
+                preferred++;
+                if (boundedGraphPath) graphPreferred++;
+                else signalPreferred++;
+            }
         }
         return List.copyOf(retained);
     }
 
     private static int retentionRank(CodeEvidenceRetentionPlan.Level level) {
         return level == CodeEvidenceRetentionPlan.Level.REQUIRED ? 0 : 1;
+    }
+
+    private static int basisRank(CodeEvidenceRetentionPlan.Basis basis) {
+        if (basis == null) return 2;
+        return switch (basis) {
+            case CONSTRAINT -> 0;
+            case BOUNDED_GRAPH_PATH -> 1;
+            case SIGNAL -> 2;
+        };
     }
 
     private static List<Candidate> protectedCandidates(

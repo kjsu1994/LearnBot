@@ -1,10 +1,12 @@
 package com.learnbot.service.coderag.evidence;
 
+import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.CodeIntelligenceAuthority;
 import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 
 import java.util.Collections;
@@ -32,11 +34,27 @@ public final class CodeEvidenceRetentionPlan {
         PREFERRED
     }
 
-    public record Entry(Level level, CodeIntelligenceAuthority authority, Set<String> groups) {
+    public enum Basis {
+        CONSTRAINT,
+        BOUNDED_GRAPH_PATH,
+        SIGNAL
+    }
+
+    public record Entry(
+            Level level,
+            CodeIntelligenceAuthority authority,
+            Set<String> groups,
+            Basis basis
+    ) {
+        public Entry(Level level, CodeIntelligenceAuthority authority, Set<String> groups) {
+            this(level, authority, groups, Basis.SIGNAL);
+        }
+
         public Entry {
             level = Objects.requireNonNull(level, "level");
             authority = authority == null ? CodeIntelligenceAuthority.UNKNOWN : authority;
             groups = immutableGroups(groups);
+            basis = basis == null ? Basis.SIGNAL : basis;
         }
 
         private Entry merge(Entry other) {
@@ -47,7 +65,8 @@ public final class CodeEvidenceRetentionPlan {
                     ? other.authority : authority;
             LinkedHashSet<String> mergedGroups = new LinkedHashSet<>(groups);
             mergedGroups.addAll(other.groups);
-            return new Entry(mergedLevel, mergedAuthority, mergedGroups);
+            Basis mergedBasis = basis.ordinal() <= other.basis.ordinal() ? basis : other.basis;
+            return new Entry(mergedLevel, mergedAuthority, mergedGroups, mergedBasis);
         }
     }
 
@@ -110,10 +129,57 @@ public final class CodeEvidenceRetentionPlan {
             if (signal == null || signal.strength() < MIN_PREFERRED_SIGNAL_STRENGTH) continue;
             CodeEvidenceItem item = items.get(signal.sourceEvidenceId());
             if (item == null || item.authority().rank() < CodeIntelligenceAuthority.SYNTAX.rank()) continue;
+            Basis basis = isBoundedGraphPath(item) ? Basis.BOUNDED_GRAPH_PATH : Basis.SIGNAL;
             merge(resolved, item.evidenceId(), new Entry(Level.PREFERRED, item.authority(),
-                    Set.of(group("signal", signal.type().name()))));
+                    signalGroups(item, signal), basis));
         }
         return of(resolved);
+    }
+
+    private static Set<String> signalGroups(CodeEvidenceItem item, CodeEvidenceSignal signal) {
+        LinkedHashSet<String> groups = new LinkedHashSet<>();
+        for (CodeEvidenceOperationProvenance provenance
+                : CodeEvidenceOperationProvenance.from(item.source())) {
+            if (!provenance.isDirectOperation() && !provenance.isSearchOperation()) continue;
+            if (!provenance.operationId().isBlank()) {
+                groups.add(group("operation", provenance.operationId()));
+            }
+            provenance.claimIds().forEach(claimId -> groups.add(group("claim", claimId)));
+            if (!provenance.evidenceGroup().isBlank()) {
+                groups.add(group("evidence", provenance.evidenceGroup()));
+            }
+            if ("traverse_graph".equals(provenance.operationType())) {
+                String direction = metadata(item.source(), "graphDirection");
+                String edgeType = metadata(item.source(), "graphEdgeType");
+                if (!direction.isBlank() && !edgeType.isBlank()) {
+                    groups.add(group("graph_branch", provenance.operationId()
+                            + ":" + direction + ":" + edgeType));
+                }
+            }
+        }
+        groups.removeIf(String::isBlank);
+        if (groups.isEmpty()) groups.add(group("signal", signal.type().name()));
+        return Set.copyOf(groups);
+    }
+
+    private static boolean isBoundedGraphPath(CodeEvidenceItem item) {
+        int graphDepth = item == null || item.source() == null
+                ? -1 : metadataInteger(item.source(), "graphDepth");
+        if (item == null || item.source() == null
+                || !metadataBoolean(item.source(), "graphExpanded")
+                || graphDepth < 1 || graphDepth > 2
+                || metadata(item.source(), "graphDirection").isBlank()
+                || metadata(item.source(), "graphEdgeType").isBlank()
+                || item.source().methodName() == null || item.source().methodName().isBlank()
+                || item.source().content() == null || item.source().content().isBlank()) {
+            return false;
+        }
+        String observedEdge = metadata(item.source(), "graphEdgeType").toUpperCase(Locale.ROOT);
+        return CodeEvidenceOperationProvenance.from(item.source()).stream()
+                .filter(provenance -> "traverse_graph".equals(provenance.operationType()))
+                .filter(provenance -> !provenance.originEvidenceIds().isEmpty())
+                .anyMatch(provenance -> provenance.relations().isEmpty()
+                        || provenance.relations().contains(observedEdge));
     }
 
     public static CodeEvidenceRetentionPlan resolve(CodeEvidenceIr ir) {
@@ -158,7 +224,7 @@ public final class CodeEvidenceRetentionPlan {
         CodeEvidenceItem item = items.get(fact.sourceEvidenceId());
         if (item == null || item.authority().rank() < CodeIntelligenceAuthority.SYNTAX.rank()) return;
         merge(resolved, item.evidenceId(), new Entry(Level.REQUIRED, item.authority(),
-                Set.of(group("fact", fact.factId()))));
+                Set.of(group("fact", fact.factId())), Basis.CONSTRAINT));
     }
 
     private static void requireDirectProof(
@@ -177,7 +243,7 @@ public final class CodeEvidenceRetentionPlan {
             return;
         }
         merge(resolved, item.evidenceId(), new Entry(Level.REQUIRED, item.authority(),
-                Set.of(group("proof", targetId))));
+                Set.of(group("proof", targetId)), Basis.CONSTRAINT));
     }
 
     private static void merge(Map<String, Entry> entries, String evidenceId, Entry entry) {
@@ -198,6 +264,23 @@ public final class CodeEvidenceRetentionPlan {
                 .filter(value -> !value.isBlank() && !"unknown".equals(value))
                 .forEach(safe::add);
         return Collections.unmodifiableSet(safe);
+    }
+
+    private static String metadata(CodeSearchResult source, String key) {
+        Object value = source == null || source.metadata() == null ? null : source.metadata().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static boolean metadataBoolean(CodeSearchResult source, String key) {
+        return Boolean.parseBoolean(metadata(source, key));
+    }
+
+    private static int metadataInteger(CodeSearchResult source, String key) {
+        try {
+            return Integer.parseInt(metadata(source, key));
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
     }
 
     private static String normalizeEvidenceId(String value) {

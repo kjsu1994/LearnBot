@@ -8,6 +8,7 @@ import com.learnbot.service.RagPipelineService;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.CodeEndpointOutline;
 import com.learnbot.repository.CodeRepository;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,33 @@ class CodeEvidenceOperationExecutorTest {
                 assertThat(provenance.evidenceGroup()).isEqualTo("queue_claim");
             });
         });
+    }
+
+    @Test
+    void directReadCarriesTheUniqueIndexedEndpointStructureForItsChunk() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                mock(CodeSearchService.class), repository, mock(CodeReferenceService.class));
+        CodeSearchResult result = result("src/web/OrderController.java", "submit", 20, 40);
+        when(repository.findActiveChunksByIds(
+                eq(null), eq(List.of(result.chunkId())), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(result));
+        when(repository.listActiveEndpointOutlinesByChunkIds(
+                eq(null), eq(List.of(result.chunkId())), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(new CodeEndpointOutline(
+                        result.chunkId(), "/api/orders", "POST")));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_chunk", "", "endpoint implementation", "endpoint_flow",
+                "", "", result.chunkId().toString(), null, null, null);
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8);
+
+        assertThat(execution.results()).singleElement().satisfies(evidence ->
+                assertThat(evidence.metadata())
+                        .containsEntry("endpointRoute", "/api/orders")
+                        .containsEntry("httpMethod", "POST")
+                        .containsEntry("graphRelation", "EXPOSES_ENDPOINT"));
     }
 
     @Test

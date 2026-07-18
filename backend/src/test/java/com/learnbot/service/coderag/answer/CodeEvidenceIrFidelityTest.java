@@ -6,6 +6,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeNavigationHandle;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -232,6 +233,66 @@ class CodeEvidenceIrFidelityTest {
         assertThat(CodeEvidenceIrFidelity.promptFacts("retained value", ir, List.of())).isEmpty();
         assertThat(CodeEvidenceIrFidelity.relevantEvidenceIds("retained value", ir))
                 .containsExactly(item.evidenceId());
+    }
+
+    @Test
+    void selectedDirectSourceRendersTypedCallOutlineWithoutQuestionVocabulary() {
+        CodeSearchResult source = result(
+                "src/Coordinator.java", "void coordinate() {}",
+                Map.of("llmDirectRead", true, "indexVersion", "v9"));
+        CodeEvidenceItem item = item(source, CodeIntelligenceAuthority.SYNTAX);
+        List<CodeNavigationHandle> handles = List.of(
+                CodeNavigationHandle.of(CodeNavigationHandle.Kind.CALL,
+                        source.filePath(), "gateway.load", source.chunkId(), 12, 12, item.evidenceId()),
+                CodeNavigationHandle.of(CodeNavigationHandle.Kind.CALL,
+                        source.filePath(), "transformer.advance", source.chunkId(), 18, 18, item.evidenceId()),
+                CodeNavigationHandle.of(CodeNavigationHandle.Kind.CALL,
+                        source.filePath(), "sink.complete", source.chunkId(), 27, 27, item.evidenceId()));
+        CodeEvidenceIr ir = new CodeEvidenceIr(
+                List.of(item), List.of(), List.of(), List.of(), handles, List.of());
+
+        String prompt = CodeEvidenceIrFidelity.promptFacts(
+                "Explain the lifecycle", ir, List.of(source));
+
+        assertThat(prompt)
+                .contains("Observed lexical call sites from selected direct source evidence")
+                .contains("src/Coordinator.java#observe")
+                .contains("gateway.load, transformer.advance, sink.complete")
+                .contains("[1]")
+                .contains("dynamic dispatch are not inferred");
+    }
+
+    @Test
+    void fullSourceCallOutlineSurvivesASelectedCompressedExcerptIdentity() {
+        CodeSearchResult fullSource = result(
+                "src/Coordinator.java", "void observe() { gateway.load(); sink.complete(); }",
+                Map.of("llmDirectRead", true, "indexVersion", "v10"));
+        CodeEvidenceItem item = item(fullSource, CodeIntelligenceAuthority.SYNTAX);
+        CodeNavigationHandle completion = CodeNavigationHandle.of(
+                CodeNavigationHandle.Kind.CALL,
+                fullSource.filePath(), "sink.complete", fullSource.chunkId(),
+                27, 27, item.evidenceId());
+        CodeEvidenceIr fullIr = new CodeEvidenceIr(
+                List.of(item), List.of(), List.of(), List.of(), List.of(completion), List.of());
+        CodeSearchResult compressed = new CodeSearchResult(
+                fullSource.chunkId(), fullSource.repositoryId(), fullSource.fileId(),
+                fullSource.repositoryName(), fullSource.filePath(), fullSource.chunkType(),
+                fullSource.symbolName(), fullSource.className(), fullSource.methodName(),
+                fullSource.namespaceName(), fullSource.controlName(), fullSource.eventName(),
+                fullSource.chunkIndex(), 10, 12, "void observe() { /* excerpt */ }", fullSource.score(),
+                Map.of(
+                        "llmDirectRead", true,
+                        "indexVersion", "v10",
+                        "sourceLineStart", 10,
+                        "sourceLineEnd", 30,
+                        "omittedByBudget", true));
+
+        CodeEvidenceIr retained = fullIr.retainNavigationEvidence(
+                Set.of(CodeEvidenceItem.evidenceId(compressed)));
+        String prompt = CodeEvidenceIrFidelity.promptFacts(
+                "Explain the lifecycle", retained, List.of(compressed));
+
+        assertThat(prompt).contains("sink.complete", "[1]");
     }
 
     private CodeEvidenceItem item(CodeSearchResult source, CodeIntelligenceAuthority authority) {

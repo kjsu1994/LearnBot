@@ -280,6 +280,7 @@ class CodeContextAssemblerTest {
                 .doesNotContain("internal.secret.resultValue");
         assertThat(rendered.lineStart()).isEqualTo(10);
         assertThat(rendered.lineEnd()).isLessThan(180);
+        assertThat(CodeEvidenceId.from(rendered)).isEqualTo(CodeEvidenceId.from(source));
         assertThat(rendered.metadata())
                 .containsEntry("sourceLineStart", 10)
                 .containsEntry("sourceLineEnd", 180)

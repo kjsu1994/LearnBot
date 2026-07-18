@@ -605,12 +605,14 @@ public class RagPipelineService {
         int used = selectFromStart(records, selected, headBudget);
         used += selectFromEnd(records, selected, tailBudget);
         int priorityBudget = Math.max(0, charBudget - used - 64);
-        for (int index = 0; index < records.length && priorityBudget > 0; index++) {
-            if (selected[index] || !highPriorityStructuredRecord(records[index])) continue;
-            int cost = records[index].length() + 1;
-            if (cost <= priorityBudget) {
-                selected[index] = true;
-                priorityBudget -= cost;
+        for (int priority = 5; priority >= 1 && priorityBudget > 0; priority--) {
+            for (int index = 0; index < records.length && priorityBudget > 0; index++) {
+                if (selected[index] || structuredRecordPriority(records[index]) != priority) continue;
+                int cost = records[index].length() + 1;
+                if (cost <= priorityBudget) {
+                    selected[index] = true;
+                    priorityBudget -= cost;
+                }
             }
         }
         StringBuilder output = new StringBuilder();
@@ -634,6 +636,18 @@ public class RagPipelineService {
         String[] lines = value.split("\\R", -1);
         List<String> records = new ArrayList<>();
         for (int index = 0; index < lines.length;) {
+            if ("Question:".equals(lines[index])) {
+                StringBuilder question = new StringBuilder(lines[index++]);
+                while (index < lines.length && !lines[index].isBlank()) {
+                    question.append('\n').append(lines[index++]);
+                }
+                if (index < lines.length && lines[index].isBlank()) {
+                    question.append('\n');
+                    index++;
+                }
+                records.add(question.toString());
+                continue;
+            }
             if (!lines[index].matches("\\d+\\. evidenceId=.*")) {
                 records.add(lines[index++]);
                 continue;
@@ -674,13 +688,29 @@ public class RagPipelineService {
         return used;
     }
 
-    private boolean highPriorityStructuredRecord(String value) {
+    private int structuredRecordPriority(String value) {
         String record = safe(value);
-        return record.contains("evidenceId=") || record.contains("claimId")
-                || record.contains("operationId=") || record.contains("status=")
-                || record.startsWith("Question:") || record.startsWith("Retrieval iteration:")
-                || record.startsWith("Previous operation observations:")
-                || (record.startsWith("[") && record.endsWith("]"));
+        if (record.startsWith("Question:") || record.contains("claimId")
+                || record.startsWith("Retrieval iteration:")
+                || record.startsWith("Previous operation observations:")) {
+            return 5;
+        }
+        if (record.contains(":graph-relation:")
+                || record.startsWith("[INDEXED_GRAPH_RELATION_HANDLES]")) {
+            return 4;
+        }
+        if (record.contains("handleId=")
+                || record.startsWith("[CODE_INTELLIGENCE_NAVIGATION_HANDLES]")) {
+            return 3;
+        }
+        if (record.matches("(?s)\\d+\\. evidenceId=.*")
+                || record.contains("operationId=") || record.contains("status=")) {
+            return 2;
+        }
+        if (record.contains("evidenceId=") || record.startsWith("[") && record.endsWith("]")) {
+            return 1;
+        }
+        return 0;
     }
 
     private int estimateStructuredTokens(String value) {
@@ -1046,6 +1076,8 @@ public class RagPipelineService {
                 - read_adjacent requires chunkId; radius is optional.
                 - traverse_graph requires an observed chunkId and one or more relations. Choose direction FORWARD for outgoing relations, REVERSE for incoming relations such as callers or implementations, or BOTH only when direction is genuinely unknown. maxHops is optional and must be 1 to 3.
                 - Common relation examples are CALLS, REFERENCES, EXTENDS, IMPLEMENTS, OVERRIDES, READS_FIELD, WRITES_FIELD, DEFINES, and CONTAINS. Select relations from the requested behavior; do not infer a programming language or framework on the server's behalf.
+                - CODE_INTELLIGENCE_NAVIGATION_HANDLES are navigation-only IR operands extracted from direct source. For CALL, read canonicalSymbol with path omitted and sourceEvidenceId as origin unless a separate observed callee path exists. For DEFINITION, chunkId is an observed graph seed; you must choose the relevant relation, direction, and hop count.
+                - INDEXED_GRAPH_RELATION_HANDLES are navigation-only edges adjacent to already observed chunks. They expose an allowed relation, direction, and optional readable neighbor without proving runtime behavior. Use the relation handle evidenceId as origin when directly reading its neighbor; or traverse from seedChunkId with exactly the shown relation and direction. You must choose the target and operation relevant to the unresolved claim.
                 - Use direct-read identifiers only when they appear in the current evidence. Do not invent paths, symbols, chunk IDs, or line ranges.
                 - Search locates an unknown file or symbol. Once the correct file is identified, navigate it with list_file_symbols or another direct-read operation before repeating semantic search.
                 - When the correct file or class is present but its excerpt does not contain the requested behavior, use list_file_symbols if the symbol is unknown, or read_adjacent if the target is near an observed chunk.
@@ -1056,6 +1088,9 @@ public class RagPipelineService {
                 - Set enough=false when evidence is mostly tests, frontend gates, history storage, retention, docs, generated, or vendor code but the question asks about runtime behavior.
                 - When a required evidence checklist is provided, enough=true only if each checklist item is directly covered or clearly irrelevant.
                 - Preserve every distinct action, phase, and artifact explicitly requested by the user as a separate checklist claim. Do not replace requested behaviors with generic architectural layer presence.
+                - A server-approved checklist may be intentionally skeletal, with blank actor, action, object, or expectedOutcome fields. Rebuild every skeletal item from the original question before judging coverage, and return the complete revised checklist. Never let one broad skeletal goal stand in for several requested stages.
+                - An explicit range from a starting action through or to a terminal action, including equivalent source-to-target wording in any language, requires separate entry and terminal-effect claims. Receiving, registering, or dispatching evidence cannot by itself satisfy a requested update, removal, persistence, or generation endpoint.
+                - A claim cannot be SUPPORTED when its supportedClaim, limitations, hypothesis, or reason still says that a named implementation, callee, or terminal stage must be inspected. Mark it UNRESOLVED and use an observed direct-read or relation handle for that missing evidence.
                 - Evidence groups must name observable requested behaviors or outcomes, not architecture roles. Names such as controller_layer, service_layer, repository_layer, api_layer, or business_logic are invalid substitutes when the question asks what actions occur across those layers.
                 - Treat architecture roles named by the user as locations in which each requested action must be traced. They do not become sufficient claims by themselves.
                 - A class-level or broad orchestration chunk does not prove a concrete action when the question asks how that action is performed. Request the concrete method or persistence implementation.
@@ -1109,6 +1144,9 @@ public class RagPipelineService {
                 - Each checklist item must contain exactly one observable action and one expected outcome. Split actions joined by and/or or their equivalent in the user's language into separate claims.
                 - Use each draft claimId in operation claimIds. The server replaces draft IDs with stable request-local IDs.
                 - Return typed operations in the first plan. Search operations may have empty originEvidenceIds; direct-read and graph operations must cite observed map evidence IDs.
+                - CODE_INTELLIGENCE_NAVIGATION_HANDLES are navigation-only. A CALL handle authorizes a symbol-only read of canonicalSymbol from sourceEvidenceId; a DEFINITION handle authorizes graph traversal from its chunkId, but you must select relation, direction, and hop count from the requested behavior.
+                - INDEXED_GRAPH_RELATION_HANDLES are navigation-only observed edges, not behavior proof. When an edge starts at a relevant seed and its neighbor aligns with an unresolved requested action, prefer an origin-bound read_symbol/read_chunk of that neighbor or an exact shown-relation traversal before a new broad search. Do not assert the neighbor's behavior until its source body is read.
+                - When several candidates share generic architectural roles, do not choose one merely because its type ends in Controller, Service, Repository, Handler, or another requested layer name. Use the complete requested behavior phrase to discriminate them, and start with a behavior-focused query when no observed body or relation distinguishes the component.
                 - Classify the route and mode in this same response. This replaces a separate router call; route selection and retrieval operations must agree.
                 - A class declaration, constructor, dependency field, or nearby but different workflow cannot satisfy a behavioral checklist item. Disconnected class or method nodes do not prove a cross-component flow: require a direct call visible in source or an observed CALLS or other relevant relation, and otherwise plan retrieval for that connection.
                 - Preserve the actor, object, action, direction, state transition, and side effect requested by the user. Do not substitute a nearby workflow that differs on those fields.
@@ -1391,8 +1429,13 @@ public class RagPipelineService {
                                 existing.evidenceGroup(),
                                 existing.goal(),
                                 item.queries().isEmpty() ? existing.queries() : item.queries(),
-                                existing.actor(), existing.action(), existing.object(), existing.expectedOutcome(),
-                                existing.scopeHints(), existing.requiredEvidenceKinds()
+                                firstNonBlank(existing.actor(), item.actor()),
+                                firstNonBlank(existing.action(), item.action()),
+                                firstNonBlank(existing.object(), item.object()),
+                                firstNonBlank(existing.expectedOutcome(), item.expectedOutcome()),
+                                existing.scopeHints().isEmpty() ? item.scopeHints() : existing.scopeHints(),
+                                existing.requiredEvidenceKinds().isEmpty()
+                                        ? item.requiredEvidenceKinds() : existing.requiredEvidenceKinds()
                         ));
                     }
                 }
@@ -1641,13 +1684,21 @@ public class RagPipelineService {
         String domainHint = domain == Domain.CODE
                 ? "source-code search over files, symbols, methods, UI events, and git commit-related questions"
                 : "private document search over PDFs, spreadsheets, web pages, policies, tables, and exact quotes";
+        String codeRules = domain == Domain.CODE ? """
+
+                Code retrieval rules:
+                - When the question is not written in conventional source-code vocabulary, include one compact English source-vocabulary query that preserves the requested actor, action, object, direction, and outcome.
+                - Preserve the distinguishing behavior noun. Do not reduce a request to generic layer names such as controller, service, repository, handler, or component.
+                - Do not invent a concrete class, method, route, file, framework, or project identifier that is absent from the original question.
+                - Rewrites discover candidates only; they are never proof of a claim.
+                """ : "";
         return """
                 You rewrite user questions into retrieval queries for a RAG system.
                 Return strict JSON only. No Markdown.
                 JSON schema: {"queries":["query 1","query 2"],"keywords":["term 1","term 2"],"reason":"short reason"}
                 Keep queries short and concrete. Preserve distinctive user terms and add conventional technical synonyms only when useful.
                 Do not answer the question.
-                Domain: """ + domainHint;
+                Domain: """ + domainHint + codeRules;
     }
 
     private String rewriteUserPrompt(String question, Domain domain, List<String> baselineQueries) {

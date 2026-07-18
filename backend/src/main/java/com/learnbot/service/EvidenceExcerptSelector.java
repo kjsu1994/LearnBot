@@ -1,6 +1,7 @@
 package com.learnbot.service;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.service.coderag.evidence.CodeLexicalCalls;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,8 +21,14 @@ public final class EvidenceExcerptSelector {
 
     private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}_-]{2,}");
     private static final Pattern QUOTED = Pattern.compile("[\"']([^\"']{4,})[\"']");
+    private static final Pattern SOURCE_RANGE_HEADER = Pattern.compile(
+            "^\\s*Lines:\\s*(\\d+)\\s*-\\s*(\\d+)\\s*$");
+    private static final Pattern NUMBERED_SOURCE_LINE = Pattern.compile("^\\s*(\\d+):(.*)$");
+    private static final Pattern INVOCATION_PREFIX = Pattern.compile(
+            "(?i)(?:^|.*[^\\p{L}\\p{N}_])(?:if|while|for|return|throw|await|yield|unless|case)\\s*$");
     private static final int WINDOW_RADIUS = 3;
     private static final int MAX_WINDOWS = 4;
+    private static final int MAX_DIRECT_WINDOWS = 6;
     private static final int REQUESTED_RANGE_PADDING_LINES = 2;
 
     private EvidenceExcerptSelector() {
@@ -236,6 +244,18 @@ public final class EvidenceExcerptSelector {
         boolean[] comments = commentLines(lines);
         Map<String, Integer> frequency = documentFrequency(lines, terms.keySet());
         List<Window> selected = new ArrayList<>();
+        List<RequestedWindow> behavioralCandidates = behavioralCallWindows(
+                result, lines, 0, lines.size() - 1, terms, frequency, comments);
+        int behavioralScopeStart = behavioralCandidates.stream()
+                .mapToInt(RequestedWindow::anchor)
+                .min()
+                .orElse(scopeStart);
+        int behavioralScopeEnd = behavioralCandidates.stream()
+                .mapToInt(RequestedWindow::anchor)
+                .max()
+                .orElse(scopeEnd);
+        int renderScopeStart = Math.min(scopeStart, behavioralScopeStart);
+        int renderScopeEnd = Math.max(scopeEnd, behavioralScopeEnd);
         List<Window> structuralFallback = List.of();
         List<Window> excludedSameNameAnchors = List.of();
         List<Window> structuralAnchors = structuralAnchorWindows(
@@ -250,8 +270,12 @@ public final class EvidenceExcerptSelector {
                         .filter(anchor -> anchor.start() != preferred.start() || anchor.end() != preferred.end())
                         .toList();
             }
-            int relevanceReserve = Math.min(96, Math.max(32, budget / 3));
-            int structuralBudget = Math.max(1, budget - relevanceReserve);
+            // A seven-line evidence window often needs a few hundred characters. Reserving only a
+            // token-sized tail lets a long declaration consume the whole budget and silently drops
+            // the call or state transition that made the chunk relevant.
+            int executionReserve = Math.min(620, Math.max(48, budget / 2));
+            executionReserve = Math.min(Math.max(1, budget - 1), executionReserve);
+            int structuralBudget = Math.max(1, budget - executionReserve);
             String renderedAnchors = renderRequestedWindows(
                     lines, merge(boundaryAnchors), sourceStart, scopeStart, scopeEnd);
             if (renderedAnchors.length() <= structuralBudget) {
@@ -267,8 +291,19 @@ public final class EvidenceExcerptSelector {
                             intentTerms,
                             documentFrequency(lines, intentTerms.keySet()),
                             comments);
-                    if (!relevantOutsideAnchors) {
+                    if (!relevantOutsideAnchors && behavioralCandidates.isEmpty()) {
                         return boundedStructuralAnchors(lines, boundaryAnchors, budget, sourceStart);
+                    }
+                    for (Window anchor : boundaryAnchors) {
+                        Window fitted = fitRequestedWindow(
+                                lines,
+                                selected,
+                                new RequestedWindow(anchor, anchor.start()),
+                                structuralBudget,
+                                sourceStart,
+                                renderScopeStart,
+                                renderScopeEnd);
+                        if (fitted != null) selected.add(fitted);
                     }
                 } else {
                     for (Window anchor : boundaryAnchors) {
@@ -278,15 +313,15 @@ public final class EvidenceExcerptSelector {
                                 new RequestedWindow(anchor, anchor.start()),
                                 structuralBudget,
                                 sourceStart,
-                                scopeStart,
-                                scopeEnd);
+                                renderScopeStart,
+                                renderScopeEnd);
                         if (fitted != null) selected.add(fitted);
                     }
-                    if (selected.isEmpty()
-                            && boundaryAnchors.size() == 1
-                            && boundaryAnchors.get(0).end() - boundaryAnchors.get(0).start() <= 1) {
-                        return boundedStructuralAnchors(lines, boundaryAnchors, budget, sourceStart);
-                    }
+                }
+                if (selected.isEmpty()
+                        && boundaryAnchors.size() == 1
+                        && boundaryAnchors.get(0).end() - boundaryAnchors.get(0).start() <= 1) {
+                    return boundedStructuralAnchors(lines, boundaryAnchors, budget, sourceStart);
                 }
             }
         }
@@ -307,6 +342,25 @@ public final class EvidenceExcerptSelector {
         candidates.sort(Comparator.comparingDouble((RequestedWindow candidate) -> candidate.window().score())
                 .reversed()
                 .thenComparingInt(RequestedWindow::anchor));
+        // Preserve the observable execution skeleton before lexical windows consume the remaining
+        // budget. Calls inside rejected same-name declarations stay excluded, so a relevant overload
+        // cannot be displaced by an unrelated implementation that happens to share its name.
+        for (RequestedWindow candidate : behavioralCandidates) {
+            if (excludedSameNameAnchors.stream().anyMatch(anchor ->
+                    candidate.anchor() >= anchor.start() && candidate.anchor() <= anchor.end())) {
+                continue;
+            }
+            if (selected.size() >= MAX_DIRECT_WINDOWS || coveredBySelected(selected, candidate.window())) {
+                continue;
+            }
+            Window fitted = fitRequestedWindow(
+                    lines, selected, candidate, budget, sourceStart,
+                    renderScopeStart, renderScopeEnd);
+            if (fitted != null) {
+                selected.add(fitted);
+                coalesceWindows(selected);
+            }
+        }
         for (RequestedWindow candidate : candidates) {
             if (structuralAnchors.size() > 1
                     && structuralAnchors.stream().noneMatch(anchor ->
@@ -324,11 +378,12 @@ public final class EvidenceExcerptSelector {
                     }
                 }
             }
-            if (selected.size() >= MAX_WINDOWS || coveredBySelected(selected, candidate.window())) {
+            if (selected.size() >= MAX_DIRECT_WINDOWS || coveredBySelected(selected, candidate.window())) {
                 continue;
             }
             Window fitted = fitRequestedWindow(
-                    lines, selected, candidate, budget, sourceStart, scopeStart, scopeEnd);
+                    lines, selected, candidate, budget, sourceStart,
+                    renderScopeStart, renderScopeEnd);
             if (fitted != null) {
                 selected.add(fitted);
                 coalesceWindows(selected);
@@ -353,7 +408,8 @@ public final class EvidenceExcerptSelector {
         }
 
         selected = merge(selected);
-        String text = renderRequestedWindows(lines, selected, sourceStart, scopeStart, scopeEnd);
+        String text = renderRequestedWindows(
+                lines, selected, sourceStart, renderScopeStart, renderScopeEnd);
         return new Excerpt(
                 text,
                 "DIRECT_READ_REQUESTED_RANGE_BOUNDED",
@@ -362,6 +418,79 @@ public final class EvidenceExcerptSelector {
                 sourceStart + selected.get(0).start(),
                 sourceStart + selected.get(selected.size() - 1).end()
         );
+    }
+
+    /**
+     * Samples actual call-site lines across the whole direct-read body (head, tail, midpoint, then
+     * finer midpoints). This preserves an execution skeleton when question vocabulary does not occur
+     * in source identifiers, while the shared lexical scanner excludes comments, literals, control
+     * keywords, and declarations.
+     */
+    private static List<RequestedWindow> behavioralCallWindows(
+            CodeSearchResult result,
+            List<String> lines,
+            int scopeStart,
+            int scopeEnd,
+            Map<String, Double> terms,
+            Map<String, Integer> frequency,
+            boolean[] comments
+    ) {
+        if (lines == null || lines.isEmpty() || scopeEnd < scopeStart) return List.of();
+        String content = String.join("\n", lines);
+        String callable = result == null ? "" : result.methodName();
+        List<CodeLexicalCalls.CallSite> calls = CodeLexicalCalls.scan(content, callable).stream()
+                .filter(call -> call.lineOffset() >= scopeStart && call.lineOffset() <= scopeEnd)
+                .toList();
+        if (calls.isEmpty()) return List.of();
+        LinkedHashMap<String, CodeLexicalCalls.CallSite> bySymbol = new LinkedHashMap<>();
+        for (CodeLexicalCalls.CallSite call : calls) {
+            bySymbol.putIfAbsent(call.symbol().toLowerCase(Locale.ROOT), call);
+        }
+        List<CodeLexicalCalls.CallSite> distinctCalls = List.copyOf(bySymbol.values());
+        List<CodeLexicalCalls.CallSite> relevantCalls = distinctCalls.stream()
+                .filter(call -> windowScore(
+                        lines, call.lineOffset(), call.lineOffset(), terms, frequency, comments) > 0)
+                .sorted(Comparator.comparingInt(CodeLexicalCalls.CallSite::lineOffset))
+                .toList();
+        List<RequestedWindow> windows = new ArrayList<>();
+        if (!relevantCalls.isEmpty()) {
+            LinkedHashMap<CodeLexicalCalls.CallSite, Boolean> prioritized = new LinkedHashMap<>();
+            distinctCalls.stream().filter(call -> sharesCallableToken(call, callable)).limit(3)
+                    .forEach(call -> prioritized.put(call, true));
+            for (int index : CodeLexicalCalls.coverageOrder(relevantCalls.size())) {
+                prioritized.put(relevantCalls.get(index), true);
+            }
+            relevantCalls.forEach(call -> prioritized.put(call, true));
+            for (CodeLexicalCalls.CallSite call : prioritized.keySet()) {
+                int line = call.lineOffset();
+                windows.add(new RequestedWindow(
+                        new Window(line, line, Double.MAX_VALUE), line));
+            }
+        } else {
+            for (int index : CodeLexicalCalls.coverageOrder(distinctCalls.size())) {
+                int line = distinctCalls.get(index).lineOffset();
+                windows.add(new RequestedWindow(
+                        new Window(line, line, Double.MAX_VALUE), line));
+            }
+        }
+        return List.copyOf(windows);
+    }
+
+    private static boolean sharesCallableToken(CodeLexicalCalls.CallSite call, String callable) {
+        if (call == null || callable == null || callable.isBlank()) return false;
+        Set<String> callableTokens = identifierTokens(callable);
+        Set<String> calleeTokens = identifierTokens(call.symbol());
+        return !callableTokens.isEmpty() && callableTokens.stream().anyMatch(calleeTokens::contains);
+    }
+
+    private static Set<String> identifierTokens(String value) {
+        if (value == null || value.isBlank()) return Set.of();
+        String split = value.replaceAll("([a-z0-9])([A-Z])", "$1 $2")
+                .replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .toLowerCase(Locale.ROOT);
+        return java.util.Arrays.stream(split.split("\\s+"))
+                .filter(token -> token.length() >= 3)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 
     private static Excerpt boundedStructuralAnchors(
@@ -1023,7 +1152,7 @@ public final class EvidenceExcerptSelector {
         char preceding = line.charAt(cursor);
         if (".:(=,!&|?(".indexOf(preceding) >= 0) return true;
         String prefix = line.substring(0, identifierStart).stripTrailing();
-        return prefix.endsWith("new");
+        return prefix.endsWith("new") || INVOCATION_PREFIX.matcher(prefix).matches();
     }
 
     private static String canonicalIdentifier(String value) {
@@ -1041,11 +1170,65 @@ public final class EvidenceExcerptSelector {
 
     private static List<String> sourceLines(String content, int sourceStart, int sourceEnd) {
         List<String> lines = new ArrayList<>(contentLines(content));
+        List<String> envelopedLines = canonicalEnvelopeSourceLines(lines, sourceStart, sourceEnd);
+        if (!envelopedLines.isEmpty()) {
+            return envelopedLines;
+        }
         int expectedLines = Math.max(1, sourceEnd - sourceStart + 1);
         if (lines.size() > expectedLines) {
             return List.copyOf(lines.subList(0, expectedLines));
         }
         return lines.isEmpty() ? List.of("") : List.copyOf(lines);
+    }
+
+    private static List<String> canonicalEnvelopeSourceLines(
+            List<String> contentLines,
+            int sourceStart,
+            int sourceEnd
+    ) {
+        boolean matchingRangeHeader = false;
+        for (String line : contentLines) {
+            Matcher header = SOURCE_RANGE_HEADER.matcher(line);
+            if (!header.matches()) {
+                continue;
+            }
+            try {
+                matchingRangeHeader = Integer.parseInt(header.group(1)) == sourceStart
+                        && Integer.parseInt(header.group(2)) == sourceEnd;
+            } catch (NumberFormatException ignored) {
+                return List.of();
+            }
+            break;
+        }
+        if (!matchingRangeHeader) {
+            return List.of();
+        }
+
+        Map<Integer, String> numberedLines = new LinkedHashMap<>();
+        for (String line : contentLines) {
+            Matcher numbered = NUMBERED_SOURCE_LINE.matcher(line);
+            if (!numbered.matches()) {
+                continue;
+            }
+            try {
+                int lineNumber = Integer.parseInt(numbered.group(1));
+                if (lineNumber >= sourceStart && lineNumber <= sourceEnd) {
+                    numberedLines.putIfAbsent(lineNumber, line.stripTrailing());
+                }
+            } catch (NumberFormatException ignored) {
+                return List.of();
+            }
+        }
+
+        List<String> sourceLines = new ArrayList<>();
+        for (int lineNumber = sourceStart; lineNumber <= sourceEnd; lineNumber++) {
+            String line = numberedLines.get(lineNumber);
+            if (line == null) {
+                return List.of();
+            }
+            sourceLines.add(line);
+        }
+        return List.copyOf(sourceLines);
     }
 
     private static List<String> contentLines(String content) {

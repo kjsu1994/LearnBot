@@ -3,6 +3,7 @@ package com.learnbot.service.coderag.retrieval;
 import com.learnbot.dto.CodeSymbolOutline;
 import com.learnbot.service.CodeIntelligenceAuthority;
 import com.learnbot.service.RagPipelineService;
+import com.learnbot.service.coderag.model.CodeNavigationHandle;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -41,6 +42,7 @@ public final class CodeRetrievalPlanValidator {
 
         for (RagPipelineService.CodeSearchOperation requested : plan.operations()) {
             RagPipelineService.CodeSearchOperation operation = normalizeObservedRead(requested, repositoryMap);
+            operation = normalizeObservedTraversal(operation, repositoryMap);
             operation = bindObservedOrigin(operation, repositoryMap);
             PlanValidationCode code = validateOperation(
                     operation, repositoryMap, knownClaims, unresolvedClaims,
@@ -132,14 +134,19 @@ public final class CodeRetrievalPlanValidator {
             RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
     ) {
         if (operation == null || !operation.isSearch() || operation.query().isBlank()
-                || repositoryMap == null || repositoryMap.symbolInventories().isEmpty()) {
+                || repositoryMap == null) {
             return false;
         }
-        return repositoryMap.symbolInventories().values().stream()
+        java.util.stream.Stream<String> inventoryCallables = repositoryMap.symbolInventories().values().stream()
                 .flatMap(inventory -> inventory.symbols().stream())
                 .filter(this::isTrustedCallableOutline)
                 .map(CodeSymbolOutline::name)
-                .map(this::canonicalSymbol)
+                .map(this::canonicalSymbol);
+        java.util.stream.Stream<String> observedCalls = repositoryMap.navigationHandles().stream()
+                .filter(handle -> handle.kind() == CodeNavigationHandle.Kind.CALL)
+                .map(CodeNavigationHandle::symbol)
+                .map(this::canonicalSymbol);
+        return java.util.stream.Stream.concat(inventoryCallables, observedCalls)
                 .filter(symbol -> distinctiveTokens(symbol).size() >= 2)
                 .anyMatch(symbol -> containsExactIdentifier(operation.query(), symbol));
     }
@@ -338,6 +345,36 @@ public final class CodeRetrievalPlanValidator {
                     if (!executedOperationKeys.contains(key)) return true;
                 }
             }
+            for (CodeNavigationHandle handle : repositoryMap.navigationHandles()) {
+                Set<String> symbolTokens = distinctiveTokens(handle.symbol());
+                if (!overlaps(intent, symbolTokens)) continue;
+                if (handle.kind() == CodeNavigationHandle.Kind.CALL) {
+                    String symbol = canonicalSymbol(handle.symbol());
+                    String key = String.join("|", "read_symbol", "", symbol);
+                    if (!symbol.isBlank() && !executedOperationKeys.contains(key)) return true;
+                }
+                if (handle.kind() == CodeNavigationHandle.Kind.DEFINITION && handle.chunkId() != null) {
+                    String prefix = "traverse_graph|" + handle.chunkId() + "|";
+                    if (executedOperationKeys.stream().noneMatch(key -> key.startsWith(prefix))) return true;
+                }
+            }
+            for (RepositoryQuestionMapBuilder.RelationEvidence relation : repositoryMap.relations()) {
+                Set<String> relationTokens = distinctiveTokens(String.join(" ",
+                        relation.from(), relation.to(), relation.fromPath(), relation.toPath(), relation.type()));
+                if (!overlaps(intent, relationTokens)) continue;
+                String targetSymbol = canonicalSymbol(relation.to());
+                String symbolRead = String.join("|", "read_symbol", relation.toPath(), targetSymbol);
+                String chunkRead = relation.toChunkId() == null
+                        ? "" : String.join("|", "read_chunk", relation.toChunkId().toString());
+                String traversalPrefix = relation.fromChunkId() == null ? ""
+                        : "traverse_graph|" + relation.fromChunkId() + "|" + relation.type() + "|"
+                        + relation.direction() + "|";
+                boolean attempted = !targetSymbol.isBlank() && executedOperationKeys.contains(symbolRead)
+                        || !chunkRead.isBlank() && executedOperationKeys.contains(chunkRead)
+                        || !traversalPrefix.isBlank()
+                        && executedOperationKeys.stream().anyMatch(key -> key.startsWith(traversalPrefix));
+                if (!attempted && (!targetSymbol.isBlank() || relation.toChunkId() != null)) return true;
+            }
         }
         return false;
     }
@@ -371,18 +408,61 @@ public final class CodeRetrievalPlanValidator {
             RagPipelineService.CodeSearchOperation operation,
             RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
     ) {
-        if (operation == null || repositoryMap == null
-                || !"read_file_range".equals(operation.type())
-                || (operation.lineStart() != null && operation.lineEnd() != null)
-                || operation.path().isBlank() || operation.symbol().isBlank()
-                || !repositoryMap.observesSymbol(operation.path(), operation.symbol())) {
+        if (operation == null || repositoryMap == null) return operation;
+        boolean missingRange = operation.lineStart() == null || operation.lineEnd() == null;
+        boolean oversizedRange = operation.lineStart() != null && operation.lineEnd() != null
+                && operation.lineEnd() >= operation.lineStart()
+                && (long) operation.lineEnd() - operation.lineStart() + 1
+                > CodeEvidenceOperationExecutor.MAX_LINE_SPAN;
+        if ("read_file_range".equals(operation.type())
+                && (missingRange || oversizedRange)
+                && !operation.path().isBlank() && !operation.symbol().isBlank()
+                && repositoryMap.observesSymbol(operation.path(), operation.symbol())) {
+            return new RagPipelineService.CodeSearchOperation(
+                    "read_symbol", operation.query(), operation.area(), operation.evidenceGroup(),
+                    operation.path(), operation.symbol(), "", null, null, operation.radius(),
+                    operation.relations(), operation.direction(), operation.maxHops(), operation.operationId(),
+                    operation.claimIds(), operation.originEvidenceIds());
+        }
+        if ("read_symbol".equals(operation.type())
+                && !operation.path().isBlank() && !operation.symbol().isBlank()
+                && !repositoryMap.observesSymbol(operation.path(), operation.symbol())
+                && repositoryMap.observesCallFromPath(operation.path(), operation.symbol())) {
+            return new RagPipelineService.CodeSearchOperation(
+                    operation.type(), operation.query(), operation.area(), operation.evidenceGroup(),
+                    "", canonicalSymbol(operation.symbol()), operation.chunkId(), operation.lineStart(),
+                    operation.lineEnd(), operation.radius(), operation.relations(), operation.direction(),
+                    operation.maxHops(), operation.operationId(), operation.claimIds(),
+                    operation.originEvidenceIds());
+        }
+        return operation;
+    }
+
+    private RagPipelineService.CodeSearchOperation normalizeObservedTraversal(
+            RagPipelineService.CodeSearchOperation operation,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap
+    ) {
+        if (operation == null || repositoryMap == null || !"traverse_graph".equals(operation.type())) {
             return operation;
         }
+        Set<String> observed = repositoryMap.observedTraversalRelations(
+                operation.chunkId(), operation.direction());
+        if (observed.isEmpty()) return operation;
+        List<String> intersection = operation.relations().stream()
+                .map(value -> value == null ? "" : value.trim().toUpperCase(Locale.ROOT))
+                .filter(observed::contains)
+                .distinct()
+                .toList();
+        List<String> normalized = !intersection.isEmpty()
+                ? intersection
+                : observed.size() == 1 ? List.copyOf(observed) : operation.relations();
+        if (normalized.equals(operation.relations())) return operation;
         return new RagPipelineService.CodeSearchOperation(
-                "read_symbol", operation.query(), operation.area(), operation.evidenceGroup(),
-                operation.path(), operation.symbol(), "", null, null, operation.radius(),
-                operation.relations(), operation.direction(), operation.maxHops(), operation.operationId(),
-                operation.claimIds(), operation.originEvidenceIds());
+                operation.type(), operation.query(), operation.area(), operation.evidenceGroup(),
+                operation.path(), operation.symbol(), operation.chunkId(), operation.lineStart(),
+                operation.lineEnd(), operation.radius(), normalized, operation.direction(),
+                operation.maxHops(), operation.operationId(), operation.claimIds(),
+                operation.originEvidenceIds());
     }
 
     private RagPipelineService.CodeSearchOperation bindObservedOrigin(
@@ -416,6 +496,10 @@ public final class CodeRetrievalPlanValidator {
                     ? "originEvidenceIds requires an observed evidence ID matching the requested operand"
                     : "originEvidenceIds requires one of these observed matching IDs: " + candidates;
         }
+        if (code == PlanValidationCode.INVALID_DUPLICATE_OPERATION) {
+            return "the same typed operation or equivalent source read already completed; "
+                    + "reassess the existing evidence or choose an untried observed operand for an unresolved claim";
+        }
         return "";
     }
 
@@ -439,7 +523,9 @@ public final class CodeRetrievalPlanValidator {
         }
         if (!operation.validationError().isBlank()) return PlanValidationCode.INVALID_OPERAND;
         String fingerprint = fingerprint(operation);
-        if (!fingerprints.add(fingerprint) || executedOperationKeys.contains(fingerprint)) {
+        if (!fingerprints.add(fingerprint) || executedOperationKeys.contains(fingerprint)
+                || repositoryMap != null
+                && repositoryMap.hasExecutedEquivalentRead(operation, executedOperationKeys)) {
             return PlanValidationCode.INVALID_DUPLICATE_OPERATION;
         }
         if (operation.isSearch()) return PlanValidationCode.VALID;
@@ -460,6 +546,15 @@ public final class CodeRetrievalPlanValidator {
         if (("read_chunk".equals(operation.type()) || "read_adjacent".equals(operation.type())
                 || "traverse_graph".equals(operation.type())) && !repositoryMap.observesChunk(operation.chunkId())) {
             return PlanValidationCode.INVALID_UNOBSERVED_OPERAND;
+        }
+        if ("traverse_graph".equals(operation.type())) {
+            Set<String> observed = repositoryMap.observedTraversalRelations(
+                    operation.chunkId(), operation.direction());
+            if (!observed.isEmpty() && operation.relations().stream()
+                    .map(value -> value == null ? "" : value.trim().toUpperCase(Locale.ROOT))
+                    .noneMatch(observed::contains)) {
+                return PlanValidationCode.INVALID_UNOBSERVED_OPERAND;
+            }
         }
         return PlanValidationCode.VALID;
     }

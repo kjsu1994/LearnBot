@@ -6,6 +6,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 import org.junit.jupiter.api.Test;
 
@@ -82,6 +83,104 @@ class CodeEvidenceRetentionPlanTest {
                 .isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
         assertThat(plan.lookup(weak.evidenceId())).isEmpty();
         assertThat(plan.lookup(lexical.evidenceId())).isEmpty();
+    }
+
+    @Test
+    void directOperationSignalsUseTypedOperationAndClaimGroups() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "list_file_symbols", "op-flow", List.of("claim-flow"), "lifecycle-flow",
+                List.of("origin-evidence"), "", "src/Flow.java", "", "",
+                null, null, null, List.of(), "", null);
+        CodeEvidenceItem source = item(result("src/Flow.java", Map.of(
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance))),
+                CodeIntelligenceAuthority.SYNTAX);
+        CodeEvidenceSignal signal = new CodeEvidenceSignal(
+                CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
+                source.evidenceId(), 1.0, "typed observation");
+
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(new CodeEvidenceIr(
+                List.of(source), List.of(), List.of(), List.of(signal), List.of(), List.of()));
+
+        assertThat(plan.lookup(source.evidenceId())).get().satisfies(entry -> {
+            assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+            assertThat(entry.groups()).containsExactlyInAnyOrder(
+                    "operation:op_flow", "claim:claim_flow", "evidence:lifecycle_flow");
+        });
+    }
+
+    @Test
+    void plannedSearchSignalsRemainPreferredRatherThanRequired() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "keyword_search", "op-discover", List.of("claim-discover"), "discovery-flow",
+                List.of(), "lifecycle transition", "", "", "",
+                null, null, null, List.of(), "", null);
+        CodeEvidenceItem source = item(result("src/Discovered.java", Map.of(
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance))),
+                CodeIntelligenceAuthority.SYNTAX);
+        CodeEvidenceSignal signal = new CodeEvidenceSignal(
+                CodeEvidenceSignal.Type.OBSERVED_NAVIGATION,
+                source.evidenceId(), 1.0, "source-backed search result");
+
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(new CodeEvidenceIr(
+                List.of(source), List.of(), List.of(), List.of(signal), List.of(), List.of()));
+
+        assertThat(plan.lookup(source.evidenceId())).get().satisfies(entry -> {
+            assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+            assertThat(entry.groups()).containsExactlyInAnyOrder(
+                    "operation:op_discover", "claim:claim_discover", "evidence:discovery_flow");
+        });
+    }
+
+    @Test
+    void directOneHopGraphImplementationUsesTypedNeighborBasisAndBranchGroup() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "traverse_graph", "op-graph", List.of("claim-flow"), "call-flow",
+                List.of("origin-evidence"), "", "", "", UUID.randomUUID().toString(),
+                null, null, null, List.of("CALLS"), "BOTH", 1);
+        CodeEvidenceItem neighbor = item(result("src/Store.java", Map.of(
+                "graphExpanded", true,
+                "graphDepth", 1,
+                "graphDirection", "FORWARD",
+                "graphEdgeType", "CALLS",
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance))),
+                CodeIntelligenceAuthority.COMPILER_SEMANTIC);
+        CodeEvidenceSignal signal = new CodeEvidenceSignal(
+                CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
+                neighbor.evidenceId(), 1.0, "direct graph body");
+
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(new CodeEvidenceIr(
+                List.of(neighbor), List.of(), List.of(), List.of(signal), List.of(), List.of()));
+
+        assertThat(plan.lookup(neighbor.evidenceId())).get().satisfies(entry -> {
+            assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH);
+            assertThat(entry.groups()).contains(
+                    "graph_branch:op_graph:forward:calls",
+                    "operation:op_graph", "claim:claim_flow", "evidence:call_flow");
+        });
+    }
+
+    @Test
+    void boundedTwoHopGraphImplementationKeepsTypedPathBasis() {
+        CodeEvidenceOperationProvenance provenance = new CodeEvidenceOperationProvenance(
+                "traverse_graph", "op-two-hop", List.of("claim-flow"), "call-flow",
+                List.of("origin-evidence"), "", "", "", UUID.randomUUID().toString(),
+                null, null, null, List.of("CALLS"), "BOTH", 2);
+        CodeEvidenceItem implementation = item(result("src/Leaf.java", Map.of(
+                "graphExpanded", true,
+                "graphDepth", 2,
+                "graphDirection", "FORWARD",
+                "graphEdgeType", "CALLS",
+                CodeEvidenceOperationProvenance.METADATA_KEY, List.of(provenance))),
+                CodeIntelligenceAuthority.COMPILER_SEMANTIC);
+        CodeEvidenceSignal signal = new CodeEvidenceSignal(
+                CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
+                implementation.evidenceId(), 1.0, "bounded graph body");
+
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(new CodeEvidenceIr(
+                List.of(implementation), List.of(), List.of(), List.of(signal), List.of(), List.of()));
+
+        assertThat(plan.lookup(implementation.evidenceId())).get().satisfies(entry ->
+                assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH));
     }
 
     @Test

@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -216,6 +217,49 @@ class CodeRepositoryDirectReadTest {
         assertThat(query.params().getValue("limit")).isEqualTo(100);
         assertThat(query.params().getValue("spaceIds")).isEqualTo(List.of(spaceId));
         assertThat(query.params().getValue("selectedSpaceId")).isEqualTo(selectedSpaceId);
+    }
+
+    @Test
+    void graphNeighborBudgetPrioritizesActiveImplementationBearingTargets() throws Exception {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        UUID seedNodeId = UUID.randomUUID();
+        when(jdbc.query(
+                anyString(),
+                ArgumentMatchers.any(MapSqlParameterSource.class),
+                ArgumentMatchers.<RowMapper<Object>>any()
+        )).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (!sql.contains("WITH seed_input")) return List.of();
+            @SuppressWarnings("unchecked")
+            RowMapper<Object> mapper = invocation.getArgument(2);
+            java.sql.ResultSet row = mock(java.sql.ResultSet.class);
+            when(row.getObject("id", UUID.class)).thenReturn(seedNodeId);
+            when(row.getString("name")).thenReturn("seed");
+            return List.of(mapper.mapRow(row, 0));
+        });
+        CodeRepository repository = new CodeRepository(
+                jdbc, new ObjectMapper(), new LearnBotProperties());
+
+        repository.graphRelatedChunks(
+                UUID.randomUUID(), List.of(UUID.randomUUID()), List.of("CALLS"), 1, "BOTH", 12);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc, times(2)).query(
+                sql.capture(),
+                ArgumentMatchers.any(MapSqlParameterSource.class),
+                ArgumentMatchers.<RowMapper<Object>>any()
+        );
+        String neighbors = sql.getAllValues().stream()
+                .filter(value -> value.contains("WITH candidates AS"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(neighbors).contains(
+                "JOIN code_graph_nodes target",
+                "target.id = candidates.to_node_id AND target.active",
+                "WHEN target.chunk_id IS NOT NULL",
+                "NULLIF(target.file_path, '') IS NOT NULL",
+                "SELECT ranked.from_node_id, ranked.to_node_id, ranked.to_node_name"
+        );
     }
 
     private NamedParameterJdbcTemplate queryJdbc() {

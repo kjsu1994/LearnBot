@@ -2,10 +2,12 @@ package com.learnbot.service.coderag.answer;
 
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.CodeIntelligenceAuthority;
+import com.learnbot.service.coderag.evidence.CodeLexicalCalls;
 import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
 import com.learnbot.service.coderag.model.CodeEvidenceFact;
 import com.learnbot.service.coderag.model.CodeEvidenceIr;
 import com.learnbot.service.coderag.model.CodeEvidenceItem;
+import com.learnbot.service.coderag.model.CodeNavigationHandle;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,6 +33,8 @@ public final class CodeEvidenceIrFidelity {
     private static final List<String> DIRECT_READ_METADATA_KEYS = List.of(
             "llmRequestedPath", "llmRequestedSymbol", "llmRequestedChunkId");
     private static final int MAX_PROMPT_FACTS = 16;
+    private static final int MAX_NAVIGATION_OUTLINE_SOURCES = 6;
+    private static final int MAX_NAVIGATION_HANDLES_PER_SOURCE = 32;
     private static final int MAX_PROMPT_CHARS = 3_200;
     private static final int MIN_FACT_RELEVANCE_SCORE = 6;
 
@@ -61,13 +65,14 @@ public final class CodeEvidenceIrFidelity {
         List<TrustedFact> selected = selectedFacts(question, ir).stream()
                 .filter(value -> citations.containsKey(value.fact().sourceEvidenceId()))
                 .toList();
-        if (selected.isEmpty()) return "";
-
-        StringBuilder prompt = new StringBuilder(
-                "\n\nTrusted typed facts from selected source evidence. Preserve required values exactly:\n");
+        StringBuilder prompt = new StringBuilder();
         Set<String> seen = new LinkedHashSet<>();
         int rendered = 0;
         for (TrustedFact value : selected) {
+            if (prompt.isEmpty()) {
+                prompt.append("\n\nTrusted typed facts from selected source evidence. "
+                        + "Preserve required values exactly:\n");
+            }
             CodeEvidenceFact fact = value.fact();
             String statement = inline(fact.subject()) + ": "
                     + inline(fact.predicate()) + "=" + inline(fact.value());
@@ -78,7 +83,125 @@ public final class CodeEvidenceIrFidelity {
             prompt.append(line);
             rendered++;
         }
-        return rendered == 0 ? "" : prompt.toString().stripTrailing();
+        appendNavigationOutlines(prompt, ir, citations);
+        return prompt.isEmpty() ? "" : prompt.toString().stripTrailing();
+    }
+
+    private static void appendNavigationOutlines(
+            StringBuilder prompt,
+            CodeEvidenceIr ir,
+            Map<String, Integer> citations
+    ) {
+        if (ir == null || citations.isEmpty() || prompt.length() >= MAX_PROMPT_CHARS) return;
+        Map<String, CodeEvidenceItem> items = ir.evidenceItems().stream()
+                .collect(Collectors.toMap(
+                        CodeEvidenceItem::evidenceId,
+                        item -> item,
+                        CodeEvidenceItem::merge,
+                        LinkedHashMap::new));
+        Map<String, List<CodeNavigationHandle>> bySource = ir.navigationHandles().stream()
+                .filter(handle -> handle.kind() == CodeNavigationHandle.Kind.CALL)
+                .filter(handle -> citations.containsKey(handle.sourceEvidenceId()))
+                .filter(handle -> trustedNavigationSource(items.get(handle.sourceEvidenceId())))
+                .collect(Collectors.groupingBy(
+                        CodeNavigationHandle::sourceEvidenceId,
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+        if (bySource.isEmpty()) return;
+
+        List<NavigationOutline> outlines = bySource.entrySet().stream()
+                .map(entry -> navigationOutline(
+                        items.get(entry.getKey()),
+                        citations.get(entry.getKey()),
+                        entry.getValue()))
+                .filter(value -> !value.symbols().isEmpty())
+                .sorted(Comparator
+                        .comparing((NavigationOutline value) -> isDirectRead(value.source()) ? 0 : 1)
+                        .thenComparing(Comparator.comparingInt(
+                                (NavigationOutline value) -> value.symbols().size()).reversed())
+                        .thenComparingInt(NavigationOutline::citation))
+                .limit(MAX_NAVIGATION_OUTLINE_SOURCES)
+                .toList();
+        if (outlines.isEmpty()) return;
+
+        String header = "\n\nObserved lexical call sites from selected direct source evidence "
+                + "(source order only; branch execution and dynamic dispatch are not inferred):\n";
+        StringBuilder block = new StringBuilder(header);
+        int lines = 0;
+        for (NavigationOutline outline : outlines) {
+            String prefix = "- `" + inline(sourceIdentity(outline.source())).replace("`", "\\`")
+                    + "`: calls=[";
+            String suffix = "] [" + outline.citation() + "]\n";
+            StringBuilder line = new StringBuilder(prefix);
+            int added = 0;
+            for (String symbol : outline.symbols()) {
+                String separator = added == 0 ? "" : ", ";
+                if (prompt.length() + block.length() + line.length() + separator.length()
+                        + symbol.length() + suffix.length() > MAX_PROMPT_CHARS) break;
+                line.append(separator).append(inline(symbol));
+                added++;
+            }
+            if (added == 0) continue;
+            line.append(suffix);
+            block.append(line);
+            lines++;
+        }
+        if (lines > 0) prompt.append(block);
+    }
+
+    private static boolean trustedNavigationSource(CodeEvidenceItem item) {
+        return item != null
+                && item.kinds().contains(CodeEvidenceItem.Kind.DIRECT_SOURCE)
+                && item.authority().rank() >= CodeIntelligenceAuthority.SYNTAX.rank();
+    }
+
+    private static NavigationOutline navigationOutline(
+            CodeEvidenceItem item,
+            Integer citation,
+            List<CodeNavigationHandle> handles
+    ) {
+        List<CodeNavigationHandle> ordered = handles == null ? List.of() : handles.stream()
+                .sorted(Comparator.comparingInt(CodeNavigationHandle::lineStart)
+                        .thenComparingInt(CodeNavigationHandle::lineEnd)
+                        .thenComparing(CodeNavigationHandle::symbol))
+                .toList();
+        LinkedHashMap<String, CodeNavigationHandle> unique = new LinkedHashMap<>();
+        ordered.forEach(handle -> unique.putIfAbsent(
+                handle.symbol().toLowerCase(Locale.ROOT), handle));
+        List<CodeNavigationHandle> distinct = List.copyOf(unique.values());
+        List<CodeNavigationHandle> selected;
+        if (distinct.size() <= MAX_NAVIGATION_HANDLES_PER_SOURCE) {
+            selected = distinct;
+        } else {
+            selected = CodeLexicalCalls.coverageOrder(distinct.size()).stream()
+                    .limit(MAX_NAVIGATION_HANDLES_PER_SOURCE)
+                    .map(distinct::get)
+                    .sorted(Comparator.comparingInt(CodeNavigationHandle::lineStart)
+                            .thenComparing(CodeNavigationHandle::symbol))
+                    .toList();
+        }
+        return new NavigationOutline(
+                item == null ? null : item.source(),
+                citation == null ? 0 : citation,
+                selected.stream().map(CodeNavigationHandle::symbol).toList());
+    }
+
+    private static String sourceIdentity(CodeSearchResult source) {
+        if (source == null) return "source";
+        String callable = firstNonBlank(
+                source.methodName(), source.symbolName(), source.className(),
+                source.controlName(), source.eventName());
+        String path = safe(source.filePath());
+        if (path.isBlank()) return callable.isBlank() ? "source" : callable;
+        return callable.isBlank() ? path : path + "#" + callable;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.trim();
+        }
+        return "";
     }
 
     /** Source identities that should receive bounded protection during final selection. */
@@ -132,6 +255,10 @@ public final class CodeEvidenceIrFidelity {
                     .filter(value -> !value.required())
                     .filter(value -> relevanceScore(value, questionTerms, safeQuestion)
                             >= MIN_FACT_RELEVANCE_SCORE)
+                    .sorted(Comparator
+                            .comparingInt((TrustedFact value) ->
+                                    relevanceScore(value, questionTerms, safeQuestion)).reversed()
+                            .thenComparing(value -> value.fact().factId()))
                     .forEach(selected::add);
         }
         return List.copyOf(selected);
@@ -309,5 +436,12 @@ public final class CodeEvidenceIrFidelity {
     }
 
     private record TrustedFact(CodeEvidenceFact fact, CodeEvidenceItem item, boolean required) {
+    }
+
+    private record NavigationOutline(
+            CodeSearchResult source,
+            int citation,
+            List<String> symbols
+    ) {
     }
 }

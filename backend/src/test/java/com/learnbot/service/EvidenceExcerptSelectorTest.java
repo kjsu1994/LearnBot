@@ -361,6 +361,85 @@ class EvidenceExcerptSelectorTest {
     }
 
     @Test
+    void canonicalChunkEnvelopeDoesNotConsumeSourceLinesOrDropMethodTail() {
+        String content = canonicalEnvelope("src/Widget.cs", 114, 124, line -> switch (line) {
+            case 114 -> "private void UpdateState() {";
+            case 123 -> "    target.Visible = true;";
+            case 124 -> "}";
+            default -> "    auditStep(" + line + ");";
+        });
+        CodeSearchResult directRead = withLineRangeAndMetadata(
+                withMethodIdentity(result(content), "UpdateState"),
+                114,
+                124,
+                Map.of("llmDirectRead", true)
+        );
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Explain UpdateState", directRead, 2_000);
+
+        assertThat(excerpt.kind()).isEqualTo("FULL_CHUNK");
+        assertThat(excerpt.text())
+                .contains("114: private void UpdateState() {", "123:     target.Visible = true;", "124: }")
+                .doesNotContain("File: src/Widget.cs", "Lines: 114-124", "\nsrc/Widget.cs");
+        assertThat(excerpt.lineStart()).isEqualTo(114);
+        assertThat(excerpt.lineEnd()).isEqualTo(124);
+    }
+
+    @Test
+    void canonicalChunkEnvelopeKeepsDeepRelevantLinesUnderDirectReadBudget() {
+        String content = canonicalEnvelope("src/Workflow.java", 200, 260, line -> switch (line) {
+            case 200 -> "void completeWorkflow() {";
+            case 247 -> "    stateStore.commitVersion(versionId);";
+            case 260 -> "}";
+            default -> "    auditStep(" + line + ");";
+        });
+        CodeSearchResult directRead = withLineRangeAndMetadata(
+                withMethodIdentity(result(content), "completeWorkflow"),
+                200,
+                260,
+                Map.of(
+                        "llmDirectRead", true,
+                        "llmChecklistGoal", "commitVersion processed version"
+                )
+        );
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Where is the processed version committed?", directRead, 360);
+
+        assertThat(excerpt.text()).contains("stateStore.commitVersion(versionId)");
+        assertThat(excerpt.text()).doesNotContain("File: src/Workflow.java", "Lines: 200-260");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(360);
+    }
+
+    @Test
+    void requestedLineRangeMapsToCanonicalEnvelopeSourceOffsets() {
+        String content = canonicalEnvelope("src/Assignment.java", 100, 110, line -> line == 105
+                ? "    target.assign(value);"
+                : "    paddingStep(" + line + ");");
+        CodeSearchResult directRead = withLineRangeAndMetadata(
+                result(content),
+                100,
+                110,
+                Map.of(
+                        "llmDirectRead", true,
+                        "llmRequestedLineStart", 105,
+                        "llmRequestedLineEnd", 105,
+                        "llmRequestedSymbol", "target.assign"
+                )
+        );
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Explain target.assign", directRead, 180);
+
+        assertThat(excerpt.text())
+                .contains("103:     paddingStep(103);", "105:     target.assign(value);", "107:     paddingStep(107);")
+                .doesNotContain("102:     paddingStep(102);", "108:     paddingStep(108);");
+        assertThat(excerpt.lineStart()).isEqualTo(103);
+        assertThat(excerpt.lineEnd()).isEqualTo(107);
+    }
+
+    @Test
     void scoredWindowsReserveMarkersAndReportOnlyCompletelyRenderedLines() {
         String content = IntStream.range(0, 20)
                 .mapToObj(line -> switch (line) {
@@ -622,6 +701,182 @@ class EvidenceExcerptSelectorTest {
     }
 
     @Test
+    void longDirectReadRetainsAnExecutionSkeletonAcrossTheWholeCallable() {
+        String content = "public Result Execute(Input input) {\n"
+                + "    source.Begin(input);\n"
+                + "    int firstPadding = 1;\n".repeat(20)
+                + "    transformer.Advance(input);\n"
+                + "    int secondPadding = 2;\n".repeat(20)
+                + "    sink.Complete(input);\n"
+                + "    return input.result();\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "Execute"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "실행 흐름을 설명해줘", directRead, 520);
+
+        assertThat(excerpt.text())
+                .contains("Execute(Input input)", "source.Begin(input)",
+                        "transformer.Advance(input)", "sink.Complete(input)");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(520);
+    }
+
+    @Test
+    void tiedStructuralAnchorsDoNotBypassWholeChunkCallCoverage() {
+        String content = "public Result Execute(int input) {\n"
+                + "    source.Begin(input);\n"
+                + "    int firstPadding = 1;\n".repeat(18)
+                + "}\n"
+                + "public Result Execute(String input) {\n"
+                + "    transformer.Advance(input);\n"
+                + "    int middlePadding = 2;\n".repeat(18)
+                + "}\n"
+                + "public Result Execute(boolean input) {\n"
+                + "    sink.Complete(input);\n"
+                + "    int lastPadding = 3;\n".repeat(18)
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "Execute"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "?ㅽ뻾 ?꾩껜 ?먮쫫", directRead, 620);
+
+        assertThat(excerpt.text())
+                .contains("source.Begin(input)", "transformer.Advance(input)", "sink.Complete(input)");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(620);
+    }
+
+    @Test
+    void observedCallsAreReservedBeforeLexicalTailWindows() {
+        String content = "private List<Item> expandRelated(List<Item> ranked) {\n"
+                + "    Map<String, Item> graphState = new LinkedHashMap<>();\n"
+                + "    String graphStatus = \"ready\";\n".repeat(18)
+                + "    for (Item related : repository.relatedChunks(\n"
+                + "            ranked,\n"
+                + "            graphState.keySet())) {\n"
+                + "        merge(graphState, related);\n"
+                + "    }\n"
+                + "    String graphSummary = graphStatus;\n".repeat(18)
+                + "    return graphState.values().stream().toList();\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "expandRelated"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Explain the expandRelated graph state flow", directRead, 300);
+
+        assertThat(excerpt.text())
+                .contains("expandRelated", "repository.relatedChunks",
+                        "graphState.values().stream().toList()");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(300);
+    }
+
+    @Test
+    void narrowRequestedRangeStillKeepsLateCallsFromTheReturnedCallableChunk() {
+        String content = "public Result Coordinate(Input input) {\n"
+                + "    authService.Resolve(input);\n"
+                + "    String verboseConfiguration = input.configurationWithA deliberatelyLongName();\n".repeat(7)
+                + "    stateService.Validate(input);\n"
+                + "    String middlePadding = input.anotherDeliberatelyLongConfigurationValue();\n".repeat(12)
+                + "    workflowService.Dispatch(input);\n"
+                + "    persistenceService.Complete(input);\n"
+                + "    return input.Result();\n"
+                + "}\n";
+        CodeSearchResult directRead = withLineRangeAndMetadata(
+                withMethodIdentity(result(content), "Coordinate"),
+                100,
+                100 + (int) content.lines().count() - 1,
+                Map.of(
+                        "llmDirectRead", true,
+                        "llmRequestedLineStart", 100,
+                        "llmRequestedLineEnd", 108));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Explain the service call flow", directRead, 420);
+
+        assertThat(excerpt.text())
+                .contains("Coordinate", "workflowService.Dispatch", "persistenceService.Complete");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(420);
+    }
+
+    @Test
+    void behaviorRelevantCollaboratorCallsBeatGenericBoundaryCalls() {
+        String content = "CodeAskResponse ask(CodeAskRequest request) {\n"
+                + "    var user = currentUserProvider.currentUser();\n"
+                + "    var space = authService.resolveSpace(user, request.spaceId());\n"
+                + "    var spaces = authService.accessibleSpaceIds(user);\n"
+                + "    if (space == null) space = spaces.get(0);\n"
+                + "    repositorySpace(user, request.repositoryId());\n"
+                + "    authService.requireSpace(user, space);\n"
+                + "    if (!Boolean.TRUE.equals(request.conversational())) {\n"
+                + "        return ragService.ask(request.repositoryId(), space, spaces, request.question());\n"
+                + "    }\n"
+                + "    var context = conversationService.prepare(user, space, request.question());\n"
+                + "    var response = ragService.askConversational(\n"
+                + "            request.repositoryId(), space, spaces, request.question(), context);\n"
+                + "    return conversationService.saveCodeTurn(context, response);\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "ask"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "Which service calls does the ask controller method perform?", directRead, 680);
+
+        assertThat(excerpt.text()).contains("ragService.ask(", "ragService.askConversational(");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(680);
+    }
+
+    @Test
+    void callableFamilyKeepsLateCompletionCallWithoutQuestionLexicalOverlap() {
+        String content = "void runIndex(IndexJob job) {\n"
+                + "    repository.markRunning(job);\n"
+                + "    scanner.scan(job);\n"
+                + "    audit.record(job);\n".repeat(24)
+                + "    repository.completeSuccessfulIndex(job.repositoryId(), job.indexVersion());\n"
+                + "    metrics.finish(job);\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "runIndex"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "성공한 작업이 활성 상태로 전환되는 흐름", directRead, 420);
+
+        assertThat(excerpt.text()).contains("completeSuccessfulIndex");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(420);
+    }
+
+    @Test
+    void executionSkeletonKeepsAMultilineCollaboratorCallWithoutMatchingQuestionWords() {
+        String content = "public List<Item> Execute(List<Item> input) {\n"
+                + "    prepare.Open();\n"
+                + "    int padding = 0;\n".repeat(18)
+                + "    for (Item item : gateway.Load(\n"
+                + "            input,\n"
+                + "            options.resolve(),\n"
+                + "            limits.current())) {\n"
+                + "        output.add(item);\n"
+                + "    }\n"
+                + "    lifecycle.Close();\n"
+                + "    return output;\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "Execute"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "처음부터 끝까지 어떤 흐름이야", directRead, 520);
+
+        assertThat(excerpt.text()).contains("gateway.Load(", "lifecycle.Close()");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(520);
+    }
+
+    @Test
     void nonDirectScoringKeepsOriginalLineOffsetsAcrossBlankLines() {
         String padding = IntStream.range(0, 20)
                 .mapToObj(index -> "padding-%02d".formatted(index))
@@ -712,5 +967,19 @@ class EvidenceExcerptSelectorTest {
                 result.chunkType(), result.symbolName(), result.className(), result.methodName(), result.namespaceName(),
                 result.controlName(), result.eventName(), result.chunkIndex(), lineStart, lineEnd,
                 result.content(), result.score(), metadata);
+    }
+
+    private String canonicalEnvelope(
+            String path,
+            int lineStart,
+            int lineEnd,
+            java.util.function.IntFunction<String> sourceLine
+    ) {
+        String numberedSource = IntStream.rangeClosed(lineStart, lineEnd)
+                .mapToObj(line -> line + ": " + sourceLine.apply(line))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElseThrow();
+        return "File: " + path + "\nLines: " + lineStart + "-" + lineEnd + "\n"
+                + numberedSource + "\n" + path;
     }
 }

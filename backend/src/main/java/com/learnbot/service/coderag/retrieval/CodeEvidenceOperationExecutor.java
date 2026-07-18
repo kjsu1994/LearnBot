@@ -9,6 +9,7 @@ import com.learnbot.service.coderag.evidence.extractor.CodeEndpointQueryVariants
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.CodeEndpointOutline;
 import com.learnbot.repository.CodeRepository;
 
 import java.util.ArrayList;
@@ -20,7 +21,7 @@ import java.util.UUID;
 
 public final class CodeEvidenceOperationExecutor {
     private static final int MAX_DIRECT_RESULTS = 24;
-    private static final int MAX_LINE_SPAN = 400;
+    static final int MAX_LINE_SPAN = 400;
     private static final int MAX_RADIUS = 3;
     private static final int MAX_OBSERVATION_OPERAND_CHARS = 120;
 
@@ -88,7 +89,9 @@ public final class CodeEvidenceOperationExecutor {
                 case "traverse_graph" -> traverseGraph(repositoryId, selectedSpaceId, spaceIds, operation, safeLimit);
                 default -> List.of();
             };
-            List<CodeSearchResult> safeResults = results == null ? List.of() : results;
+            List<CodeSearchResult> safeResults = enrichEndpointMetadata(
+                    repositoryId, selectedSpaceId, spaceIds,
+                    results == null ? List.of() : results);
             List<CodeSearchResult> marked = safeResults.stream()
                     .map(result -> markOperationProvenance(result, operation))
                     .map(result -> operation.isDirectRead() ? markDirectRead(result, operation) : result)
@@ -124,6 +127,51 @@ public final class CodeEvidenceOperationExecutor {
                         limit);
         if (!endpointCandidates.isEmpty()) return endpointCandidates;
         return searchVariants(repositoryId, selectedSpaceId, spaceIds, route, limit, graphIntent, true, retrievalIntent);
+    }
+
+    private List<CodeSearchResult> enrichEndpointMetadata(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            List<CodeSearchResult> results
+    ) {
+        if (repository == null || results == null || results.isEmpty()) return results == null ? List.of() : results;
+        List<UUID> chunkIds = results.stream()
+                .map(CodeSearchResult::chunkId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        List<CodeEndpointOutline> outlines = repository.listActiveEndpointOutlinesByChunkIds(
+                repositoryId, chunkIds, spaceIds, selectedSpaceId);
+        if (outlines == null || outlines.isEmpty()) return results;
+
+        Map<UUID, List<CodeEndpointOutline>> byChunk = outlines.stream()
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.groupingBy(
+                        CodeEndpointOutline::chunkId, LinkedHashMap::new,
+                        java.util.stream.Collectors.toList()));
+        return results.stream().map(result -> {
+            List<CodeEndpointOutline> structures = byChunk.getOrDefault(result.chunkId(), List.of());
+            List<CodeEndpointOutline> distinct = structures.stream()
+                    .filter(value -> value.route() != null && !value.route().isBlank())
+                    .distinct()
+                    .toList();
+            if (distinct.size() != 1) return result;
+            CodeEndpointOutline endpoint = distinct.get(0);
+            Map<String, Object> metadata = new LinkedHashMap<>(
+                    result.metadata() == null ? Map.of() : result.metadata());
+            metadata.put("endpointRoute", endpoint.route());
+            if (endpoint.httpMethod() != null && !endpoint.httpMethod().isBlank()) {
+                metadata.put("httpMethod", endpoint.httpMethod());
+            }
+            metadata.put("graphRelation", "EXPOSES_ENDPOINT");
+            return new CodeSearchResult(
+                    result.chunkId(), result.repositoryId(), result.fileId(), result.repositoryName(),
+                    result.filePath(), result.chunkType(), result.symbolName(), result.className(),
+                    result.methodName(), result.namespaceName(), result.controlName(), result.eventName(),
+                    result.chunkIndex(), result.lineStart(), result.lineEnd(), result.content(),
+                    result.score(), Map.copyOf(metadata));
+        }).toList();
     }
 
     private List<CodeSearchResult> searchVariants(

@@ -34,7 +34,8 @@ public final class CodeEvidenceAccumulator {
             "llmChecklistGroupRequired", "llmSearchPlanEvidence", "llmCoverageRequired", "llmValidatedEvidence"
     );
     private static final Set<String> STRUCTURAL_METADATA_KEYS = Set.of(
-            "endpointRoute", "httpMethod", "graphRelation"
+            "endpointRoute", "httpMethod", "graphRelation",
+            "graphDirection", "graphPathDirections"
     );
 
     private final EvidenceExtractorRegistry extractorRegistry;

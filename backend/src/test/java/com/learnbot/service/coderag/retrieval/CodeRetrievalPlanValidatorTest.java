@@ -2,8 +2,12 @@ package com.learnbot.service.coderag.retrieval;
 
 import com.learnbot.service.ActiveCodeIndexIdentity;
 import com.learnbot.service.RagPipelineService;
+import com.learnbot.service.coderag.evidence.CodeEvidenceId;
+import com.learnbot.service.coderag.model.CodeEvidenceIr;
+import com.learnbot.service.coderag.model.CodeNavigationHandle;
 
 import com.learnbot.dto.CodeSearchResult;
+import com.learnbot.dto.CodeGraphRelationOutline;
 import com.learnbot.dto.CodeSymbolOutline;
 import com.learnbot.repository.CodeRepository;
 import org.junit.jupiter.api.Test;
@@ -420,6 +424,29 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void initialPlanAcceptsACompositeCallObservedInDirectSourceAsAMultilingualBridge() {
+        var map = observedCallMap("src/Highlighter.cs", "automation.AddSelectionEventHandler");
+        var claim = new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "handler_registration", "선택 이벤트 핸들러를 등록한다", List.of(),
+                "대상", "등록한다", "선택 이벤트 핸들러", "변경 이벤트가 수신된다",
+                List.of(), List.of("DIRECT_SOURCE"));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "AddSelectionEventHandler implementation", "handler behavior",
+                "handler_registration", "", "", "", null, null, null, List.of(), "BOTH", null,
+                "observed-source-call", List.of("claim-1"), List.of());
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "test", List.of("claim-1"), List.of(), List.of(),
+                List.of("handler_registration"), List.of(claim), List.of(operation), List.of(),
+                "hypothesis", 1, "UNRESOLVED", List.of(), "NONE");
+
+        var result = validator.validateInitial(
+                "선택 이벤트 핸들러의 등록 생명주기를 추적해줘", plan, map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).containsExactly(operation);
+    }
+
+    @Test
     void observedContainersAndSinglePartCallablesDoNotBypassQuestionAnchoring() {
         var containerMap = observedMapWithOutlineKind(
                 "src/AdminController.java", "AdminController", "class");
@@ -638,6 +665,46 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void rejectsASymbolReadWhenItsUniqueObservedChunkWasAlreadyRead() {
+        String path = "src/Gateway.java";
+        var map = observedMap(path, "complete");
+        UUID chunkId = map.symbolInventories().get(path).symbols().get(0).chunkId();
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "implementation", "claim-1", path, "complete", "",
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(
+                plan(List.of(operation), "NONE"), map, Set.of("read_chunk|" + chunkId));
+
+        assertThat(result.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_DUPLICATE_OPERATION);
+        assertThat(result.executableOperations()).isEmpty();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error.detail()).contains(
+                        "already completed", "untried observed operand", "unresolved claim"));
+    }
+
+    @Test
+    void rejectsAChunkReadWhenItsUniqueObservedSymbolWasAlreadyRead() {
+        String path = "src/Gateway.java";
+        var map = observedMap(path, "complete");
+        UUID chunkId = map.symbolInventories().get(path).symbols().get(0).chunkId();
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_chunk", "", "implementation", "claim-1", path, "complete", chunkId.toString(),
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(
+                plan(List.of(operation), "NONE"), map, Set.of("read_symbol|" + path + "|complete"));
+
+        assertThat(result.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_DUPLICATE_OPERATION);
+        assertThat(result.executableOperations()).isEmpty();
+        assertThat(result.errors()).singleElement().satisfies(error ->
+                assertThat(error.detail()).contains(
+                        "already completed", "untried observed operand", "unresolved claim"));
+    }
+
+    @Test
     void inventedDirectReadPathIsRejected() {
         var operation = new RagPipelineService.CodeSearchOperation(
                 "read_symbol", "", "implementation", "claim-1", "invented/Service.java", "complete", "",
@@ -682,6 +749,24 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void acceptsAQualifiedSymbolWhenItsCanonicalNameIsInTheObservedFileInventory() {
+        String path = "src/Gateway.java";
+        var map = observedMap(path, "complete");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "implementation", "claim-1", path, "sample.Gateway.complete", "",
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).singleElement().satisfies(executable -> {
+            assertThat(executable.symbol()).isEqualTo("sample.Gateway.complete");
+            assertThat(executable.originEvidenceIds()).singleElement()
+                    .satisfies(origin -> assertThat(map.containsEvidenceId(origin)).isTrue());
+        });
+    }
+
+    @Test
     void changesARangeReadWithoutObservedLinesToAnObservedSymbolRead() {
         String path = "src/Gateway.java";
         var map = observedMap(path, "complete");
@@ -699,8 +784,145 @@ class CodeRetrievalPlanValidatorTest {
         });
     }
 
+    @Test
+    void changesAnOversizedRangeWithAnObservedSymbolToABoundedSymbolRead() {
+        String path = "src/Gateway.java";
+        var map = observedMap(path, "complete");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_file_range", "", "implementation", "claim-1", path, "complete", "",
+                10, 900, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).singleElement().satisfies(executable -> {
+            assertThat(executable.type()).isEqualTo("read_symbol");
+            assertThat(executable.path()).isEqualTo(path);
+            assertThat(executable.symbol()).isEqualTo("complete");
+            assertThat(executable.lineStart()).isNull();
+            assertThat(executable.lineEnd()).isNull();
+            assertThat(executable.originEvidenceIds()).hasSize(1);
+        });
+    }
+
+    @Test
+    void normalizesObservedCallerPathToAProvenanceBoundSymbolOnlyRead() {
+        String callerPath = "src/Caller.java";
+        var map = observedCallMap(callerPath, "gateway.finish");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "implementation", "claim-1", callerPath, "gateway.finish", "",
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), map, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).singleElement().satisfies(executable -> {
+            assertThat(executable.path()).isBlank();
+            assertThat(executable.symbol()).isEqualTo("finish");
+            assertThat(executable.originEvidenceIds()).singleElement()
+                    .satisfies(origin -> assertThat(map.containsEvidenceId(origin)).isTrue());
+        });
+    }
+
+    @Test
+    void normalizesAnUnobservedTraversalRelationWhenTheActiveSeedHasOneCapability() {
+        GraphMapFixture fixture = observedGraphMap("CALLS");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "traverse_graph", "", "implementation", "claim-1",
+                fixture.source().filePath(), fixture.source().methodName(),
+                fixture.source().chunkId().toString(), null, null, null,
+                List.of("REFERENCES"), "BOTH", 1, "op-graph", List.of("claim-1"),
+                List.of(CodeEvidenceId.from(fixture.source())));
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), fixture.map(), Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).singleElement().satisfies(executable ->
+                assertThat(executable.relations()).containsExactly("CALLS"));
+    }
+
+    @Test
+    void doesNotTurnAnUnobservedCallIntoASymbolRead() {
+        String callerPath = "src/Caller.java";
+        var map = observedCallMap(callerPath, "gateway.finish");
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "read_symbol", "", "implementation", "claim-1", callerPath, "gateway.invented", "",
+                null, null, null, List.of(), "BOTH", null, "op-1", List.of("claim-1"), List.of());
+
+        var result = validator.validate(plan(List.of(operation), "NONE"), map, Set.of());
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_MISSING_ORIGIN);
+    }
+
     private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedMap(String path, String symbol) {
         return observedMap(path, symbol, Map.of());
+    }
+
+    private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedCallMap(
+            String callerPath,
+            String observedCall
+    ) {
+        UUID repositoryId = UUID.randomUUID();
+        UUID indexVersion = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        CodeRepository repository = mock(CodeRepository.class);
+        ActiveCodeIndexIdentity identity = new ActiveCodeIndexIdentity(
+                repositoryId, null, indexVersion, "fingerprint", "analyzer", "schema", "READY", "1", "1");
+        when(repository.findActiveIndexIdentity(eq(repositoryId), any(), any()))
+                .thenReturn(java.util.Optional.of(identity));
+        when(repository.findActiveChunksByPath(
+                eq(repositoryId), eq("__learnbot__/project-context.md"), eq(8), any(), any()))
+                .thenReturn(List.of());
+        when(repository.listAnalysisDiagnostics(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listJobFailures(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listActiveSymbolOutlinesByPaths(eq(repositoryId), any(), anyInt(), any(), any()))
+                .thenReturn(List.of());
+        CodeSearchResult caller = new CodeSearchResult(
+                chunkId, repositoryId, UUID.randomUUID(), "repo", callerPath, "method",
+                "run", "Caller", "run", "app", null, null, 0, 10, 30,
+                observedCall + "(task);", 0.9, Map.of("indexVersion", indexVersion.toString()));
+        CodeNavigationHandle handle = CodeNavigationHandle.of(
+                CodeNavigationHandle.Kind.CALL, callerPath, observedCall, chunkId,
+                caller.lineStart(), caller.lineEnd(), CodeEvidenceId.from(caller));
+        CodeEvidenceIr ir = new CodeEvidenceIr(
+                List.of(), List.of(), List.of(), List.of(), List.of(handle), List.of());
+        return new RepositoryQuestionMapBuilder(repository).build(
+                repositoryId, null, List.of(UUID.randomUUID()), "follow the call", List.of(caller), ir);
+    }
+
+    private GraphMapFixture observedGraphMap(String relationType) {
+        UUID repositoryId = UUID.randomUUID();
+        UUID indexVersion = UUID.randomUUID();
+        UUID chunkId = UUID.randomUUID();
+        UUID neighborChunkId = UUID.randomUUID();
+        CodeRepository repository = mock(CodeRepository.class);
+        ActiveCodeIndexIdentity identity = new ActiveCodeIndexIdentity(
+                repositoryId, null, indexVersion, "fingerprint", "analyzer", "schema", "READY", "1", "1");
+        when(repository.findActiveIndexIdentity(eq(repositoryId), any(), any()))
+                .thenReturn(java.util.Optional.of(identity));
+        when(repository.findActiveChunksByPath(
+                eq(repositoryId), eq("__learnbot__/project-context.md"), eq(8), any(), any()))
+                .thenReturn(List.of());
+        when(repository.listAnalysisDiagnostics(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listJobFailures(repositoryId, indexVersion)).thenReturn(List.of());
+        when(repository.listActiveSymbolOutlinesByPaths(eq(repositoryId), any(), anyInt(), any(), any()))
+                .thenReturn(List.of());
+        when(repository.listActiveGraphRelationOutlinesByChunkIds(
+                eq(repositoryId), eq(indexVersion), any(), anyInt(), any(), any()))
+                .thenReturn(List.of(new CodeGraphRelationOutline(
+                        UUID.randomUUID(), chunkId, "FORWARD", relationType,
+                        "coordinate", "Pipeline.coordinate", "src/Pipeline.java",
+                        "persist", "Store.persist", "src/Store.java", neighborChunkId, 1.0)));
+        CodeSearchResult source = new CodeSearchResult(
+                chunkId, repositoryId, UUID.randomUUID(), "repo", "src/Pipeline.java", "method",
+                "coordinate", "Pipeline", "coordinate", "app", null, null, 0, 10, 30,
+                "void coordinate() { store.persist(); }", 0.9,
+                Map.of("indexVersion", indexVersion.toString()));
+        RepositoryQuestionMapBuilder.RepositoryQuestionMap map = new RepositoryQuestionMapBuilder(repository).build(
+                repositoryId, null, List.of(UUID.randomUUID()), "follow the call", List.of(source));
+        return new GraphMapFixture(map, source);
     }
 
     private RepositoryQuestionMapBuilder.RepositoryQuestionMap observedMapWithOutlineKind(
@@ -789,5 +1011,11 @@ class CodeRetrievalPlanValidatorTest {
         return new RagPipelineService.CodeEvidenceFollowUpPlan(
                 true, false, "test", List.of("claim-1"), List.of(), List.of(), List.of("claim-1"),
                 List.of(claim), operations, List.of(), "hypothesis", 1, "UNRESOLVED", List.of(), terminationRequest);
+    }
+
+    private record GraphMapFixture(
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap map,
+            CodeSearchResult source
+    ) {
     }
 }

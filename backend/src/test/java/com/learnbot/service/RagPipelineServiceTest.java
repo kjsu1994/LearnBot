@@ -708,7 +708,7 @@ class RagPipelineServiceTest {
                 any(Duration.class),
                 any()
         )).thenReturn(new OllamaClient.ChatResult("""
-                {"enough":false,"missingAreas":["graph expansion","answer generation"],"operations":[{"type":"hybrid_search","query":"CodeSearchService expandGraph","area":"graph expansion","evidenceGroup":"graph_traversal"},{"type":"hybrid_search","query":"answer generation model client call","area":"answer generation","evidenceGroup":"answer_generation"}],"followUpQueries":["CodeSearchService expandGraph","answer generation model client call"],"queryAreas":["graph expansion","answer generation"],"requiredEvidenceGroups":["graph_traversal"],"checklist":[{"claimId":"graph-expansion","evidenceGroup":"graph_traversal","goal":"find concrete graph expansion implementation","queries":["CodeSearchService expandGraph graphRelatedChunks"]},{"claimId":"answer-generation","evidenceGroup":"answer_generation","goal":"find the requested answer generation behavior","queries":["answer generation model client call"]}],"coverageSelections":[],"reason":"need concrete traversal evidence"}
+                {"enough":false,"missingAreas":["graph expansion","answer generation"],"operations":[{"type":"hybrid_search","query":"CodeSearchService expandGraph","area":"graph expansion","evidenceGroup":"graph_traversal"},{"type":"hybrid_search","query":"answer generation model client call","area":"answer generation","evidenceGroup":"answer_generation"}],"followUpQueries":["CodeSearchService expandGraph","answer generation model client call"],"queryAreas":["graph expansion","answer generation"],"requiredEvidenceGroups":["graph_traversal"],"checklist":[{"claimId":"graph-expansion","evidenceGroup":"graph_traversal","goal":"find concrete graph expansion implementation","actor":"search service","action":"expand","object":"graph candidates","expectedOutcome":"related chunks are returned","queries":["CodeSearchService expandGraph graphRelatedChunks"]},{"claimId":"answer-generation","evidenceGroup":"answer_generation","goal":"find the requested answer generation behavior","queries":["answer generation model client call"]}],"coverageSelections":[],"reason":"need concrete traversal evidence"}
                 """, "stop", true, 120, 90, "http://ollama", "test", "auxiliary", false));
 
         RagPipelineService.CodeEvidenceFollowUpPlan plan = service.planCodeEvidenceFollowUp(
@@ -721,6 +721,13 @@ class RagPipelineServiceTest {
 
         assertThat(plan.checklist()).extracting(RagPipelineService.CodeEvidenceChecklistItem::evidenceGroup)
                 .containsExactly("graph_traversal", "answer_generation");
+        assertThat(plan.checklist().get(0)).satisfies(item -> {
+            assertThat(item.goal()).isEqualTo("find concrete graph expansion implementation");
+            assertThat(item.actor()).isEqualTo("search service");
+            assertThat(item.action()).isEqualTo("expand");
+            assertThat(item.object()).isEqualTo("graph candidates");
+            assertThat(item.expectedOutcome()).isEqualTo("related chunks are returned");
+        });
         assertThat(plan.requiredEvidenceGroups()).contains("graph_traversal", "answer_generation");
         ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -747,7 +754,13 @@ class RagPipelineServiceTest {
                 .contains("direct call visible in source, an observed CALLS")
                 .contains("lexical overlap between user vocabulary and observed source identifiers is low")
                 .contains("one separate conventional source-vocabulary query")
-                .contains("without inventing a concrete identifier");
+                .contains("without inventing a concrete identifier")
+                .contains("server-approved checklist may be intentionally skeletal")
+                .contains("Never let one broad skeletal goal stand in for several requested stages")
+                .contains("explicit range from a starting action through or to a terminal action")
+                .contains("including equivalent source-to-target wording in any language")
+                .contains("cannot be SUPPORTED when its supportedClaim, limitations, hypothesis, or reason")
+                .doesNotContain("UpdateHighlight", "completeSuccessfulIndex", "askPrioritized");
     }
 
     @Test
@@ -934,6 +947,41 @@ class RagPipelineServiceTest {
                 .contains("evidenceId=index:chunk:10-40")
                 .contains("Symbols: Service execute")
                 .contains("DIRECT_IMPLEMENTATION_BODY calls search expand rank generate");
+    }
+
+    @Test
+    void structuredPromptBudgetKeepsQuestionAndIndexedNavigationOperands() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getOllama().setContextWindow(4096);
+        RagPipelineService service = new RagPipelineService(mock(OllamaClient.class), properties);
+        String leadingEvidence = java.util.stream.IntStream.range(0, 180)
+                .mapToObj(index -> "- evidenceId=index:chunk:" + index
+                        + " kind=IMPLEMENTATION_BODY excerpt=" + "noise".repeat(8))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElseThrow();
+        String trailingEvidence = java.util.stream.IntStream.range(180, 360)
+                .mapToObj(index -> "- evidenceId=index:chunk:" + index
+                        + " kind=IMPLEMENTATION_BODY excerpt=" + "tail".repeat(8))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElseThrow();
+        String relation = "- evidenceId=index:graph-relation:edge-7 seedPath=src/Flow.java "
+                + "seedSymbol=run relation=CALLS direction=FORWARD neighborPath=src/Store.java "
+                + "neighborSymbol=commitResult neighborChunkId=chunk-7 navigationOnly=true";
+        String oversized = "RepositoryEvidenceMap\n" + leadingEvidence
+                + "\n[INDEXED_GRAPH_RELATION_HANDLES] navigationOnly=true\n" + relation
+                + "\n" + trailingEvidence
+                + "\nQuestion:\nTRACE_UNIQUE_REQUEST_BEHAVIOR\n\n"
+                + "Retrieval iteration: 3\nTAIL_LATEST_OBSERVATION";
+
+        String bounded = service.boundedStructuredUserPrompt(
+                "code evidence retrieval iteration", "system", oversized, 512,
+                Map.of("type", "object", "properties", Map.of("enough", Map.of("type", "boolean"))));
+
+        assertThat(bounded)
+                .contains("TRACE_UNIQUE_REQUEST_BEHAVIOR")
+                .contains("index:graph-relation:edge-7", "neighborSymbol=commitResult")
+                .contains("TAIL_LATEST_OBSERVATION");
+        assertThat(bounded.length()).isLessThan(oversized.length());
     }
 
     @Test

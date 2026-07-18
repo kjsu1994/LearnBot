@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public record CodeEvidenceIr(
         List<CodeEvidenceItem> evidenceItems,
@@ -79,6 +81,74 @@ public record CodeEvidenceIr(
         return new CodeEvidenceIr(List.copyOf(mergedItems.values()), List.copyOf(mergedFacts.values()),
                 List.copyOf(mergedConstraints.values()), List.copyOf(mergedSignals.values()),
                 List.copyOf(mergedHandles.values()), List.copyOf(mergedDiagnostics));
+    }
+
+    /**
+     * Keeps typed intelligence only for evidence that survived final context selection. This lets
+     * full-source facts and navigation handles remain available after excerpt compression without
+     * reintroducing facts from candidates that were not shown to the answer model.
+     */
+    public CodeEvidenceIr retainEvidence(Set<String> evidenceIds) {
+        Set<String> retainedIds = evidenceIds == null ? Set.of() : evidenceIds.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+        if (retainedIds.isEmpty()) return empty();
+
+        List<CodeEvidenceItem> retainedItems = evidenceItems.stream()
+                .filter(item -> retainedIds.contains(item.evidenceId()))
+                .toList();
+        List<CodeEvidenceFact> retainedFacts = facts.stream()
+                .filter(fact -> retainedIds.contains(fact.sourceEvidenceId()))
+                .toList();
+        List<CodeEvidenceSignal> retainedSignals = signals.stream()
+                .filter(signal -> retainedIds.contains(signal.sourceEvidenceId()))
+                .toList();
+        List<CodeNavigationHandle> retainedHandles = navigationHandles.stream()
+                .filter(handle -> retainedIds.contains(handle.sourceEvidenceId()))
+                .toList();
+        Set<String> retainedTargets = java.util.stream.Stream.of(
+                        retainedIds.stream(),
+                        retainedFacts.stream().map(CodeEvidenceFact::factId),
+                        retainedHandles.stream().map(CodeNavigationHandle::handleId))
+                .flatMap(java.util.function.Function.identity())
+                .collect(Collectors.toUnmodifiableSet());
+        List<CodeEvidenceConstraint> retainedConstraints = constraints.stream()
+                .filter(constraint -> retainedTargets.contains(constraint.targetId()))
+                .toList();
+        return new CodeEvidenceIr(retainedItems, retainedFacts, retainedConstraints,
+                retainedSignals, retainedHandles, diagnostics);
+    }
+
+    /**
+     * Keeps only the navigation closure for selected evidence. This is intentionally narrower
+     * than {@link #retainEvidence(Set)}: excerpt compression may hide an otherwise useful call
+     * site, but it must not restore unrelated assignments or exact facts omitted from the final
+     * answer context.
+     */
+    public CodeEvidenceIr retainNavigationEvidence(Set<String> evidenceIds) {
+        Set<String> retainedIds = evidenceIds == null ? Set.of() : evidenceIds.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+        if (retainedIds.isEmpty()) return empty();
+
+        List<CodeEvidenceItem> retainedItems = evidenceItems.stream()
+                .filter(item -> retainedIds.contains(item.evidenceId()))
+                .toList();
+        List<CodeNavigationHandle> retainedHandles = navigationHandles.stream()
+                .filter(handle -> retainedIds.contains(handle.sourceEvidenceId()))
+                .toList();
+        Set<String> retainedHandleIds = retainedHandles.stream()
+                .map(CodeNavigationHandle::handleId)
+                .collect(Collectors.toUnmodifiableSet());
+        List<CodeEvidenceConstraint> retainedConstraints = constraints.stream()
+                .filter(constraint -> retainedHandleIds.contains(constraint.targetId()))
+                .toList();
+        return new CodeEvidenceIr(retainedItems, List.of(), retainedConstraints,
+                List.of(), retainedHandles, diagnostics);
     }
 
     public CodeEvidenceIr withDiagnostic(Diagnostic diagnostic) {

@@ -7,6 +7,8 @@ import com.learnbot.config.LearnBotProperties;
 import com.learnbot.dto.CodeChunkSummary;
 import com.learnbot.dto.CodeAnalysisDiagnosticSummary;
 import com.learnbot.dto.CodeFileSummary;
+import com.learnbot.dto.CodeGraphRelationOutline;
+import com.learnbot.dto.CodeEndpointOutline;
 import com.learnbot.dto.CodeRepositorySummary;
 import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.dto.CodeSymbolOutline;
@@ -1320,6 +1322,43 @@ public class CodeRepository {
                 .addValue("selectedSpaceId", selectedSpaceId), this::mapSearchResult);
     }
 
+    public List<CodeEndpointOutline> listActiveEndpointOutlinesByChunkIds(
+            UUID repositoryId,
+            List<UUID> chunkIds,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        List<UUID> ids = chunkIds == null ? List.of() : chunkIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .limit(250)
+                .toList();
+        if (ids.isEmpty()) return List.of();
+        return jdbc.query("""
+                SELECT DISTINCT n.chunk_id,
+                       n.metadata->>'route' AS route,
+                       COALESCE(n.metadata->>'httpMethod', '') AS http_method
+                FROM code_graph_nodes n
+                JOIN code_chunks c ON c.id = n.chunk_id AND c.active
+                JOIN code_repositories r ON r.id = c.repository_id AND r.deleted_at IS NULL
+                WHERE n.active
+                  AND n.node_type = 'endpoint'
+                  AND n.chunk_id IN (:chunkIds)
+                  AND COALESCE(n.metadata->>'route', '') <> ''
+                  AND r.space_id IN (:spaceIds)
+                  AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                  AND (CAST(:repositoryId AS uuid) IS NULL OR c.repository_id = CAST(:repositoryId AS uuid))
+                ORDER BY n.chunk_id, route, http_method
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("chunkIds", ids)
+                .addValue("spaceIds", authorizedSpaceIds(spaceIds))
+                .addValue("selectedSpaceId", selectedSpaceId), (rs, rowNum) -> new CodeEndpointOutline(
+                        rs.getObject("chunk_id", UUID.class),
+                        rs.getString("route"),
+                        rs.getString("http_method")));
+    }
+
     private String normalizeEndpointRoute(String value) {
         String route = value == null ? "" : value.trim();
         if (route.isBlank()) return "";
@@ -1635,6 +1674,130 @@ public class CodeRepository {
                         rs.getString("analyzer"),
                         rs.getString("authority"),
                         rs.getInt("total_in_file")
+                ));
+    }
+
+    public List<CodeGraphRelationOutline> listActiveGraphRelationOutlinesByChunkIds(
+            UUID repositoryId,
+            UUID indexVersion,
+            List<UUID> seedChunkIds,
+            int perSeedLimit,
+            List<UUID> spaceIds,
+            UUID selectedSpaceId
+    ) {
+        if (repositoryId == null || indexVersion == null || seedChunkIds == null || seedChunkIds.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> seeds = seedChunkIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .limit(32)
+                .toList();
+        if (seeds.isEmpty()) {
+            return List.of();
+        }
+        int safePerSeedLimit = Math.max(1, Math.min(perSeedLimit, 64));
+        List<UUID> safeSpaceIds = authorizedSpaceIds(spaceIds);
+        return jdbc.query("""
+                WITH relation_candidates AS (
+                    SELECT e.id AS edge_id,
+                           seed_chunk.id AS seed_chunk_id,
+                           'FORWARD' AS direction,
+                           e.edge_type,
+                           seed.name AS seed_name,
+                           COALESCE(seed.qualified_name, '') AS seed_qualified_name,
+                           COALESCE(seed.file_path, seed_chunk.file_path, '') AS seed_path,
+                           neighbor.name AS neighbor_name,
+                           COALESCE(neighbor.qualified_name, '') AS neighbor_qualified_name,
+                           COALESCE(neighbor.file_path, neighbor_chunk.file_path, '') AS neighbor_path,
+                           neighbor_chunk.id AS neighbor_chunk_id,
+                           e.confidence
+                    FROM code_graph_edges e
+                    JOIN code_graph_nodes seed ON seed.id = e.source_node_id AND seed.active
+                    JOIN code_graph_nodes neighbor ON neighbor.id = e.target_node_id AND neighbor.active
+                    JOIN code_chunks seed_chunk ON seed_chunk.id = seed.chunk_id AND seed_chunk.active
+                    LEFT JOIN code_chunks neighbor_chunk ON neighbor_chunk.id = neighbor.chunk_id AND neighbor_chunk.active
+                    JOIN code_repositories r ON r.id = e.repository_id AND r.deleted_at IS NULL
+                    WHERE e.active
+                      AND e.repository_id = :repositoryId
+                      AND e.index_version = :indexVersion
+                      AND seed_chunk.id IN (:seedChunkIds)
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+
+                    UNION ALL
+
+                    SELECT e.id AS edge_id,
+                           seed_chunk.id AS seed_chunk_id,
+                           'REVERSE' AS direction,
+                           e.edge_type,
+                           seed.name AS seed_name,
+                           COALESCE(seed.qualified_name, '') AS seed_qualified_name,
+                           COALESCE(seed.file_path, seed_chunk.file_path, '') AS seed_path,
+                           neighbor.name AS neighbor_name,
+                           COALESCE(neighbor.qualified_name, '') AS neighbor_qualified_name,
+                           COALESCE(neighbor.file_path, neighbor_chunk.file_path, '') AS neighbor_path,
+                           neighbor_chunk.id AS neighbor_chunk_id,
+                           e.confidence
+                    FROM code_graph_edges e
+                    JOIN code_graph_nodes seed ON seed.id = e.target_node_id AND seed.active
+                    JOIN code_graph_nodes neighbor ON neighbor.id = e.source_node_id AND neighbor.active
+                    JOIN code_chunks seed_chunk ON seed_chunk.id = seed.chunk_id AND seed_chunk.active
+                    LEFT JOIN code_chunks neighbor_chunk ON neighbor_chunk.id = neighbor.chunk_id AND neighbor_chunk.active
+                    JOIN code_repositories r ON r.id = e.repository_id AND r.deleted_at IS NULL
+                    WHERE e.active
+                      AND e.repository_id = :repositoryId
+                      AND e.index_version = :indexVersion
+                      AND seed_chunk.id IN (:seedChunkIds)
+                      AND r.space_id IN (:spaceIds)
+                      AND (CAST(:selectedSpaceId AS uuid) IS NULL OR r.space_id = CAST(:selectedSpaceId AS uuid))
+                ), deduplicated AS (
+                    SELECT relation_candidates.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY seed_chunk_id, direction, edge_type,
+                                            LOWER(seed_name), LOWER(neighbor_name),
+                                            neighbor_path, neighbor_chunk_id
+                               ORDER BY confidence DESC, edge_id
+                           ) AS duplicate_rank
+                    FROM relation_candidates
+                ), ranked AS (
+                    SELECT deduplicated.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY seed_chunk_id, direction
+                               ORDER BY CASE WHEN neighbor_chunk_id IS NULL THEN 1 ELSE 0 END,
+                                        confidence DESC,
+                                        CASE WHEN edge_type = 'REFERENCES' THEN 1 ELSE 0 END,
+                                        edge_type, neighbor_name, neighbor_path, edge_id
+                           ) AS relation_rank
+                    FROM deduplicated
+                    WHERE duplicate_rank = 1
+                )
+                SELECT edge_id, seed_chunk_id, direction, edge_type,
+                       seed_name, seed_qualified_name, seed_path,
+                       neighbor_name, neighbor_qualified_name, neighbor_path,
+                       neighbor_chunk_id, confidence
+                FROM ranked
+                WHERE relation_rank <= :perSeedLimit
+                ORDER BY seed_chunk_id, direction, relation_rank
+                """, new MapSqlParameterSource()
+                .addValue("repositoryId", repositoryId)
+                .addValue("indexVersion", indexVersion)
+                .addValue("seedChunkIds", seeds)
+                .addValue("perSeedLimit", safePerSeedLimit)
+                .addValue("spaceIds", safeSpaceIds)
+                .addValue("selectedSpaceId", selectedSpaceId), (rs, rowNum) -> new CodeGraphRelationOutline(
+                        rs.getObject("edge_id", UUID.class),
+                        rs.getObject("seed_chunk_id", UUID.class),
+                        rs.getString("direction"),
+                        rs.getString("edge_type"),
+                        rs.getString("seed_name"),
+                        rs.getString("seed_qualified_name"),
+                        rs.getString("seed_path"),
+                        rs.getString("neighbor_name"),
+                        rs.getString("neighbor_qualified_name"),
+                        rs.getString("neighbor_path"),
+                        rs.getObject("neighbor_chunk_id", UUID.class),
+                        rs.getDouble("confidence")
                 ));
     }
 
@@ -2033,7 +2196,8 @@ public class CodeRepository {
                 LIMIT :maxSeedNodes
                 """.formatted(seedValues, seedTypeOrder), seedParams, (rs, rowNum) -> {
                     UUID id = rs.getObject("id", UUID.class);
-                    return new TraversalPath(id, List.of(id), List.of(rs.getString("name")), List.of(), 0, 1.0);
+                    return new TraversalPath(id, List.of(id), List.of(rs.getString("name")),
+                            List.of(), List.of(), 0, 1.0);
                 });
         if (seeds.isEmpty()) {
             return List.of();
@@ -2074,9 +2238,11 @@ public class CodeRepository {
                 names.add(neighbor.toNodeName());
                 List<String> edges = new ArrayList<>(parent.pathEdges());
                 edges.add(neighbor.edgeType());
+                List<String> directions = new ArrayList<>(parent.pathDirections());
+                directions.add(neighbor.direction());
                 TraversalPath candidate = new TraversalPath(
                         neighbor.toNodeId(), List.copyOf(visited), List.copyOf(names), List.copyOf(edges),
-                        hop, parent.pathScore() * neighbor.confidence() * 0.82
+                        List.copyOf(directions), hop, parent.pathScore() * neighbor.confidence() * 0.82
                 );
                 TraversalPath current = nextByNode.get(candidate.nodeId());
                 if (current == null || candidate.pathScore() > current.pathScore()) {
@@ -2118,30 +2284,36 @@ public class CodeRepository {
         return jdbc.query("""
                 WITH candidates AS (
                     SELECT e.source_node_id AS from_node_id, e.target_node_id AS to_node_id,
-                           e.edge_type, e.confidence
+                           e.edge_type, e.confidence, 'FORWARD' AS traversal_direction
                     FROM code_graph_edges e
                     WHERE :forward AND e.active AND e.source_node_id IN (:frontierIds)
                       AND e.edge_type IN (:edgeTypes)
                     UNION ALL
                     SELECT e.target_node_id AS from_node_id, e.source_node_id AS to_node_id,
-                           e.edge_type, e.confidence
+                           e.edge_type, e.confidence, 'REVERSE' AS traversal_direction
                     FROM code_graph_edges e
                     WHERE :reverse AND e.active AND e.target_node_id IN (:frontierIds)
                       AND e.edge_type IN (:edgeTypes)
                 ), ranked AS (
-                    SELECT candidates.*,
+                    SELECT candidates.*, target.name AS to_node_name,
                            row_number() OVER (
                                PARTITION BY from_node_id
-                               ORDER BY confidence DESC,
+                               ORDER BY CASE
+                                       WHEN target.chunk_id IS NOT NULL
+                                            AND NULLIF(target.file_path, '') IS NOT NULL THEN 0
+                                       ELSE 1
+                                   END,
+                                   confidence DESC,
                                    CASE WHEN edge_type = 'REFERENCES' THEN 1 ELSE 0 END,
                                    edge_type, to_node_id
                            ) AS edge_rank
                     FROM candidates
+                    JOIN code_graph_nodes target
+                      ON target.id = candidates.to_node_id AND target.active
                 )
-                SELECT ranked.from_node_id, ranked.to_node_id, target.name AS to_node_name,
-                       ranked.edge_type, ranked.confidence
+                SELECT ranked.from_node_id, ranked.to_node_id, ranked.to_node_name,
+                        ranked.edge_type, ranked.confidence, ranked.traversal_direction
                 FROM ranked
-                JOIN code_graph_nodes target ON target.id = ranked.to_node_id AND target.active
                 WHERE ranked.edge_rank <= :maxEdgesPerNode
                 ORDER BY ranked.edge_rank, ranked.confidence DESC, ranked.to_node_id
                 LIMIT :remainingRows
@@ -2156,7 +2328,8 @@ public class CodeRepository {
                         rs.getObject("to_node_id", UUID.class),
                         rs.getString("to_node_name"),
                         rs.getString("edge_type"),
-                        rs.getDouble("confidence")
+                        rs.getDouble("confidence"),
+                        rs.getString("traversal_direction")
                 ));
     }
 
@@ -2227,6 +2400,8 @@ public class CodeRepository {
             metadata.put("graphPathNodes", path.pathNames());
             metadata.put("graphEdgeTypes", path.pathEdges());
             metadata.put("graphEdgeType", path.pathEdges().get(path.pathEdges().size() - 1));
+            metadata.put("graphPathDirections", path.pathDirections());
+            metadata.put("graphDirection", path.pathDirections().get(path.pathDirections().size() - 1));
             metadata.put("graphDepth", path.depth());
             metadata.put("graphPathScore", path.pathScore());
             metadata.put("graphExpanded", true);
@@ -2253,9 +2428,10 @@ public class CodeRepository {
     }
 
     private record TraversalPath(UUID nodeId, List<UUID> visited, List<String> pathNames,
-                                 List<String> pathEdges, int depth, double pathScore) {}
+                                  List<String> pathEdges, List<String> pathDirections,
+                                  int depth, double pathScore) {}
     private record TraversalNeighbor(UUID fromNodeId, UUID toNodeId, String toNodeName,
-                                     String edgeType, double confidence) {}
+                                      String edgeType, double confidence, String direction) {}
     private record TraversalChunk(UUID nodeId, CodeSearchResult result) {}
 
     private String graphEvidenceKind(TraversalPath path) {
