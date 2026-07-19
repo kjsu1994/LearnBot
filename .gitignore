@@ -46,6 +46,9 @@ artifacts/local-agent/stable/*
 !artifacts/local-agent/stable/.gitkeep
 artifacts/local-agent/pilot/*
 !artifacts/local-agent/pilot/.gitkeep
+artifacts/local-agent/trust/*
+!artifacts/local-agent/trust/.gitkeep
+deploy/local-agent-lan-http.generated.inc
 
 # Local runtime data and object-store volume mirrors
 postgres-data/

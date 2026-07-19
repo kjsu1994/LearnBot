@@ -60,21 +60,14 @@ internal sealed partial class LearnBotLocalAgent
 
     private static string? NormalizeTrustedUpdateUri(string? value, string? serverUrl)
     {
-        if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var server)
-            || server.Scheme != Uri.UriSchemeHttps
-            || string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var update))
-        {
-            return null;
-        }
-        var absolute = update.IsAbsoluteUri ? update : new Uri(server, update);
-        var sameOrigin = absolute.Scheme == Uri.UriSchemeHttps
-            && string.Equals(absolute.Host, server.Host, StringComparison.OrdinalIgnoreCase)
-            && absolute.Port == server.Port;
-        return sameOrigin ? absolute.ToString() : null;
+        return ServerOriginPolicy.TryResolveSameOriginUri(
+            value,
+            serverUrl ?? "",
+            ConfiguredPublicBaseUrl(),
+            ConfiguredAllowInsecurePrivateNetwork(),
+            out var absolute)
+                ? absolute.ToString()
+                : null;
     }
 
     private static int SelfTestAgentUpdateGateContract()
@@ -108,11 +101,30 @@ internal sealed partial class LearnBotLocalAgent
                 """, server);
             var httpRejected = IsAgentUpdateRequired(out var httpState)
                 && httpState?.UpdateUri is null;
+            var enterpriseHttpAccepted = ServerOriginPolicy.TryResolveSameOriginUri(
+                    "/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller",
+                    "http://192.168.1.72:8083",
+                    "http://192.168.1.72:8083",
+                    allowInsecurePrivateNetwork: true,
+                    out var privateUpdate)
+                && privateUpdate.ToString() == "http://192.168.1.72:8083/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller";
+            var differentPrivateOriginRejected = !ServerOriginPolicy.TryResolveSameOriginUri(
+                "http://192.168.1.73:8083/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller",
+                "http://192.168.1.72:8083",
+                "http://192.168.1.72:8083",
+                allowInsecurePrivateNetwork: true,
+                out _);
             CaptureHeartbeatUpdateState("""
                 {"latestVersion":"2.0.0","minimumVersion":"1.5.0","updateState":"CURRENT","updateUri":"https://learnbot.example.test/downloads/agent.appinstaller"}
                 """, server);
             var current = !IsAgentUpdateRequired(out _);
-            var passed = blocked && relative && crossOriginRejected && httpRejected && current;
+            var passed = blocked
+                && relative
+                && crossOriginRejected
+                && httpRejected
+                && enterpriseHttpAccepted
+                && differentPrivateOriginRejected
+                && current;
             Console.WriteLine(passed ? "agent-update-gate-contract-ok" : "agent-update-gate-contract-failed");
             return passed ? 0 : 1;
         }

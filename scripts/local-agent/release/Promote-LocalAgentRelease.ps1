@@ -58,6 +58,11 @@ $source = Get-Content -Raw -LiteralPath $sourceMetadataPath | ConvertFrom-Json
 if ($source.version -ne $Version -or $source.channel -ne $From -or -not [bool]$source.signed) {
     throw "Only the requested signed pilot release can be promoted."
 }
+$sourceInsecurePrivateNetwork = ($source.PSObject.Properties.Name -contains "insecurePrivateNetwork") -and [bool]$source.insecurePrivateNetwork
+$sourceEnterpriseManagedTrust = ($source.PSObject.Properties.Name -contains "enterpriseManagedTrust") -and [bool]$source.enterpriseManagedTrust
+if ($sourceInsecurePrivateNetwork) {
+    throw "A private-network HTTP pilot cannot be promoted to stable. Publish a new HTTPS package version first."
+}
 if (-not ($source.PSObject.Properties.Name -contains "productionTrusted") -or -not [bool]$source.productionTrusted) {
     throw "Pilot was not signed with an asserted production-trusted identity and cannot be promoted to stable."
 }
@@ -113,6 +118,19 @@ try {
     }
     [xml](Get-Content -Raw -LiteralPath $stagedAppInstaller) | Out-Null
 
+    $targetSigningCertificate = $null
+    if ($source.PSObject.Properties.Name -contains "signingCertificate" -and $null -ne $source.signingCertificate) {
+        $targetSigningCertificate = [ordered]@{
+            required = [bool]$source.signingCertificate.required
+            subject = [string]$source.signingCertificate.subject
+            thumbprint = [string]$source.signingCertificate.thumbprint
+            sha256 = [string]$source.signingCertificate.sha256
+            path = [string]$source.signingCertificate.path
+            url = "$origin/downloads/local-agent/$([string]$source.signingCertificate.path)"
+            targetStore = [string]$source.signingCertificate.targetStore
+        }
+    }
+
     $targetMetadata = [ordered]@{
         schema = [string]$source.schema
         channel = $To
@@ -127,7 +145,11 @@ try {
         publisher = [string]$source.publisher
         signed = $true
         signingMode = [string]$source.signingMode
+        enterpriseManagedTrust = $sourceEnterpriseManagedTrust
+        insecurePrivateNetwork = $false
+        transportSecurity = "https"
         productionTrusted = $true
+        signingCertificate = $targetSigningCertificate
         publishedAt = [string]$source.publishedAt
         promotedAt = [DateTimeOffset]::UtcNow.ToString("o")
         promotionMode = $(if ($rollback) { "rollback" } else { "forward" })
@@ -135,7 +157,8 @@ try {
         promotedBy = [Environment]::UserName
     }
     $stagedMetadata = Join-Path $staging "release.json"
-    $targetMetadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $stagedMetadata -Encoding UTF8
+    $targetMetadataJson = $targetMetadata | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($stagedMetadata, $targetMetadataJson, [Text.UTF8Encoding]::new($false))
 
     $lock = $null
     try {
@@ -160,7 +183,8 @@ try {
         $targetMetadata.replacedVersion = $replacedVersion
         $targetMetadata.promotionMode = $(if ($rollback) { "rollback" } else { "forward" })
         $targetMetadata.promotedAt = [DateTimeOffset]::UtcNow.ToString("o")
-        $targetMetadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $stagedMetadata -Encoding UTF8
+        $targetMetadataJson = $targetMetadata | ConvertTo-Json -Depth 4
+        [IO.File]::WriteAllText($stagedMetadata, $targetMetadataJson, [Text.UTF8Encoding]::new($false))
         Publish-AtomicFile $stagedAppInstaller (Join-Path $targetDirectory "LearnBotLocalAgent.appinstaller")
         Publish-AtomicFile $stagedMetadata (Join-Path $targetDirectory "release.json")
     } catch [IO.IOException] {

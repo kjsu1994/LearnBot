@@ -96,6 +96,10 @@ public final class CodeEvidenceOperationExecutor {
                 results = mergeUnique(results, sourceBundleExpander.expand(
                         repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, results,
                         retrievalIntent));
+            } else if (operation.isDirectRead()) {
+                results = mergeUnique(results, sourceBundleExpander.expandDirectContainer(
+                        repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, results,
+                        retrievalIntent));
             }
             List<CodeSearchResult> safeResults = enrichEndpointMetadata(
                     repositoryId, selectedSpaceId, spaceIds,

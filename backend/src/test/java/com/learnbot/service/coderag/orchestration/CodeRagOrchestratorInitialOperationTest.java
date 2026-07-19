@@ -467,6 +467,20 @@ class CodeRagOrchestratorInitialOperationTest {
         assertThat(orchestrator.preview(canonical)).isEqualTo(canonical);
     }
 
+    @Test
+    void graphTraversalObservationPublishesReturnedSymbolsForTheNextPlan() {
+        UUID repositoryId = UUID.randomUUID();
+        var graph = new RagPipelineService.CodeSearchOperation(
+                "traverse_graph", "", "implementation", "flow", "", "", "",
+                null, null, null, List.of("CALLS"), "FORWARD", 2,
+                "graph-flow", List.of("claim-flow"), List.of());
+        CodeSearchResult first = rankedResult(repositoryId, "dispatchFrame", 0.8, 20);
+        CodeSearchResult second = rankedResult(repositoryId, "persistFrame", 0.7, 40);
+
+        assertThat(CodeRagOrchestrator.operationResultHandles(graph, List.of(first, second)))
+                .contains("observedSymbols=[dispatchFrame, persistFrame]");
+    }
+
     private CodeSearchResult structuralResult(UUID repositoryId) {
         return new CodeSearchResult(
                 UUID.randomUUID(), repositoryId, UUID.randomUUID(), "repo", "src/app/Worker.java",

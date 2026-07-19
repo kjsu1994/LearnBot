@@ -913,6 +913,29 @@ class EvidenceExcerptSelectorTest {
         assertThat(direct.contentComplete()).isFalse();
     }
 
+    @Test
+    void callableFamilyCoverageReservesLateCompletionBeforeEarlySameFamilyCallsFillBudget() {
+        String content = "void ExecuteBatch(Batch batch) {\n"
+                + "    worker.prepareBatch(batch);\n"
+                + "    String firstPadding = batch.configurationWithAnIntentionallyLongName();\n".repeat(12)
+                + "    worker.validateBatch(batch);\n"
+                + "    String secondPadding = batch.anotherConfigurationWithAnIntentionallyLongName();\n".repeat(12)
+                + "    worker.stageBatch(batch);\n"
+                + "    String thirdPadding = batch.yetAnotherConfigurationWithAnIntentionallyLongName();\n".repeat(12)
+                + "    worker.publishBatch(batch);\n"
+                + "    worker.completeBatch(batch);\n"
+                + "}\n";
+        CodeSearchResult directRead = withMetadata(
+                withMethodIdentity(result(content), "ExecuteBatch"),
+                Map.of("llmDirectRead", true, "llmReadFulfilled", true));
+
+        EvidenceExcerptSelector.Excerpt excerpt = EvidenceExcerptSelector.select(
+                "완료 상태로 이어지는 전체 흐름", directRead, 420);
+
+        assertThat(excerpt.text()).contains("ExecuteBatch", "completeBatch");
+        assertThat(excerpt.text().length()).isLessThanOrEqualTo(420);
+    }
+
     private CodeSearchResult result(String content) {
         UUID repositoryId = UUID.randomUUID();
         return new CodeSearchResult(

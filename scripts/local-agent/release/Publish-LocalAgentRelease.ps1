@@ -4,7 +4,6 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+\.\d+$')]
     [string]$Version,
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^https://')]
     [string]$PublicBaseUrl,
     [Parameter(Mandatory = $true)]
     [string]$Publisher,
@@ -15,6 +14,7 @@ param(
     [string]$Channel = "pilot",
     [string]$ArtifactsRoot,
     [string]$WindowsSdkBin,
+    [string]$DotNetPath = "dotnet",
     [string]$TimestampUrl = "http://timestamp.acs.microsoft.com",
     [Parameter(Mandatory = $true, ParameterSetName = "CertificateStore")]
     [string]$CertificateThumbprint,
@@ -24,7 +24,12 @@ param(
     [string]$ArtifactSigningMetadataPath,
     [Parameter(Mandatory = $true, ParameterSetName = "UnsignedTest")]
     [switch]$UnsignedTest,
-    [switch]$AssertPublicTrustCertificate
+    [switch]$AssertPublicTrustCertificate,
+    [switch]$EnterpriseManagedTrust,
+    [switch]$AllowInsecurePrivateNetwork,
+    [switch]$PortableServerPackage,
+    [switch]$SkipTimestamp,
+    [switch]$ValidateConfigurationOnly
 )
 
 Set-StrictMode -Version Latest
@@ -71,28 +76,34 @@ function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
 function Invoke-Sign([string]$SignTool, [string]$Path) {
     if ($UnsignedTest) { return }
     if ($PSCmdlet.ParameterSetName -eq "ArtifactSigning") {
-        Invoke-Checked $SignTool @(
-            "sign", "/v", "/fd", "SHA256", "/td", "SHA256", "/tr", $TimestampUrl,
-            "/dlib", $ArtifactSigningDlibPath, "/dmdf", $ArtifactSigningMetadataPath, $Path
-        )
+        $arguments = @("sign", "/v", "/fd", "SHA256")
+        if (-not $SkipTimestamp) { $arguments += @("/td", "SHA256", "/tr", $TimestampUrl) }
+        $arguments += @("/dlib", $ArtifactSigningDlibPath, "/dmdf", $ArtifactSigningMetadataPath, $Path)
+        Invoke-Checked $SignTool $arguments
         return
     }
     $thumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
-    Invoke-Checked $SignTool @(
-        "sign", "/v", "/fd", "SHA256", "/sha1", $thumbprint,
-        "/tr", $TimestampUrl, "/td", "SHA256", $Path
-    )
+    $arguments = @("sign", "/v", "/fd", "SHA256", "/sha1", $thumbprint)
+    if (-not $SkipTimestamp) { $arguments += @("/tr", $TimestampUrl, "/td", "SHA256") }
+    $arguments += $Path
+    Invoke-Checked $SignTool $arguments
 }
 
-function Invoke-PublishProject([string]$Project, [string]$Output, [string]$Origin) {
+function Invoke-PublishProject(
+    [string]$Project,
+    [string]$Output,
+    [string]$Origin,
+    [bool]$InsecurePrivateNetwork
+) {
     New-Item -ItemType Directory -Force -Path $Output | Out-Null
-    Invoke-Checked "dotnet" @(
+    Invoke-Checked $DotNetPath @(
         "publish", $Project, "--configuration", "Release", "--runtime", "win-x64",
         "--self-contained", "true", "--output", $Output,
         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
         "-p:DebugType=embedded", "-p:Version=$Version", "-p:FileVersion=$Version",
         "-p:AssemblyVersion=$Version", "-p:ContinuousIntegrationBuild=true",
-        "-p:LearnBotPublicBaseUrl=$Origin"
+        "-p:LearnBotPublicBaseUrl=$Origin",
+        "-p:LearnBotAllowInsecurePrivateNetwork=$($InsecurePrivateNetwork.ToString().ToLowerInvariant())"
     )
 }
 
@@ -142,23 +153,74 @@ function Export-ScaledPng([string]$Source, [string]$Destination, [int]$Size) {
     }
 }
 
-function Resolve-PublicOrigin([string]$Value) {
+function Test-Rfc1918Ipv4Literal([string]$HostName) {
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($HostName, [ref]$address)) { return $false }
+    $bytes = $address.GetAddressBytes()
+    return $bytes.Length -eq 4 -and (
+        $bytes[0] -eq 10 -or
+        ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or
+        ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
+    )
+}
+
+function Resolve-PublicOrigin([string]$Value, [bool]$AllowPrivateHttp) {
     $uri = $null
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or
-        $uri.Scheme -ne [Uri]::UriSchemeHttps -or
+        ($uri.Scheme -ne [Uri]::UriSchemeHttps -and $uri.Scheme -ne [Uri]::UriSchemeHttp) -or
         [string]::IsNullOrWhiteSpace($uri.Host) -or
         -not [string]::IsNullOrEmpty($uri.UserInfo) -or
         ($uri.AbsolutePath -ne "/") -or
         -not [string]::IsNullOrEmpty($uri.Query) -or
         -not [string]::IsNullOrEmpty($uri.Fragment)) {
-        throw "PublicBaseUrl must be an HTTPS origin only (for example, https://learnbot.example or https://learnbot.example:8443)."
+        throw "PublicBaseUrl must be an HTTP(S) origin without a path, query, user info, or fragment."
+    }
+    if ($uri.Scheme -eq [Uri]::UriSchemeHttp -and
+        (-not $AllowPrivateHttp -or -not (Test-Rfc1918Ipv4Literal $uri.Host))) {
+        throw "HTTP release origins require -AllowInsecurePrivateNetwork and an RFC1918 IPv4 literal. Host names and public IP addresses are blocked."
     }
     return $uri.GetLeftPart([UriPartial]::Authority)
 }
 
-$origin = Resolve-PublicOrigin $PublicBaseUrl
+$origin = Resolve-PublicOrigin $PublicBaseUrl ([bool]$AllowInsecurePrivateNetwork)
+$insecurePrivateNetwork = ([Uri]$origin).Scheme -eq [Uri]::UriSchemeHttp
+if ($AllowInsecurePrivateNetwork -and -not $insecurePrivateNetwork) {
+    throw "-AllowInsecurePrivateNetwork is valid only for an RFC1918 HTTP origin. Omit it for HTTPS releases."
+}
+if ($insecurePrivateNetwork -and $Channel -ne "pilot") {
+    throw "Enterprise private-network HTTP packages are restricted to the pilot channel and cannot be published as stable."
+}
+if ($PortableServerPackage -and $Channel -ne "pilot") {
+    throw "Portable server packages are restricted to the pilot channel."
+}
+if ($PortableServerPackage -and -not $UnsignedTest -and -not $EnterpriseManagedTrust) {
+    throw "Signed portable server packages require -EnterpriseManagedTrust."
+}
+if ($EnterpriseManagedTrust -and $AssertPublicTrustCertificate) {
+    throw "Choose either -EnterpriseManagedTrust or -AssertPublicTrustCertificate, not both."
+}
+if ($EnterpriseManagedTrust -and $PSCmdlet.ParameterSetName -ne "CertificateStore") {
+    throw "-EnterpriseManagedTrust requires a code-signing certificate from the Windows certificate store."
+}
+if ($insecurePrivateNetwork -and -not $UnsignedTest -and -not $EnterpriseManagedTrust) {
+    throw "Signed private-network HTTP packages require -EnterpriseManagedTrust to assert that IT deploys the signing trust chain to managed PCs."
+}
 if ([Version]$MinimumSupportedVersion -gt [Version]$Version) {
     throw "MinimumSupportedVersion cannot be newer than Version."
+}
+if ($ValidateConfigurationOnly) {
+    [ordered]@{
+        valid = $true
+        version = $Version
+        minimumSupportedVersion = $MinimumSupportedVersion
+        channel = $Channel
+        publicBaseUrl = $origin
+        portableServerPackage = [bool]$PortableServerPackage
+        insecurePrivateNetwork = $insecurePrivateNetwork
+        enterpriseManagedTrust = [bool]$EnterpriseManagedTrust
+        signingMode = $PSCmdlet.ParameterSetName
+    } | ConvertTo-Json
+    return
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\.."))
@@ -217,17 +279,17 @@ if ($PSCmdlet.ParameterSetName -eq "CertificateStore") {
     if (-not $certificate.HasPrivateKey) {
         throw "The selected signing certificate does not have an accessible private key."
     }
-    if ($Channel -eq "stable" -and -not $AssertPublicTrustCertificate) {
-        throw "Stable CertificateStore publishing requires -AssertPublicTrustCertificate. Prefer Azure Artifact Signing for public no-admin distribution."
+    $enhancedKeyUsage = $certificate.Extensions |
+        Where-Object { $_.Oid.Value -eq "2.5.29.37" } |
+        Select-Object -First 1
+    $codeSigningAllowed = $null -ne $enhancedKeyUsage -and @($enhancedKeyUsage.EnhancedKeyUsages | ForEach-Object { $_.Value }) -contains "1.3.6.1.5.5.7.3.3"
+    if (-not $codeSigningAllowed) {
+        throw "The selected certificate does not contain the Code Signing EKU."
+    }
+    if ($Channel -eq "stable" -and -not $AssertPublicTrustCertificate -and -not $EnterpriseManagedTrust) {
+        throw "Stable CertificateStore publishing requires either -AssertPublicTrustCertificate or -EnterpriseManagedTrust."
     }
     if ($AssertPublicTrustCertificate) {
-        $enhancedKeyUsage = $certificate.Extensions |
-            Where-Object { $_.Oid.Value -eq "2.5.29.37" } |
-            Select-Object -First 1
-        $codeSigningAllowed = $null -ne $enhancedKeyUsage -and @($enhancedKeyUsage.EnhancedKeyUsages | ForEach-Object { $_.Value }) -contains "1.3.6.1.5.5.7.3.3"
-        if (-not $codeSigningAllowed) {
-            throw "The asserted production certificate does not contain the Code Signing EKU."
-        }
         $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
         try {
             $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Online
@@ -248,9 +310,11 @@ if ($PSCmdlet.ParameterSetName -eq "CertificateStore") {
     }
 }
 
-Invoke-PublishProject $projectPath (Join-Path $packageRoot "app") $origin
-Invoke-PublishProject $setupProjectPath (Join-Path $packageRoot "setup") $origin
-Invoke-PublishProject $hostProjectPath (Join-Path $packageRoot "host") $origin
+$binaryOrigin = if ($PortableServerPackage) { "https://learnbot.portable.invalid" } else { $origin }
+$binaryAllowsInsecurePrivateNetwork = $insecurePrivateNetwork -or [bool]$PortableServerPackage
+Invoke-PublishProject $projectPath (Join-Path $packageRoot "app") $binaryOrigin $binaryAllowsInsecurePrivateNetwork
+Invoke-PublishProject $setupProjectPath (Join-Path $packageRoot "setup") $binaryOrigin $binaryAllowsInsecurePrivateNetwork
+Invoke-PublishProject $hostProjectPath (Join-Path $packageRoot "host") $binaryOrigin $binaryAllowsInsecurePrivateNetwork
 
 $packageFileName = "LearnBotLocalAgent_${Version}_x64.msix"
 $packageUri = "$origin/downloads/local-agent/releases/$Version/$packageFileName"
@@ -289,11 +353,51 @@ $stagedPackage = Join-Path $stagingRoot $packageFileName
 Invoke-Checked $makeAppx @("pack", "/d", $packageRoot, "/p", $stagedPackage, "/o")
 Invoke-Sign $signTool $stagedPackage
 if (-not $UnsignedTest) {
-    Invoke-Checked $signTool @("verify", "/pa", "/all", "/v", $stagedPackage)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $verifyOutput = & $signTool verify /pa /all /v $stagedPackage 2>&1
+        $verifyExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    Write-Host ($verifyOutput -join [Environment]::NewLine)
     $signature = Get-AuthenticodeSignature -LiteralPath $stagedPackage
+    $managedTrustPending = $EnterpriseManagedTrust -and
+        $verifyExitCode -ne 0 -and
+        $signature.Status.ToString() -eq "UnknownError" -and
+        $signature.StatusMessage -match '(?i)root certificate.*not trusted by the trust provider' -and
+        ($verifyOutput -join [Environment]::NewLine) -notmatch '(?i)hash mismatch|not digitally signed|invalid digest'
+    if ($verifyExitCode -ne 0 -and -not $managedTrustPending) {
+        throw "Authenticode verification failed for $stagedPackage"
+    }
     if ($null -eq $signature.SignerCertificate -or
         -not [string]::Equals($signature.SignerCertificate.Subject, $Publisher, [StringComparison]::Ordinal)) {
         throw "The signed package certificate subject does not exactly match Publisher."
+    }
+    if (-not $SkipTimestamp -and $null -eq $signature.TimeStamperCertificate) {
+        throw "The signed package does not contain the required RFC 3161 timestamp."
+    }
+}
+
+$stagedPublicCertificate = $null
+$signingCertificateMetadata = $null
+if (-not $UnsignedTest) {
+    $publicCertificate = $signature.SignerCertificate
+    $certificateFileName = "LearnBotLocalAgentSigning_$($publicCertificate.Thumbprint.ToUpperInvariant()).cer"
+    $certificateRelativePath = "trust/$certificateFileName"
+    $certificateUri = "$origin/downloads/local-agent/$certificateRelativePath"
+    $stagedPublicCertificate = Join-Path $stagingRoot $certificateFileName
+    Export-Certificate -Cert $publicCertificate -FilePath $stagedPublicCertificate -Force | Out-Null
+    $certificateHash = (Get-FileHash -LiteralPath $stagedPublicCertificate -Algorithm SHA256).Hash.ToLowerInvariant()
+    $signingCertificateMetadata = [ordered]@{
+        required = [bool]$EnterpriseManagedTrust
+        subject = $publicCertificate.Subject
+        thumbprint = $publicCertificate.Thumbprint.ToUpperInvariant()
+        sha256 = $certificateHash
+        path = $certificateRelativePath
+        url = $certificateUri
+        targetStore = $(if ($EnterpriseManagedTrust) { "Cert:\LocalMachine\TrustedPeople" } else { $null })
     }
 }
 
@@ -318,24 +422,40 @@ $metadata = [ordered]@{
     architecture = "x64"
     packageUrl = $packageUri
     appInstallerUrl = $appInstallerUri
+    packagePath = "releases/$Version/$packageFileName"
+    appInstallerPath = "$Channel/LearnBotLocalAgent.appinstaller"
     sha256 = $hash
     sizeBytes = $size
     publisher = $Publisher
     signed = -not [bool]$UnsignedTest
     signingMode = $PSCmdlet.ParameterSetName
-    productionTrusted = -not [bool]$UnsignedTest -and (
-        $PSCmdlet.ParameterSetName -eq "ArtifactSigning" -or [bool]$AssertPublicTrustCertificate
+    enterpriseManagedTrust = -not [bool]$UnsignedTest -and [bool]$EnterpriseManagedTrust
+    portableServerPackage = [bool]$PortableServerPackage
+    embeddedServerOrigin = $(if ($PortableServerPackage) { $null } else { $origin })
+    insecurePrivateNetwork = $insecurePrivateNetwork
+    transportSecurity = $(if ($insecurePrivateNetwork) { "http-private-network" } else { "https" })
+    productionTrusted = -not $insecurePrivateNetwork -and -not [bool]$UnsignedTest -and (
+        $PSCmdlet.ParameterSetName -eq "ArtifactSigning" -or
+        [bool]$AssertPublicTrustCertificate -or
+        [bool]$EnterpriseManagedTrust
     )
+    signingCertificate = $signingCertificateMetadata
     publishedAt = [DateTimeOffset]::UtcNow.ToString("o")
 }
 $stagedReleaseJson = Join-Path $stagingRoot "release.json"
-$metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $stagedReleaseJson -Encoding UTF8
+$metadataJson = $metadata | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText($stagedReleaseJson, $metadataJson, [Text.UTF8Encoding]::new($false))
 
 New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
 Copy-Item -LiteralPath $stagedPackage -Destination (Join-Path $releaseDirectory $packageFileName)
 Copy-Item -LiteralPath $stagedReleaseJson -Destination (Join-Path $releaseDirectory "release.json")
 
 # The immutable package is available before the channel metadata starts pointing to it.
+if ($null -ne $stagedPublicCertificate) {
+    $trustDirectory = Join-Path $artifacts "trust"
+    New-Item -ItemType Directory -Force -Path $trustDirectory | Out-Null
+    Publish-AtomicFile $stagedPublicCertificate (Join-Path $trustDirectory ([IO.Path]::GetFileName($stagedPublicCertificate)))
+}
 New-Item -ItemType Directory -Force -Path $channelDirectory | Out-Null
 $channelLockPath = Join-Path $channelDirectory ".publish.lock"
 $channelLock = $null

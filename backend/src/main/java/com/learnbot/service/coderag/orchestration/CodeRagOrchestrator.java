@@ -43,6 +43,7 @@ import com.learnbot.service.coderag.evidence.extractor.EvidenceExtractorRegistry
 import com.learnbot.service.coderag.evidence.extractor.NavigationEvidenceExtractor;
 import com.learnbot.service.coderag.evidence.extractor.OperationEvidenceExtractor;
 import com.learnbot.service.coderag.evidence.extractor.PersistenceEvidenceExtractor;
+import com.learnbot.service.coderag.evidence.extractor.QuestionCallableEvidenceExtractor;
 import com.learnbot.service.coderag.evidence.extractor.TransactionEvidenceExtractor;
 import com.learnbot.service.coderag.model.CodeAnalysisDiagnosticMetadata;
 import com.learnbot.service.coderag.model.CodeEvidenceExtractionContext;
@@ -54,6 +55,7 @@ import com.learnbot.service.coderag.retrieval.CodeEvidenceOperationExecutor;
 import com.learnbot.service.coderag.retrieval.CodeDeadlineExactReadPolicy;
 import com.learnbot.service.coderag.retrieval.CodeGraphClosurePlanner;
 import com.learnbot.service.coderag.retrieval.CodeInitialDiscoveryPlanner;
+import com.learnbot.service.coderag.retrieval.CodeInitialEvidenceSelector;
 import com.learnbot.service.coderag.retrieval.CodeQueryRewritePolicy;
 import com.learnbot.service.coderag.retrieval.CodeRetrievalCoordinator;
 import com.learnbot.service.coderag.retrieval.CodeRetrievalPlanValidator;
@@ -106,6 +108,7 @@ public class CodeRagOrchestrator {
     private final CodeRetrievalCoordinator retrievalCoordinator;
     private final CodeGraphClosurePlanner graphClosurePlanner = new CodeGraphClosurePlanner();
     private final CodeInitialDiscoveryPlanner initialDiscoveryPlanner = new CodeInitialDiscoveryPlanner();
+    private final CodeInitialEvidenceSelector initialEvidenceSelector = new CodeInitialEvidenceSelector();
     private final CodeQueryRewritePolicy queryRewritePolicy = new CodeQueryRewritePolicy();
     private final RepositoryQuestionMapBuilder questionMapBuilder;
     private final CodeQuestionRouter questionRouter;
@@ -177,6 +180,7 @@ public class CodeRagOrchestrator {
     private static EvidenceExtractorRegistry defaultEvidenceExtractorRegistry() {
         return new EvidenceExtractorRegistry(List.of(
                 new OperationEvidenceExtractor(),
+                new QuestionCallableEvidenceExtractor(),
                 new EndpointEvidenceExtractor(),
                 new AssignmentEvidenceExtractor(),
                 new TransactionEvidenceExtractor(),
@@ -633,6 +637,24 @@ public class CodeRagOrchestrator {
                 Set.of());
         CodeRetrievalPlanValidator.PlanValidationResult initialPlanValidation = retrievalCoordinator.validateInitialPlan(
                 question, initialTypedPlan, repositoryMap, Set.of());
+        if (initialPlanValidation.code()
+                == CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH) {
+            Set<String> rejectedOperationIds = initialPlanValidation.errors().stream()
+                    .filter(error -> error.code()
+                            == CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH)
+                    .map(CodeRetrievalPlanValidator.PlanValidationError::operationId)
+                    .filter(value -> value != null && !value.isBlank())
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            List<RagPipelineService.CodeSearchOperation> repairedOperations =
+                    initialDiscoveryPlanner.repairRejectedSearchAnchors(
+                            question, initialTypedPlan.checklist(), initialTypedPlan.operations(),
+                            rejectedOperationIds, 4);
+            if (!repairedOperations.equals(initialTypedPlan.operations())) {
+                initialTypedPlan = withInitialOperations(initialTypedPlan, repairedOperations);
+                initialPlanValidation = retrievalCoordinator.validateInitialPlan(
+                        question, initialTypedPlan, repositoryMap, Set.of());
+            }
+        }
         InitialPlanExecution initialExecution = executeInitialPlanEvidence(
                 repositoryId, selectedSpaceId, spaceIds, question, plannedQuestionMode, searchLimit, searchPlan,
                 initialPlanValidation.executableOperations(), merged);
@@ -913,6 +935,18 @@ public class CodeRagOrchestrator {
         // the trusted ranking intent so an unverified symbol in a planner query cannot amplify
         // its own premise while source candidates are expanded.
         return abbreviate(safe(question, "").trim(), 1600);
+    }
+
+    private RagPipelineService.CodeEvidenceFollowUpPlan withInitialOperations(
+            RagPipelineService.CodeEvidenceFollowUpPlan plan,
+            List<RagPipelineService.CodeSearchOperation> operations
+    ) {
+        return new RagPipelineService.CodeEvidenceFollowUpPlan(
+                plan.attempted(), plan.enough(), plan.reason(), plan.missingAreas(),
+                plan.followUpQueries(), plan.queryAreas(), plan.requiredEvidenceGroups(),
+                plan.checklist(), operations, plan.coverageSelections(), plan.hypothesis(),
+                plan.hypothesisVersion(), plan.premiseDisposition(), plan.claimResults(),
+                plan.terminationRequest());
     }
 
     private void addIfNotBlank(Set<String> values, String value) {
@@ -1276,8 +1310,8 @@ public class CodeRagOrchestrator {
                     + operationResultHandles(operation, execution.results())
                     + " " + execution.observation());
             int retainedOperationResults = operation.isSearch() ? 4 : perQueryLimit;
-            for (CodeSearchResult result : execution.results().stream()
-                    .limit(retainedOperationResults).toList()) {
+            for (CodeSearchResult result : initialEvidenceSelector.select(
+                    operation, execution.results(), retainedOperationResults)) {
                 CodeSearchResult operationMarked = operation.isSearch()
                         ? result : markLlmIterationEvidence(result, operation);
                 merge(merged, markLlmSearchPlanGroupEvidence(
@@ -1688,7 +1722,9 @@ public class CodeRagOrchestrator {
             RagPipelineService.CodeSearchOperation operation,
             List<CodeSearchResult> results
     ) {
-        if (operation == null || !"list_file_symbols".equals(operation.type()) || results == null) return "";
+        if (operation == null || results == null
+                || (!"list_file_symbols".equals(operation.type())
+                && !"traverse_graph".equals(operation.type()))) return "";
         List<String> symbols = results.stream()
                 .filter(java.util.Objects::nonNull)
                 .flatMap(result -> java.util.stream.Stream.of(result.methodName(), result.symbolName()))

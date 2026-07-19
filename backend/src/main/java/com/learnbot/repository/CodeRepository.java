@@ -2294,22 +2294,56 @@ public class CodeRepository {
                     FROM code_graph_edges e
                     WHERE :reverse AND e.active AND e.target_node_id IN (:frontierIds)
                       AND e.edge_type IN (:edgeTypes)
-                ), ranked AS (
+                ), enriched AS (
                     SELECT candidates.*, target.name AS to_node_name,
-                           row_number() OVER (
-                               PARTITION BY from_node_id
-                               ORDER BY CASE
-                                       WHEN target.chunk_id IS NOT NULL
-                                            AND NULLIF(target.file_path, '') IS NOT NULL THEN 0
-                                       ELSE 1
-                                   END,
-                                   confidence DESC,
-                                   CASE WHEN edge_type = 'REFERENCES' THEN 1 ELSE 0 END,
-                                   edge_type, to_node_id
-                           ) AS edge_rank
+                           CASE
+                               WHEN target.chunk_id IS NOT NULL
+                                    AND NULLIF(target.file_path, '') IS NOT NULL THEN 0
+                               ELSE 1
+                           END AS concrete_rank,
+                           CASE
+                               WHEN :forward <> :reverse
+                                    AND NULLIF(origin.file_path, '') IS NOT NULL
+                                    AND origin.file_path = target.file_path THEN 0
+                               ELSE 1
+                           END AS source_scope,
+                           CASE
+                               WHEN :forward <> :reverse
+                                    AND NULLIF(origin.file_path, '') IS NOT NULL
+                                    AND origin.file_path = target.file_path
+                               THEN ABS(
+                                   COALESCE(target_chunk.line_start::bigint, 2147483647)
+                                   - COALESCE(origin_chunk.line_end::bigint,
+                                              target_chunk.line_start::bigint, 2147483647))
+                               ELSE 2147483647
+                           END AS source_distance
                     FROM candidates
+                    JOIN code_graph_nodes origin
+                      ON origin.id = candidates.from_node_id AND origin.active
                     JOIN code_graph_nodes target
                       ON target.id = candidates.to_node_id AND target.active
+                    LEFT JOIN code_chunks origin_chunk
+                      ON origin_chunk.id = origin.chunk_id AND origin_chunk.active
+                    LEFT JOIN code_chunks target_chunk
+                      ON target_chunk.id = target.chunk_id AND target_chunk.active
+                ), scoped AS (
+                    SELECT enriched.*,
+                           row_number() OVER (
+                               PARTITION BY from_node_id, source_scope
+                               ORDER BY concrete_rank, source_distance,
+                                        confidence DESC,
+                                        CASE WHEN edge_type = 'REFERENCES' THEN 1 ELSE 0 END,
+                                        edge_type, to_node_id
+                           ) AS scope_rank
+                    FROM enriched
+                ), ranked AS (
+                    SELECT scoped.*,
+                           row_number() OVER (
+                               PARTITION BY from_node_id
+                               ORDER BY scope_rank, source_scope, concrete_rank,
+                                        confidence DESC, edge_type, to_node_id
+                           ) AS edge_rank
+                    FROM scoped
                 )
                 SELECT ranked.from_node_id, ranked.to_node_id, ranked.to_node_name,
                         ranked.edge_type, ranked.confidence, ranked.traversal_direction

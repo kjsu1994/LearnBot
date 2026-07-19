@@ -10,8 +10,12 @@
     <VersionPrefix>0.2.0</VersionPrefix>
     <Platforms>x64</Platforms>
     <LearnBotPublicBaseUrl Condition="'$(LearnBotPublicBaseUrl)' == ''">https://learnbot.example.invalid</LearnBotPublicBaseUrl>
+    <LearnBotAllowInsecurePrivateNetwork Condition="'$(LearnBotAllowInsecurePrivateNetwork)' == ''">false</LearnBotAllowInsecurePrivateNetwork>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="LearnBotPublicBaseUrl" Value="$(LearnBotPublicBaseUrl)" />
+    <AssemblyMetadata Include="LearnBotAllowInsecurePrivateNetwork" Value="$(LearnBotAllowInsecurePrivateNetwork)" />
+    <Compile Include="..\Security\ServerActivation.cs" Link="Security\ServerActivation.cs" />
+    <Compile Include="..\Security\ServerOriginPolicy.cs" Link="Security\ServerOriginPolicy.cs" />
   </ItemGroup>
 </Project>

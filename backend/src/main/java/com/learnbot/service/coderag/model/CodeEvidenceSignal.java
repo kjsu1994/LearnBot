@@ -15,6 +15,7 @@ public record CodeEvidenceSignal(
         OBSERVED_NAVIGATION,
         PERSISTENCE_RELATION,
         CLAIM_LINKED_SEARCH_HEAD,
+        QUESTION_CALLABLE_BODY,
         SOURCE_BUNDLE_MEMBER,
         SOURCE_BUNDLE_BOUNDARY
     }

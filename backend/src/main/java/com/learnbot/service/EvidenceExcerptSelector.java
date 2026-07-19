@@ -455,7 +455,12 @@ public final class EvidenceExcerptSelector {
         List<RequestedWindow> windows = new ArrayList<>();
         if (!relevantCalls.isEmpty()) {
             LinkedHashMap<CodeLexicalCalls.CallSite, Boolean> prioritized = new LinkedHashMap<>();
-            distinctCalls.stream().filter(call -> sharesCallableToken(call, callable)).limit(3)
+            List<CodeLexicalCalls.CallSite> callableFamily = distinctCalls.stream()
+                    .filter(call -> sharesCallableToken(call, callable))
+                    .toList();
+            CodeLexicalCalls.coverageOrder(callableFamily.size()).stream()
+                    .limit(3)
+                    .map(callableFamily::get)
                     .forEach(call -> prioritized.put(call, true));
             for (int index : CodeLexicalCalls.coverageOrder(relevantCalls.size())) {
                 prioritized.put(relevantCalls.get(index), true);

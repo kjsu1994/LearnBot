@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -19,7 +20,30 @@ internal static class Program
                 Directory.CreateDirectory(root);
                 var path = Path.Combine(root, "agent-update.json");
                 File.WriteAllText(path, "{\"updateState\":\"UPDATE_REQUIRED\",\"updateUri\":\"https://learnbot.example.test/agent.appinstaller\"}");
-                return TryReadUpdateUri(path, out var uri) && uri.StartsWith("https://", StringComparison.Ordinal) ? 0 : 1;
+                var httpsAccepted = TryReadUpdateUri(
+                    path,
+                    "https://learnbot.example.test",
+                    allowInsecurePrivateNetwork: false,
+                    out var uri)
+                    && uri.StartsWith("https://", StringComparison.Ordinal);
+                File.WriteAllText(path, "{\"updateState\":\"UPDATE_REQUIRED\",\"updateUri\":\"http://192.168.1.72:8083/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller\"}");
+                var privateHttpAccepted = TryReadUpdateUri(
+                    path,
+                    "http://192.168.1.72:8083",
+                    allowInsecurePrivateNetwork: true,
+                    out var privateUri)
+                    && privateUri.StartsWith("http://192.168.1.72:8083/", StringComparison.Ordinal);
+                var privateHttpDefaultRejected = !TryReadUpdateUri(
+                    path,
+                    "http://192.168.1.72:8083",
+                    allowInsecurePrivateNetwork: false,
+                    out _);
+                var wrongOriginRejected = !TryReadUpdateUri(
+                    path,
+                    "http://192.168.1.73:8083",
+                    allowInsecurePrivateNetwork: true,
+                    out _);
+                return httpsAccepted && privateHttpAccepted && privateHttpDefaultRejected && wrongOriginRejected ? 0 : 1;
             }
             finally
             {
@@ -91,6 +115,52 @@ internal static class Program
 
     private static bool TryReadUpdateUri(string path, out string updateUri)
     {
+        var deployment = ReadDeploymentConfiguration();
+        var configuredOrigin = TryReadStoredServerOrigin(deployment) ?? deployment.PublicBaseUrl;
+        return TryReadUpdateUri(
+            path,
+            configuredOrigin,
+            deployment.AllowInsecurePrivateNetwork,
+            out updateUri);
+    }
+
+    private static string? TryReadStoredServerOrigin(DeploymentConfiguration deployment)
+    {
+        try
+        {
+            var configuredPath = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+            var path = string.IsNullOrWhiteSpace(configuredPath)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".learnbot", "agent.json")
+                : configuredPath;
+            if (!File.Exists(path)) return null;
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            var value = root.TryGetProperty("serverUrl", out var serverElement)
+                ? serverElement.GetString()
+                : root.TryGetProperty("ServerUrl", out serverElement)
+                    ? serverElement.GetString()
+                    : null;
+            return ServerOriginPolicy.TryValidateServerOrigin(
+                value,
+                deployment.PublicBaseUrl,
+                deployment.AllowInsecurePrivateNetwork,
+                out var server,
+                out _)
+                ? server.GetLeftPart(UriPartial.Authority)
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryReadUpdateUri(
+        string path,
+        string configuredOrigin,
+        bool allowInsecurePrivateNetwork,
+        out string updateUri)
+    {
         updateUri = "";
         try
         {
@@ -100,8 +170,12 @@ internal static class Program
             var state = root.TryGetProperty("updateState", out var stateElement) ? stateElement.GetString() : null;
             var uriValue = root.TryGetProperty("updateUri", out var uriElement) ? uriElement.GetString() : null;
             if (!string.Equals(state, "UPDATE_REQUIRED", StringComparison.OrdinalIgnoreCase)
-                || !Uri.TryCreate(uriValue, UriKind.Absolute, out var uri)
-                || uri.Scheme != Uri.UriSchemeHttps)
+                || !ServerOriginPolicy.TryResolveSameOriginUri(
+                    uriValue,
+                    configuredOrigin,
+                    configuredOrigin,
+                    allowInsecurePrivateNetwork,
+                    out var uri))
             {
                 return false;
             }
@@ -113,4 +187,22 @@ internal static class Program
             return false;
         }
     }
+
+    private static DeploymentConfiguration ReadDeploymentConfiguration()
+    {
+        var metadata = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>().ToArray();
+        var origin = metadata
+            .FirstOrDefault(item => item.Key == "LearnBotPublicBaseUrl")?
+            .Value?
+            .TrimEnd('/')
+            ?? "https://learnbot.example.invalid";
+        var allowValue = metadata
+            .FirstOrDefault(item => item.Key == "LearnBotAllowInsecurePrivateNetwork")?
+            .Value;
+        return new DeploymentConfiguration(
+            origin,
+            bool.TryParse(allowValue, out var allowInsecurePrivateNetwork) && allowInsecurePrivateNetwork);
+    }
+
+    private sealed record DeploymentConfiguration(string PublicBaseUrl, bool AllowInsecurePrivateNetwork);
 }

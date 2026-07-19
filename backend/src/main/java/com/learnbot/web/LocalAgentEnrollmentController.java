@@ -120,7 +120,7 @@ public class LocalAgentEnrollmentController {
     @GetMapping
     List<DeviceResponse> devices() {
         UUID userId = currentUserProvider.currentUser().id();
-        return deviceRepository.listActiveByUser(userId).stream().map(device -> toResponse(userId, device)).toList();
+        return deviceRepository.listRegisteredByUser(userId).stream().map(device -> toResponse(userId, device)).toList();
     }
 
     @DeleteMapping("/{agentId}")

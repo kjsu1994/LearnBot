@@ -10,11 +10,13 @@
     <Platforms>x64</Platforms>
     <HostingWindowsServicesVersion Condition="'$(HostingWindowsServicesVersion)' == ''">10.0.0</HostingWindowsServicesVersion>
     <LearnBotPublicBaseUrl Condition="'$(LearnBotPublicBaseUrl)' == ''">https://learnbot.example.invalid</LearnBotPublicBaseUrl>
+    <LearnBotAllowInsecurePrivateNetwork Condition="'$(LearnBotAllowInsecurePrivateNetwork)' == ''">false</LearnBotAllowInsecurePrivateNetwork>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Setup\**\*.cs" />
     <Compile Remove="StartupHost\**\*.cs" />
     <AssemblyMetadata Include="LearnBotPublicBaseUrl" Value="$(LearnBotPublicBaseUrl)" />
+    <AssemblyMetadata Include="LearnBotAllowInsecurePrivateNetwork" Value="$(LearnBotAllowInsecurePrivateNetwork)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(HostingWindowsServicesVersion)" />
   </ItemGroup>
 </Project>

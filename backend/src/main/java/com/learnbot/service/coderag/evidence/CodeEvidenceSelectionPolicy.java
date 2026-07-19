@@ -31,6 +31,7 @@ public final class CodeEvidenceSelectionPolicy {
     private static final int MAX_PREFERRED_REPRESENTATIVES = 4;
     private static final int MAX_SIGNAL_PREFERRED_REPRESENTATIVES = 3;
     private static final int MAX_DIRECT_PROOF_REPRESENTATIVES = 2;
+    private static final int MAX_DIRECT_OBSERVATION_REPRESENTATIVES = 2;
     private static final int MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES = 4;
     private static final int MAX_SOURCE_BUNDLE_REPRESENTATIVES = 2;
     // Typed facts must not crowd out the semantic slate; three slots still allow a
@@ -200,7 +201,7 @@ public final class CodeEvidenceSelectionPolicy {
                 ? CodeEvidenceRetentionPlan.empty() : retentionPlan;
         if (safePlan.isEmpty() || candidates == null || candidates.isEmpty() || limit <= 0) return List.of();
 
-        List<RetainedCandidate> prioritized = candidates.stream()
+        List<RetainedCandidate> prioritized = diversifyPreferredDirectProofs(candidates.stream()
                 .map(candidate -> safePlan.lookup(CodeEvidenceId.from(candidate.result()))
                         .map(entry -> new RetainedCandidate(candidate, entry))
                         .orElse(null))
@@ -211,7 +212,7 @@ public final class CodeEvidenceSelectionPolicy {
                          .thenComparing(Comparator.comparingInt(
                                 (RetainedCandidate value) -> value.entry().authority().rank()).reversed())
                         .thenComparingInt(value -> value.candidate().rank()))
-                .toList();
+                .toList());
 
         Map<String, Integer> perGroup = new LinkedHashMap<>();
         Map<CodeEvidenceRetentionPlan.Level, Integer> grouplessByLevel = new LinkedHashMap<>();
@@ -219,6 +220,7 @@ public final class CodeEvidenceSelectionPolicy {
         int preferred = 0;
         int signalPreferred = 0;
         int directProofPreferred = 0;
+        int directObservationPreferred = 0;
         int graphPreferred = 0;
         int sourceBundlePreferred = 0;
         for (RetainedCandidate value : prioritized) {
@@ -230,16 +232,20 @@ public final class CodeEvidenceSelectionPolicy {
                     == CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH;
             boolean directProof = entry.basis()
                     == CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF;
+            boolean directObservation = entry.basis()
+                    == CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION;
             boolean sourceBundle = entry.basis()
                     == CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && directProof
                     && directProofPreferred >= MAX_DIRECT_PROOF_REPRESENTATIVES) continue;
+            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && directObservation
+                    && directObservationPreferred >= MAX_DIRECT_OBSERVATION_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && boundedGraphPath
                     && graphPreferred >= MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && sourceBundle
                     && sourceBundlePreferred >= MAX_SOURCE_BUNDLE_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED
-                    && !directProof && !boundedGraphPath && !sourceBundle
+                    && !directProof && !directObservation && !boundedGraphPath && !sourceBundle
                     && signalPreferred >= MAX_SIGNAL_PREFERRED_REPRESENTATIVES) continue;
             Set<String> quotaGroups = boundedGraphPath
                     ? entry.groups().stream()
@@ -248,6 +254,10 @@ public final class CodeEvidenceSelectionPolicy {
                     : sourceBundle
                     ? entry.groups().stream()
                     .filter(group -> group.startsWith("source_bundle:"))
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
+                    : directObservation
+                    ? entry.groups().stream()
+                    .filter(group -> group.startsWith("operation:"))
                     .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
                     : entry.groups();
             if (quotaGroups.isEmpty()) {
@@ -259,6 +269,8 @@ public final class CodeEvidenceSelectionPolicy {
                         ? MAX_DIRECT_GRAPH_BRANCH_REPRESENTATIVES
                         : sourceBundle
                         ? MAX_SOURCE_BUNDLE_REPRESENTATIVES
+                        : directObservation
+                        ? 1
                         : MAX_TYPED_RETENTION_GROUP_REPRESENTATIVES;
                 if (quotaGroups.stream()
                         .anyMatch(group -> perGroup.getOrDefault(group, 0)
@@ -271,12 +283,46 @@ public final class CodeEvidenceSelectionPolicy {
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED) {
                 preferred++;
                 if (directProof) directProofPreferred++;
+                else if (directObservation) directObservationPreferred++;
                 else if (boundedGraphPath) graphPreferred++;
                 else if (sourceBundle) sourceBundlePreferred++;
                 else signalPreferred++;
             }
         }
         return List.copyOf(retained);
+    }
+
+    /** Prevents two same-file reads from consuming the whole bounded direct-proof lane. */
+    private static List<RetainedCandidate> diversifyPreferredDirectProofs(
+            List<RetainedCandidate> prioritized
+    ) {
+        if (prioritized == null || prioritized.size() < 2) return prioritized == null ? List.of() : prioritized;
+        List<RetainedCandidate> proofs = prioritized.stream()
+                .filter(value -> value.entry().level() == CodeEvidenceRetentionPlan.Level.PREFERRED)
+                .filter(value -> value.entry().basis() == CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF)
+                .toList();
+        if (proofs.size() < 2) return prioritized;
+
+        LinkedHashMap<String, RetainedCandidate> firstBySource = new LinkedHashMap<>();
+        for (RetainedCandidate proof : proofs) {
+            firstBySource.putIfAbsent(sourceDiversityKey(proof), proof);
+        }
+        if (firstBySource.size() < 2) return prioritized;
+        List<RetainedCandidate> reordered = new ArrayList<>(firstBySource.values());
+        proofs.stream().filter(value -> !reordered.contains(value)).forEach(reordered::add);
+        java.util.Iterator<RetainedCandidate> iterator = reordered.iterator();
+        return prioritized.stream()
+                .map(value -> value.entry().level() == CodeEvidenceRetentionPlan.Level.PREFERRED
+                        && value.entry().basis() == CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF
+                        ? iterator.next() : value)
+                .toList();
+    }
+
+    private static String sourceDiversityKey(RetainedCandidate value) {
+        CodeSearchResult result = value == null ? null : value.candidate().result();
+        String path = result == null || result.filePath() == null
+                ? "" : result.filePath().trim().replace('\\', '/').toLowerCase(Locale.ROOT);
+        return path.isBlank() ? CodeEvidenceId.from(result) : path;
     }
 
     private static int retentionRank(CodeEvidenceRetentionPlan.Level level) {
@@ -288,9 +334,10 @@ public final class CodeEvidenceSelectionPolicy {
         return switch (basis) {
             case CONSTRAINT -> 0;
             case DIRECT_PROOF -> 1;
-            case BOUNDED_GRAPH_PATH -> 2;
-            case SOURCE_BUNDLE -> 3;
-            case SIGNAL -> 4;
+            case DIRECT_OBSERVATION -> 2;
+            case BOUNDED_GRAPH_PATH -> 3;
+            case SOURCE_BUNDLE -> 4;
+            case SIGNAL -> 5;
         };
     }
 

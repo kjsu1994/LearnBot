@@ -309,24 +309,12 @@ internal sealed partial class LearnBotLocalAgent
 
     private static bool TryValidateEnrollmentServer(string value, out Uri uri, out string? error)
     {
-        error = null;
-        if (!Uri.TryCreate(value, UriKind.Absolute, out uri!)
-            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-        {
-            error = "A valid absolute HTTPS LearnBot server URL is required.";
-            return false;
-        }
-        if (uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback)
-        {
-            error = "Local Agent enrollment requires HTTPS. HTTP is allowed only for localhost development.";
-            return false;
-        }
-        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) || uri.AbsolutePath != "/")
-        {
-            error = "The LearnBot server URL must be an origin without a path, query, or fragment.";
-            return false;
-        }
-        return true;
+        return ServerOriginPolicy.TryValidateServerOrigin(
+            value,
+            ConfiguredPublicBaseUrl(),
+            ConfiguredAllowInsecurePrivateNetwork(),
+            out uri,
+            out error);
     }
 
     private static EnrollmentReuseDecision DecideEnrollmentReuse(AgentConfig config, string server, bool reconnect)
@@ -362,6 +350,71 @@ internal sealed partial class LearnBotLocalAgent
             }, paired.ServerUrl, reconnect: false) == EnrollmentReuseDecision.BlockedCredentialUnavailable
             && DecideEnrollmentReuse(new AgentConfig(), paired.ServerUrl, reconnect: false) == EnrollmentReuseDecision.Enroll;
         Console.WriteLine(passed ? "enrollment-reuse-contract-ok" : "enrollment-reuse-contract-failed");
+        return passed ? 0 : 1;
+    }
+
+    private static int SelfTestServerOriginPolicyContract()
+    {
+        const string configured = "http://192.168.1.72:8083";
+        var passed = TryValidateEnrollmentServer(
+                ConfiguredPublicBaseUrl(),
+                out _,
+                out _)
+            && ServerOriginPolicy.TryValidateServerOrigin(
+                configured,
+                configured,
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && !ServerOriginPolicy.TryValidateServerOrigin(
+                configured,
+                configured,
+                allowInsecurePrivateNetwork: false,
+                out _,
+                out _)
+            && !ServerOriginPolicy.TryValidateServerOrigin(
+                "http://192.168.1.73:8083",
+                configured,
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && !ServerOriginPolicy.TryValidateServerOrigin(
+                "http://learnbot.internal:8083",
+                "http://learnbot.internal:8083",
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && !ServerOriginPolicy.TryValidateServerOrigin(
+                "http://203.0.113.10:8083",
+                "http://203.0.113.10:8083",
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && ServerOriginPolicy.TryValidateServerOrigin(
+                "http://10.20.30.40:8083",
+                "https://learnbot.portable.invalid",
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && !ServerOriginPolicy.TryValidateServerOrigin(
+                "http://203.0.113.10:8083",
+                "https://learnbot.portable.invalid",
+                allowInsecurePrivateNetwork: true,
+                out _,
+                out _)
+            && ServerOriginPolicy.TryValidateServerOrigin(
+                "https://learnbot.example.test",
+                configured,
+                allowInsecurePrivateNetwork: false,
+                out _,
+                out _)
+            && ServerOriginPolicy.TryValidateServerOrigin(
+                "http://localhost:8083",
+                configured,
+                allowInsecurePrivateNetwork: false,
+                out _,
+                out _);
+        Console.WriteLine(passed ? "server-origin-policy-contract-ok" : "server-origin-policy-contract-failed");
         return passed ? 0 : 1;
     }
 }

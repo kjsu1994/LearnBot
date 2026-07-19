@@ -89,6 +89,79 @@ class CodeInitialDiscoveryPlannerTest {
         assertThat(validation.executableOperations()).containsExactlyElementsOf(searches);
     }
 
+    @Test
+    void rejectedMultilingualSearchesCanBeRevalidatedWithBoundedQuestionAnchors() {
+        var first = claim(
+                "claim-1", "primary_write", "adapter", "apply", "automation value",
+                "the primary write path is shown");
+        var second = claim(
+                "claim-2", "fallback_write", "adapter", "send", "native message",
+                "the fallback write path is shown");
+        var primary = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "AutomationValueProvider apply value", "behavior", "primary_write",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "search-primary", List.of("claim-1"), List.of());
+        var fallback = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "NativeMessageSender send native message", "behavior", "fallback_write",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "search-fallback", List.of("claim-2"), List.of());
+        var initial = plan(List.of(first, second), List.of(primary, fallback));
+        CodeRetrievalPlanValidator validator = new CodeRetrievalPlanValidator();
+
+        var rejected = validator.validateInitial(
+                "입력 값을 넣는 두 경로를 비교해줘", initial, null, java.util.Set.of());
+        List<RagPipelineService.CodeSearchOperation> repaired = planner.repairRejectedSearchAnchors(
+                "입력 값을 넣는 두 경로를 비교해줘", initial.checklist(), initial.operations(),
+                rejected.errors().stream().map(CodeRetrievalPlanValidator.PlanValidationError::operationId)
+                        .collect(java.util.stream.Collectors.toSet()),
+                4);
+        var validated = validator.validateInitial(
+                "입력 값을 넣는 두 경로를 비교해줘", plan(List.of(first, second), repaired),
+                null, java.util.Set.of());
+
+        assertThat(rejected.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH);
+        assertThat(repaired.subList(0, 2)).allMatch(operation ->
+                operation.operationId().startsWith("initial-repair-anchor-"));
+        assertThat(validated.code()).isEqualTo(CodeRetrievalPlanValidator.PlanValidationCode.VALID);
+        assertThat(validated.executableOperations()).contains(primary, fallback);
+    }
+
+    @Test
+    void aQuestionAnchorDoesNotAuthorizeADriftedSourceQuery() {
+        var claim = claim(
+                "claim-1", "state_write", "store", "persist", "session state",
+                "the state is durable");
+        var drifted = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "delete billing records", "behavior", "state_write",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "search-drifted", List.of("claim-1"), List.of());
+        List<RagPipelineService.CodeSearchOperation> repaired = planner.repairRejectedSearchAnchors(
+                "세션 상태 저장 흐름을 설명해줘", List.of(claim), List.of(drifted),
+                java.util.Set.of("search-drifted"), 2);
+
+        var validation = new CodeRetrievalPlanValidator().validateInitial(
+                "세션 상태 저장 흐름을 설명해줘", plan(List.of(claim), repaired),
+                null, java.util.Set.of());
+
+        assertThat(validation.code()).isEqualTo(
+                CodeRetrievalPlanValidator.PlanValidationCode.INVALID_QUERY_CLAIM_MISMATCH);
+        assertThat(validation.executableOperations()).noneMatch(operation ->
+                operation.operationId().equals("search-drifted"));
+    }
+
+    private RagPipelineService.CodeEvidenceFollowUpPlan plan(
+            List<RagPipelineService.CodeEvidenceChecklistItem> checklist,
+            List<RagPipelineService.CodeSearchOperation> operations
+    ) {
+        return new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "test", checklist.stream().map(
+                        RagPipelineService.CodeEvidenceChecklistItem::claimId).toList(),
+                List.of(), List.of(), checklist.stream().map(
+                        RagPipelineService.CodeEvidenceChecklistItem::evidenceGroup).toList(),
+                checklist, operations, List.of(), "", 1, "UNRESOLVED", List.of(), "NONE");
+    }
+
     private RagPipelineService.CodeEvidenceChecklistItem claim(
             String id,
             String group,

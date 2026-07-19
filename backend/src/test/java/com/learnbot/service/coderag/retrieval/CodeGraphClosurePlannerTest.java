@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CodeGraphClosurePlannerTest {
 
     @Test
-    void addsOneBoundedBidirectionalCallTraversalForAnExactFlowRead() {
+    void addsOneBoundedForwardCallTraversalForAnExactFlowRead() {
         GraphFixture fixture = graphFixture();
         RagPipelineService.CodeEvidenceFollowUpPlan augmented = new CodeGraphClosurePlanner().augment(
                 CodeQuestionMode.CALL_FLOW, plan(fixture, List.of(readOperation(fixture))),
@@ -28,7 +28,7 @@ class CodeGraphClosurePlannerTest {
         assertThat(closure.type()).isEqualTo("traverse_graph");
         assertThat(closure.chunkId()).isEqualTo(fixture.seedChunkId().toString());
         assertThat(closure.relations()).containsExactly("CALLS");
-        assertThat(closure.direction()).isEqualTo("BOTH");
+        assertThat(closure.direction()).isEqualTo("FORWARD");
         assertThat(closure.maxHops()).isEqualTo(2);
         assertThat(closure.claimIds()).containsExactly("claim-1");
         assertThat(closure.originEvidenceIds()).containsExactly(fixture.sourceEvidenceId());

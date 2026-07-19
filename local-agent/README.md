@@ -2,6 +2,240 @@
 
 This is the first MVP skeleton for the per-user Local Agent.
 
+## 사내망 HTTP 배포 및 사용자 설치
+
+현재 우선 운영 방식은 **부서마다 LearnBot 전체(RAG 및 Local Agent 서버 기능)를 Compose로 실행하는 회사 내부망 HTTP pilot**이다. 서버 주소는 제품이나 서명된 MSIX에 고정되어 있지 않다. MSIX는 중앙 release runner에서 한 번 빌드·서명해 모든 부서 서버에서 재사용하고, 각 서버 PC에서는 자신의 실제 RFC1918 사설 IPv4 주소(`10/8`, `172.16/12`, `192.168/16`)와 포트가 들어간 `.appinstaller` 및 `release.json`만 생성한다.
+
+전체 흐름은 다음과 같다.
+
+| 주체 | 할 일 |
+| --- | --- |
+| 서버 운영자 | 서버별 LAN 주소 초기화, Compose 실행, 서명된 범용 MSIX와 서버별 pilot 메타데이터 게시 |
+| 사내 IT | 사용자 PC에 사내 코드 서명 인증서의 신뢰 체인과 필요한 앱 설치 정책 배포 |
+| 일반 사용자 | LearnBot 화면에서 설치 파일 다운로드, 앱 실행, PC 연결 승인, 작업 폴더 선택 |
+
+일반 사용자는 서버 PC에 직접 접근할 필요가 없다. 다만 화면의 다운로드 기능만 구현되어 있다고 바로 파일을 받을 수 있는 것은 아니다. 서버의 `artifacts/local-agent`에 서명된 `release.json`, `.appinstaller`, 버전별 `.msix`가 게시되고 Nginx가 이를 제공해야 화면의 다운로드 버튼이 활성화된다.
+
+### 중요한 배포 원칙
+
+- `http://192.168.1.72:8083` 같은 주소는 예시일 뿐 고정값이 아니다. 초기화 스크립트가 실행된 서버의 실제 주소를 기준으로 `$Deployment.publicBaseUrl`을 만든다.
+- HTTP 배포는 `pilot` 채널에서만 허용된다. HTTP 패키지를 `stable`로 게시하거나 승격하는 작업은 차단된다.
+- 서명된 `.msix`에는 운영 서버 IP나 포트를 넣지 않는다. 사용자가 누른 `이 PC 연결` 링크가 현재 브라우저 origin을 Agent에 전달하며, Agent는 승인 후 그 origin을 `%USERPROFILE%\.learnbot\agent.json`에 저장한다. 링크에는 토큰이나 자격 증명을 넣지 않는다.
+- `.appinstaller`와 channel `release.json`은 서버별 파일이다. 서버 IP나 포트가 바뀌면 초기화와 `Set-LocalAgentServerRelease.ps1`을 다시 실행하면 되며, 동일 MSIX를 다시 빌드하거나 서명할 필요가 없다.
+- 부서별 서버에서 새 self-signed 인증서를 만들지 않는다. 모든 부서는 중앙에서 검증한 동일 MSIX와 그 MSIX 서명자와 정확히 일치하는 공개 CER를 사용한다. 서버 PC에는 private key가 필요하지 않다.
+- 서버 IP는 가능하면 고정 IP 또는 DHCP reservation으로 유지한다. 이미 연결된 PC가 있는 서버의 주소를 바꾸면 해당 PC는 새 화면에서 다시 연결해야 한다.
+- 사용자 PC 자신의 IP는 패키지에 저장되거나 제한 조건으로 사용되지 않는다. Windows 11 x64 PC가 회사망에서 해당 서버 IP와 포트에 접근할 수 있으면 된다.
+- HTTP 통신은 암호화되지 않는다. 서버 방화벽에서 실제 회사 사용자망 CIDR만 허용하고 인터넷, 게스트 Wi-Fi 및 불특정 네트워크에는 포트를 공개하지 않는다.
+- 사용자 PC에 배포하는 사내 인증서는 현재 단계에서 **MSIX 코드 서명 신뢰용**이다. HTTP 통신을 암호화하는 TLS 인증서가 아니며, HTTPS 전환 시에는 별도의 서버 TLS 인증서가 필요하다.
+
+자세한 운영, 업데이트, 롤백 및 향후 HTTPS 전환 절차는 [`../docs/local-agent-deployment-runbook.md`](../docs/local-agent-deployment-runbook.md)를 참고한다.
+
+## 서버 운영자용 설치 파일 게시 절차
+
+아래 명령은 저장소 루트에서 실행한다.
+
+### 가장 간단한 부서 서버 시작
+
+새 부서 서버에는 이 소스와 함께 중앙에서 검증한 다음 두 artifact를 복사한다. 이 파일들은 Git에서 제외되므로 `git clone`만으로는 포함되지 않는다.
+
+- `artifacts/local-agent/releases/<version>/`: 서명된 범용 MSIX와 불변 `release.json`
+- `artifacts/local-agent/trust/*.cer`: 위 MSIX 서명자와 지문이 같은 공개 인증서
+
+Docker Desktop이 실행 중이면 다음 한 명령이 기본 gateway가 있는 실제 회사 LAN 인터페이스를 선택하고, 그 PC의 주소로 release 포인터를 만든 뒤 전체 Compose를 시작한다. Docker/WSL 가상 NIC는 기본 gateway가 없는 경우 자동 선택 대상에서 제외된다.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\local-agent\Start-LearnBotDepartmentServer.ps1 `
+  -Port 8083
+```
+
+VPN 등으로 기본 gateway가 여러 개면 회사 LAN IP만 명시한다. 이 값은 코드나 MSIX에 저장되는 하드코딩 값이 아니라 해당 서버의 실행 시 설정이다.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\local-agent\Start-LearnBotDepartmentServer.ps1 `
+  -ServerLanIp "<현재 부서 서버에 실제로 할당된 사설 IPv4>" `
+  -Port 8083
+```
+
+Compose를 시작하지 않고 주소·release·인증서 일치만 검사하려면 `-ConfigureOnly`를 추가한다. 성공 결과의 `userPortalUrl`이 해당 부서 사용자에게 안내할 주소다.
+
+### 1. 사전 준비
+
+서버 PC에는 다음 항목이 필요하다.
+
+- Docker와 Docker Compose v2.24.4 이상
+- 사용자 PC가 접근할 고정 또는 DHCP 예약 사설 IPv4 주소
+- 선택한 포트로 들어오는 연결을 회사 사용자망 CIDR에만 허용하는 방화벽 규칙
+
+패키지를 빌드하고 서명하는 Windows PC에는 다음 항목이 필요하다. 서버 PC와 같은 컴퓨터여도 되고 별도의 release runner여도 된다.
+
+- .NET 10 SDK
+- Windows SDK의 x64 `makeappx.exe`와 `signtool.exe`
+- private key와 Code Signing EKU(`1.3.6.1.5.5.7.3.3`)가 있는 사내 코드 서명 인증서
+- 서명 인증서의 Subject와 정확히 같은 MSIX `Publisher` 값
+- 서명 결과가 최종적으로 서버의 `artifacts/local-agent`에 배치되는 파일 공유 또는 배포 경로
+
+사내 IT는 설치 전에 사용자 PC의 Local Machine 인증서 저장소에 사내 root/intermediate 신뢰 체인과 조직 정책상 필요한 publisher trust를 GPO 또는 MDM으로 배포해야 한다. 코드 서명 private key는 release runner 밖으로 내보내지 않는다.
+
+### 2. 서버별 주소와 Compose 설정 생성
+
+먼저 게시할 4자리 버전을 정한다. 같은 버전은 다시 게시하지 않는다.
+
+```powershell
+$Version = "0.2.0.0"
+$Minimum = "0.1.0.0"
+
+# 활성 상태인 사설 IPv4가 하나면 자동으로 선택한다.
+$Deployment = .\scripts\local-agent\Initialize-LocalAgentLanHttp.ps1 `
+  -LatestVersion $Version `
+  -MinimumVersion $Minimum | ConvertFrom-Json
+
+$Origin = $Deployment.publicBaseUrl
+$Origin
+```
+
+사설 IPv4가 여러 개인 서버에서는 회사 LAN에 연결된 실제 주소를 명시한다. 기본 포트는 `8083`이며, 다른 포트가 필요하면 `-Port`로 지정한다.
+
+```powershell
+$Deployment = .\scripts\local-agent\Initialize-LocalAgentLanHttp.ps1 `
+  -ServerLanIp "<이 서버 PC에 실제로 할당된 사내망 IPv4>" `
+  -Port 8083 `
+  -LatestVersion $Version `
+  -MinimumVersion $Minimum | ConvertFrom-Json
+
+$Origin = $Deployment.publicBaseUrl
+```
+
+초기화 스크립트는 Git에 커밋되지 않는 다음 서버별 파일을 만든다.
+
+- `.env.local-agent-lan-http`: bind 주소, 포트, 공개 origin 및 버전
+- `deploy/local-agent-lan-http.generated.inc`: 해당 서버 IP만 허용하는 Nginx Host 정책
+
+스크립트가 선택한 IP는 현재 서버 PC에 실제로 할당된 주소인지 검사한다. 여러 NIC 중 임의의 주소를 추측하지 않으므로 오류가 나면 올바른 `-ServerLanIp`를 지정한다.
+
+### 3. 서버 실행
+
+먼저 병합된 Compose 설정을 확인한 뒤 서버를 실행한다.
+
+```powershell
+docker compose --env-file .env.local-agent-lan-http `
+  -f docker-compose.yml `
+  -f docker-compose.local-agent-release.yml `
+  -f docker-compose.local-agent-lan-http.yml `
+  config
+
+docker compose --env-file .env.local-agent-lan-http `
+  -f docker-compose.yml `
+  -f docker-compose.local-agent-release.yml `
+  -f docker-compose.local-agent-lan-http.yml `
+  up -d --build
+```
+
+`config` 결과에서 Nginx가 `$Origin`의 IP와 포트에 bind되는지 확인한다. 포트는 방화벽에서 회사 사용자망에만 개방한다.
+
+### 4. 사내 코드 서명 인증서로 pilot 게시
+
+`$Publisher`에는 서명 인증서의 전체 Subject를 정확히 입력하고, `$Thumbprint`에는 해당 인증서의 SHA-1 thumbprint를 입력한다. 다음 값은 자리표시자이므로 실제 조직 값으로 바꿔야 한다.
+
+사내 CA 인증서가 아직 준비되지 않은 최초 pilot에서는 다음 스크립트로 release runner 사용자 저장소에 비내보내기 self-signed 코드 서명 키를 만들 수 있다. 공개 CER만 `artifacts/local-agent/trust/LearnBotLocalAgentPilot.cer`로 내보내며, 이 CER를 설치 전에 GPO/MDM으로 모든 pilot PC의 `Local Computer\Trusted People`에 배포한다. private key는 복사하지 않는다.
+
+```powershell
+$Signing = powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\local-agent\release\Initialize-LocalAgentPilotSigningCertificate.ps1 |
+  ConvertFrom-Json
+
+$Publisher = $Signing.subject
+$Thumbprint = $Signing.thumbprint
+```
+
+```powershell
+# 사내 CA 인증서를 이미 발급받았다면 위 pilot 생성 단계 대신 다음 두 값을 지정한다.
+# $Publisher = "CN=<코드 서명 인증서의 정확한 Subject>"
+# $Thumbprint = "<코드 서명 인증서 SHA-1 thumbprint>"
+$SdkBin = "C:\Program Files (x86)\Windows Kits\10\bin\<설치된 SDK 버전>\x64"
+
+.\scripts\local-agent\release\Publish-LocalAgentRelease.ps1 `
+  -Version $Version `
+  -MinimumSupportedVersion $Minimum `
+  -PublicBaseUrl $Origin `
+  -Publisher $Publisher `
+  -Channel pilot `
+  -ArtifactsRoot .\artifacts\local-agent `
+  -WindowsSdkBin $SdkBin `
+  -CertificateThumbprint $Thumbprint `
+  -EnterpriseManagedTrust `
+  -AllowInsecurePrivateNetwork `
+  -PortableServerPackage
+```
+
+`dotnet`이 PATH에 없으면 `-DotNetPath "<dotnet.exe 경로>"`를 추가한다. 기본 timestamp 서버에 접근할 수 없는 폐쇄망이면 조직의 RFC 3161 timestamp 주소를 `-TimestampUrl`로 지정해야 한다.
+
+빌드와 서명이 끝나면 artifact 구조, 버전, 해시 및 서명을 검사한다.
+
+```powershell
+.\scripts\local-agent\release\Test-LocalAgentRelease.ps1 `
+  -ArtifactsRoot .\artifacts\local-agent `
+  -Channel pilot `
+  -ExpectedLatestVersion $Version `
+  -ExpectedMinimumSupportedVersion $Minimum `
+  -RequireSignature `
+  -SignToolPath "$SdkBin\signtool.exe"
+```
+
+별도 release runner에서 게시했다면 검증된 `artifacts/local-agent` 내용을 서버가 mount하는 동일한 경로로 전달한다. 서명된 파일이나 `release.json`을 수동으로 수정하지 않는다.
+
+다른 서버 PC에서는 `releases/<version>`의 서명된 MSIX와 release metadata만 복사한 뒤 아래 명령으로 그 서버 주소의 `.appinstaller` 및 channel metadata를 만든다. 이 단계에는 서명 인증서나 private key가 필요하지 않으며 MSIX 해시는 바뀌지 않는다.
+
+```powershell
+.\scripts\local-agent\release\Set-LocalAgentServerRelease.ps1 `
+  -Version $Version `
+  -PublicBaseUrl $Origin `
+  -ArtifactsRoot .\artifacts\local-agent `
+  -AllowInsecurePrivateNetwork
+```
+
+### 5. 다운로드 화면 확인
+
+서버별 `$Origin`을 사용해 metadata와 화면을 확인한다.
+
+```powershell
+Invoke-WebRequest -UseBasicParsing "$Origin/downloads/local-agent/pilot/release.json"
+Start-Process "$Origin/settings/local-agent"
+```
+
+`release.json` 요청이 성공하고 화면에 `Windows 11 x64용 다운로드`가 표시되면 사용자가 화면에서 설치 파일을 받을 수 있다. `설치 파일 준비 중`이 계속 표시되면 pilot artifact가 아직 없거나 Nginx에서 해당 파일을 읽지 못하는 상태다.
+
+## 일반 사용자용 설치 및 연결 방법
+
+사용자는 서버 PC에 접속하거나 명령어를 실행할 필요가 없다.
+
+1. 회사 네트워크에 연결한 상태에서 IT가 안내한 `http://<해당 LearnBot 서버의 LAN IP>:<포트>/settings/local-agent`에 접속하고 LearnBot에 로그인한다.
+2. `Windows 11 x64용 다운로드`를 누른다.
+3. 화면에 `회사 인증서 사전 배포 필요`가 표시되면 IT가 공개 CER를 사용자 PC의 `Local Computer\TrustedPeople`에 먼저 배포했는지 확인한다. 화면의 공개 인증서 링크는 IT·관리자용이며 일반 사용자가 Current User 저장소에 넣어서는 해결되지 않는다.
+4. 다운로드한 `LearnBotLocalAgent.appinstaller` 파일을 열고 Windows App Installer에서 게시자가 회사의 코드 서명 게시자와 일치하는지 확인한 뒤 설치한다. 인증서 경고가 보이면 우회하지 말고 IT에 문의한다.
+5. 설치가 끝나면 설치 파일을 받은 LearnBot 화면의 `이 PC 연결`을 누른다. 이 버튼이 현재 서버 주소를 안전 정책에 맞춰 Agent에 전달한다. 시작 메뉴에서만 처음 실행하면 서버 주소가 없으므로 먼저 LearnBot 화면에서 연결해야 한다.
+6. 브라우저에 표시된 PC 이름, 요청 코드 및 설치 식별자를 확인하고 `이 PC 승인`을 누른다. 본인이 시작하지 않은 요청은 거부한다.
+7. Local Agent 창으로 돌아가 LearnBot이 접근해도 되는 작업 폴더를 선택한다. Agent는 선택한 폴더 밖을 작업 폴더로 사용하지 않는다.
+8. LearnBot 화면의 `등록된 PC`에서 연결 상태와 허용 폴더를 확인하고 필요하면 해당 PC를 작업 PC로 선택한다.
+
+일반 사용자의 앱 설치는 별도 .NET이나 관리자 권한이 필요하지 않도록 self-contained MSIX로 배포한다. 단, 현재 enterprise-managed pilot의 코드 서명 인증서는 IT가 미리 PC 전체 저장소에 배포해야 한다. AppLocker, WDAC 또는 sideloading 정책이 MSIX 설치를 막는 조직에서도 IT 정책 변경이 선행되어야 한다.
+
+## 문제 해결
+
+| 증상 | 확인할 항목 |
+| --- | --- |
+| LearnBot 화면 자체가 열리지 않음 | 안내받은 서버 IP와 포트, 회사망 연결, 서버 Compose 상태, 방화벽 허용 CIDR |
+| `설치 파일 준비 중`이 계속 표시됨 | `pilot/release.json`, `.appinstaller`, 버전별 `.msix` 게시 여부와 Nginx artifact mount |
+| `0x800B010A`와 함께 설치 버튼이 비활성화됨 | 패키지 손상이 아니라 서명 신뢰 체인 누락이다. 화면에서 받은 공개 CER와 표시된 지문을 대조하고 IT가 `Cert:\LocalMachine\TrustedPeople`에 배포한다. `CurrentUser` 저장소는 App Installer가 사용하지 않는다. |
+| App Installer가 인증서를 신뢰하지 않음 | 사내 root/intermediate 및 publisher trust 배포 여부, 공개 CER 지문과 MSIX signer 지문, 패키지 `Publisher`와 인증서 Subject 일치 여부 |
+| 설치 후 서버에 연결되지 않음 | 설치 파일을 받은 LearnBot 화면에서 `이 PC 연결`을 눌렀는지, 전달된 서버가 RFC1918 HTTP 주소인지, 방화벽이 해당 포트를 허용하는지 확인 |
+| 서버 IP 또는 포트가 변경됨 | 초기화 스크립트와 `Set-LocalAgentServerRelease.ps1`을 다시 실행하고 Compose를 재시작한다. MSIX 재서명은 불필요하며 기존 연결 PC는 새 화면에서 다시 연결한다. |
+| 브라우저 승인 화면이 자동으로 열리지 않음 | Local Agent의 `브라우저 다시 열기` 또는 `코드 복사` 기능 사용 |
+| 설치가 조직 정책으로 차단됨 | App Installer, MSIX sideloading, AppLocker 및 WDAC 정책을 사내 IT가 확인 |
+
+## 개발 및 내부 CLI 참고
+
 It is intentionally safe by default:
 
 - It pairs with the central LearnBot server using a token generated from the web UI.

@@ -467,6 +467,39 @@ class CodeEvidenceSelectionPolicyTest {
     }
 
     @Test
+    void exactMultiMatchObservationsKeepOneRepresentativePerOperationBeforeGraphSignals() {
+        CodeSearchResult semantic = result("src/Overview.java", 1.0, Map.of());
+        CodeSearchResult firstOverload = result("src/FlowWorker.java", 0.8, Map.of());
+        CodeSearchResult duplicateOverload = result("src/FlowWorker.java", 0.7, Map.of());
+        CodeSearchResult secondExactRead = result("src/FlowStore.java", 0.6, Map.of());
+        CodeSearchResult graphNeighbor = result("src/FlowGateway.java", 0.5, Map.of());
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.of(Map.of(
+                CodeEvidenceId.from(firstOverload), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_worker", "claim:flow"),
+                        CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION),
+                CodeEvidenceId.from(duplicateOverload), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_worker", "claim:flow"),
+                        CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION),
+                CodeEvidenceId.from(secondExactRead), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_store", "claim:flow"),
+                        CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION),
+                CodeEvidenceId.from(graphNeighbor), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.COMPILER_SEMANTIC,
+                        Set.of("graph_branch:op_flow:forward:calls"),
+                        CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH)));
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                List.of(semantic, firstOverload, duplicateOverload, secondExactRead, graphNeighbor),
+                List.of(semantic), plan, 4);
+
+        assertThat(selected).containsExactly(semantic, firstOverload, secondExactRead, graphNeighbor)
+                .doesNotContain(duplicateOverload);
+    }
+
+    @Test
     void typedPlanChangesMembershipButPreservesPresentationRankAndHardLimit() {
         CodeSearchResult semantic = result("src/Semantic.java", 1.0, Map.of());
         CodeSearchResult preferred = result("src/Preferred.java", 0.5, Map.of());
@@ -483,6 +516,29 @@ class CodeEvidenceSelectionPolicyTest {
                 List.of(semantic, preferred, required), List.of(semantic), plan, 2);
 
         assertThat(selected).hasSize(2).containsExactly(preferred, required);
+    }
+
+    @Test
+    void boundedDirectProofLaneKeepsDistinctSourceRolesBeforeSameFileDuplicates() {
+        CodeSearchResult firstServiceRead = result("src/FlowService.java", 1.0, Map.of());
+        CodeSearchResult duplicateServiceRead = result("src/FlowService.java", 0.9, Map.of());
+        CodeSearchResult repositoryRead = result("src/FlowRepository.java", 0.8, Map.of());
+        CodeSearchResult semantic = result("src/Overview.java", 0.7, Map.of());
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new java.util.LinkedHashMap<>();
+        for (CodeSearchResult proof : List.of(firstServiceRead, duplicateServiceRead, repositoryRead)) {
+            entries.put(CodeEvidenceId.from(proof), new CodeEvidenceRetentionPlan.Entry(
+                    CodeEvidenceRetentionPlan.Level.PREFERRED,
+                    CodeIntelligenceAuthority.SYNTAX,
+                    Set.of("proof:" + CodeEvidenceId.from(proof)),
+                    CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF));
+        }
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                List.of(firstServiceRead, duplicateServiceRead, repositoryRead, semantic),
+                List.of(semantic), CodeEvidenceRetentionPlan.of(entries), 3);
+
+        assertThat(selected).contains(firstServiceRead, repositoryRead, semantic)
+                .doesNotContain(duplicateServiceRead);
     }
 
     @Test

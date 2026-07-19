@@ -18,12 +18,13 @@ import java.util.UUID;
  *
  * <p>The policy is deliberately structural: it uses only the routed question mode, typed read
  * operands, active-index symbol identities, and relation handles. It does not inspect repository names, paths,
- * frameworks, benchmark cases, or question vocabulary. One bidirectional {@code CALLS}
- * traversal at at most two hops exposes a short caller/callee chain without turning every
+ * frameworks, benchmark cases, or question vocabulary. One forward {@code CALLS}
+ * traversal at at most two hops exposes a short downstream execution chain without turning every
  * direct read into an unbounded graph walk.</p>
  */
 public final class CodeGraphClosurePlanner {
     private static final String CALLS = "CALLS";
+    private static final String FORWARD = "FORWARD";
     private static final String BOTH = "BOTH";
 
     public RagPipelineService.CodeEvidenceFollowUpPlan augment(
@@ -78,7 +79,7 @@ public final class CodeGraphClosurePlanner {
         RagPipelineService.CodeSearchOperation closure = new RagPipelineService.CodeSearchOperation(
                 "traverse_graph", "", source.area(), source.evidenceGroup(),
                 "", "", selected.seedChunkId().toString(), null, null, null,
-                List.of(CALLS), BOTH, 2, operationId,
+                List.of(CALLS), FORWARD, 2, operationId,
                 source.claimIds(), List.of(selected.originEvidenceId()));
 
         List<RagPipelineService.CodeSearchOperation> operations = new ArrayList<>(plan.operations());
@@ -149,9 +150,11 @@ public final class CodeGraphClosurePlanner {
             Set<String> attempted,
             Set<String> scheduled
     ) {
-        String prefix = "traverse_graph|" + seedChunkId + "|" + CALLS + "|" + BOTH + "|";
-        return attempted.stream().anyMatch(key -> key.startsWith(prefix))
-                || scheduled.stream().anyMatch(key -> key.startsWith(prefix));
+        return List.of(FORWARD, BOTH).stream().anyMatch(direction -> {
+            String prefix = "traverse_graph|" + seedChunkId + "|" + CALLS + "|" + direction + "|";
+            return attempted.stream().anyMatch(key -> key.startsWith(prefix))
+                    || scheduled.stream().anyMatch(key -> key.startsWith(prefix));
+        });
     }
 
     private boolean sameSymbol(String left, String right) {

@@ -143,6 +143,55 @@ class CodeSourceBundleExpanderTest {
         assertThat(expanded).isEmpty();
     }
 
+    @Test
+    void directConstructorContainerExposesOnlyQuestionSupportedMembers() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSourceBundleExpander expander = new CodeSourceBundleExpander(repository);
+        CodeSearchResult constructor = result("SessionCoordinator", 1);
+        CodeSearchResult dispatch = result("dispatchQueuedTask", 30);
+        CodeSearchResult metrics = result("publishMetrics", 60);
+        when(repository.listActiveSymbolsByPath(
+                eq(REPOSITORY_ID), eq(PATH), eq(80), eq(List.of(SPACE_ID)), eq(SPACE_ID)))
+                .thenReturn(List.of(constructor, dispatch, metrics));
+        RagPipelineService.CodeSearchOperation direct = new RagPipelineService.CodeSearchOperation(
+                "read_chunk", "", "", "request_flow", PATH, "", constructor.chunkId().toString(),
+                null, null, null, List.of(), "BOTH", null,
+                "read-container", List.of("claim-request"), List.of("origin-container"));
+
+        List<CodeSearchResult> expanded = expander.expandDirectContainer(
+                REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), direct,
+                GraphSearchIntent.FLOW, List.of(constructor),
+                "Which entry dispatches the queued task?");
+
+        assertThat(expanded).extracting(CodeSearchResult::methodName)
+                .containsExactly("dispatchQueuedTask");
+        assertThat(CodeEvidenceOperationProvenance.from(expanded.get(0)))
+                .singleElement().satisfies(provenance ->
+                        assertThat(provenance.operationType()).isEqualTo("read_source_member"));
+    }
+
+    @Test
+    void alreadyObservedCallableCanStillCarryTheSourceBoundarySignal() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSourceBundleExpander expander = new CodeSourceBundleExpander(repository);
+        CodeSearchResult start = result("startLifecycle", 10);
+        CodeSearchResult middle = result("refreshLifecycle", 40);
+        CodeSearchResult finish = result("finishLifecycle", 80);
+        when(repository.listActiveSymbolsByPath(
+                eq(REPOSITORY_ID), eq(PATH), eq(80), eq(List.of(SPACE_ID)), eq(SPACE_ID)))
+                .thenReturn(List.of(start, middle, finish));
+
+        List<CodeSearchResult> expanded = expander.expand(
+                REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), searchOperation(),
+                GraphSearchIntent.FLOW, List.of(start, finish), "refresh lifecycle");
+
+        assertThat(expanded.stream()
+                .filter(result -> CodeEvidenceOperationProvenance.from(result).stream()
+                        .anyMatch(value -> "read_source_boundary".equals(value.operationType())))
+                .map(CodeSearchResult::methodName))
+                .containsExactly("startLifecycle", "finishLifecycle");
+    }
+
     private RagPipelineService.CodeSearchOperation searchOperation() {
         return new RagPipelineService.CodeSearchOperation(
                 "hybrid_search", "runtime lifecycle", "runtime lifecycle", "lifecycle",

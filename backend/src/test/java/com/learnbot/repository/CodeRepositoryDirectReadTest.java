@@ -254,10 +254,17 @@ class CodeRepositoryDirectReadTest {
                 .findFirst()
                 .orElseThrow();
         assertThat(neighbors).contains(
+                "JOIN code_graph_nodes origin",
                 "JOIN code_graph_nodes target",
                 "target.id = candidates.to_node_id AND target.active",
                 "WHEN target.chunk_id IS NOT NULL",
                 "NULLIF(target.file_path, '') IS NOT NULL",
+                ":forward <> :reverse",
+                "origin.file_path = target.file_path",
+                "AS source_scope",
+                "AS source_distance",
+                "PARTITION BY from_node_id, source_scope",
+                "ORDER BY scope_rank, source_scope",
                 "SELECT ranked.from_node_id, ranked.to_node_id, ranked.to_node_name"
         );
     }

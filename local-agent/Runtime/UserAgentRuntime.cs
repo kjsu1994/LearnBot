@@ -27,6 +27,15 @@ internal sealed partial class LearnBotLocalAgent
         return string.IsNullOrWhiteSpace(value) ? "https://learnbot.example.invalid" : value.TrimEnd('/');
     }
 
+    private static bool ConfiguredAllowInsecurePrivateNetwork()
+    {
+        var value = typeof(LearnBotLocalAgent).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(item => string.Equals(item.Key, "LearnBotAllowInsecurePrivateNetwork", StringComparison.Ordinal))?
+            .Value;
+        return bool.TryParse(value, out var enabled) && enabled;
+    }
+
     private static IDisposable? TryAcquireAgentInstanceLock()
     {
         var identity = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;

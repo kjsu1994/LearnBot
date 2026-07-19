@@ -965,11 +965,11 @@
 }
 
 .workspace-tabs-user {
-  grid-template-columns: repeat(3, minmax(0, 160px));
+  grid-template-columns: repeat(4, minmax(0, 150px));
 }
 
 .workspace-tabs-admin {
-  grid-template-columns: repeat(4, minmax(0, 150px));
+  grid-template-columns: repeat(5, minmax(0, 150px));
 }
 
 .tab-button {
@@ -978,6 +978,7 @@
   border-radius: 6px;
   color: #53616a;
   min-height: 38px;
+  white-space: nowrap;
 }
 
 .tab-button:hover:not(:disabled),

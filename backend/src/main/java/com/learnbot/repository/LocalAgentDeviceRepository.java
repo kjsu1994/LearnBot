@@ -137,6 +137,17 @@ public class LocalAgentDeviceRepository {
                 """, new MapSqlParameterSource("userId", userId), this::map);
     }
 
+    public List<LocalAgentDevice> listRegisteredByUser(UUID userId) {
+        return jdbc.query("""
+                SELECT * FROM local_agent_devices
+                WHERE user_id = :userId
+                  AND revoked_at IS NULL
+                  AND installation_id IS NOT NULL
+                  AND machine_name IS NOT NULL
+                ORDER BY selected_at DESC NULLS LAST, last_seen_at DESC NULLS LAST, created_at ASC, agent_id ASC
+                """, new MapSqlParameterSource("userId", userId), this::map);
+    }
+
     public Optional<LocalAgentDevice> findActiveByUserAndAgent(UUID userId, UUID agentId) {
         List<LocalAgentDevice> rows = jdbc.query("""
                 SELECT * FROM local_agent_devices

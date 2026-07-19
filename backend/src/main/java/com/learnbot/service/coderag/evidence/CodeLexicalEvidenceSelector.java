@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class CodeLexicalEvidenceSelector {
     private static final Set<String> STOP_WORDS = Set.of(
@@ -71,6 +72,33 @@ public final class CodeLexicalEvidenceSelector {
                 1.0, 0.0, 1.0) > 0
                 || addTermScores(auxiliaryTerms, symbolTerms, Set.of(), contentTerms,
                 1.0, 0.0, 1.0) > 0;
+    }
+
+    /** Exact user-authored callable identity; planner and file/type text cannot satisfy it. */
+    public static boolean hasExactTrustedCallableMatch(String trustedIntent, CodeSearchResult result) {
+        if (trustedIntent == null || trustedIntent.isBlank() || result == null) return false;
+        return List.of(safe(result.methodName()), safe(result.symbolName())).stream()
+                .map(CodeLexicalEvidenceSelector::canonicalCallable)
+                .filter(symbol -> symbol.length() >= 3)
+                .distinct()
+                .anyMatch(symbol -> Pattern.compile(
+                                "(?<![\\p{L}\\p{N}_$])" + Pattern.quote(symbol)
+                                        + "(?![\\p{L}\\p{N}_$])",
+                                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(trustedIntent).find());
+    }
+
+    private static String canonicalCallable(String value) {
+        String callable = safe(value).trim();
+        int parameters = callable.indexOf('(');
+        if (parameters >= 0) callable = callable.substring(0, parameters);
+        callable = callable.replace("::", ".").replace('#', '.');
+        int separator = callable.lastIndexOf('.');
+        if (separator >= 0 && separator + 1 < callable.length()) {
+            callable = callable.substring(separator + 1);
+        }
+        int generic = callable.indexOf('<');
+        return (generic > 0 ? callable.substring(0, generic) : callable).trim();
     }
 
     private static double score(

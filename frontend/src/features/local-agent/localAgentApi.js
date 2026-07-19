@@ -5,8 +5,39 @@ const LOCAL_AGENT_ENDPOINTS = Object.freeze({
   enrollmentDecision: (enrollmentId) => `/api/local-agents/enrollments/${encodeURIComponent(enrollmentId)}/decision`,
   stableRelease: '/downloads/local-agent/stable/release.json',
   stableInstaller: '/downloads/local-agent/stable/LearnBotLocalAgent.appinstaller',
+  pilotRelease: '/downloads/local-agent/pilot/release.json',
+  pilotInstaller: '/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller',
   connectProtocol: 'learnbot-local-agent://connect',
 });
+
+function isRfc1918Ipv4Literal(hostname = '') {
+  const parts = String(hostname).split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
+  const octets = parts.map(Number);
+  if (octets.some((value) => value < 0 || value > 255)) return false;
+  return octets[0] === 10
+    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+    || (octets[0] === 192 && octets[1] === 168);
+}
+
+function isInsecurePrivateNetworkLocation(locationValue = typeof window === 'undefined' ? null : window.location) {
+  return locationValue?.protocol === 'http:' && isRfc1918Ipv4Literal(locationValue.hostname);
+}
+
+function localAgentDistributionEndpoints(locationValue = typeof window === 'undefined' ? null : window.location) {
+  const pilot = isInsecurePrivateNetworkLocation(locationValue);
+  return {
+    channel: pilot ? 'pilot' : 'stable',
+    release: pilot ? LOCAL_AGENT_ENDPOINTS.pilotRelease : LOCAL_AGENT_ENDPOINTS.stableRelease,
+    installer: pilot ? LOCAL_AGENT_ENDPOINTS.pilotInstaller : LOCAL_AGENT_ENDPOINTS.stableInstaller,
+  };
+}
+
+function localAgentConnectUri(locationValue = typeof window === 'undefined' ? null : window.location) {
+  const origin = locationValue?.origin;
+  if (!origin) return LOCAL_AGENT_ENDPOINTS.connectProtocol;
+  return `${LOCAL_AGENT_ENDPOINTS.connectProtocol}?server=${encodeURIComponent(origin)}`;
+}
 
 function normalizeUserCode(value = '') {
   return String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
@@ -53,7 +84,7 @@ function normalizeEnrollment(payload) {
   };
 }
 
-function trustedDownloadPath(candidate, fallback = LOCAL_AGENT_ENDPOINTS.stableInstaller) {
+function trustedDownloadPath(candidate, fallback = localAgentDistributionEndpoints().installer) {
   if (!candidate) return fallback;
   try {
     const currentOrigin = typeof window === 'undefined' ? 'https://learnbot.invalid' : window.location.origin;
@@ -67,7 +98,8 @@ function trustedDownloadPath(candidate, fallback = LOCAL_AGENT_ENDPOINTS.stableI
 }
 
 async function fetchReleaseMetadata() {
-  const response = await fetch(LOCAL_AGENT_ENDPOINTS.stableRelease, {
+  const distribution = localAgentDistributionEndpoints();
+  const response = await fetch(distribution.release, {
     method: 'GET',
     credentials: 'omit',
     headers: { Accept: 'application/json' },
@@ -75,10 +107,16 @@ async function fetchReleaseMetadata() {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`설치 파일 정보를 불러오지 못했습니다. (${response.status})`);
   const release = await response.json();
+  const signingCertificate = release.signingCertificate || {};
+  const certificateUrl = trustedDownloadPath(signingCertificate.url || release.signingCertificateUrl, '');
   return {
     ...release,
     version: release.version || release.latestVersion || '-',
-    installerUrl: trustedDownloadPath(release.appInstallerUrl || release.installerUrl),
+    distributionChannel: distribution.channel,
+    installerUrl: trustedDownloadPath(release.appInstallerUrl || release.installerUrl, distribution.installer),
+    signingCertificate: { ...signingCertificate, url: certificateUrl },
+    certificateUrl,
+    trustRequired: Boolean(signingCertificate.required ?? release.enterpriseManagedTrust),
   };
 }
 
@@ -117,6 +155,10 @@ export {
   decideEnrollment,
   fetchDevices,
   fetchReleaseMetadata,
+  isInsecurePrivateNetworkLocation,
+  isRfc1918Ipv4Literal,
+  localAgentConnectUri,
+  localAgentDistributionEndpoints,
   lookupEnrollment,
   normalizeDeviceResponse,
   normalizeEnrollment,

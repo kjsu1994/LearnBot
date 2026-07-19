@@ -104,6 +104,7 @@ class CodeEvidenceRetentionPlanTest {
 
         assertThat(plan.lookup(source.evidenceId())).get().satisfies(entry -> {
             assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+            assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION);
             assertThat(entry.groups()).containsExactlyInAnyOrder(
                     "operation:op_flow", "claim:claim_flow", "evidence:lifecycle_flow");
         });

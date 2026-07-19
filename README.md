@@ -73,6 +73,8 @@ Open:
 
 Local Agent production deployment: [operator runbook](docs/local-agent-deployment-runbook.md)
 
+사내망 HTTP Local Agent profile은 특정 IP를 코드에 고정하지 않는다. 부서 서버 PC마다 `Start-LearnBotDepartmentServer.ps1`을 실행하면 기본 gateway가 있는 실제 LAN IP와 선택한 포트로 Nginx가 bind되고, 동일한 범용 서명 MSIX가 현재 웹 origin에 연결된다. 사용자·운영자 절차와 다른 서버로 이전하는 방법은 [Local Agent README](local-agent/README.md)를 따른다. 현재 서버 origin은 Git에서 제외된 `.env.local-agent-lan-http`의 `LEARNBOT_LOCAL_AGENT_PUBLIC_BASE_URL`에서 확인한다.
+
 Check whether Ollama and the optional reranker are using GPU memory while models are loaded:
 
 ```bash
@@ -740,7 +742,7 @@ The first real snapshot creation boundary is specified in `docs/local-agent-snap
 
 ### Local Agent
 
-The Windows Local Agent now ships as a self-contained signed MSIX/App Installer package with a Setup GUI and per-user StartupHost. Users install it from **Settings → Local Agent**, approve the short-lived browser connection request, and do not need server-PC access, administrator rights, or a separate .NET runtime. Production packaging, pilot verification, stable promotion, TLS, and rollback procedures are documented in the [Local Agent deployment runbook](docs/local-agent-deployment-runbook.md). The CLI commands below remain available for diagnostics and legacy internal workflows.
+The Windows Local Agent now ships as a self-contained signed MSIX/App Installer package with a Setup GUI and per-user StartupHost. Users install it from **Settings → Local Agent**, approve the short-lived browser connection request, and do not need server-PC access, administrator rights, or a separate .NET runtime. The default distribution path uses HTTPS; an explicitly constrained enterprise LAN HTTP pilot profile is available for centrally managed PCs. Packaging, certificate trust, pilot verification, stable promotion, TLS migration, and rollback procedures are documented in the [Local Agent deployment runbook](docs/local-agent-deployment-runbook.md). The CLI commands below remain available for diagnostics and legacy internal workflows.
 
 Current commands:
 

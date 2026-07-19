@@ -52,6 +52,50 @@ final class CodeSourceBundleExpander {
                 .mapToObj(index -> new RankedSource(index, searchResults.get(index)))
                 .filter(value -> isSourceAnchor(value.result()))
                 .toList();
+        return expandAnchors(
+                repositoryId, selectedSpaceId, spaceIds, operation, graphIntent,
+                searchResults, retrievalIntent, head, true);
+    }
+
+    /** Exposes only lexically supported members from a directly read class/constructor container. */
+    List<CodeSearchResult> expandDirectContainer(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            RagPipelineService.CodeSearchOperation operation,
+            GraphSearchIntent graphIntent,
+            List<CodeSearchResult> directResults,
+            String retrievalIntent
+    ) {
+        if (repository == null || operation == null || !isContainerReadOperation(operation)
+                || !hasTypedClaimBinding(operation)
+                || retrievalIntent == null || retrievalIntent.isBlank()
+                || directResults == null || directResults.isEmpty()) {
+            return List.of();
+        }
+        List<RankedSource> containers = java.util.stream.IntStream.range(
+                        0, Math.min(SEARCH_HEAD_SIZE, directResults.size()))
+                .mapToObj(index -> new RankedSource(index, directResults.get(index)))
+                .filter(value -> isContainerAnchor(value.result()))
+                .toList();
+        return expandAnchors(
+                repositoryId, selectedSpaceId, spaceIds, operation, graphIntent,
+                directResults, retrievalIntent, containers, false);
+    }
+
+    private List<CodeSearchResult> expandAnchors(
+            UUID repositoryId,
+            UUID selectedSpaceId,
+            List<UUID> spaceIds,
+            RagPipelineService.CodeSearchOperation operation,
+            GraphSearchIntent graphIntent,
+            List<CodeSearchResult> observedResults,
+            String retrievalIntent,
+            List<RankedSource> head,
+            boolean includeBoundaries
+    ) {
+        if (head == null || head.isEmpty()) return List.of();
+        boolean canRankMembers = retrievalIntent != null && !retrievalIntent.isBlank();
         SourceFamily family = sourceFamily(head);
         if (family == null) return List.of();
 
@@ -85,23 +129,20 @@ final class CodeSourceBundleExpander {
             }
         }
 
-        if (family.cohesive() && supportsSourceBoundary(graphIntent)) {
-            Set<UUID> observedChunkIds = searchResults.stream()
-                    .map(CodeSearchResult::chunkId)
-                    .filter(java.util.Objects::nonNull)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
-            List<CodeSearchResult> unobserved = siblings.stream()
-                    .filter(result -> result.chunkId() != null
-                            && !observedChunkIds.contains(result.chunkId()))
+        if (includeBoundaries && family.cohesive() && supportsSourceBoundary(graphIntent)) {
+            // Mark the actual callable boundaries even when search already observed them. The executor
+            // merges provenance by chunk identity, so an observed first/last member can gain the typed
+            // boundary signal instead of disappearing merely because it was found early.
+            List<CodeSearchResult> ordered = siblings.stream()
                     .sorted(Comparator.comparingInt(CodeSearchResult::lineStart)
                             .thenComparingInt(CodeSearchResult::lineEnd)
                             .thenComparing(CodeSearchResult::methodName))
                     .toList();
-            if (!unobserved.isEmpty()) {
-                output.add(mark(unobserved.get(0), operation, origins,
+            if (!ordered.isEmpty()) {
+                output.add(mark(ordered.get(0), operation, origins,
                         "read_source_boundary", 1));
-                if (unobserved.size() > 1 && MAX_BOUNDARIES > 1) {
-                    output.add(mark(unobserved.get(unobserved.size() - 1), operation, origins,
+                if (ordered.size() > 1 && MAX_BOUNDARIES > 1) {
+                    output.add(mark(ordered.get(ordered.size() - 1), operation, origins,
                             "read_source_boundary", 2));
                 }
             }
@@ -176,11 +217,24 @@ final class CodeSourceBundleExpander {
                 && operation.evidenceGroup() != null && !operation.evidenceGroup().isBlank();
     }
 
+    private static boolean isContainerReadOperation(RagPipelineService.CodeSearchOperation operation) {
+        if (operation == null) return false;
+        return switch (operation.type()) {
+            case "read_chunk", "read_symbol", "read_file_range" -> true;
+            default -> false;
+        };
+    }
+
     private static boolean isSourceAnchor(CodeSearchResult result) {
         return result != null && result.chunkId() != null
                 && result.filePath() != null && !result.filePath().isBlank()
                 && result.className() != null && !result.className().isBlank()
                 && result.content() != null && !result.content().isBlank();
+    }
+
+    private static boolean isContainerAnchor(CodeSearchResult result) {
+        if (!isSourceAnchor(result)) return false;
+        return "class".equalsIgnoreCase(result.chunkType()) || isConstructor(result);
     }
 
     private static boolean isCallable(CodeSearchResult result) {

@@ -6,8 +6,8 @@ import {
 import { Badge } from '../ui/badge.jsx';
 import { Button } from '../ui/button.jsx';
 import {
-  LOCAL_AGENT_ENDPOINTS, decideEnrollment, fetchDevices, fetchReleaseMetadata,
-  lookupEnrollment, normalizeUserCode, revokeDevice, selectDevice,
+  decideEnrollment, fetchDevices, fetchReleaseMetadata,
+  isInsecurePrivateNetworkLocation, localAgentConnectUri, lookupEnrollment, normalizeUserCode, revokeDevice, selectDevice,
 } from '../../features/local-agent/localAgentApi.js';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -16,6 +16,11 @@ function formatTimestamp(value) {
   if (!value) return '아직 연결 기록 없음';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('ko-KR');
+}
+
+function formatThumbprint(value) {
+  const normalized = String(value || '').toUpperCase().replace(/[^A-F0-9]/g, '');
+  return normalized.match(/.{1,4}/g)?.join(' ') || '';
 }
 
 function isConnected(device) {
@@ -123,6 +128,7 @@ export function LocalAgentSettings({ request, approvalMode = false }) {
   const [revokingId, setRevokingId] = useState('');
   const [selectingId, setSelectingId] = useState('');
   const [connectHint, setConnectHint] = useState(false);
+  const insecurePrivateNetwork = useMemo(() => isInsecurePrivateNetworkLocation(), []);
   const userCode = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     return normalizeUserCode(params.get('user_code') || params.get('userCode') || '');
@@ -162,7 +168,7 @@ export function LocalAgentSettings({ request, approvalMode = false }) {
 
   function openAgent() {
     setConnectHint(true);
-    window.location.assign(LOCAL_AGENT_ENDPOINTS.connectProtocol);
+    window.location.assign(localAgentConnectUri());
   }
 
   async function handleRevoke(device) {
@@ -201,7 +207,9 @@ export function LocalAgentSettings({ request, approvalMode = false }) {
         <div>
           <span className="local-agent-eyebrow">LearnBot for Windows</span>
           <h1>내 PC를 안전하게 연결하세요</h1>
-          <p>Local Agent는 사용자가 허용한 작업 폴더에서만 승인된 작업을 실행합니다. PC는 서버로 암호화된 outbound 연결만 시작합니다.</p>
+          <p>{insecurePrivateNetwork
+            ? 'Local Agent는 사용자가 허용한 작업 폴더에서만 승인된 작업을 실행합니다. 현재는 회사 내부망 전용 HTTP 파일럿으로 연결됩니다.'
+            : 'Local Agent는 사용자가 허용한 작업 폴더에서만 승인된 작업을 실행합니다. PC는 서버로 암호화된 outbound 연결만 시작합니다.'}</p>
         </div>
         <div className="local-agent-summary" aria-label="Local Agent 연결 요약">
           <div><strong>{devices.length}</strong><span>등록된 PC</span></div>
@@ -210,6 +218,16 @@ export function LocalAgentSettings({ request, approvalMode = false }) {
         </div>
       </header>
 
+      {insecurePrivateNetwork && (
+        <div className="local-agent-notice warning local-agent-network-warning" role="status">
+          <AlertTriangle size={19} />
+          <div>
+            <strong>사내망 HTTP 파일럿</strong>
+            <span>통신이 암호화되지 않습니다. 회사 네트워크에서만 사용하고 외부망·게스트 Wi-Fi에서는 접속하지 마세요. 설치 파일은 IT가 배포한 사내 코드 서명 인증서로 검증됩니다.</span>
+          </div>
+        </div>
+      )}
+
       {approvalMode && (userCode
         ? <EnrollmentApproval request={request} userCode={userCode} onFinished={() => refreshDevices({ quiet: true })} />
         : <div className="local-agent-notice error"><AlertTriangle size={18} />승인 코드가 없습니다. Local Agent에서 연결을 다시 시작하세요.</div>)}
@@ -217,18 +235,42 @@ export function LocalAgentSettings({ request, approvalMode = false }) {
       <section className="local-agent-steps" aria-label="Local Agent 설치 단계">
         <article className="local-agent-step">
           <b>1</b><span className="local-agent-icon"><Download size={22} /></span><h2>Windows 앱 설치</h2>
-          <p>설치 파일을 내려받아 Windows App Installer에서 설치하세요. 관리자 권한이나 .NET 설치는 필요하지 않습니다.</p>
+          <p>설치 파일을 내려받아 Windows App Installer에서 설치하세요. 앱에는 별도 .NET 설치가 필요하지 않습니다.</p>
+          {release?.trustRequired && (
+            <div className="local-agent-trust-prerequisite" role="note">
+              <strong><ShieldCheck size={16} /> 회사 인증서 사전 배포 필요</strong>
+              <span>IT가 서명 인증서를 이 PC의 로컬 컴퓨터 → 신뢰할 수 있는 사용자(Trusted People)에 먼저 배포해야 합니다. 누락되면 0x800B010A가 표시되고 설치 버튼이 비활성화됩니다.</span>
+              {release.signingCertificate?.thumbprint && (
+                <span>확인할 인증서 지문 <code>{formatThumbprint(release.signingCertificate.thumbprint)}</code></span>
+              )}
+              {release.certificateUrl && (
+                <a href={release.certificateUrl} download>
+                  <Download size={14} /> 공개 인증서 받기 (IT·관리자용)
+                </a>
+              )}
+              <details>
+                <summary>관리자 권한으로 직접 설치하는 방법</summary>
+                <ol>
+                  <li>공개 인증서를 내려받아 파일을 엽니다.</li>
+                  <li><strong>인증서 설치</strong>를 누르고 저장 위치로 <strong>로컬 컴퓨터</strong>를 선택합니다.</li>
+                  <li><strong>모든 인증서를 다음 저장소에 저장</strong>을 선택하고 <strong>신뢰할 수 있는 사용자(Trusted People)</strong>를 지정합니다.</li>
+                  <li>완료 후 열려 있던 App Installer를 닫고 Windows 앱 설치 파일을 다시 엽니다.</li>
+                </ol>
+                <span>관리자 권한이 없으면 직접 진행하지 말고 IT에 인증서 배포를 요청하세요.</span>
+              </details>
+            </div>
+          )}
           {installerUrl
             ? <a className="local-agent-download" href={installerUrl} download><Download size={17} /> Windows 11 x64용 다운로드</a>
             : <Button type="button" disabled><Download size={17} /> {releaseChecked ? '설치 파일 준비 중' : '설치 파일 확인 중'}</Button>}
-          <small>{release ? `최신 버전 ${release.version} · 다운로드한 .appinstaller 파일을 열고 설치를 누르세요.` : '서명된 운영 패키지가 게시되면 다운로드할 수 있습니다.'}</small>
+          <small>{release ? `${release.distributionChannel === 'pilot' ? '사내 파일럿' : '최신'} 버전 ${release.version} · 다운로드한 .appinstaller 파일을 열고 설치를 누르세요.` : '서명된 운영 패키지가 게시되면 다운로드할 수 있습니다.'}</small>
           {releaseError && <small className="local-agent-error-text">{releaseError}</small>}
         </article>
         <article className="local-agent-step">
           <b>2</b><span className="local-agent-icon"><PlugZap size={22} /></span><h2>이 PC 연결</h2>
           <p>설치가 끝나면 LearnBot을 실행해 이 계정과 연결하세요.</p>
           <Button type="button" onClick={openAgent}><ExternalLink size={16} /> 이 PC 연결</Button>
-          {connectHint && <small>앱이 열리지 않으면 Windows 시작 메뉴에서 LearnBot을 실행하세요.</small>}
+          {connectHint && <small>앱이 열리지 않으면 설치가 끝났는지 확인한 뒤 이 버튼을 다시 누르세요.</small>}
         </article>
         <article className="local-agent-step">
           <b>3</b><span className="local-agent-icon"><ShieldCheck size={22} /></span><h2>승인과 폴더 선택</h2>

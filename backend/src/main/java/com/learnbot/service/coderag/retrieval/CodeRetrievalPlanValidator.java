@@ -16,6 +16,8 @@ import java.util.regex.Pattern;
 
 public final class CodeRetrievalPlanValidator {
     private static final Pattern SEMANTIC_TOKEN = Pattern.compile("[\\p{L}\\p{N}_]{2,}");
+    private static final Pattern CODE_SHAPED_IDENTIFIER = Pattern.compile(
+            "\\b(?:[A-Za-z]+\\d[A-Za-z0-9_]*|[A-Za-z]+(?:[A-Z][A-Za-z0-9]*)+|[A-Z][A-Z0-9]+(?:_[A-Z0-9]+)+)\\b");
 
     public PlanValidationResult validate(
             RagPipelineService.CodeEvidenceFollowUpPlan plan,
@@ -259,13 +261,35 @@ public final class CodeRetrievalPlanValidator {
         }
         for (String claimId : operation.claimIds()) {
             RagPipelineService.CodeEvidenceChecklistItem claim = claims.get(claimId);
-            if (claim == null || !hasSubstantiveOverlap(queryTokens, claimBehaviorTokens(claim))
+            Set<String> claimTokens = claimBehaviorTokens(claim);
+            boolean aligned = hasSubstantiveOverlap(queryTokens, claimTokens)
+                    || hasCodeShapedClaimOverlap(operation.query(), claimTokens);
+            if (claim == null || !aligned
                     || companionCounts.getOrDefault(claimId, 0) >= 1) {
                 return false;
             }
         }
         operation.claimIds().forEach(id -> companionCounts.merge(id, 1, Integer::sum));
         return true;
+    }
+
+    /**
+     * A bounded source-vocabulary companion may use a composite identifier that is split into
+     * several semantic tokens. Requiring the whole short query to be majority-covered rejects
+     * valid translated identifiers, so accept one code-shaped identifier only when its own
+     * tokens overlap the claim. Plain prose and short-prefix coincidences do not qualify.
+     */
+    private boolean hasCodeShapedClaimOverlap(String query, Set<String> claimTokens) {
+        if (query == null || query.isBlank() || claimTokens == null || claimTokens.isEmpty()) return false;
+        Matcher matcher = CODE_SHAPED_IDENTIFIER.matcher(query);
+        while (matcher.find()) {
+            Set<String> identifierTokens = distinctiveTokens(matcher.group());
+            if (!identifierTokens.isEmpty()
+                    && matchedTargetTokenCount(identifierTokens, claimTokens) >= 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasSubstantiveOverlap(Set<String> left, Set<String> right) {

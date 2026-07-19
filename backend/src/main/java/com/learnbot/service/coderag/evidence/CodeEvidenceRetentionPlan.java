@@ -37,6 +37,7 @@ public final class CodeEvidenceRetentionPlan {
     public enum Basis {
         CONSTRAINT,
         DIRECT_PROOF,
+        DIRECT_OBSERVATION,
         BOUNDED_GRAPH_PATH,
         SOURCE_BUNDLE,
         SIGNAL
@@ -133,6 +134,8 @@ public final class CodeEvidenceRetentionPlan {
             if (item == null || item.authority().rank() < CodeIntelligenceAuthority.SYNTAX.rank()) continue;
             Basis basis = isBoundedGraphPath(item)
                     ? Basis.BOUNDED_GRAPH_PATH
+                    : signal.type() == CodeEvidenceSignal.Type.DIRECT_OBSERVATION
+                    ? Basis.DIRECT_OBSERVATION
                     : signal.type() == CodeEvidenceSignal.Type.SOURCE_BUNDLE_BOUNDARY
                     ? Basis.SOURCE_BUNDLE
                     : Basis.SIGNAL;
@@ -144,6 +147,13 @@ public final class CodeEvidenceRetentionPlan {
 
     private static Set<String> signalGroups(CodeEvidenceItem item, CodeEvidenceSignal signal) {
         LinkedHashSet<String> groups = new LinkedHashSet<>();
+        if (signal.type() == CodeEvidenceSignal.Type.QUESTION_CALLABLE_BODY) {
+            String callable = item.source() == null ? "" : item.source().methodName();
+            if (callable == null || callable.isBlank()) {
+                callable = item.source() == null ? "" : item.source().symbolName();
+            }
+            groups.add(group("question_callable", callable));
+        }
         for (CodeEvidenceOperationProvenance provenance
                 : CodeEvidenceOperationProvenance.from(item.source())) {
             if (!provenance.isDirectOperation() && !provenance.isSearchOperation()) continue;

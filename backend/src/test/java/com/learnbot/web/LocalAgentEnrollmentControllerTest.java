@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,6 +39,19 @@ class LocalAgentEnrollmentControllerTest {
             enrollmentService, rotationService, deviceRepository, authService, gatewayService,
             versionPolicy, currentUserProvider, auditService
     );
+
+    @Test
+    void devicesListsOnlyFullyRegisteredPcRows() {
+        UUID userId = UUID.randomUUID();
+        when(currentUserProvider.currentUser()).thenReturn(
+                new AppUser(userId, "user@example.com", "User", "USER", "ACTIVE")
+        );
+        when(deviceRepository.listRegisteredByUser(userId)).thenReturn(List.of());
+
+        assertThat(controller.devices()).isEmpty();
+
+        verify(deviceRepository).listRegisteredByUser(userId);
+    }
 
     @Test
     void revokeSelfUsesAgentCredentialAndClearsDeviceLifecycle() {

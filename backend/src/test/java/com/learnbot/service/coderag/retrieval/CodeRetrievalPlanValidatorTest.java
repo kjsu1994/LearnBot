@@ -354,6 +354,32 @@ class CodeRetrievalPlanValidatorTest {
     }
 
     @Test
+    void codeShapedSourceCompanionMayBridgeOneObservedClaimAfterAnAnchor() {
+        var claim = new RagPipelineService.CodeEvidenceChecklistItem(
+                "claim-1", "frame_delivery", "trace frame delivery", List.of(),
+                "dispatcher", "dispatch", "frame", "frame delivery completes",
+                List.of(), List.of("DIRECT_SOURCE"));
+        var anchor = new RagPipelineService.CodeSearchOperation(
+                "hybrid_search", "trace native frame delivery", "flow", "frame_delivery",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "question-anchor", List.of("claim-1"), List.of());
+        var companion = new RagPipelineService.CodeSearchOperation(
+                "keyword_search", "Native32 DispatchFrame MSG_WRITE", "flow", "frame_delivery",
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "code-shaped-companion", List.of("claim-1"), List.of());
+        var plan = new RagPipelineService.CodeEvidenceFollowUpPlan(
+                true, false, "test", List.of("claim-1"), List.of(), List.of(),
+                List.of("frame_delivery"), List.of(claim), List.of(anchor, companion), List.of(),
+                "hypothesis", 1, "UNRESOLVED", List.of(), "NONE");
+
+        var result = validator.validateInitial(
+                "trace native frame delivery", plan, null, Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.executableOperations()).containsExactly(anchor, companion);
+    }
+
+    @Test
     void initialPlanAcceptsRoleScopeAndBehaviorWhenTheyBridgeTheClaim() {
         var claim = new RagPipelineService.CodeEvidenceChecklistItem(
                 "claim-1", "persistence", "persist user settings", List.of(),

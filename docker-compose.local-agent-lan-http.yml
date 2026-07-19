@@ -1,0 +1,11 @@
+services:
+  nginx:
+    # Use the frontend built into the image. The override avoids a stale host
+    # frontend/dist bind mount while preserving the durable artifact mount.
+    volumes: !override
+      - ./artifacts/local-agent:/usr/share/nginx/client/downloads/local-agent:ro
+      - ./deploy/local-agent-lan-http.generated.inc:/etc/nginx/conf.d/client-ip-policy.inc:ro
+
+  backend:
+    environment:
+      LEARNBOT_LOCAL_AGENT_UPDATE_URI: /downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller

@@ -37,7 +37,17 @@ internal sealed partial class LearnBotLocalAgent
         if (Uri.TryCreate(args[0], UriKind.Absolute, out var activationUri)
             && string.Equals(activationUri.Scheme, "learnbot-local-agent", StringComparison.OrdinalIgnoreCase))
         {
-            return await Connect(["--server", ConfiguredPublicBaseUrl()]);
+            if (!ServerActivation.TryReadServer(
+                    args[0],
+                    ConfiguredPublicBaseUrl(),
+                    ConfiguredAllowInsecurePrivateNetwork(),
+                    out var activationServer,
+                    out var activationError))
+            {
+                Console.Error.WriteLine(activationError);
+                return 2;
+            }
+            return await Connect(["--server", activationServer]);
         }
 
         return args[0].ToLowerInvariant() switch
@@ -69,7 +79,12 @@ internal sealed partial class LearnBotLocalAgent
 
     private async Task<int> Pair(string[] args)
     {
-        var server = GetOption(args, "--server") ?? "http://localhost:8083";
+        var server = (GetOption(args, "--server") ?? "http://localhost:8083").TrimEnd('/');
+        if (!TryValidateEnrollmentServer(server, out _, out var serverPolicyError))
+        {
+            Console.Error.WriteLine(serverPolicyError);
+            return 2;
+        }
         var token = GetOption(args, "--token");
         var agentId = GetOption(args, "--agent-id");
         var transport = NormalizeTransport(GetOption(args, "--transport") ?? "polling");
@@ -78,7 +93,7 @@ internal sealed partial class LearnBotLocalAgent
         {
             var webToken = GetOption(args, "--web-token")
                 ?? Environment.GetEnvironmentVariable("LEARNBOT_WEB_TOKEN")
-                ?? await ReadStoredWebAccessTokenWithRefresh(server.TrimEnd('/'));
+                ?? await ReadStoredWebAccessTokenWithRefresh(server);
             if (string.IsNullOrWhiteSpace(webToken))
             {
                 Console.Error.WriteLine("Web session is required for automatic pairing. Run learnbot login, pass --web-token, or use manual --agent-id/--token pairing.");
@@ -86,7 +101,7 @@ internal sealed partial class LearnBotLocalAgent
             }
             try
             {
-                using var client = new HttpClient { BaseAddress = new Uri(server.TrimEnd('/')) };
+                using var client = new HttpClient { BaseAddress = new Uri(server) };
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", webToken);
                 client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("learnbot-local-agent", Version));
                 using var response = await client.PostAsync("/api/local-agents/pairing-token", Json(new { label = Environment.MachineName }));
@@ -115,7 +130,7 @@ internal sealed partial class LearnBotLocalAgent
         var config = LoadConfigOrDefault();
         var candidate = new AgentConfig
         {
-            ServerUrl = server.TrimEnd('/'),
+            ServerUrl = server,
             AgentId = parsedAgentId,
             Token = token,
             CredentialExpiresAt = DateTimeOffset.UtcNow.AddDays(30),
@@ -164,6 +179,11 @@ internal sealed partial class LearnBotLocalAgent
         }
         var once = args.Contains("--once", StringComparer.OrdinalIgnoreCase);
         var config = RequireConfig();
+        if (!TryValidateEnrollmentServer(config.ServerUrl ?? "", out _, out var serverPolicyError))
+        {
+            Console.Error.WriteLine("Stored Local Agent server is not allowed by this package: " + serverPolicyError);
+            return 2;
+        }
         if (!await RecoverPendingCredentialBeforeHeartbeat(config, once, cancellationToken))
         {
             return 1;
@@ -199,6 +219,13 @@ internal sealed partial class LearnBotLocalAgent
                         return 4;
                     }
                     config = refreshedConfig;
+                    if (!TryValidateEnrollmentServer(config.ServerUrl ?? "", out _, out serverPolicyError))
+                    {
+                        finalStatus = "failed";
+                        finalEvent = "Stored Local Agent server is not allowed by this package: " + serverPolicyError;
+                        Log(finalEvent);
+                        return 2;
+                    }
                     transport = NormalizeTransport(requestedTransport ?? config.Transport);
                     var shouldTryWebSocket = transport != "polling"
                         && (nextWebSocketRetryAt is null || DateTimeOffset.UtcNow >= nextWebSocketRetryAt.Value);
@@ -7228,6 +7255,10 @@ internal sealed partial class LearnBotLocalAgent
         if (string.Equals(args[0], "enrollment-reuse-contract", StringComparison.OrdinalIgnoreCase))
         {
             return SelfTestEnrollmentReuseContract();
+        }
+        if (string.Equals(args[0], "server-origin-policy-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestServerOriginPolicyContract();
         }
         if (string.Equals(args[0], "agent-update-gate-contract", StringComparison.OrdinalIgnoreCase))
         {

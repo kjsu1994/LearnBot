@@ -1,42 +1,163 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 
 if (args.Contains("--self-test-output-parser", StringComparer.OrdinalIgnoreCase))
 {
-    var passed = EnrollmentOutputParser.TryReadApprovalUrl("https://learnbot.example.test/settings/local-agent/device?user_code=ABCD-EFGH", out var url)
+    const string httpsOrigin = "https://learnbot.example.test";
+    const string privateOrigin = "http://192.168.1.72:8083";
+    var passed = EnrollmentOutputParser.TryReadApprovalUrl(
+            "https://learnbot.example.test/settings/local-agent/device?user_code=ABCD-EFGH",
+            httpsOrigin,
+            allowInsecurePrivateNetwork: false,
+            out var url)
         && url.StartsWith("https://", StringComparison.Ordinal)
+        && EnrollmentOutputParser.TryReadApprovalUrl(
+            "http://192.168.1.72:8083/settings/local-agent/connect?user_code=ABCD-EFGH",
+            privateOrigin,
+            allowInsecurePrivateNetwork: true,
+            out var privateUrl)
+        && privateUrl.StartsWith(privateOrigin, StringComparison.Ordinal)
+        && !EnrollmentOutputParser.TryReadApprovalUrl(
+            "http://192.168.1.73:8083/settings/local-agent/connect?user_code=ABCD-EFGH",
+            privateOrigin,
+            allowInsecurePrivateNetwork: true,
+            out _)
+        && !EnrollmentOutputParser.TryReadApprovalUrl(
+            "http://192.168.1.72:8083/settings/local-agent/connect?user_code=ABCD-EFGH",
+            privateOrigin,
+            allowInsecurePrivateNetwork: false,
+            out _)
         && EnrollmentOutputParser.TryReadUserCode("User code: ABCD-EFGH", out var code)
         && code == "ABCD-EFGH"
         && SetupCommandBuilder.Connect("https://learnbot.example.test", reconnect: true).Contains("--reconnect")
         && SetupCommandBuilder.Disconnect(localOnly: true).SequenceEqual(["disconnect", "--local-only"])
-        && UpdateRequiredForm.IsTrustedUpdateUri("https://learnbot.example.test/agent.appinstaller")
-        && !UpdateRequiredForm.IsTrustedUpdateUri("http://learnbot.example.test/agent.appinstaller");
+        && UpdateRequiredForm.IsTrustedUpdateUri(
+            "https://learnbot.example.test/agent.appinstaller",
+            httpsOrigin,
+            allowInsecurePrivateNetwork: false)
+        && UpdateRequiredForm.IsTrustedUpdateUri(
+            "http://192.168.1.72:8083/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller",
+            privateOrigin,
+            allowInsecurePrivateNetwork: true)
+        && !UpdateRequiredForm.IsTrustedUpdateUri(
+            "http://192.168.1.73:8083/downloads/local-agent/pilot/LearnBotLocalAgent.appinstaller",
+            privateOrigin,
+            allowInsecurePrivateNetwork: true)
+        && ServerActivation.TryReadServer(
+            "learnbot-local-agent://connect?server=http%3A%2F%2F10.20.30.40%3A8083",
+            "https://learnbot.portable.invalid",
+            allowInsecurePrivateNetwork: true,
+            out var activatedServer,
+            out _)
+        && activatedServer == "http://10.20.30.40:8083"
+        && !ServerActivation.TryReadServer(
+            "learnbot-local-agent://connect?server=http%3A%2F%2F203.0.113.10%3A8083",
+            "https://learnbot.portable.invalid",
+            allowInsecurePrivateNetwork: true,
+            out _,
+            out _);
     Console.WriteLine(passed ? "setup-output-parser-ok" : "setup-output-parser-failed");
     Environment.ExitCode = passed ? 0 : 1;
     return;
 }
 
 ApplicationConfiguration.Initialize();
+var deployment = ResolveDeploymentConfiguration(args, out var activationError);
+if (activationError is not null)
+{
+    MessageBox.Show(
+        activationError,
+        "LearnBot Local Agent",
+        MessageBoxButtons.OK,
+        MessageBoxIcon.Error);
+    return;
+}
 var updateArgumentIndex = Array.FindIndex(args, value => string.Equals(value, "--update-required", StringComparison.OrdinalIgnoreCase));
 if (updateArgumentIndex >= 0)
 {
     var updateUri = updateArgumentIndex + 1 < args.Length ? args[updateArgumentIndex + 1] : null;
-    Application.Run(new UpdateRequiredForm(updateUri));
+    Application.Run(new UpdateRequiredForm(updateUri, deployment.PublicBaseUrl, deployment.AllowInsecurePrivateNetwork));
     return;
 }
-Application.Run(new SetupForm(ReadPublicBaseUrl()));
+Application.Run(new SetupForm(deployment.PublicBaseUrl, deployment.AllowInsecurePrivateNetwork));
 
-static string ReadPublicBaseUrl() =>
-    Assembly.GetExecutingAssembly()
-        .GetCustomAttributes<AssemblyMetadataAttribute>()
+static DeploymentConfiguration ResolveDeploymentConfiguration(string[] arguments, out string? error)
+{
+    error = null;
+    var compiled = ReadDeploymentConfiguration();
+    var origin = TryReadStoredServerOrigin(compiled) ?? compiled.PublicBaseUrl;
+    var activationArgument = arguments.FirstOrDefault(value =>
+        value.StartsWith("learnbot-local-agent:", StringComparison.OrdinalIgnoreCase));
+    if (activationArgument is null)
+    {
+        return compiled with { PublicBaseUrl = origin };
+    }
+    if (!ServerActivation.TryReadServer(
+            activationArgument,
+            compiled.PublicBaseUrl,
+            compiled.AllowInsecurePrivateNetwork,
+            out var activatedOrigin,
+            out error))
+    {
+        return compiled;
+    }
+    return compiled with { PublicBaseUrl = activatedOrigin };
+}
+
+static string? TryReadStoredServerOrigin(DeploymentConfiguration deployment)
+{
+    try
+    {
+        var configuredPath = Environment.GetEnvironmentVariable("LEARNBOT_AGENT_CONFIG");
+        var path = string.IsNullOrWhiteSpace(configuredPath)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".learnbot", "agent.json")
+            : configuredPath;
+        if (!File.Exists(path)) return null;
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var root = document.RootElement;
+        var value = root.TryGetProperty("serverUrl", out var serverElement)
+            ? serverElement.GetString()
+            : root.TryGetProperty("ServerUrl", out serverElement)
+                ? serverElement.GetString()
+                : null;
+        return ServerOriginPolicy.TryValidateServerOrigin(
+            value,
+            deployment.PublicBaseUrl,
+            deployment.AllowInsecurePrivateNetwork,
+            out var server,
+            out _)
+            ? server.GetLeftPart(UriPartial.Authority)
+            : null;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+    {
+        return null;
+    }
+}
+
+static DeploymentConfiguration ReadDeploymentConfiguration()
+{
+    var metadata = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>().ToArray();
+    var origin = metadata
         .FirstOrDefault(item => item.Key == "LearnBotPublicBaseUrl")?
         .Value?
         .TrimEnd('/')
-    ?? "https://learnbot.example.invalid";
+        ?? "https://learnbot.example.invalid";
+    var allowValue = metadata
+        .FirstOrDefault(item => item.Key == "LearnBotAllowInsecurePrivateNetwork")?
+        .Value;
+    return new DeploymentConfiguration(
+        origin,
+        bool.TryParse(allowValue, out var allowInsecurePrivateNetwork) && allowInsecurePrivateNetwork);
+}
+
+internal sealed record DeploymentConfiguration(string PublicBaseUrl, bool AllowInsecurePrivateNetwork);
 
 internal sealed class SetupForm : Form
 {
     private readonly string server;
+    private readonly bool allowInsecurePrivateNetwork;
     private readonly Label statusLabel;
     private readonly ProgressBar progress;
     private readonly Button retryButton;
@@ -50,9 +171,10 @@ internal sealed class SetupForm : Form
     private string? approvalUrl;
     private string? userCode;
 
-    internal SetupForm(string server)
+    internal SetupForm(string server, bool allowInsecurePrivateNetwork)
     {
         this.server = server;
+        this.allowInsecurePrivateNetwork = allowInsecurePrivateNetwork;
         Text = "LearnBot Local Agent 설정";
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(520, 350);
@@ -69,7 +191,9 @@ internal sealed class SetupForm : Form
         };
         var description = new Label
         {
-            Text = "브라우저에서 이 PC를 승인한 다음 사용할 작업 폴더를 선택하세요.",
+            Text = allowInsecurePrivateNetwork
+                ? "사내망 HTTP 파일럿입니다. 회사 네트워크에서만 연결하고 이 PC를 승인하세요."
+                : "브라우저에서 이 PC를 승인한 다음 사용할 작업 폴더를 선택하세요.",
             AutoSize = true,
             Location = new Point(30, 72)
         };
@@ -149,11 +273,15 @@ internal sealed class SetupForm : Form
 
     private async Task EnrollAsync(bool reconnect = false)
     {
-        if (!Uri.TryCreate(server, UriKind.Absolute, out var uri)
-            || uri.Scheme != Uri.UriSchemeHttps
+        if (!ServerOriginPolicy.TryValidateServerOrigin(
+                server,
+                server,
+                allowInsecurePrivateNetwork,
+                out var uri,
+                out var policyError)
             || uri.Host.EndsWith(".invalid", StringComparison.OrdinalIgnoreCase))
         {
-            ShowFailure("이 설치 패키지에 운영 HTTPS 주소가 설정되지 않았습니다.");
+            ShowFailure(policyError ?? "이 설치 패키지에 유효한 LearnBot 서버 주소가 설정되지 않았습니다.");
             return;
         }
 
@@ -313,7 +441,7 @@ internal sealed class SetupForm : Form
 
     private void HandleConnectOutput(string line)
     {
-        if (EnrollmentOutputParser.TryReadApprovalUrl(line, out var parsedUrl))
+        if (EnrollmentOutputParser.TryReadApprovalUrl(line, server, allowInsecurePrivateNetwork, out var parsedUrl))
         {
             approvalUrl = parsedUrl;
             browserButton.Enabled = true;
@@ -373,10 +501,19 @@ internal sealed class SetupForm : Form
 
 internal static class EnrollmentOutputParser
 {
-    internal static bool TryReadApprovalUrl(string line, out string url)
+    internal static bool TryReadApprovalUrl(
+        string line,
+        string configuredOrigin,
+        bool allowInsecurePrivateNetwork,
+        out string url)
     {
         var value = line.Trim();
-        var valid = Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+        var valid = ServerOriginPolicy.TryResolveSameOriginUri(
+            value,
+            configuredOrigin,
+            configuredOrigin,
+            allowInsecurePrivateNetwork,
+            out _);
         url = valid ? value : "";
         return valid;
     }
@@ -399,9 +536,14 @@ internal sealed class UpdateRequiredForm : Form
     private readonly string? updateUri;
     private readonly Label statusLabel;
 
-    internal UpdateRequiredForm(string? updateUri)
+    internal UpdateRequiredForm(
+        string? updateUri,
+        string configuredOrigin,
+        bool allowInsecurePrivateNetwork)
     {
-        this.updateUri = IsTrustedUpdateUri(updateUri) ? updateUri : null;
+        this.updateUri = IsTrustedUpdateUri(updateUri, configuredOrigin, allowInsecurePrivateNetwork)
+            ? updateUri
+            : null;
         Text = "LearnBot Local Agent 업데이트";
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(500, 205);
@@ -442,8 +584,16 @@ internal sealed class UpdateRequiredForm : Form
         Controls.AddRange([title, statusLabel, updateButton, closeButton]);
     }
 
-    internal static bool IsTrustedUpdateUri(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+    internal static bool IsTrustedUpdateUri(
+        string? value,
+        string configuredOrigin,
+        bool allowInsecurePrivateNetwork) =>
+        ServerOriginPolicy.TryResolveSameOriginUri(
+            value,
+            configuredOrigin,
+            configuredOrigin,
+            allowInsecurePrivateNetwork,
+            out _);
 
     private void OpenUpdate()
     {
