@@ -30,6 +30,7 @@ public final class CodeEvidenceSelectionPolicy {
     private static final int MAX_GROUPLESS_REPRESENTATIVES_PER_TYPE = 1;
     private static final int MAX_PREFERRED_REPRESENTATIVES = 4;
     private static final int MAX_SIGNAL_PREFERRED_REPRESENTATIVES = 3;
+    private static final int MAX_DIRECT_PROOF_REPRESENTATIVES = 2;
     private static final int MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES = 4;
     private static final int MAX_SOURCE_BUNDLE_REPRESENTATIVES = 2;
     // Typed facts must not crowd out the semantic slate; three slots still allow a
@@ -217,6 +218,7 @@ public final class CodeEvidenceSelectionPolicy {
         List<Candidate> retained = new ArrayList<>();
         int preferred = 0;
         int signalPreferred = 0;
+        int directProofPreferred = 0;
         int graphPreferred = 0;
         int sourceBundlePreferred = 0;
         for (RetainedCandidate value : prioritized) {
@@ -226,14 +228,18 @@ public final class CodeEvidenceSelectionPolicy {
                     && preferred >= MAX_PREFERRED_REPRESENTATIVES) continue;
             boolean boundedGraphPath = entry.basis()
                     == CodeEvidenceRetentionPlan.Basis.BOUNDED_GRAPH_PATH;
+            boolean directProof = entry.basis()
+                    == CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF;
             boolean sourceBundle = entry.basis()
                     == CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE;
+            if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && directProof
+                    && directProofPreferred >= MAX_DIRECT_PROOF_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && boundedGraphPath
                     && graphPreferred >= MAX_BOUNDED_GRAPH_PATH_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED && sourceBundle
                     && sourceBundlePreferred >= MAX_SOURCE_BUNDLE_REPRESENTATIVES) continue;
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED
-                    && !boundedGraphPath && !sourceBundle
+                    && !directProof && !boundedGraphPath && !sourceBundle
                     && signalPreferred >= MAX_SIGNAL_PREFERRED_REPRESENTATIVES) continue;
             Set<String> quotaGroups = boundedGraphPath
                     ? entry.groups().stream()
@@ -264,7 +270,8 @@ public final class CodeEvidenceSelectionPolicy {
             retained.add(value.candidate());
             if (entry.level() == CodeEvidenceRetentionPlan.Level.PREFERRED) {
                 preferred++;
-                if (boundedGraphPath) graphPreferred++;
+                if (directProof) directProofPreferred++;
+                else if (boundedGraphPath) graphPreferred++;
                 else if (sourceBundle) sourceBundlePreferred++;
                 else signalPreferred++;
             }
@@ -280,9 +287,10 @@ public final class CodeEvidenceSelectionPolicy {
         if (basis == null) return 2;
         return switch (basis) {
             case CONSTRAINT -> 0;
-            case BOUNDED_GRAPH_PATH -> 1;
-            case SOURCE_BUNDLE -> 2;
-            case SIGNAL -> 3;
+            case DIRECT_PROOF -> 1;
+            case BOUNDED_GRAPH_PATH -> 2;
+            case SOURCE_BUNDLE -> 3;
+            case SIGNAL -> 4;
         };
     }
 

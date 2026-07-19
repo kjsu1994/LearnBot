@@ -8,7 +8,30 @@ function normalizeRoute(pathname = '/') {
   return routePaths.home;
 }
 
+function normalizeNavigationTarget(target = '/') {
+  const parsed = new URL(String(target || '/'), 'https://learnbot.invalid');
+  const cleanPath = parsed.pathname.replace(/\/+$/, '') || '/';
+  const normalizedPath = normalizeRoute(cleanPath);
+  if (cleanPath !== normalizedPath || parsed.origin !== 'https://learnbot.invalid') return routePaths.home;
+  return `${normalizedPath}${parsed.search}`;
+}
+
+function safeReturnTo(search = '', fallback = routePaths.home) {
+  const candidate = new URLSearchParams(String(search).replace(/^\?/, '')).get('returnTo');
+  if (!candidate || candidate.startsWith('//')) return fallback;
+  const target = normalizeNavigationTarget(candidate);
+  return target === routePaths.login || target.startsWith(`${routePaths.login}?`) ? fallback : target;
+}
+
+function postLoginTarget(pathname = '/', search = '') {
+  const route = normalizeRoute(pathname);
+  if (route === routePaths.login) return safeReturnTo(search);
+  if (route === routePaths.home) return routePaths.home;
+  return normalizeNavigationTarget(`${route}${search}`);
+}
+
 function routeToView(pathname) {
+  if (pathname === routePaths.localAgent || pathname === routePaths.localAgentConnect) return 'localAgent';
   if (pathname === routePaths.docs) return 'docs';
   if (pathname === routePaths.saved) return 'saved';
   if (pathname === routePaths.admin) return 'admin';
@@ -55,4 +78,4 @@ const codeModes = [
   { value: 'impact', label: '영향 범위' },
 ];
 
-export { normalizeRoute, routeToView };
+export { normalizeNavigationTarget, normalizeRoute, postLoginTarget, routeToView, safeReturnTo };

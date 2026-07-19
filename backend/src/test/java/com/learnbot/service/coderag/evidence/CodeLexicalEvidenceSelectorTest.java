@@ -28,6 +28,37 @@ class CodeLexicalEvidenceSelectorTest {
                 .doesNotContainKey("deterministicLexicalCandidate"));
     }
 
+    @Test
+    void auxiliaryPlannerSymbolCannotOverrideStrongerSemanticEvidenceByNamingItself() {
+        CodeSearchResult semantic = result(
+                "processModern", 20, 40, "void processModern() { executeCurrentFlow(); }");
+        CodeSearchResult hypothesized = new CodeSearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/app/Client.java",
+                "method", "processLegacy", "Client", "processLegacy", "app", null, null, 1,
+                60, 80, "void processLegacy() { executeFallbackFlow(); }", 0.7, Map.of());
+
+        List<CodeSearchResult> ranked = CodeLexicalEvidenceSelector.rank(
+                "처리 흐름을 설명해줘",
+                "processLegacy process modern flow",
+                List.of(hypothesized, semantic), 2);
+
+        assertThat(ranked).extracting(CodeSearchResult::methodName)
+                .startsWith("processModern");
+    }
+
+    @Test
+    void implementationLengthDoesNotBreakATieWithoutAnyLexicalMatch() {
+        CodeSearchResult concise = result("accept", 10, 12, "return value;");
+        CodeSearchResult longUnrelated = result(
+                "broadcast", 30, 180, "void broadcast() { performManyUnrelatedSteps(); }");
+
+        List<CodeSearchResult> ranked = CodeLexicalEvidenceSelector.rank(
+                "대상 동작을 설명해줘", List.of(longUnrelated, concise), 2);
+
+        assertThat(ranked).extracting(CodeSearchResult::methodName)
+                .startsWith("accept");
+    }
+
     private CodeSearchResult result(String method, int start, int end, String content) {
         return new CodeSearchResult(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "repo", "src/app/Client.java",

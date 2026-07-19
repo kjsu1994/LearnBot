@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { routePaths } from '../../config/constants.js';
-import { normalizeRoute, routeToView } from '../../lib/routing.js';
+import { normalizeNavigationTarget, normalizeRoute, routeToView } from '../../lib/routing.js';
 
 export function useAppRoute() {
   const [routePath, setRoutePath] = useState(() => normalizeRoute(window.location.pathname));
@@ -24,11 +24,12 @@ export function useAppRoute() {
   }, [routePath]);
 
   function navigateTo(path) {
-    const nextPath = normalizeRoute(path);
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
+    const nextTarget = normalizeNavigationTarget(path);
+    const nextUrl = new URL(nextTarget, window.location.origin);
+    if (`${window.location.pathname}${window.location.search}` !== nextTarget) {
+      window.history.pushState({}, '', nextTarget);
     }
-    setRoutePath(nextPath);
+    setRoutePath(nextUrl.pathname);
   }
 
   return {

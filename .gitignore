@@ -39,6 +39,14 @@ obj/
 **/bin/
 **/obj/
 
+# Local Agent signed release output
+artifacts/local-agent/releases/*
+!artifacts/local-agent/releases/.gitkeep
+artifacts/local-agent/stable/*
+!artifacts/local-agent/stable/.gitkeep
+artifacts/local-agent/pilot/*
+!artifacts/local-agent/pilot/.gitkeep
+
 # Local runtime data and object-store volume mirrors
 postgres-data/
 ollama-data/

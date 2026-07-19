@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CodeEvidenceRetentionPlanTest {
     @Test
-    void resolvesExactFactAndDirectProofConstraintsToTheirSourceEvidence() {
+    void exactFactsAreRequiredWhileStructuralDirectProofRemainsPreferred() {
         CodeEvidenceItem factSource = item(result("src/Fact.java", Map.of()), CodeIntelligenceAuthority.SYNTAX);
         CodeEvidenceItem proofSource = item(result("src/Proof.java", Map.of()), CodeIntelligenceAuthority.COMPILER_SEMANTIC);
         CodeEvidenceFact fact = CodeEvidenceFact.of(factSource.evidenceId(), "State", "VALUE", "READY",
@@ -42,10 +42,11 @@ class CodeEvidenceRetentionPlanTest {
                         CodeEvidenceRetentionPlan.Entry::authority)
                 .containsExactly(CodeEvidenceRetentionPlan.Level.REQUIRED, CodeIntelligenceAuthority.SYNTAX);
         assertThat(plan.lookup(proofSource.evidenceId())).get()
-                .extracting(CodeEvidenceRetentionPlan.Entry::level,
-                        CodeEvidenceRetentionPlan.Entry::authority)
-                .containsExactly(CodeEvidenceRetentionPlan.Level.REQUIRED,
-                        CodeIntelligenceAuthority.COMPILER_SEMANTIC);
+                .satisfies(entry -> {
+                    assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+                    assertThat(entry.authority()).isEqualTo(CodeIntelligenceAuthority.COMPILER_SEMANTIC);
+                    assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF);
+                });
     }
 
     @Test

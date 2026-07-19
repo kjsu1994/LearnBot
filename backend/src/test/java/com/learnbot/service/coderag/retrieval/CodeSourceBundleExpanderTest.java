@@ -4,6 +4,7 @@ import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.service.GraphSearchIntent;
 import com.learnbot.service.RagPipelineService;
+import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import org.junit.jupiter.api.Test;
 
@@ -40,11 +41,14 @@ class CodeSourceBundleExpanderTest {
 
         List<CodeSearchResult> expanded = expander.expand(
                 REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), searchOperation(),
-                GraphSearchIntent.FLOW, List.of(open, close, other));
+                GraphSearchIntent.FLOW, List.of(open, close, other), "open close channel");
 
         assertThat(expanded).extracting(CodeSearchResult::methodName)
-                .containsExactly("initializeRuntime", "finishRuntime");
-        assertThat(expanded).allSatisfy(result -> {
+                .containsExactly("openChannel", "closeChannel", "initializeRuntime", "finishRuntime");
+        assertThat(expanded.subList(0, 2)).allSatisfy(result ->
+                assertThat(CodeEvidenceOperationProvenance.from(result)).singleElement().satisfies(provenance ->
+                        assertThat(provenance.operationType()).isEqualTo("read_source_member")));
+        assertThat(expanded.subList(2, 4)).allSatisfy(result -> {
             assertThat(result.filePath()).isEqualTo(PATH);
             assertThat(CodeEvidenceOperationProvenance.from(result)).singleElement().satisfies(provenance -> {
                 assertThat(provenance.operationType()).isEqualTo("read_source_boundary");
@@ -67,7 +71,7 @@ class CodeSourceBundleExpanderTest {
 
         List<CodeSearchResult> expanded = expander.expand(
                 REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), searchOperation(),
-                GraphSearchIntent.LOCATE, List.of(result("first", 10), result("second", 20)));
+                GraphSearchIntent.LOCATE, List.of(result("first", 10), result("second", 20)), "");
 
         assertThat(expanded).isEmpty();
         verify(repository, never()).listActiveSymbolsByPath(
@@ -83,11 +87,60 @@ class CodeSourceBundleExpanderTest {
 
         List<CodeSearchResult> expanded = expander.expand(
                 REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), untyped,
-                GraphSearchIntent.FLOW, List.of(result("first", 10), result("second", 20)));
+                GraphSearchIntent.FLOW, List.of(result("first", 10), result("second", 20)),
+                "runtime lifecycle");
 
         assertThat(expanded).isEmpty();
         verify(repository, never()).listActiveSymbolsByPath(
                 eq(REPOSITORY_ID), eq(PATH), eq(80), eq(List.of(SPACE_ID)), eq(SPACE_ID));
+    }
+
+    @Test
+    void classContainerAnchorExposesIntentRankedCallableMembersWithoutANameRule() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSourceBundleExpander expander = new CodeSourceBundleExpander(repository);
+        CodeSearchResult container = new CodeSearchResult(
+                UUID.randomUUID(), REPOSITORY_ID, UUID.randomUUID(), "repo", PATH,
+                "class", "SessionCoordinator", "SessionCoordinator", "", "runtime",
+                null, null, 1, 1, 120, "class SessionCoordinator { }", 0.9, Map.of());
+        CodeSearchResult cleanup = result("cleanupCache", 10);
+        CodeSearchResult process = result("processQueuedRequest", 40);
+        CodeSearchResult report = result("reportMetrics", 80);
+        when(repository.listActiveSymbolsByPath(
+                eq(REPOSITORY_ID), eq(PATH), eq(80), eq(List.of(SPACE_ID)), eq(SPACE_ID)))
+                .thenReturn(List.of(cleanup, process, report));
+
+        List<CodeSearchResult> expanded = expander.expand(
+                REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), searchOperation(),
+                GraphSearchIntent.LOCATE, List.of(container), "process queued request");
+
+        assertThat(expanded).isNotEmpty();
+        assertThat(expanded.get(0).methodName()).isEqualTo("processQueuedRequest");
+        assertThat(CodeEvidenceOperationProvenance.from(expanded.get(0)))
+                .singleElement().satisfies(provenance -> {
+                    assertThat(provenance.operationType()).isEqualTo("read_source_member");
+                    assertThat(provenance.originEvidenceIds())
+                            .containsExactly(CodeEvidenceItem.evidenceId(container));
+                });
+    }
+
+    @Test
+    void classContainerDoesNotExposeArbitraryMembersWithoutLexicalSupport() {
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeSourceBundleExpander expander = new CodeSourceBundleExpander(repository);
+        CodeSearchResult container = new CodeSearchResult(
+                UUID.randomUUID(), REPOSITORY_ID, UUID.randomUUID(), "repo", PATH,
+                "class", "SessionCoordinator", "SessionCoordinator", "", "runtime",
+                null, null, 1, 1, 120, "class SessionCoordinator { }", 0.9, Map.of());
+        when(repository.listActiveSymbolsByPath(
+                eq(REPOSITORY_ID), eq(PATH), eq(80), eq(List.of(SPACE_ID)), eq(SPACE_ID)))
+                .thenReturn(List.of(result("cleanupCache", 10), result("reportMetrics", 80)));
+
+        List<CodeSearchResult> expanded = expander.expand(
+                REPOSITORY_ID, SPACE_ID, List.of(SPACE_ID), searchOperation(),
+                GraphSearchIntent.LOCATE, List.of(container), "persist transaction state");
+
+        assertThat(expanded).isEmpty();
     }
 
     private RagPipelineService.CodeSearchOperation searchOperation() {

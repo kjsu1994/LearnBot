@@ -1,5 +1,8 @@
 server:
   port: 8080
+  # Backend is loopback/container-only. Honor the sanitized proxy headers that
+  # the LearnBot Nginx edge overwrites so public HTTPS cookies remain Secure.
+  forward-headers-strategy: framework
 
 spring:
   application:

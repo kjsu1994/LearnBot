@@ -35,7 +35,7 @@ public record CodeEvidenceOperationProvenance(
             "keyword_search", "hybrid_search", "reference_search", "find_endpoint");
     private static final Set<String> DIRECT_OPERATION_TYPES = Set.of(
             "read_chunk", "read_symbol", "list_file_symbols", "read_file_range",
-            "read_adjacent", "traverse_graph", "read_source_boundary");
+            "read_adjacent", "traverse_graph", "read_source_member", "read_source_boundary");
 
     public CodeEvidenceOperationProvenance(
             String operationType,
@@ -134,6 +134,18 @@ public record CodeEvidenceOperationProvenance(
 
     public boolean isDirectOperation() {
         return DIRECT_OPERATION_TYPES.contains(operationType);
+    }
+
+    /** A bounded callable chosen from the type inventory anchored by a typed search operation. */
+    public boolean isSourceBundleCandidate() {
+        return ("read_source_member".equals(operationType)
+                || "read_source_boundary".equals(operationType))
+                && !operationId.isBlank()
+                && !claimIds.isEmpty()
+                && !evidenceGroup.isBlank()
+                && !originEvidenceIds.isEmpty()
+                && !path.isBlank()
+                && !symbol.isBlank();
     }
 
     /** A bounded search head is an exploration candidate, not exact proof. */

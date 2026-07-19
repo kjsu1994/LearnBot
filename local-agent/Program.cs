@@ -16,7 +16,8 @@ return await app.Run(args);
 
 internal sealed partial class LearnBotLocalAgent
 {
-    private const string Version = "0.1.0";
+    private static readonly string Version = ReadApplicationVersion();
+    private const int UpdateRequiredExitCode = 20;
     private const int LocalDataRetentionDays = 7;
     private static readonly TimeSpan LocalDataCleanupInterval = TimeSpan.FromDays(1);
     private static readonly TimeSpan StaleSnapshotStagingRetention = TimeSpan.FromDays(1);
@@ -33,9 +34,16 @@ internal sealed partial class LearnBotLocalAgent
             return await CliChat([]);
         }
         ApplyConfigOverride(args);
+        if (Uri.TryCreate(args[0], UriKind.Absolute, out var activationUri)
+            && string.Equals(activationUri.Scheme, "learnbot-local-agent", StringComparison.OrdinalIgnoreCase))
+        {
+            return await Connect(["--server", ConfiguredPublicBaseUrl()]);
+        }
 
         return args[0].ToLowerInvariant() switch
         {
+            "connect" => await Connect(args[1..]),
+            "disconnect" => await Disconnect(args[1..]),
             "chat" => await CliChat(args[1..]),
             "pair" => await Pair(args[1..]),
             "agent" => await Agent(args[1..]),
@@ -110,6 +118,8 @@ internal sealed partial class LearnBotLocalAgent
             ServerUrl = server.TrimEnd('/'),
             AgentId = parsedAgentId,
             Token = token,
+            CredentialExpiresAt = DateTimeOffset.UtcNow.AddDays(30),
+            InstallationId = config.InstallationId,
             Version = Version,
             Transport = transport,
             Workspaces = config.Workspaces
@@ -144,10 +154,23 @@ internal sealed partial class LearnBotLocalAgent
 
     private async Task<int> AgentStart(string[] args, CancellationToken cancellationToken = default)
     {
-        var config = RequireConfig();
+        using var instanceLock = args.Contains("--once", StringComparer.OrdinalIgnoreCase)
+            ? null
+            : TryAcquireAgentInstanceLock();
+        if (!args.Contains("--once", StringComparer.OrdinalIgnoreCase) && instanceLock is null)
+        {
+            Console.Error.WriteLine("LearnBot Local Agent is already running for this user.");
+            return 3;
+        }
         var once = args.Contains("--once", StringComparer.OrdinalIgnoreCase);
+        var config = RequireConfig();
+        if (!await RecoverPendingCredentialBeforeHeartbeat(config, once, cancellationToken))
+        {
+            return 1;
+        }
         var intervalSeconds = Math.Clamp(ParseInt(GetOption(args, "--interval-seconds"), 15), 5, 300);
-        var transport = NormalizeTransport(GetOption(args, "--transport") ?? config.Transport);
+        var requestedTransport = GetOption(args, "--transport");
+        var transport = NormalizeTransport(requestedTransport ?? config.Transport);
         var activeTransport = transport == "polling" ? "polling" : "starting";
         var webSocketFailures = 0;
         DateTimeOffset? nextWebSocketRetryAt = null;
@@ -167,6 +190,16 @@ internal sealed partial class LearnBotLocalAgent
             {
                 try
                 {
+                    var refreshedConfig = TryReloadPairedRuntimeConfig();
+                    if (refreshedConfig is null)
+                    {
+                        finalStatus = "disconnected";
+                        finalEvent = "Local Agent configuration was removed. Run learnbot connect to reconnect.";
+                        Log(finalEvent);
+                        return 4;
+                    }
+                    config = refreshedConfig;
+                    transport = NormalizeTransport(requestedTransport ?? config.Transport);
                     var shouldTryWebSocket = transport != "polling"
                         && (nextWebSocketRetryAt is null || DateTimeOffset.UtcNow >= nextWebSocketRetryAt.Value);
                     var usedWebSocketHeartbeat = shouldTryWebSocket
@@ -179,6 +212,7 @@ internal sealed partial class LearnBotLocalAgent
                         activeTransport = "websocket";
                         webSocketFailures = 0;
                         nextWebSocketRetryAt = null;
+                        await SendHeartbeat(config, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                         WriteRunState("running", "websocket heartbeat", transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
                     }
                     else
@@ -217,8 +251,21 @@ internal sealed partial class LearnBotLocalAgent
                                 nextWebSocketRetryAt);
                         }
                     }
-                    await PollOnce(config);
-                    WriteRunState("running", "poll", transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
+                    await TryRotateAgentCredential(config);
+                    if (IsAgentUpdateRequired(out var updateState))
+                    {
+                        var updateEvent = $"update required; latest={updateState!.LatestVersion ?? "unknown"}; minimum={updateState.MinimumVersion ?? "unknown"}";
+                        finalStatus = "update-required";
+                        finalEvent = updateEvent;
+                        WriteRunState("running", updateEvent, transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
+                        Log(updateEvent + "; tool polling paused");
+                        return UpdateRequiredExitCode;
+                    }
+                    else
+                    {
+                        await PollOnce(config);
+                        WriteRunState("running", "poll", transport, activeTransport, webSocketFailures, nextWebSocketRetryAt);
+                    }
                     if (!once && DateTimeOffset.UtcNow >= nextLocalDataCleanupAt)
                     {
                         RunLocalDataRetentionCleanup(logResult: true);
@@ -231,6 +278,14 @@ internal sealed partial class LearnBotLocalAgent
                     finalStatus = "stopped";
                     finalEvent = "service stop requested";
                     break;
+                }
+                catch (HttpRequestException ex) when (IsAgentAuthenticationFailure(ex))
+                {
+                    finalStatus = "disconnected";
+                    finalEvent = "Local Agent credential was rejected by the server. Run learnbot connect to reconnect.";
+                    Log(finalEvent);
+                    Console.Error.WriteLine(finalEvent);
+                    return 4;
                 }
                 catch (Exception ex)
                 {
@@ -2352,7 +2407,9 @@ internal sealed partial class LearnBotLocalAgent
         using var response = await client.PostAsync(
             "/api/local-agents/heartbeat",
             Json(HeartbeatPayload(config, configuredTransport, activeTransport, webSocketFailureCount, nextWebSocketRetryAt)));
+        var responseBody = await response.Content.ReadAsStringAsync();
         response.EnsureSuccessStatusCode();
+        CaptureHeartbeatUpdateState(responseBody, config.ServerUrl);
     }
 
     private async Task<bool> TryRunWebSocketOnce(AgentConfig config, string transport, TimeSpan receiveWindow)
@@ -3699,14 +3756,46 @@ internal sealed partial class LearnBotLocalAgent
     {
         var path = ConfigPath();
         if (!File.Exists(path)) return new AgentConfig();
-        return JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(path), JsonOptions) ?? new AgentConfig();
+        var json = File.ReadAllText(path);
+        var config = JsonSerializer.Deserialize<AgentConfig>(json, JsonOptions) ?? new AgentConfig();
+        config.Version = Version;
+        string? legacyToken = null;
+        using (var document = JsonDocument.Parse(json))
+        {
+            if (document.RootElement.TryGetProperty("token", out var tokenElement)
+                && tokenElement.ValueKind == JsonValueKind.String)
+            {
+                legacyToken = tokenElement.GetString();
+            }
+        }
+
+        var storedCredential = TryReadAgentCredential(config);
+        if (storedCredential is not null)
+        {
+            config.Token = storedCredential.Token;
+            config.CredentialExpiresAt = storedCredential.ExpiresAt;
+        }
+        else if (!string.IsNullOrWhiteSpace(legacyToken))
+        {
+            config.Token = legacyToken;
+            config.CredentialExpiresAt ??= DateTimeOffset.UtcNow;
+            SaveConfig(config);
+        }
+        return config;
     }
 
     private void SaveConfig(AgentConfig config)
     {
         var path = ConfigPath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(config, JsonOptions));
+        if (!string.IsNullOrWhiteSpace(config.Token)
+            && !TryWriteAgentCredential(config, config.Token, config.CredentialExpiresAt, out var credentialError))
+        {
+            throw new InvalidOperationException("Failed to protect Local Agent credential: " + credentialError);
+        }
+        var tempPath = path + ".tmp";
+        File.WriteAllText(tempPath, JsonSerializer.Serialize(config, JsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.Move(tempPath, path, overwrite: true);
     }
 
     private static string ConfigPath()
@@ -4082,7 +4171,14 @@ internal sealed partial class LearnBotLocalAgent
         {
             return null;
         }
-        return CryptUnprotect(value);
+        try
+        {
+            return CryptUnprotect(value);
+        }
+        catch (Exception ex) when (ex is FormatException or CryptographicException)
+        {
+            return null;
+        }
     }
 
     private static void TryOpenUrl(string url)
@@ -4307,7 +4403,11 @@ internal sealed partial class LearnBotLocalAgent
             configuredTransport,
             activeTransport,
             webSocketFailureCount,
-            nextWebSocketRetryAt);
+            nextWebSocketRetryAt,
+            LoadAgentUpdateState()?.UpdateState,
+            LoadAgentUpdateState()?.LatestVersion,
+            LoadAgentUpdateState()?.MinimumVersion,
+            LoadAgentUpdateState()?.UpdateUri);
         File.WriteAllText(path, JsonSerializer.Serialize(state, JsonOptions));
     }
 
@@ -6070,6 +6170,7 @@ internal sealed partial class LearnBotLocalAgent
         || string.Equals(option, "--preview", StringComparison.OrdinalIgnoreCase)
         || string.Equals(option, "--browser", StringComparison.OrdinalIgnoreCase)
         || string.Equals(option, "--device", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(option, "--reconnect", StringComparison.OrdinalIgnoreCase)
         || string.Equals(option, "--no-open", StringComparison.OrdinalIgnoreCase)
         || string.Equals(option, "--no-remember", StringComparison.OrdinalIgnoreCase)
         || string.Equals(option, "--no-auto-loop", StringComparison.OrdinalIgnoreCase)
@@ -7119,6 +7220,38 @@ internal sealed partial class LearnBotLocalAgent
         if (string.Equals(args[0], "pair-atomic-config-contract", StringComparison.OrdinalIgnoreCase))
         {
             return await SelfTestPairAtomicConfigContract();
+        }
+        if (string.Equals(args[0], "agent-credential-storage-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestAgentCredentialStorageContract();
+        }
+        if (string.Equals(args[0], "enrollment-reuse-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestEnrollmentReuseContract();
+        }
+        if (string.Equals(args[0], "agent-update-gate-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestAgentUpdateGateContract();
+        }
+        if (string.Equals(args[0], "disconnect-local-cleanup-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestDisconnectLocalCleanupContract();
+        }
+        if (string.Equals(args[0], "credential-rotation-recovery-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCredentialRotationRecoveryContract();
+        }
+        if (string.Equals(args[0], "enrollment-confirmation-recovery-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestEnrollmentConfirmationRecoveryContract();
+        }
+        if (string.Equals(args[0], "runtime-config-reload-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestRuntimeConfigReloadContract();
+        }
+        if (string.Equals(args[0], "corrupt-agent-credential-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return SelfTestCorruptAgentCredentialContract();
         }
         if (string.Equals(args[0], "local-data-retention-contract", StringComparison.OrdinalIgnoreCase))
         {
@@ -10926,6 +11059,8 @@ internal sealed partial class LearnBotLocalAgent
     private static int Help()
     {
         Console.WriteLine("""
+        learnbot connect --server https://learnbot.example [--workspace <path>] [--transport polling|websocket|auto] [--reconnect]
+        learnbot disconnect [--local-only]
         learnbot pair --server http://localhost:8083 [--workspace <path>] [--transport polling|websocket|auto]
         learnbot pair --server http://localhost:8083 --agent-id <agent-id> --token <pairing-token> [--transport polling|websocket|auto]
         learnbot status
@@ -10984,8 +11119,11 @@ internal sealed class AgentConfig
 {
     public string? ServerUrl { get; set; } = "http://localhost:8083";
     public Guid AgentId { get; set; }
+    [JsonIgnore]
     public string? Token { get; set; }
-    public string Version { get; set; } = "0.1.0";
+    public DateTimeOffset? CredentialExpiresAt { get; set; }
+    public Guid InstallationId { get; set; } = Guid.NewGuid();
+    public string Version { get; set; } = "0.0.0";
     public string Transport { get; set; } = "polling";
     public List<AgentWorkspace> Workspaces { get; set; } = [];
 }
@@ -11009,7 +11147,11 @@ internal sealed record AgentRunState(
     string? ConfiguredTransport,
     string? ActiveTransport,
     int WebSocketFailureCount,
-    DateTimeOffset? NextWebSocketRetryAt);
+    DateTimeOffset? NextWebSocketRetryAt,
+    string? UpdateState,
+    string? LatestVersion,
+    string? MinimumVersion,
+    string? UpdateUri);
 
 internal sealed record WorkspaceResolution(
     bool Success,

@@ -21,8 +21,13 @@ public class AuditService {
     }
 
     public void log(AppUser actor, String action, String targetType, String targetId, UUID spaceId, String message, Map<String, Object> metadata) {
+        logByUserId(actor == null ? null : actor.id(), action, targetType, targetId, spaceId, message, metadata);
+    }
+
+    public void logByUserId(UUID actorUserId, String action, String targetType, String targetId, UUID spaceId,
+                            String message, Map<String, Object> metadata) {
         securityRepository.createAuditLog(
-                actor == null ? null : actor.id(),
+                actorUserId,
                 action,
                 targetType,
                 targetId,
@@ -36,4 +41,3 @@ public class AuditService {
         return securityRepository.listAuditLogs(limit);
     }
 }
-

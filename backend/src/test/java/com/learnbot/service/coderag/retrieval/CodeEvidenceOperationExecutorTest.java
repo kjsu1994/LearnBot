@@ -110,6 +110,34 @@ class CodeEvidenceOperationExecutorTest {
     }
 
     @Test
+    void searchResultMergesSourceMemberProvenanceWhenTheChunkAlreadyExists() {
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository repository = mock(CodeRepository.class);
+        CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(
+                searchService, repository, mock(CodeReferenceService.class));
+        CodeSearchResult member = result("src/app/Worker.java", "claimQueuedWork", 20, 60);
+        when(searchService.cheapSearch(
+                eq(null), eq("queued work"), eq(8), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(member));
+        when(repository.listActiveSymbolsByPath(
+                eq(null), eq("src/app/Worker.java"), eq(80), anyList(), eq(SPACE_ID)))
+                .thenReturn(List.of(member));
+        var operation = new RagPipelineService.CodeSearchOperation(
+                "keyword_search", "queued work", "worker flow", "queue_claim",
+                "", "", "", null, null, null, List.of(), "", null,
+                "op-queue", List.of("claim-queue"), List.of());
+
+        var execution = executor.execute(
+                null, SPACE_ID, List.of(SPACE_ID), operation, GraphSearchIntent.FLOW, 8,
+                "claim queued work");
+
+        assertThat(execution.results()).singleElement().satisfies(evidence ->
+                assertThat(CodeEvidenceOperationProvenance.from(evidence))
+                        .extracting(CodeEvidenceOperationProvenance::operationType)
+                        .containsExactly("read_source_member", "keyword_search"));
+    }
+
+    @Test
     void directReadDropsFreeFormQueryFromProvenanceAndExcerptWeighting() {
         CodeRepository repository = mock(CodeRepository.class);
         CodeEvidenceOperationExecutor executor = new CodeEvidenceOperationExecutor(

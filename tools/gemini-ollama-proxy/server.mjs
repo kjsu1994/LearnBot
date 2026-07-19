@@ -56,6 +56,7 @@ async function handleChat(body, res) {
 
   if (!upstream.ok) {
     const text = await upstream.text();
+    logUpstreamFailure(upstream, text);
     return sendJson(res, upstream.status, { error: text || upstream.statusText });
   }
 
@@ -227,4 +228,76 @@ function sendJson(res, status, body) {
 
 function safeMessage(error) {
   return error && error.message ? error.message : String(error);
+}
+
+function logUpstreamFailure(upstream, text) {
+  const retryAfter = upstream.headers.get("retry-after");
+  console.error(JSON.stringify({
+    event: "gemini_proxy_upstream_error",
+    httpStatus: upstream.status,
+    retryAfter: retryAfter || null,
+    upstream: summarizeUpstreamError(text)
+  }));
+}
+
+function summarizeUpstreamError(text) {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    const error = parsed?.error && typeof parsed.error === "object" ? parsed.error : parsed;
+    return {
+      code: error?.code ?? null,
+      status: error?.status ?? null,
+      message: sanitizeDiagnosticText(error?.message),
+      details: Array.isArray(error?.details) ? error.details.map(summarizeErrorDetail).filter(Boolean) : []
+    };
+  } catch {
+    return { message: sanitizeDiagnosticText(text) };
+  }
+}
+
+function summarizeErrorDetail(detail) {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+
+  const type = typeof detail["@type"] === "string"
+    ? detail["@type"].split(".").pop()
+    : null;
+  const summary = { type };
+  if (typeof detail.retryDelay === "string") {
+    summary.retryDelay = detail.retryDelay;
+  }
+  if (Array.isArray(detail.violations)) {
+    summary.violations = detail.violations.map(violation => ({
+      quotaMetric: sanitizeDiagnosticText(violation?.quotaMetric),
+      quotaId: sanitizeDiagnosticText(violation?.quotaId),
+      quotaDimensions: sanitizeQuotaDimensions(violation?.quotaDimensions),
+      quotaValue: sanitizeDiagnosticText(violation?.quotaValue)
+    }));
+  }
+  return summary;
+}
+
+function sanitizeQuotaDimensions(dimensions) {
+  if (!dimensions || typeof dimensions !== "object" || Array.isArray(dimensions)) {
+    return null;
+  }
+  return Object.fromEntries(Object.entries(dimensions).map(([key, value]) => [
+    sanitizeDiagnosticText(key),
+    sanitizeDiagnosticText(value)
+  ]));
+}
+
+function sanitizeDiagnosticText(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return String(value)
+    .replace(/projects\/(\d+)/gi, "projects/[redacted]")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-api-key]")
+    .slice(0, 1000);
 }

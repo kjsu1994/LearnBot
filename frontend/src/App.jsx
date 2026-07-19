@@ -8,12 +8,14 @@ import { CodeWorkspace } from './components/code/CodeWorkspace.jsx';
 import { DocumentWorkspace } from './components/documents/DocumentWorkspace.jsx';
 import { HomePage, LoginScreen, WorkspaceShell } from './components/layout/Layout.jsx';
 import { SavedAnswersWorkspace } from './components/saved/SavedAnswersWorkspace.jsx';
+import { LocalAgentSettings } from './components/local-agent/LocalAgentSettings.jsx';
 import { useAppRoute } from './features/app/useAppRoute.js';
 import { useBusyTasks } from './features/app/useBusyTasks.js';
 import { useCodeRagController } from './features/code/useCodeRagController.js';
 import { useDocumentRagController } from './features/documents/useDocumentRagController.js';
 import { useSavedAnswersController } from './features/saved/useSavedAnswersController.js';
 import { getProgressMessage } from './lib/formatters.js';
+import { postLoginTarget } from './lib/routing.js';
 
 const LEGACY_AUTH_FALLBACK_ENABLED = import.meta.env.VITE_AUTH_LEGACY_FALLBACK === 'true';
 
@@ -372,7 +374,7 @@ export default function App() {
 
   useEffect(() => {
     if (user && routePath === routePaths.login) {
-      navigateTo(routePaths.home);
+      navigateTo(postLoginTarget(window.location.pathname, window.location.search));
       return;
     }
     if (user && routePath === routePaths.admin && !isAdminUser) {
@@ -529,7 +531,7 @@ export default function App() {
           clearStoredToken();
         }
       }
-      navigateTo(routePaths.home);
+      navigateTo(postLoginTarget(window.location.pathname, window.location.search));
     } catch (err) {
       setError(err.message || '로그인에 실패했습니다.');
     } finally {
@@ -1009,6 +1011,13 @@ export default function App() {
       deleteDocument={deleteDocument}
       loading={loading}
     >
+
+        {activeView === 'localAgent' && (
+          <LocalAgentSettings
+            request={request}
+            approvalMode={routePath === routePaths.localAgentConnect}
+          />
+        )}
 
         {activeView === 'code' && (
           <CodeWorkspace

@@ -56,6 +56,7 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
         Map<String, Candidate> candidates = new LinkedHashMap<>();
         Map<String, CodeEvidenceConstraint> constraints = new LinkedHashMap<>();
         Map<String, CodeEvidenceSignal> signals = new LinkedHashMap<>();
+        Map<ExactReadKey, Set<String>> exactReadMatches = exactReadMatches(context.evidence());
 
         for (CodeSearchResult result : context.evidence()) {
             List<CodeEvidenceOperationProvenance> provenance =
@@ -67,9 +68,13 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
 
             boolean directObservation = provenance.stream()
                     .anyMatch(OperationEvidenceExtractor::isDirectObservation);
+            boolean sourceBundleMember = provenance.stream()
+                    .anyMatch(value -> isDirectObservation(value)
+                            && "read_source_member".equals(value.operationType()));
             boolean sourceBundleBoundary = provenance.stream()
                     .anyMatch(value -> isDirectObservation(value)
                             && "read_source_boundary".equals(value.operationType()));
+            boolean sourceBundle = sourceBundleMember || sourceBundleBoundary;
             boolean claimLinkedSearchHead = provenance.stream()
                     .anyMatch(value -> isClaimLinkedSearchHead(result, value));
             CodeEvidenceItem item = new CodeEvidenceItem(
@@ -83,12 +88,16 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
 
             if (directObservation) {
                 signals.putIfAbsent(evidenceId, new CodeEvidenceSignal(
-                        sourceBundleBoundary
+                        sourceBundleMember
+                                ? CodeEvidenceSignal.Type.SOURCE_BUNDLE_MEMBER
+                                : sourceBundleBoundary
                                 ? CodeEvidenceSignal.Type.SOURCE_BUNDLE_BOUNDARY
                                 : CodeEvidenceSignal.Type.DIRECT_OBSERVATION,
                         evidenceId,
-                        sourceBundleBoundary ? 0.9 : 1.0,
-                        sourceBundleBoundary
+                        sourceBundleMember ? 0.6 : sourceBundleBoundary ? 0.9 : 1.0,
+                        sourceBundleMember
+                                ? "A bounded source bundle exposed an exploratory callable candidate."
+                                : sourceBundleBoundary
                                 ? "A bounded source bundle exposed a callable boundary through typed structural provenance."
                                 : "A typed direct retrieval operation linked origin evidence to a structural source operand."));
             } else if (claimLinkedSearchHead) {
@@ -99,7 +108,10 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
                         "A bounded head result from a typed claim-linked search exposed direct source evidence."));
             }
             boolean exactDirectProof = provenance.stream()
-                    .anyMatch(value -> isExactDirectProof(result, value));
+                    .filter(value -> isExactDirectProof(result, value))
+                    .anyMatch(value -> exactReadMatches
+                            .getOrDefault(ExactReadKey.from(value), Set.of())
+                            .size() == 1);
             if (exactDirectProof) {
                 constraints.putIfAbsent(evidenceId, new CodeEvidenceConstraint(
                         CodeEvidenceConstraint.Type.DIRECT_PROOF_REQUIRED,
@@ -155,6 +167,26 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
             case "read_file_range" -> matchesFileRange(result, provenance);
             default -> false;
         };
+    }
+
+    /**
+     * An exact operand that resolves to several definitions is navigation evidence, not a
+     * unique proof. Count matches across the complete extraction slate before applying the
+     * per-extractor item limit so overloads cannot become required merely because one was cut.
+     */
+    private static Map<ExactReadKey, Set<String>> exactReadMatches(List<CodeSearchResult> evidence) {
+        Map<ExactReadKey, Set<String>> matches = new LinkedHashMap<>();
+        for (CodeSearchResult result : evidence == null ? List.<CodeSearchResult>of() : evidence) {
+            if (result == null) continue;
+            String evidenceId = CodeEvidenceItem.evidenceId(result);
+            for (CodeEvidenceOperationProvenance provenance
+                    : CodeEvidenceOperationProvenance.from(result)) {
+                if (!isExactDirectProof(result, provenance)) continue;
+                matches.computeIfAbsent(ExactReadKey.from(provenance), ignored -> new java.util.LinkedHashSet<>())
+                        .add(evidenceId);
+            }
+        }
+        return matches;
     }
 
     private static boolean matchesChunk(
@@ -245,5 +277,22 @@ public final class OperationEvidenceExtractor implements EvidenceExtractor {
             boolean directObservation,
             boolean claimLinkedSearchHead
     ) {
+    }
+
+    private record ExactReadKey(
+            String operationType,
+            String operationId,
+            String path,
+            String symbol,
+            String chunkId,
+            Integer lineStart,
+            Integer lineEnd
+    ) {
+        private static ExactReadKey from(CodeEvidenceOperationProvenance provenance) {
+            return new ExactReadKey(
+                    provenance.operationType(), provenance.operationId(),
+                    normalizePath(provenance.path()), canonicalSymbol(provenance.symbol()),
+                    provenance.chunkId(), provenance.lineStart(), provenance.lineEnd());
+        }
     }
 }

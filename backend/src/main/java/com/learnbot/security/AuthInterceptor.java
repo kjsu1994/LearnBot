@@ -31,6 +31,10 @@ public class AuthInterceptor implements HandlerInterceptor {
                 || "/api/auth/cli-device-session/claim-result".equals(path)) {
             return true;
         }
+        if ("/api/local-agents/enrollments".equals(path)
+                || "/api/local-agents/enrollments/exchange".equals(path)) {
+            return true;
+        }
         if (isLocalAgentTokenEndpoint(path) && hasLocalAgentToken(request)) {
             return true;
         }
@@ -61,6 +65,10 @@ public class AuthInterceptor implements HandlerInterceptor {
     private boolean isLocalAgentTokenEndpoint(String path) {
         return "/api/local-agents/heartbeat".equals(path)
                 || "/api/local-agents/ws".equals(path)
+                || "/api/local-agents/self".equals(path)
+                || path.matches("/api/local-agents/enrollments/[^/]+/confirm")
+                || path.matches("/api/local-agents/self/credential-rotations/[^/]+/confirm")
+                || "/api/local-agents/self/credential-rotations".equals(path)
                 || path.startsWith("/api/local-agents/tools/");
     }
 

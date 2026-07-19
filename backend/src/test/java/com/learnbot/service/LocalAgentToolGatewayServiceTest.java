@@ -47,8 +47,12 @@ class LocalAgentToolGatewayServiceTest {
     private final CodeAgentLoopTimelineRepository loopTimelineRepository = mock(CodeAgentLoopTimelineRepository.class);
     private final LocalAgentGatewayService gatewayService = mock(LocalAgentGatewayService.class);
     private final LocalAgentToolPusher toolPusher = mock(LocalAgentToolPusher.class);
+    private final LocalAgentAuditService auditService = mock(LocalAgentAuditService.class);
     private final LearnBotProperties properties = releaseDisabledProperties();
-    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository, gatewayService, toolPusher, properties);
+    private final LocalAgentToolGatewayService service = new LocalAgentToolGatewayService(
+            repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository,
+            gatewayService, toolPusher, properties, auditService
+    );
 
     @Test
     void enqueuePersistsReadOnlyRequestForConnectedApprovedWorkspace() {
@@ -3346,6 +3350,47 @@ class LocalAgentToolGatewayServiceTest {
     }
 
     @Test
+    void enqueueReleaseAttemptFreshObservationsDoesNotPushToAgentBelowMinimumVersion() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID sourceRequestId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        LocalAgentToolRequest sourceRequest = patchRequest(userId, agentId, workspaceId);
+        LocalAgentToolExecution source = execution(
+                sourceRequestId, sourceRequest, LocalAgentApprovalState.APPROVED, LocalAgentToolStatus.APPROVED_HELD
+        );
+        OffsetDateTime now = OffsetDateTime.now();
+        when(repository.find(sourceRequestId)).thenReturn(java.util.Optional.of(source));
+        when(releaseAttemptRepository.findLatestForSourceRequest(userId, sourceRequestId)).thenReturn(
+                java.util.Optional.of(new LocalAgentPatchReleaseAttempt(
+                        attemptId, sourceRequestId, sourceRequest.sessionId(), userId, agentId, workspaceId,
+                        LocalAgentPatchReleaseAttemptRepository.DISABLED_STATUS, false, 120, Map.of(), List.of(),
+                        now.minusSeconds(2), now.minusSeconds(1), null
+                ))
+        );
+        when(gatewayService.isConnected(userId, agentId)).thenReturn(true);
+        when(gatewayService.status(userId, agentId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED, agentId, "0.1.0", now.minusMinutes(1), now,
+                List.of("git.status", "patch.apply"),
+                List.of(new LocalAgentWorkspaceSummary(workspaceId, "repo", "C:/work/repo", true)),
+                "auto", "websocket", 0, null, "Local Agent is connected.",
+                "1.2.0", "1.0.0", "UPDATE_REQUIRED",
+                "/downloads/local-agent/stable/LearnBotLocalAgent.appinstaller"
+        ));
+
+        assertThatThrownBy(() -> service.enqueueReleaseAttemptFreshObservations(userId, sourceRequestId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must be updated");
+
+        verify(repository, never()).create(any(UUID.class), any(LocalAgentToolRequest.class));
+        verify(toolPusher, never()).sendToolRequest(any());
+        verify(auditService).updateRequiredDispatchBlocked(
+                eq(userId), eq(agentId), any(LocalAgentStatusResponse.class)
+        );
+    }
+
+    @Test
     void enqueueReleaseAttemptFreshObservationsRequiresDisabledNonClaimableAttempt() {
         UUID userId = UUID.randomUUID();
         UUID agentId = UUID.randomUUID();
@@ -3840,6 +3885,24 @@ class LocalAgentToolGatewayServiceTest {
         );
         verify(repository, never()).complete(any(LocalAgentToolResponse.class));
         verify(toolPusher, never()).sendToolRequest(any());
+    }
+
+    @Test
+    void claimNextDoesNotDispatchWorkToAgentBelowMinimumVersion() {
+        UUID userId = UUID.randomUUID();
+        UUID agentId = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.now();
+        when(gatewayService.status(userId, agentId)).thenReturn(new LocalAgentStatusResponse(
+                LocalAgentConnectionState.CONNECTED, agentId, "0.1.0", now.minusMinutes(1), now,
+                List.of("file.read"), List.of(), "auto", "polling", 0, null,
+                "Local Agent is connected.", "1.2.0", "1.0.0", "UPDATE_REQUIRED",
+                "/downloads/local-agent/stable/LearnBotLocalAgent.appinstaller"
+        ));
+
+        assertThat(service.claimNext(userId, agentId)).isEmpty();
+
+        verify(repository, never()).expireTimedOutLeases();
+        verify(repository, never()).claimNext(any(), any());
     }
 
     @Test

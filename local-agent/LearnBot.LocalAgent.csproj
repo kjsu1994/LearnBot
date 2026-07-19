@@ -1,12 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>learnbot</AssemblyName>
+    <VersionPrefix>0.2.0</VersionPrefix>
+    <Platforms>x64</Platforms>
+    <HostingWindowsServicesVersion Condition="'$(HostingWindowsServicesVersion)' == ''">10.0.0</HostingWindowsServicesVersion>
+    <LearnBotPublicBaseUrl Condition="'$(LearnBotPublicBaseUrl)' == ''">https://learnbot.example.invalid</LearnBotPublicBaseUrl>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <Compile Remove="Setup\**\*.cs" />
+    <Compile Remove="StartupHost\**\*.cs" />
+    <AssemblyMetadata Include="LearnBotPublicBaseUrl" Value="$(LearnBotPublicBaseUrl)" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(HostingWindowsServicesVersion)" />
   </ItemGroup>
 </Project>

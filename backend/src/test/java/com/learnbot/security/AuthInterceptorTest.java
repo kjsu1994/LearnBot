@@ -83,4 +83,28 @@ class AuthInterceptorTest {
                         interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
                 .isInstanceOf(UnauthorizedException.class);
     }
+
+    @Test
+    void localAgentSelfRevokeAcceptsAgentTokenForControllerAuthentication() {
+        AuthService authService = mock(AuthService.class);
+        AuthInterceptor interceptor = new AuthInterceptor(authService);
+        MockHttpServletRequest request = new MockHttpServletRequest("DELETE", "/api/local-agents/self");
+        request.addHeader("X-Local-Agent-Token", "agent-token");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void enrollmentConfirmationAcceptsPendingCandidateToken() {
+        AuthService authService = mock(AuthService.class);
+        AuthInterceptor interceptor = new AuthInterceptor(authService);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/local-agents/enrollments/" + java.util.UUID.randomUUID() + "/confirm"
+        );
+        request.addHeader("X-Local-Agent-Token", "candidate-token");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
+    }
 }

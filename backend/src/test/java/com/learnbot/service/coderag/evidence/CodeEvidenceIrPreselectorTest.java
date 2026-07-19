@@ -63,6 +63,38 @@ class CodeEvidenceIrPreselectorTest {
                 .doesNotContain(exactReads.get(2), exactReads.get(3), exactReads.get(4), exactReads.get(5));
     }
 
+    @Test
+    void sourceBundleCandidatesDoNotDisplaceTheSemanticHeadBeforeIrExtraction() {
+        List<CodeSearchResult> semantic = java.util.stream.IntStream.range(0, 70)
+                .mapToObj(index -> result("SEMANTIC_" + index, null))
+                .toList();
+        List<CodeSearchResult> firstOperation = java.util.stream.IntStream.range(0, 4)
+                .mapToObj(index -> sourceCandidate("FIRST_" + index, "source-op-1", index))
+                .toList();
+        List<CodeSearchResult> secondOperation = java.util.stream.IntStream.range(0, 2)
+                .mapToObj(index -> sourceCandidate("SECOND_" + index, "source-op-2", index))
+                .toList();
+        List<CodeSearchResult> ranked = new ArrayList<>(semantic);
+        ranked.addAll(firstOperation);
+        ranked.addAll(secondOperation);
+
+        List<CodeSearchResult> selected = CodeEvidenceIrPreselector.select(ranked, 64);
+
+        assertThat(selected).hasSize(64)
+                .containsExactlyElementsOf(semantic.subList(0, 64))
+                .doesNotContainAnyElementsOf(firstOperation)
+                .doesNotContainAnyElementsOf(secondOperation);
+    }
+
+    private CodeSearchResult sourceCandidate(String content, String operationId, int rank) {
+        return result(content, new CodeEvidenceOperationProvenance(
+                rank % 2 == 0 ? "read_source_member" : "read_source_boundary",
+                operationId, List.of("claim-flow"), "execution_flow",
+                List.of("index:origin:1-20"), "", "src/Worker.java", "step" + rank,
+                UUID.randomUUID().toString(), 10, 30, null, List.of(), "BOTH", null,
+                rank + 1));
+    }
+
     private CodeSearchResult result(
             String content,
             CodeEvidenceOperationProvenance provenance

@@ -2,13 +2,13 @@ package com.learnbot.service;
 
 import com.learnbot.dto.LocalAgentPairingTokenResponse;
 import com.learnbot.dto.LocalAgentTokenSummary;
+import com.learnbot.repository.LocalAgentDeviceRepository;
 import com.learnbot.repository.LocalAgentTokenRepository;
 import com.learnbot.security.UnauthorizedException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.Base64;
@@ -22,24 +22,58 @@ public class LocalAgentAuthService {
 
     private final LocalAgentTokenRepository repository;
     private final List<LocalAgentTokenRevocationListener> revocationListeners;
+    private final LocalAgentDeviceRepository deviceRepository;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public LocalAgentAuthService(
             LocalAgentTokenRepository repository,
             List<LocalAgentTokenRevocationListener> revocationListeners
     ) {
+        this(repository, revocationListeners, null);
+    }
+
+    @Autowired
+    public LocalAgentAuthService(
+            LocalAgentTokenRepository repository,
+            List<LocalAgentTokenRevocationListener> revocationListeners,
+            LocalAgentDeviceRepository deviceRepository
+    ) {
         this.repository = repository;
         this.revocationListeners = revocationListeners;
+        this.deviceRepository = deviceRepository;
     }
 
     @Transactional
     public LocalAgentPairingTokenResponse issueToken(UUID userId, String label) {
-        UUID tokenId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        String rawToken = newToken();
-        OffsetDateTime expiresAt = OffsetDateTime.now().plusDays(TOKEN_DAYS);
+        return issueTokenForAgent(userId, UUID.randomUUID(), label);
+    }
+
+    @Transactional
+    public LocalAgentPairingTokenResponse issueTokenForAgent(UUID userId, UUID agentId, String label) {
+        LocalAgentPairingTokenResponse prepared = prepareCredential(agentId);
+        activateCredential(userId, agentId, label, prepared.tokenId(), prepared.token(), prepared.expiresAt());
+        return prepared;
+    }
+
+    public LocalAgentPairingTokenResponse prepareCredential(UUID agentId) {
+        return new LocalAgentPairingTokenResponse(
+                UUID.randomUUID(), agentId, newToken(), OffsetDateTime.now().plusDays(TOKEN_DAYS)
+        );
+    }
+
+    @Transactional
+    public void activateCredential(
+            UUID userId,
+            UUID agentId,
+            String label,
+            UUID tokenId,
+            String rawToken,
+            OffsetDateTime expiresAt
+    ) {
+        if (deviceRepository != null) {
+            deviceRepository.ensureDevice(userId, agentId, cleanLabel(label), OffsetDateTime.now());
+        }
         repository.create(tokenId, userId, agentId, cleanLabel(label), tokenHash(rawToken), expiresAt);
-        return new LocalAgentPairingTokenResponse(tokenId, agentId, rawToken, expiresAt);
     }
 
     @Transactional(readOnly = true)
@@ -65,6 +99,13 @@ public class LocalAgentAuthService {
         if (revoked) {
             revocationListeners.forEach(listener -> listener.onTokenRevoked(userId, tokenId));
         }
+        return revoked;
+    }
+
+    @Transactional
+    public List<UUID> revokeAgent(UUID userId, UUID agentId) {
+        List<UUID> revoked = repository.revokeAllForAgent(userId, agentId);
+        revoked.forEach(tokenId -> revocationListeners.forEach(listener -> listener.onTokenRevoked(userId, tokenId)));
         return revoked;
     }
 
@@ -97,11 +138,6 @@ public class LocalAgentAuthService {
     }
 
     private String tokenHash(String token) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return Base64.getEncoder().encodeToString(digest.digest(token.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("Token hashing is unavailable.", ex);
-        }
+        return LocalAgentSecretHasher.sha256(token);
     }
 }

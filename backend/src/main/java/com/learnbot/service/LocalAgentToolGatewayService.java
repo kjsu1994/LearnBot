@@ -52,6 +52,7 @@ public class LocalAgentToolGatewayService {
     private final LocalAgentGatewayService gatewayService;
     private final LocalAgentToolPusher toolPusher;
     private final LearnBotProperties properties;
+    private final LocalAgentAuditService auditService;
     private final LocalAgentPostExecutionObservationGateBuilder postExecutionObservationGateBuilder =
             new LocalAgentPostExecutionObservationGateBuilder();
     private final LocalAgentObservationAcceptanceGateBuilder observationAcceptanceGateBuilder =
@@ -110,7 +111,6 @@ public class LocalAgentToolGatewayService {
         );
     }
 
-    @Autowired
     public LocalAgentToolGatewayService(
             LocalAgentToolExecutionRepository repository,
             LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository,
@@ -120,6 +120,21 @@ public class LocalAgentToolGatewayService {
             LocalAgentToolPusher toolPusher,
             LearnBotProperties properties
     ) {
+        this(repository, mutationObservationIntakeRepository, releaseAttemptRepository, loopTimelineRepository,
+                gatewayService, toolPusher, properties, LocalAgentAuditService.noop());
+    }
+
+    @Autowired
+    public LocalAgentToolGatewayService(
+            LocalAgentToolExecutionRepository repository,
+            LocalAgentMutationObservationIntakeRepository mutationObservationIntakeRepository,
+            LocalAgentPatchReleaseAttemptRepository releaseAttemptRepository,
+            CodeAgentLoopTimelineRepository loopTimelineRepository,
+            LocalAgentGatewayService gatewayService,
+            LocalAgentToolPusher toolPusher,
+            LearnBotProperties properties,
+            LocalAgentAuditService auditService
+    ) {
         this.repository = repository;
         this.mutationObservationIntakeRepository = mutationObservationIntakeRepository;
         this.releaseAttemptRepository = releaseAttemptRepository;
@@ -127,6 +142,7 @@ public class LocalAgentToolGatewayService {
         this.gatewayService = gatewayService;
         this.toolPusher = toolPusher;
         this.properties = properties;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -141,7 +157,9 @@ public class LocalAgentToolGatewayService {
             appendAgentUnavailableStopOutcome(request);
             throw new IllegalStateException("Local Agent is not connected.");
         }
-        if (request.workspaceId() != null && !gatewayService.hasApprovedWorkspace(request.userId(), request.workspaceId())) {
+        requireDispatchableAgent(request.userId(), request.agentId());
+        if (request.workspaceId() != null && !hasApprovedWorkspace(
+                request.userId(), request.agentId(), request.workspaceId())) {
             throw new IllegalStateException("Workspace is not approved by the Local Agent.");
         }
         UUID requestId = UUID.randomUUID();
@@ -225,7 +243,8 @@ public class LocalAgentToolGatewayService {
             appendAgentUnavailableStopOutcome(request);
             throw new IllegalStateException("Local Agent is not connected.");
         }
-        if (request.workspaceId() != null && !gatewayService.hasApprovedWorkspace(request.userId(), request.workspaceId())) {
+        if (request.workspaceId() != null && !hasApprovedWorkspace(
+                request.userId(), request.agentId(), request.workspaceId())) {
             throw new IllegalStateException("Workspace is not approved by the Local Agent.");
         }
         UUID requestId = UUID.randomUUID();
@@ -285,7 +304,7 @@ public class LocalAgentToolGatewayService {
                 "Patch must target USER_LOCAL_AGENT."
         ));
 
-        LocalAgentStatusResponse status = gatewayService.status(userId);
+        LocalAgentStatusResponse status = selectedAgentStatus(userId, execution.agentId());
         checks.add(check(
                 "agentConnected",
                 status.state() == LocalAgentConnectionState.CONNECTED
@@ -295,7 +314,8 @@ public class LocalAgentToolGatewayService {
         ));
         checks.add(check(
                 "workspaceApproved",
-                execution.workspaceId() != null && gatewayService.hasApprovedWorkspace(userId, execution.workspaceId()),
+                execution.workspaceId() != null && hasApprovedWorkspace(
+                        userId, execution.agentId(), execution.workspaceId()),
                 "The request workspace must still be approved by the Local Agent."
         ));
         checks.add(check(
@@ -979,7 +999,9 @@ public class LocalAgentToolGatewayService {
         if (!gatewayService.isConnected(source.userId(), source.agentId())) {
             throw new IllegalStateException("Local Agent is not connected.");
         }
-        if (source.workspaceId() != null && !gatewayService.hasApprovedWorkspace(source.userId(), source.workspaceId())) {
+        requireDispatchableAgent(source.userId(), source.agentId());
+        if (source.workspaceId() != null && !hasApprovedWorkspace(
+                source.userId(), source.agentId(), source.workspaceId())) {
             throw new IllegalStateException("Workspace is not approved by the Local Agent.");
         }
 
@@ -1044,12 +1066,38 @@ public class LocalAgentToolGatewayService {
 
     @Transactional
     public Optional<LocalAgentQueuedToolRequest> claimNext(UUID userId, UUID agentId) {
+        LocalAgentStatusResponse selectedStatus = selectedAgentStatus(userId, agentId);
+        if (selectedStatus != null && "UPDATE_REQUIRED".equals(selectedStatus.updateState())) {
+            return Optional.empty();
+        }
         List<LocalAgentToolExecution> timedOut = repository.expireTimedOutLeases();
         if (timedOut != null) {
             timedOut.forEach(this::appendLeaseTimeoutStopOutcome);
         }
         return repository.claimNext(userId, agentId)
                 .map(this::toQueuedRequest);
+    }
+
+    private LocalAgentStatusResponse selectedAgentStatus(UUID userId, UUID agentId) {
+        LocalAgentStatusResponse selected = gatewayService.status(userId, agentId);
+        return selected == null ? gatewayService.status(userId) : selected;
+    }
+
+    private void requireDispatchableAgent(UUID userId, UUID agentId) {
+        LocalAgentStatusResponse selectedStatus = selectedAgentStatus(userId, agentId);
+        if (selectedStatus != null && "UPDATE_REQUIRED".equals(selectedStatus.updateState())) {
+            auditService.updateRequiredDispatchBlocked(userId, agentId, selectedStatus);
+            throw new IllegalStateException("Local Agent must be updated before new tool work can be dispatched.");
+        }
+    }
+
+    private boolean hasApprovedWorkspace(UUID userId, UUID agentId, UUID workspaceId) {
+        LocalAgentStatusResponse selected = gatewayService.status(userId, agentId);
+        if (selected == null) {
+            return gatewayService.hasApprovedWorkspace(userId, workspaceId);
+        }
+        return selected.workspaces().stream()
+                .anyMatch(workspace -> workspaceId.equals(workspace.workspaceId()) && workspace.approved());
     }
 
     @Transactional

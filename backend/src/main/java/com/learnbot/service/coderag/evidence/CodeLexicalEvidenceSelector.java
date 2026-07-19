@@ -20,13 +20,26 @@ public final class CodeLexicalEvidenceSelector {
     }
 
     public static List<CodeSearchResult> rank(String intent, List<CodeSearchResult> candidates, int limit) {
+        return rank(intent, "", candidates, limit);
+    }
+
+    public static List<CodeSearchResult> rank(
+            String trustedIntent,
+            String auxiliaryIntent,
+            List<CodeSearchResult> candidates,
+            int limit
+    ) {
         if (candidates == null || candidates.isEmpty()) return List.of();
-        List<String> intentTerms = terms(intent).stream().filter(term -> !STOP_WORDS.contains(term)).toList();
-        if (intentTerms.isEmpty()) return candidates.stream().limit(Math.max(1, limit)).toList();
-        String compactIntent = compact(intent);
+        List<String> trustedTerms = meaningfulTerms(trustedIntent);
+        List<String> auxiliaryTerms = meaningfulTerms(auxiliaryIntent);
+        if (trustedTerms.isEmpty() && auxiliaryTerms.isEmpty()) {
+            return candidates.stream().limit(Math.max(1, limit)).toList();
+        }
+        String compactTrustedIntent = compact(trustedIntent);
         return candidates.stream()
                 .filter(java.util.Objects::nonNull)
-                .map(result -> new Scored(result, score(result, intentTerms, compactIntent)))
+                .map(result -> new Scored(result, score(
+                        result, trustedTerms, auxiliaryTerms, compactTrustedIntent)))
                 .sorted(Comparator.comparingDouble(Scored::score).reversed()
                         .thenComparing(scored -> safe(scored.result().filePath()))
                         .thenComparingInt(scored -> scored.result().lineStart()))
@@ -35,7 +48,37 @@ public final class CodeLexicalEvidenceSelector {
                 .toList();
     }
 
-    private static double score(CodeSearchResult result, List<String> intentTerms, String compactIntent) {
+    /**
+     * Returns whether either intent names behavior in a callable itself. File and containing-type
+     * matches deliberately do not qualify because they would select every sibling in that type.
+     */
+    public static boolean hasCallableLexicalMatch(
+            String trustedIntent,
+            String auxiliaryIntent,
+            CodeSearchResult result
+    ) {
+        if (result == null) return false;
+        List<String> trustedTerms = meaningfulTerms(trustedIntent);
+        List<String> auxiliaryTerms = meaningfulTerms(auxiliaryIntent);
+        String symbol = String.join(" ", safe(result.methodName()), safe(result.symbolName()));
+        Set<String> symbolTerms = new LinkedHashSet<>(terms(symbol));
+        Set<String> contentTerms = new LinkedHashSet<>(terms(result.content()));
+        String compactSymbol = compact(String.join(" ", safe(result.methodName()), safe(result.symbolName())));
+        boolean exactTrustedSymbol = compactSymbol.length() >= 4
+                && compact(trustedIntent).contains(compactSymbol);
+        return exactTrustedSymbol
+                || addTermScores(trustedTerms, symbolTerms, Set.of(), contentTerms,
+                1.0, 0.0, 1.0) > 0
+                || addTermScores(auxiliaryTerms, symbolTerms, Set.of(), contentTerms,
+                1.0, 0.0, 1.0) > 0;
+    }
+
+    private static double score(
+            CodeSearchResult result,
+            List<String> trustedTerms,
+            List<String> auxiliaryTerms,
+            String compactTrustedIntent
+    ) {
         String symbol = String.join(" ", safe(result.methodName()), safe(result.symbolName()), safe(result.className()));
         String path = safe(result.filePath());
         String content = safe(result.content());
@@ -44,17 +87,42 @@ public final class CodeLexicalEvidenceSelector {
         Set<String> contentTerms = new LinkedHashSet<>(terms(content));
         double score = result.score();
         String compactSymbol = compact(String.join(" ", safe(result.methodName()), safe(result.symbolName())));
-        if (compactSymbol.length() >= 4 && compactIntent.contains(compactSymbol)) score += 8.0;
-        for (String term : intentTerms) {
-            if (symbolTerms.contains(term)) score += 4.0;
-            if (pathTerms.contains(term)) score += 2.0;
-            if (contentTerms.contains(term)) score += 0.45;
-        }
+        if (compactSymbol.length() >= 4 && compactTrustedIntent.contains(compactSymbol)) score += 8.0;
+        double trustedScore = addTermScores(
+                trustedTerms, symbolTerms, pathTerms, contentTerms, 4.0, 2.0, 0.45);
+        double auxiliaryScore = addTermScores(
+                auxiliaryTerms, symbolTerms, pathTerms, contentTerms, 1.5, 0.75, 0.15);
+        boolean lexicalMatch = trustedScore > 0 || auxiliaryScore > 0;
+        score += trustedScore + auxiliaryScore;
         int span = Math.max(1, result.lineEnd() - result.lineStart() + 1);
-        if ((!safe(result.methodName()).isBlank() || !safe(result.symbolName()).isBlank()) && span > 3) {
+        if (lexicalMatch
+                && (!safe(result.methodName()).isBlank() || !safe(result.symbolName()).isBlank())
+                && span > 3) {
             score += Math.min(0.75, span / 80.0);
         }
         return score;
+    }
+
+    private static double addTermScores(
+            List<String> intentTerms,
+            Set<String> symbolTerms,
+            Set<String> pathTerms,
+            Set<String> contentTerms,
+            double symbolWeight,
+            double pathWeight,
+            double contentWeight
+    ) {
+        double score = 0.0;
+        for (String term : intentTerms) {
+            if (symbolTerms.contains(term)) score += symbolWeight;
+            if (pathTerms.contains(term)) score += pathWeight;
+            if (contentTerms.contains(term)) score += contentWeight;
+        }
+        return score;
+    }
+
+    private static List<String> meaningfulTerms(String value) {
+        return terms(value).stream().filter(term -> !STOP_WORDS.contains(term)).toList();
     }
 
     private static CodeSearchResult mark(Scored scored) {

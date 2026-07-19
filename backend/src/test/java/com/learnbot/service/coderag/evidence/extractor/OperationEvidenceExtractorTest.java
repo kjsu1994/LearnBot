@@ -10,7 +10,6 @@ import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeEvidenceSignal;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
-import com.learnbot.service.coderag.evidence.CodeEvidenceRetentionPlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -47,6 +46,30 @@ class OperationEvidenceExtractorTest {
             assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
             assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE);
         });
+    }
+
+    @Test
+    void sourceMemberRemainsExplorationIrWithoutProtectedRetention() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        CodeEvidenceOperationProvenance member = new CodeEvidenceOperationProvenance(
+                "read_source_member", "op-flow-source-member-1",
+                List.of("claim-flow"), "execution_flow", List.of("index:origin:1-20"),
+                "", "src/app/Worker.java", "claimNext", UUID.randomUUID().toString(),
+                10, 30, null, List.of(), "BOTH", null);
+        CodeSearchResult source = result(
+                UUID.randomUUID(), "void claimNext() {}", member, Map.of());
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How is work claimed?", EvidenceExtractionStage.POST_OPERATION,
+                List.of(source)));
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.from(ir);
+
+        assertThat(ir.signals()).singleElement().satisfies(signal -> {
+            assertThat(signal.type()).isEqualTo(CodeEvidenceSignal.Type.SOURCE_BUNDLE_MEMBER);
+            assertThat(signal.strength()).isEqualTo(0.6);
+        });
+        assertThat(ir.constraints()).isEmpty();
+        assertThat(plan.lookup(ir.evidenceItems().get(0).evidenceId())).isEmpty();
     }
 
     @Test
@@ -185,7 +208,7 @@ class OperationEvidenceExtractorTest {
     }
 
     @Test
-    void exactSymbolReadProducesRequiredIrProofAndSurvivesTightSelection() {
+    void uniqueExactSymbolReadProducesBoundedPreferredProofAndSurvivesTightSelection() {
         OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
         CodeEvidenceOperationProvenance exactRead = new CodeEvidenceOperationProvenance(
                 "read_symbol", "op-read-symbol", List.of("claim-1"), "execution_flow",
@@ -206,12 +229,38 @@ class OperationEvidenceExtractorTest {
             assertThat(constraint.reason()).doesNotContain("Worker", "claimNext", "execution_flow");
         });
         CodeEvidenceRetentionPlan retentionPlan = CodeEvidenceRetentionPlan.from(ir);
-        assertThat(retentionPlan.lookup(ir.evidenceItems().get(0).evidenceId())).get()
-                .extracting(CodeEvidenceRetentionPlan.Entry::level)
-                .isEqualTo(CodeEvidenceRetentionPlan.Level.REQUIRED);
+        assertThat(retentionPlan.lookup(ir.evidenceItems().get(0).evidenceId())).get().satisfies(entry -> {
+            assertThat(entry.level()).isEqualTo(CodeEvidenceRetentionPlan.Level.PREFERRED);
+            assertThat(entry.basis()).isEqualTo(CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF);
+        });
         assertThat(CodeEvidenceSelectionPolicy.selectFinalEvidenceWithRetention(
                 List.of(broad, exact), List.of(broad), 1, retentionPlan))
                 .containsExactly(exact);
+    }
+
+    @Test
+    void ambiguousExactSymbolReadKeepsObservationsWithoutCreatingProofConstraints() {
+        OperationEvidenceExtractor extractor = new OperationEvidenceExtractor();
+        CodeEvidenceOperationProvenance ambiguousRead = new CodeEvidenceOperationProvenance(
+                "read_symbol", "op-read-overload", List.of("claim-1"), "execution_flow",
+                List.of("index:origin:1-20"), "",
+                "src/app/Resolver.java", "Resolver.resolve", "",
+                null, null, null, List.of(), "BOTH", null);
+        List<CodeSearchResult> overloads = java.util.stream.IntStream.range(0, 3)
+                .mapToObj(index -> result(
+                        UUID.randomUUID(), "void resolve(Type" + index + " value) {}", ambiguousRead,
+                        Map.of("symbolEvidenceKind", "DEFINITION", "callableBodyPresent", true),
+                        "src/app/Resolver.java", "resolve", "resolve"))
+                .toList();
+
+        var ir = extractor.extract(new CodeEvidenceExtractionContext(
+                "How is a value resolved?", EvidenceExtractionStage.POST_OPERATION, overloads));
+
+        assertThat(ir.evidenceItems()).hasSize(3);
+        assertThat(ir.signals()).hasSize(3)
+                .allSatisfy(signal -> assertThat(signal.type())
+                        .isEqualTo(CodeEvidenceSignal.Type.DIRECT_OBSERVATION));
+        assertThat(ir.constraints()).isEmpty();
     }
 
     @Test

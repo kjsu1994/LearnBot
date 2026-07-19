@@ -4,6 +4,7 @@ import com.learnbot.service.CodeReferenceService;
 import com.learnbot.service.CodeSearchService;
 import com.learnbot.service.GraphSearchIntent;
 import com.learnbot.service.RagPipelineService;
+import com.learnbot.service.coderag.evidence.CodeEvidenceAccumulator;
 import com.learnbot.service.coderag.evidence.CodeLexicalEvidenceSelector;
 import com.learnbot.service.coderag.evidence.extractor.CodeEndpointQueryVariants;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
@@ -93,7 +94,8 @@ public final class CodeEvidenceOperationExecutor {
             };
             if (operation.isSearch()) {
                 results = mergeUnique(results, sourceBundleExpander.expand(
-                        repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, results));
+                        repositoryId, selectedSpaceId, spaceIds, operation, graphIntent, results,
+                        retrievalIntent));
             }
             List<CodeSearchResult> safeResults = enrichEndpointMetadata(
                     repositoryId, selectedSpaceId, spaceIds,
@@ -142,12 +144,29 @@ public final class CodeEvidenceOperationExecutor {
     ) {
         Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
         for (CodeSearchResult result : primary == null ? List.<CodeSearchResult>of() : primary) {
-            if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
+            mergeCandidate(merged, result);
         }
         for (CodeSearchResult result : additions == null ? List.<CodeSearchResult>of() : additions) {
-            if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
+            mergeCandidate(merged, result);
         }
         return List.copyOf(merged.values());
+    }
+
+    private void mergeCandidate(Map<UUID, CodeSearchResult> merged, CodeSearchResult incoming) {
+        if (incoming == null || incoming.chunkId() == null) return;
+        CodeSearchResult current = merged.get(incoming.chunkId());
+        if (current == null) {
+            merged.put(incoming.chunkId(), incoming);
+            return;
+        }
+        Map<String, Object> metadata = CodeEvidenceAccumulator.mergeMetadata(
+                current, current, incoming);
+        merged.put(current.chunkId(), new CodeSearchResult(
+                current.chunkId(), current.repositoryId(), current.fileId(), current.repositoryName(),
+                current.filePath(), current.chunkType(), current.symbolName(), current.className(),
+                current.methodName(), current.namespaceName(), current.controlName(), current.eventName(),
+                current.chunkIndex(), current.lineStart(), current.lineEnd(), current.content(),
+                current.score(), metadata));
     }
 
     private List<CodeSearchResult> enrichEndpointMetadata(
@@ -214,8 +233,10 @@ public final class CodeEvidenceOperationExecutor {
                 if (result != null && result.chunkId() != null) merged.putIfAbsent(result.chunkId(), result);
             }
         }
-        String intent = String.join(" ", safe(retrievalIntent), safe(query)).trim();
-        List<CodeSearchResult> initiallyRanked = CodeLexicalEvidenceSelector.rank(intent, List.copyOf(merged.values()), limit);
+        String trustedIntent = safe(retrievalIntent).trim();
+        String auxiliaryIntent = safe(query).trim();
+        List<CodeSearchResult> initiallyRanked = CodeLexicalEvidenceSelector.rank(
+                trustedIntent, auxiliaryIntent, List.copyOf(merged.values()), limit);
         if (repository != null) {
             LinkedHashMap<UUID, CodeSearchResult> expanded = new LinkedHashMap<>(merged);
             for (String path : initiallyRanked.stream()
@@ -228,11 +249,13 @@ public final class CodeEvidenceOperationExecutor {
                     .toList()) {
                 List<CodeSearchResult> symbols = repository.listActiveSymbolsByPath(
                         repositoryId, path, 80, spaceIds, selectedSpaceId);
-                for (CodeSearchResult symbol : CodeLexicalEvidenceSelector.rank(intent, symbols, 8)) {
+                for (CodeSearchResult symbol : CodeLexicalEvidenceSelector.rank(
+                        trustedIntent, auxiliaryIntent, symbols, 8)) {
                     if (symbol != null && symbol.chunkId() != null) expanded.putIfAbsent(symbol.chunkId(), symbol);
                 }
             }
-            return CodeLexicalEvidenceSelector.rank(intent, List.copyOf(expanded.values()), limit);
+            return CodeLexicalEvidenceSelector.rank(
+                    trustedIntent, auxiliaryIntent, List.copyOf(expanded.values()), limit);
         }
         return initiallyRanked;
     }

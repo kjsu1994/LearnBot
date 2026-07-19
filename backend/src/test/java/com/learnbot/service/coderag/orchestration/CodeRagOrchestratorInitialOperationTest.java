@@ -6,10 +6,15 @@ import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.repository.CodeRepository;
 import com.learnbot.service.CodeReferenceService;
 import com.learnbot.service.CodeSearchService;
+import com.learnbot.service.CodeIntelligenceAuthority;
 import com.learnbot.service.GraphSearchIntent;
 import com.learnbot.service.OllamaClient;
 import com.learnbot.service.RagPipelineService;
 import com.learnbot.service.coderag.evidence.CodeEvidenceRanker;
+import com.learnbot.service.coderag.evidence.CodeEvidenceId;
+import com.learnbot.service.coderag.model.CodeEvidenceConstraint;
+import com.learnbot.service.coderag.model.CodeEvidenceIr;
+import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 import com.learnbot.service.coderag.model.CodeQuestionMode;
 import org.junit.jupiter.api.Test;
@@ -17,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -401,9 +407,45 @@ class CodeRagOrchestratorInitialOperationTest {
                 "", "", "", null, null, null, List.of(), "BOTH", null,
                 "follow-up-search", List.of("claim-1"), List.of());
         assertThat(orchestrator.retrievalOperationIntent(question, search, List.of(claim)))
-                .contains(question, "queued work claim behavior", "prove queued work claim");
+                .isEqualTo(question)
+                .doesNotContain("queued work claim behavior", "prove queued work claim");
         assertThat(orchestrator.retrievalOperationEvidenceIntent(search))
                 .contains("keyword_search", "queued work claim behavior");
+    }
+
+    @Test
+    void accumulatedIrRetentionSurvivesTheNextRankedCandidateSelection() {
+        LearnBotProperties properties = new LearnBotProperties();
+        properties.getRag().getPipeline().setCodeEvidenceAdjudicationMaxCandidates(2);
+        CodeRagOrchestrator orchestrator = new CodeRagOrchestrator(
+                mock(CodeSearchService.class), mock(CodeRepository.class), mock(CodeReferenceService.class),
+                null, mock(OllamaClient.class), properties, mock(RagPipelineService.class),
+                new CodeEvidenceRanker(properties), null);
+        UUID repositoryId = UUID.randomUUID();
+        CodeSearchResult first = rankedResult(repositoryId, "first", 0.95, 10);
+        CodeSearchResult second = rankedResult(repositoryId, "second", 0.90, 30);
+        CodeSearchResult exactRead = rankedResult(repositoryId, "retained", 0.05, 50);
+        String evidenceId = CodeEvidenceId.from(exactRead);
+        CodeEvidenceIr accumulated = new CodeEvidenceIr(
+                List.of(new CodeEvidenceItem(
+                        evidenceId, exactRead, Set.of(CodeEvidenceItem.Kind.DIRECT_SOURCE),
+                        CodeIntelligenceAuthority.SYNTAX)),
+                List.of(),
+                List.of(new CodeEvidenceConstraint(
+                        CodeEvidenceConstraint.Type.DIRECT_PROOF_REQUIRED,
+                        evidenceId, "typed exact read resolved its structural operand")),
+                List.of(), List.of(), List.of());
+        Map<UUID, CodeSearchResult> merged = new LinkedHashMap<>();
+        merged.put(first.chunkId(), first);
+        merged.put(second.chunkId(), second);
+        merged.put(exactRead.chunkId(), exactRead);
+
+        List<CodeSearchResult> selected = orchestrator.rankedCodeEvidence(
+                "Explain the workflow", CodeQuestionMode.LOCATE, merged, 2, accumulated);
+
+        assertThat(selected).hasSize(2);
+        assertThat(selected).extracting(CodeSearchResult::chunkId)
+                .contains(exactRead.chunkId());
     }
 
     @Test
@@ -430,6 +472,19 @@ class CodeRagOrchestratorInitialOperationTest {
                 UUID.randomUUID(), repositoryId, UUID.randomUUID(), "repo", "src/app/Worker.java",
                 "file_section", "Worker", "Worker", null, "app", null, null, 1,
                 1, 160, "class Worker { void claim() {} }", 0.8, Map.of("language", "java"));
+    }
+
+    private CodeSearchResult rankedResult(
+            UUID repositoryId,
+            String method,
+            double score,
+            int lineStart
+    ) {
+        return new CodeSearchResult(
+                UUID.randomUUID(), repositoryId, UUID.randomUUID(), "repo", "src/app/Worker.java",
+                "method", method, "Worker", method, "app", null, null, 1,
+                lineStart, lineStart + 8, "void " + method + "() { perform(); }", score,
+                Map.of("indexVersion", "index-v1"));
     }
 
     private CodeSearchResult genericStructuralResult(

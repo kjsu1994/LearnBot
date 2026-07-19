@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Info, Loader2, Search } from 'lucide-react';
-import { IconBook, IconCode, IconDatabase, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
+import { IconBook, IconCode, IconDatabase, IconDeviceDesktop, IconFileText, IconLock, IconLogout, IconRefresh, IconSearch, IconShieldCheck, IconSparkles } from '@tabler/icons-react';
 import { routePaths } from '../../config/constants.js';
 import { formatBrandText, formatDate, getSourceLabel } from '../../lib/formatters.js';
 import { AnimatedContent, AnimatedPage, AnimatedSection } from '../common/Common.jsx';
@@ -791,6 +791,10 @@ function WorkspaceShell({
             <IconBook size={16} />
             저장됨
           </button>
+          <button className={activeView === 'localAgent' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.localAgent)}>
+            <IconDeviceDesktop size={16} />
+            Local Agent
+          </button>
           {(user.role === 'MASTER' || user.role === 'ADMIN') && (
             <button className={activeView === 'admin' ? 'tab-button active' : 'tab-button'} type="button" onClick={() => navigateTo(routePaths.admin)}>
               <IconShieldCheck size={16} />
@@ -1140,6 +1144,7 @@ function Sidebar({
     { key: 'code', label: '코드', detail: `${indexedRepoCount} repos`, icon: <IconCode size={16} />, path: routePaths.code },
     { key: 'docs', label: '문서', detail: `${indexedCount} docs`, icon: <IconFileText size={16} />, path: routePaths.docs },
     { key: 'saved', label: '저장됨', detail: 'Library', icon: <IconDatabase size={16} />, path: routePaths.saved },
+    { key: 'localAgent', label: 'Local Agent', detail: 'My PC', icon: <IconDeviceDesktop size={16} />, path: routePaths.localAgent },
     ...(user.role === 'MASTER' || user.role === 'ADMIN'
       ? [{ key: 'admin', label: '관리자', detail: 'Console', icon: <IconShieldCheck size={16} />, path: routePaths.admin }]
       : []),

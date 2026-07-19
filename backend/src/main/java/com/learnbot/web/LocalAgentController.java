@@ -99,7 +99,7 @@ public class LocalAgentController {
                 request.webSocketFailureCount(),
                 request.nextWebSocketRetryAt()
         );
-        return gatewayService.status(userId);
+        return gatewayService.status(userId, request.agentId());
     }
 
     @GetMapping("/tools/next")

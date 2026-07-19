@@ -440,6 +440,33 @@ class CodeEvidenceSelectionPolicyTest {
     }
 
     @Test
+    void sourceBundleKeepsCompetingOperationBranchesBesideAnExactRead() {
+        CodeSearchResult semantic = result("src/Overview.java", 1.0, Map.of());
+        CodeSearchResult exactRead = result("src/FirstBranch.java", 0.8, Map.of());
+        CodeSearchResult firstMember = result("src/SecondBranch.java", 0.4, Map.of());
+        CodeSearchResult secondMember = result("src/ThirdBranch.java", 0.3, Map.of());
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.of(Map.of(
+                CodeEvidenceId.from(exactRead), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.REQUIRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("proof:exact"), CodeEvidenceRetentionPlan.Basis.CONSTRAINT),
+                CodeEvidenceId.from(firstMember), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("source_bundle:member:search_a"),
+                        CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE),
+                CodeEvidenceId.from(secondMember), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("source_bundle:member:search_b"),
+                        CodeEvidenceRetentionPlan.Basis.SOURCE_BUNDLE)));
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                List.of(semantic, exactRead, firstMember, secondMember),
+                List.of(semantic), plan, 3);
+
+        assertThat(selected).containsExactly(exactRead, firstMember, secondMember)
+                .doesNotContain(semantic);
+    }
+
+    @Test
     void typedPlanChangesMembershipButPreservesPresentationRankAndHardLimit() {
         CodeSearchResult semantic = result("src/Semantic.java", 1.0, Map.of());
         CodeSearchResult preferred = result("src/Preferred.java", 0.5, Map.of());

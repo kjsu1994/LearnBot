@@ -9,3 +9,4 @@ FROM nginx:stable
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY nginx/backend-upstream.inc /etc/nginx/conf.d/backend-upstream.inc
 COPY --from=frontend-build /app/dist /usr/share/nginx/client
+RUN mkdir -p /usr/share/nginx/client/downloads/local-agent

@@ -51,6 +51,7 @@ import com.learnbot.service.coderag.model.CodeEvidenceItem;
 import com.learnbot.service.coderag.model.EvidenceExtractionStage;
 import com.learnbot.service.coderag.model.CodeQuestionMode;
 import com.learnbot.service.coderag.retrieval.CodeEvidenceOperationExecutor;
+import com.learnbot.service.coderag.retrieval.CodeDeadlineExactReadPolicy;
 import com.learnbot.service.coderag.retrieval.CodeGraphClosurePlanner;
 import com.learnbot.service.coderag.retrieval.CodeInitialDiscoveryPlanner;
 import com.learnbot.service.coderag.retrieval.CodeQueryRewritePolicy;
@@ -652,7 +653,7 @@ public class CodeRagOrchestrator {
                 repositoryMap, selectedSpaceId, spaceIds, question,
                 merged.values(), initialExecution.observations(), retrievalEvidenceIr).map();
         List<CodeSearchResult> results = rankedCodeEvidence(
-                question, plannedQuestionMode, merged, limit, null);
+                question, plannedQuestionMode, merged, limit, retrievalEvidenceIr);
         RagPipelineService.EvidenceAssessment assessment = pipelineService.assessCode(
                 question,
                 results,
@@ -701,13 +702,14 @@ public class CodeRagOrchestrator {
         int previousValidatedClaimCount = validatedClaimCount(results);
         int previousDirectReadEvidenceCount = directReadEvidenceCount(results);
         boolean indexChanged = false;
+        boolean deadlineDrainUsed = false;
         int contractRepairAttempts = 0;
         CodeRetrievalPlanValidator.PlanValidationCode terminalValidationCode =
                 CodeRetrievalPlanValidator.PlanValidationCode.VALID;
 
         while (!followUpPlan.enough()
                 && completedAdditionalIterations < maxAdditionalIterations
-                && System.nanoTime() < retrievalDeadlineNanos) {
+                && (System.nanoTime() < retrievalDeadlineNanos || !deadlineDrainUsed)) {
             int executedThisIteration = 0;
             CodeRetrievalPlanValidator.PlanValidationResult planValidation = retrievalCoordinator.validatePlan(
                     followUpPlan, repositoryMap, executedOperations);
@@ -741,7 +743,17 @@ public class CodeRagOrchestrator {
                     break;
                 }
             }
-            for (RagPipelineService.CodeSearchOperation requestedOperation : planValidation.executableOperations()) {
+            boolean deadlineDrain = System.nanoTime() >= retrievalDeadlineNanos;
+            List<RagPipelineService.CodeSearchOperation> executableOperations = deadlineDrain
+                    ? CodeDeadlineExactReadPolicy.select(planValidation.executableOperations())
+                    : planValidation.executableOperations();
+            if (deadlineDrain) {
+                deadlineDrainUsed = true;
+                operationObservations.add("phase=DEADLINE_DRAIN status="
+                        + (executableOperations.isEmpty() ? "NO_EXACT_READ" : "READY")
+                        + " operations=" + executableOperations.size());
+            }
+            for (RagPipelineService.CodeSearchOperation requestedOperation : executableOperations) {
                 RagPipelineService.CodeSearchOperation operation = resolveOperationOperands(requestedOperation, results);
                 String operationKey = retrievalOperationKey(operation);
                 if (!executedOperations.add(operationKey)) {
@@ -793,9 +805,15 @@ public class CodeRagOrchestrator {
                 indexChanged = true;
                 break;
             }
-            results = rankedCodeEvidence(question, plannedQuestionMode, merged, limit, followUpPlan);
+            results = rankedCodeEvidence(
+                    question, plannedQuestionMode, merged, limit, retrievalEvidenceIr);
             assessment = pipelineService.assessCode(
                     question, results, minCodeEvidence(plannedQuestionMode), iteration);
+            if (deadlineDrain) {
+                operationObservations.add("phase=DEADLINE_DRAIN status=COMPLETED operations="
+                        + executedThisIteration);
+                break;
+            }
             RagPipelineService.CodeEvidenceFollowUpPlan previousPlan = followUpPlan;
             followUpPlan = preservePlanOnPlanningFailure(previousPlan, graphClosurePlanner.augment(
                     plannedQuestionMode, enforceDirectClaimProof(pipelineService.planCodeEvidenceIteration(
@@ -891,22 +909,10 @@ public class CodeRagOrchestrator {
             RagPipelineService.CodeSearchOperation operation,
             List<RagPipelineService.CodeEvidenceChecklistItem> checklist
     ) {
-        LinkedHashSet<String> parts = new LinkedHashSet<>();
-        addIfNotBlank(parts, question);
-        if (operation != null && operation.isSearch()) {
-            addIfNotBlank(parts, operation.query());
-            addIfNotBlank(parts, operation.evidenceGroup());
-            Set<String> claimIds = new LinkedHashSet<>(operation.claimIds());
-            for (RagPipelineService.CodeEvidenceChecklistItem item : checklist == null ? List.<RagPipelineService.CodeEvidenceChecklistItem>of() : checklist) {
-                if (!claimIds.contains(item.claimId())) continue;
-                addIfNotBlank(parts, item.goal());
-                addIfNotBlank(parts, item.actor());
-                addIfNotBlank(parts, item.action());
-                addIfNotBlank(parts, item.object());
-                addIfNotBlank(parts, item.expectedOutcome());
-            }
-        }
-        return abbreviate(String.join(" ", parts), 1600);
+        // The typed operation already carries planner text. Keep the user-authored question as
+        // the trusted ranking intent so an unverified symbol in a planner query cannot amplify
+        // its own premise while source candidates are expanded.
+        return abbreviate(safe(question, "").trim(), 1600);
     }
 
     private void addIfNotBlank(Set<String> values, String value) {
@@ -1304,10 +1310,7 @@ public class CodeRagOrchestrator {
             String question,
             RagPipelineService.CodeSearchOperation operation
     ) {
-        LinkedHashSet<String> parts = new LinkedHashSet<>();
-        addIfNotBlank(parts, question);
-        if (operation != null && operation.isSearch()) addIfNotBlank(parts, operation.query());
-        return abbreviate(String.join(" ", parts), 1600);
+        return abbreviate(safe(question, "").trim(), 1600);
     }
 
     public static boolean shouldBlockAnswerGeneration(
@@ -1758,16 +1761,17 @@ public class CodeRagOrchestrator {
         };
     }
 
-    private List<CodeSearchResult> rankedCodeEvidence(
+    List<CodeSearchResult> rankedCodeEvidence(
             String question,
             CodeQuestionMode questionMode,
             Map<UUID, CodeSearchResult> merged,
             int limit,
-        RagPipelineService.CodeEvidenceFollowUpPlan followUpPlan
+            CodeEvidenceIr retrievalIr
     ) {
         List<CodeSearchResult> ranked = evidenceRanker.rank(question, questionMode, List.copyOf(merged.values()));
         int selectionLimit = candidateSlateLimit(limit);
-        CodeEvidenceRetentionPlan retentionPlan = evidenceRetentionPlan(question, ranked);
+        CodeEvidenceRetentionPlan retentionPlan = CodeEvidenceRetentionPlan.from(retrievalIr)
+                .merge(evidenceRetentionPlan(question, ranked));
         List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.select(
                 ranked, selectionLimit, retentionPlan);
         Set<UUID> retainedChunkIds = selected.stream()

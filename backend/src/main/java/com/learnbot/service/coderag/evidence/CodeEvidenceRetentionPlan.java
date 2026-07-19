@@ -36,6 +36,7 @@ public final class CodeEvidenceRetentionPlan {
 
     public enum Basis {
         CONSTRAINT,
+        DIRECT_PROOF,
         BOUNDED_GRAPH_PATH,
         SOURCE_BUNDLE,
         SIGNAL
@@ -236,8 +237,11 @@ public final class CodeEvidenceRetentionPlan {
                 || (fact != null && fact.authority().rank() < CodeIntelligenceAuthority.SYNTAX.rank())) {
             return;
         }
-        merge(resolved, item.evidenceId(), new Entry(Level.REQUIRED, item.authority(),
-                Set.of(group("proof", targetId)), Basis.CONSTRAINT));
+        // Fulfilling a structural operand proves what was read, not that the planner chose
+        // question-relevant evidence. Keep it bounded and preferred until a verified claim
+        // explicitly promotes the source at the answer boundary.
+        merge(resolved, item.evidenceId(), new Entry(Level.PREFERRED, item.authority(),
+                Set.of(group("proof", targetId)), Basis.DIRECT_PROOF));
     }
 
     private static void merge(Map<String, Entry> entries, String evidenceId, Entry entry) {

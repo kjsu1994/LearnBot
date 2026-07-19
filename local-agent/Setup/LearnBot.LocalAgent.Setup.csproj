@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>LearnBotSetup</AssemblyName>
+    <VersionPrefix>0.2.0</VersionPrefix>
+    <Platforms>x64</Platforms>
+    <LearnBotPublicBaseUrl Condition="'$(LearnBotPublicBaseUrl)' == ''">https://learnbot.example.invalid</LearnBotPublicBaseUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="LearnBotPublicBaseUrl" Value="$(LearnBotPublicBaseUrl)" />
+  </ItemGroup>
+</Project>

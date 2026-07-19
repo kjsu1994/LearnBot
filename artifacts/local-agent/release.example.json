@@ -1,0 +1,17 @@
+{
+  "schema": "learnbot.local-agent.release.v1",
+  "channel": "stable",
+  "version": "0.2.0.0",
+  "minimumSupportedVersion": "0.1.0.0",
+  "platform": "windows",
+  "architecture": "x64",
+  "appInstallerUrl": "/downloads/local-agent/stable/LearnBotLocalAgent.appinstaller",
+  "packageUrl": "/downloads/local-agent/releases/0.2.0.0/LearnBotLocalAgent_0.2.0.0_x64.msix",
+  "sha256": "replace-with-release-sha256",
+  "sizeBytes": 0,
+  "publisher": "CN=ReplaceWithProductionPublisher",
+  "signed": false,
+  "signingMode": "ArtifactSigning",
+  "productionTrusted": false,
+  "publishedAt": "replace-with-rfc3339-timestamp"
+}

@@ -97,4 +97,39 @@ class LocalAgentGatewayServiceTest {
         service.disconnect(userId, agentId);
         assertThat(service.status(userId).state()).isEqualTo(LocalAgentConnectionState.DISCONNECTED);
     }
+
+    @Test
+    void heartbeatsFromMultipleDevicesDoNotOverwriteEachOther() {
+        LocalAgentGatewayService service = new LocalAgentGatewayService();
+        UUID userId = UUID.randomUUID();
+        UUID firstAgent = UUID.randomUUID();
+        UUID secondAgent = UUID.randomUUID();
+        UUID firstWorkspace = UUID.randomUUID();
+        UUID secondWorkspace = UUID.randomUUID();
+
+        service.registerHeartbeat(userId, firstAgent, "0.1.0", List.of("file.read"), List.of(
+                new LocalAgentWorkspaceSummary(firstWorkspace, "first", "C:/first", true)
+        ));
+        service.registerHeartbeat(userId, secondAgent, "0.1.0", List.of("git.status"), List.of(
+                new LocalAgentWorkspaceSummary(secondWorkspace, "second", "C:/second", true)
+        ));
+
+        assertThat(service.statuses(userId)).extracting(status -> status.agentId())
+                .containsExactlyInAnyOrder(firstAgent, secondAgent);
+        assertThat(service.status(userId, firstAgent).capabilities()).containsExactly("file.read");
+        assertThat(service.status(userId, secondAgent).capabilities()).containsExactly("git.status");
+        assertThat(service.status(userId).agentId()).isEqualTo(firstAgent);
+        assertThat(service.hasApprovedWorkspace(userId, firstWorkspace)).isTrue();
+        assertThat(service.hasApprovedWorkspace(userId, secondWorkspace)).isFalse();
+
+        service.select(userId, secondAgent);
+
+        assertThat(service.status(userId).agentId()).isEqualTo(secondAgent);
+        assertThat(service.hasApprovedWorkspace(userId, firstWorkspace)).isFalse();
+        assertThat(service.hasApprovedWorkspace(userId, secondWorkspace)).isTrue();
+
+        service.disconnect(userId, secondAgent);
+
+        assertThat(service.status(userId).agentId()).isEqualTo(firstAgent);
+    }
 }

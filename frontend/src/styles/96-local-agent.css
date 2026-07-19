@@ -1,0 +1,52 @@
+.local-agent-page { display: grid; gap: 24px; color: #e2e8f0; }
+.local-agent-hero, .local-agent-panel, .local-agent-step, .local-agent-device { border: 1px solid rgba(148, 163, 184, .17); background: rgba(15, 23, 42, .8); }
+.local-agent-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 32px; border-radius: 24px; background: radial-gradient(circle at 90% 15%, rgba(56, 189, 248, .15), transparent 35%), linear-gradient(135deg, #0f172a, #1e293b); }
+.local-agent-hero h1, .local-agent-heading h2, .local-agent-step h2, .local-agent-device h3 { margin: 0; color: #f8fafc; }
+.local-agent-hero h1 { margin-top: 6px; font-size: clamp(28px, 4vw, 44px); letter-spacing: -.04em; }
+.local-agent-hero p, .local-agent-heading p, .local-agent-step p, .local-agent-device p { margin: 8px 0 0; color: #94a3b8; line-height: 1.65; }
+.local-agent-hero p { max-width: 720px; }
+.local-agent-eyebrow { color: #38bdf8; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.local-agent-summary { display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); min-width: 330px; border: 1px solid rgba(148, 163, 184, .16); border-radius: 18px; background: rgba(2, 6, 23, .42); }
+.local-agent-summary div { display: grid; gap: 2px; padding: 16px; text-align: center; }
+.local-agent-summary div + div { border-left: 1px solid rgba(148, 163, 184, .14); }
+.local-agent-summary strong { color: #fff; font-size: 24px; }
+.local-agent-summary span, .local-agent-step small { color: #94a3b8; font-size: 12px; }
+.local-agent-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.local-agent-step { position: relative; display: flex; min-height: 270px; flex-direction: column; align-items: flex-start; gap: 12px; padding: 24px; border-radius: 20px; }
+.local-agent-step > b { position: absolute; top: 18px; right: 20px; color: rgba(148, 163, 184, .3); font-size: 30px; }
+.local-agent-step p { flex: 1; }
+.local-agent-step ul { display: grid; gap: 6px; margin: 0; padding-left: 20px; color: #b8c6d8; font-size: 13px; }
+.local-agent-icon { display: inline-grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border: 1px solid rgba(56, 189, 248, .24); border-radius: 14px; color: #38bdf8; background: rgba(14, 165, 233, .1); }
+.local-agent-icon.online { color: #34d399; border-color: rgba(52, 211, 153, .24); background: rgba(16, 185, 129, .1); }
+.local-agent-icon.warning { color: #fbbf24; border-color: rgba(251, 191, 36, .24); background: rgba(245, 158, 11, .1); }
+.local-agent-download { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 16px; border-radius: 10px; color: #fff; background: #0284c7; font-size: 14px; font-weight: 700; text-decoration: none; }
+.local-agent-download:hover { background: #0369a1; }
+.local-agent-panel { padding: 26px; border-radius: 22px; }
+.local-agent-heading { display: flex; align-items: center; gap: 14px; }
+.local-agent-heading h2 { margin-top: 3px; font-size: 22px; }
+.local-agent-heading.device-heading { justify-content: space-between; margin-bottom: 20px; }
+.local-agent-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 22px 0 0; overflow: hidden; border: 1px solid rgba(148, 163, 184, .16); border-radius: 14px; background: rgba(148, 163, 184, .12); }
+.local-agent-detail-grid div { padding: 14px; background: #111c30; }
+.local-agent-detail-grid dt { margin-bottom: 5px; color: #7f91a9; font-size: 11px; font-weight: 700; }
+.local-agent-detail-grid dd { display: flex; align-items: center; gap: 6px; margin: 0; color: #e2e8f0; font-size: 13px; font-weight: 650; word-break: break-word; }
+.local-agent-security-note { margin: 16px 0; color: #cbd5e1; font-size: 13px; }
+.local-agent-actions { display: flex; gap: 10px; }
+.local-agent-actions.end { justify-content: flex-end; }
+.local-agent-notice { display: flex; align-items: center; gap: 9px; margin-top: 16px; padding: 12px 14px; border: 1px solid rgba(148, 163, 184, .18); border-radius: 12px; color: #cbd5e1; background: rgba(30, 41, 59, .72); font-size: 13px; }
+.local-agent-notice.error { color: #fecaca; border-color: rgba(248, 113, 113, .28); background: rgba(127, 29, 29, .2); }
+.local-agent-notice.success { color: #a7f3d0; border-color: rgba(52, 211, 153, .28); background: rgba(6, 78, 59, .2); }
+.local-agent-notice.warning { color: #fde68a; border-color: rgba(251, 191, 36, .26); background: rgba(120, 53, 15, .18); }
+.local-agent-error-text { color: #fca5a5 !important; }
+.local-agent-devices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.local-agent-device { display: grid; gap: 16px; padding: 20px; border-radius: 18px; }
+.local-agent-device-title { display: flex; align-items: center; gap: 10px; }
+.local-agent-device-title > div { min-width: 0; flex: 1; }
+.local-agent-device-title h3 { font-size: 17px; }
+.local-agent-detail-grid.device-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.local-agent-workspaces { display: flex; flex-wrap: wrap; gap: 7px; }
+.local-agent-workspaces span { max-width: 100%; overflow: hidden; padding: 5px 9px; border-radius: 8px; color: #b8c6d8; background: rgba(51, 65, 85, .7); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.local-agent-empty { display: grid; justify-items: center; gap: 8px; padding: 42px 20px; border: 1px dashed rgba(148, 163, 184, .24); border-radius: 16px; color: #8293aa; text-align: center; }
+.local-agent-empty strong { color: #cbd5e1; }
+.local-agent-empty p { margin: 0; font-size: 13px; }
+@media (max-width: 1100px) { .local-agent-hero { align-items: stretch; flex-direction: column; } .local-agent-summary { min-width: 0; } .local-agent-steps, .local-agent-devices { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .local-agent-hero, .local-agent-panel { padding: 20px; } .local-agent-summary, .local-agent-detail-grid, .local-agent-detail-grid.device-meta { grid-template-columns: 1fr; } .local-agent-summary div + div { border-top: 1px solid rgba(148, 163, 184, .14); border-left: 0; } .local-agent-heading.device-heading { align-items: flex-start; flex-direction: column; } }

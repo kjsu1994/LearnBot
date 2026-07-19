@@ -71,6 +71,8 @@ Open:
 - MinIO API: http://localhost:19000
 - MinIO Console: http://localhost:19001
 
+Local Agent production deployment: [operator runbook](docs/local-agent-deployment-runbook.md)
+
 Check whether Ollama and the optional reranker are using GPU memory while models are loaded:
 
 ```bash
@@ -736,9 +738,9 @@ The Code workspace can prepare and display this request for review, including re
 The first real snapshot creation boundary is specified in `docs/local-agent-snapshot-implementation-plan.md`. Snapshot creation support is the recovery baseline before any patch application release is considered.
 
 
-### Local Agent MVP Skeleton
+### Local Agent
 
-The first local executable skeleton lives in `local-agent/` and builds as a .NET console app named `learnbot`. It is intended for the early internal pilot path, not as the final installer/service package yet.
+The Windows Local Agent now ships as a self-contained signed MSIX/App Installer package with a Setup GUI and per-user StartupHost. Users install it from **Settings → Local Agent**, approve the short-lived browser connection request, and do not need server-PC access, administrator rights, or a separate .NET runtime. Production packaging, pilot verification, stable promotion, TLS, and rollback procedures are documented in the [Local Agent deployment runbook](docs/local-agent-deployment-runbook.md). The CLI commands below remain available for diagnostics and legacy internal workflows.
 
 Current commands:
 

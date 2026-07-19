@@ -63,6 +63,20 @@ public class LocalAgentTokenRepository {
         return updated > 0;
     }
 
+    public List<UUID> revokeAllForAgent(UUID userId, UUID agentId) {
+        return jdbc.query("""
+                UPDATE local_agent_tokens
+                SET revoked_at = COALESCE(revoked_at, now())
+                WHERE user_id = :userId
+                  AND agent_id = :agentId
+                  AND revoked_at IS NULL
+                RETURNING id
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("agentId", agentId),
+                (rs, rowNum) -> rs.getObject("id", UUID.class));
+    }
+
     public void markSeen(UUID id) {
         jdbc.update("""
                 UPDATE local_agent_tokens

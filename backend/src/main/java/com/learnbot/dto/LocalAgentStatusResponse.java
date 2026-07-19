@@ -16,8 +16,31 @@ public record LocalAgentStatusResponse(
         String activeTransport,
         int webSocketFailureCount,
         OffsetDateTime nextWebSocketRetryAt,
-        String message
+        String message,
+        String latestVersion,
+        String minimumVersion,
+        String updateState,
+        String updateUri
 ) {
+    public LocalAgentStatusResponse(
+            LocalAgentConnectionState state,
+            UUID agentId,
+            String version,
+            OffsetDateTime connectedAt,
+            OffsetDateTime lastSeenAt,
+            List<String> capabilities,
+            List<LocalAgentWorkspaceSummary> workspaces,
+            String configuredTransport,
+            String activeTransport,
+            int webSocketFailureCount,
+            OffsetDateTime nextWebSocketRetryAt,
+            String message
+    ) {
+        this(state, agentId, version, connectedAt, lastSeenAt, capabilities, workspaces,
+                configuredTransport, activeTransport, webSocketFailureCount, nextWebSocketRetryAt,
+                message, null, null, "UNKNOWN", null);
+    }
+
     public static LocalAgentStatusResponse disconnected() {
         return new LocalAgentStatusResponse(
                 LocalAgentConnectionState.DISCONNECTED,
@@ -31,7 +54,11 @@ public record LocalAgentStatusResponse(
                 null,
                 0,
                 null,
-                "No Local Agent is connected. User-owned file changes require a per-user Local Agent."
+                "No Local Agent is connected. User-owned file changes require a per-user Local Agent.",
+                null,
+                null,
+                "UNKNOWN",
+                null
         );
     }
 }
