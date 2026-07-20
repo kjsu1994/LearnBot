@@ -48,7 +48,7 @@ services:
       - "${LEARNBOT_NGINX_BIND_ADDRESS:-127.0.0.1}:${LEARNBOT_NGINX_PORT:-8083}:80"
     volumes:
       - ./frontend/dist:/usr/share/nginx/client:ro
-      - ./artifacts/local-agent:/usr/share/nginx/client/downloads/local-agent:ro
+      - ./artifacts/local-agent:/usr/share/nginx/downloads/local-agent:ro
     depends_on:
       backend:
         condition: service_started
