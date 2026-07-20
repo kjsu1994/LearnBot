@@ -36,6 +36,31 @@ class CodeInitialEvidenceSelectorTest {
     }
 
     @Test
+    void searchCutDoesNotLetRankedMembersStarveAnAppendedCallableBoundary() {
+        var search = operation("hybrid_search", "search-flow");
+        CodeSearchResult semanticFirst = result("src/Overview.code", "overview", Map.of());
+        CodeSearchResult semanticSecond = result("src/Flow.code", "flow", Map.of());
+        CodeSearchResult semanticThird = result("src/Details.code", "details", Map.of());
+        CodeSearchResult firstMember = result("src/FlowWorker.code", "RunPhase", Map.of(
+                CodeEvidenceOperationProvenance.METADATA_KEY,
+                List.of(provenance("read_source_member", "search-flow"))));
+        CodeSearchResult secondMember = result("src/FlowWorker.code", "SavePhase", Map.of(
+                CodeEvidenceOperationProvenance.METADATA_KEY,
+                List.of(provenance("read_source_member", "search-flow"))));
+        CodeSearchResult boundary = result("src/FlowWorker.code", "StartPhase", Map.of(
+                CodeEvidenceOperationProvenance.METADATA_KEY,
+                List.of(provenance("read_source_boundary", "search-flow"))));
+
+        List<CodeSearchResult> selected = selector.select(search, List.of(
+                semanticFirst, semanticSecond, semanticThird,
+                firstMember, secondMember, boundary), 4);
+
+        assertThat(selected)
+                .containsExactly(firstMember, boundary, semanticFirst, semanticSecond)
+                .doesNotContain(secondMember, semanticThird);
+    }
+
+    @Test
     void directReadKeepsTheExecutorOrderAndHardLimit() {
         var read = operation("read_symbol", "read-flow");
         CodeSearchResult first = result("src/FlowWorker.code", "RunPhase", Map.of());

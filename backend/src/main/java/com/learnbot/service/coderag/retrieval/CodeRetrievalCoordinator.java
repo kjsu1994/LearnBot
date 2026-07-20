@@ -33,6 +33,8 @@ public final class CodeRetrievalCoordinator {
     private final CodeRetrievalLoop loop;
     private final CodeRetrievalPlanValidator planValidator;
     private final CodeEvidenceOperationExecutor operationExecutor;
+    private final CodeObservedClaimReadPlanner observedClaimReadPlanner =
+            new CodeObservedClaimReadPlanner();
 
     public CodeRetrievalCoordinator() {
         this(new CodeRetrievalLoop(), new CodeRetrievalPlanValidator(), null);
@@ -80,6 +82,14 @@ public final class CodeRetrievalCoordinator {
             Set<String> executedOperationKeys
     ) {
         return planValidator.validateInitial(question, plan, repositoryMap, executedOperationKeys);
+    }
+
+    public List<RagPipelineService.CodeSearchOperation> selectObservedClaimReads(
+            RagPipelineService.CodeEvidenceFollowUpPlan plan,
+            RepositoryQuestionMapBuilder.RepositoryQuestionMap repositoryMap,
+            Set<String> executedOperationKeys
+    ) {
+        return observedClaimReadPlanner.select(plan, repositoryMap, executedOperationKeys);
     }
 
     public CodeEvidenceOperationExecutor.Execution executeOperation(

@@ -877,6 +877,75 @@ public class CodeRagOrchestrator {
             previousValidatedClaimCount = currentValidatedClaimCount;
             previousDirectReadEvidenceCount = currentDirectReadEvidenceCount;
         }
+        if (!indexChanged && !followUpPlan.enough()) {
+            List<RagPipelineService.CodeSearchOperation> observedReads =
+                    retrievalCoordinator.selectObservedClaimReads(
+                            followUpPlan, repositoryMap, executedOperations);
+            if (!observedReads.isEmpty()) {
+                CodeRetrievalPlanValidator.PlanValidationResult drainValidation =
+                        retrievalCoordinator.validatePlan(
+                                withInitialOperations(followUpPlan, observedReads),
+                                repositoryMap,
+                                executedOperations);
+                List<RagPipelineService.CodeSearchOperation> drainOperations =
+                        CodeDeadlineExactReadPolicy.select(drainValidation.executableOperations());
+                operationObservations.add("phase=OBSERVED_CLAIM_READ_DRAIN status="
+                        + (drainOperations.isEmpty() ? "REJECTED" : "READY")
+                        + " operations=" + drainOperations.size());
+                int executedDrainOperations = 0;
+                for (RagPipelineService.CodeSearchOperation requestedOperation : drainOperations) {
+                    RagPipelineService.CodeSearchOperation operation =
+                            resolveOperationOperands(requestedOperation, results);
+                    String operationKey = retrievalOperationKey(operation);
+                    if (!executedOperations.add(operationKey)) continue;
+                    CodeEvidenceOperationExecutor.Execution execution =
+                            retrievalCoordinator.executeOperation(
+                                    repositoryId,
+                                    selectedSpaceId,
+                                    spaceIds,
+                                    operation,
+                                    graphSearchIntent(plannedQuestionMode),
+                                    searchLimit,
+                                    retrievalOperationIntent(
+                                            question, operation, followUpPlan.checklist()));
+                    operationObservations.add("phase=OBSERVED_CLAIM_READ_DRAIN "
+                            + operationTrace(operation)
+                            + " " + execution.observation());
+                    int before = merged.size();
+                    for (CodeSearchResult result : execution.results()) {
+                        merge(merged, markLlmIterationEvidence(result, operation));
+                    }
+                    followUpCandidateCount += Math.max(0, merged.size() - before);
+                    followUpQueriesUsed++;
+                    executedDrainOperations++;
+                    log.info("Code RAG observed claim read drain operationId={} claimIds={} status={} candidates={}",
+                            operation.operationId(), operation.claimIds(),
+                            execution.status(), execution.results().size());
+                }
+                if (executedDrainOperations > 0) {
+                    iteration++;
+                    retrievalEvidenceIr = accumulateRetrievalEvidenceIr(
+                            retrievalEvidenceIr, question, plannedQuestionMode,
+                            EvidenceExtractionStage.POST_OPERATION, merged.values());
+                    RepositoryQuestionMapBuilder.MapUpdateResult mapUpdate =
+                            questionMapBuilder.update(
+                                    repositoryMap, selectedSpaceId, spaceIds, question,
+                                    merged.values(), operationObservations, retrievalEvidenceIr);
+                    repositoryMap = mapUpdate.map();
+                    if (mapUpdate.identityChanged()) {
+                        operationObservations.add("phase=OBSERVED_CLAIM_READ_DRAIN status=INDEX_CHANGED");
+                        indexChanged = true;
+                    } else {
+                        results = rankedCodeEvidence(
+                                question, plannedQuestionMode, merged, limit, retrievalEvidenceIr);
+                        results = applyValidatedCoverageSelections(followUpPlan, results, merged);
+                        operationObservations.add(
+                                "phase=OBSERVED_CLAIM_READ_DRAIN status=COMPLETED operations="
+                                        + executedDrainOperations);
+                    }
+                }
+            }
+        }
         followUpStoppedEarly = followUpPlan.enough() && completedAdditionalIterations < maxAdditionalIterations;
 
         int pinnedUsedCount = (int) results.stream().filter(this::isConversationPinned).count();

@@ -92,6 +92,93 @@ class CodeRagOrchestratorInitialOperationTest {
     }
 
     @Test
+    void unresolvedClaimConvertsItsObservedCallableIntoOneBoundedExactRead() throws Exception {
+        UUID repositoryId = UUID.randomUUID();
+        UUID spaceId = UUID.randomUUID();
+        String question = "How does managed value application execute?";
+        CodeSearchService searchService = mock(CodeSearchService.class);
+        CodeRepository codeRepository = mock(CodeRepository.class);
+        RagPipelineService pipelineService = mock(RagPipelineService.class);
+        LearnBotProperties properties = new LearnBotProperties();
+        CodeRagOrchestrator orchestrator = new CodeRagOrchestrator(
+                searchService,
+                codeRepository,
+                mock(CodeReferenceService.class),
+                null,
+                mock(OllamaClient.class),
+                properties,
+                pipelineService,
+                new CodeEvidenceRanker(properties),
+                null
+        );
+        CodeSearchResult candidate = new CodeSearchResult(
+                UUID.randomUUID(), repositoryId, UUID.randomUUID(), "repo", "src/module/InputAdapter.code",
+                "method", "ApplyManagedValue", "InputAdapter", "ApplyManagedValue", "module",
+                null, null, 1, 10, 30, "void ApplyManagedValue() { apply(); }", 0.8,
+                Map.of("indexVersion", "index-v1", "callableBodyPresent", true));
+        RagPipelineService.CodeEvidenceChecklistItem claim =
+                new RagPipelineService.CodeEvidenceChecklistItem(
+                        "claim-apply", "managed_value", question, List.of(question),
+                        "adapter", "apply", "managed value", "managed value is applied",
+                        List.of("src/module"), List.of("DIRECT_SOURCE"));
+        RagPipelineService.CodeSearchOperation search = new RagPipelineService.CodeSearchOperation(
+                "keyword_search", question, "implementation", claim.evidenceGroup(),
+                "", "", "", null, null, null, List.of(), "BOTH", null,
+                "initial-managed-search", List.of(claim.claimId()), List.of());
+        RagPipelineService.CodeEvidenceSearchPlan searchPlan =
+                new RagPipelineService.CodeEvidenceSearchPlan(
+                        true, true, 0.9, List.of(question), List.of(claim),
+                        "search the requested behavior", "managed application", 1, List.of(search));
+        RagPipelineService.CodeEvidenceFollowUpPlan unresolvedPlan =
+                new RagPipelineService.CodeEvidenceFollowUpPlan(
+                        true, false, "exact callable source remains required",
+                        List.of(claim.claimId()), List.of(), List.of(), List.of(claim.evidenceGroup()),
+                        List.of(claim), List.of(), List.of(), "managed application", 1,
+                        "DISTRIBUTED", List.of(), "NONE");
+        when(searchService.searchWithoutGraph(
+                eq(repositoryId), eq(question), anyInt(), eq(List.of(spaceId)), eq(spaceId),
+                eq(GraphSearchIntent.EXPLAIN))).thenReturn(List.of(candidate));
+        when(searchService.cheapSearch(
+                eq(repositoryId), eq(question), anyInt(), eq(List.of(spaceId)), eq(spaceId)))
+                .thenReturn(List.of(candidate));
+        when(codeRepository.findActiveChunksByIds(
+                eq(repositoryId), eq(List.of(candidate.chunkId())), eq(List.of(spaceId)), eq(spaceId)))
+                .thenReturn(List.of(candidate));
+        when(pipelineService.codeSearchLimit(anyInt())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(pipelineService.codeRetrievalDeadlineSeconds()).thenReturn(5);
+        when(pipelineService.codeRetrievalMaxIterations()).thenReturn(1);
+        when(pipelineService.planCodeEvidenceSearch(eq(question), eq("method"), anyString(), anyInt()))
+                .thenReturn(searchPlan);
+        when(pipelineService.assessCode(eq(question), anyList(), anyInt(), anyInt()))
+                .thenReturn(new RagPipelineService.EvidenceAssessment(
+                        true, 1, 0.5, 1, 1.0, List.of("callable body observed")));
+        when(pipelineService.planCodeEvidenceIteration(
+                eq(question), eq("method"), anyList(), anyInt(), anyList(), anyList(), anyInt(), anyString()))
+                .thenReturn(unresolvedPlan);
+
+        var retrieve = CodeRagOrchestrator.class.getDeclaredMethod(
+                "retrieveCodeEvidence", UUID.class, UUID.class, List.class, String.class,
+                CodeQuestionMode.class, int.class, RagConversationContext.class);
+        retrieve.setAccessible(true);
+        Object retrieval = retrieve.invoke(
+                orchestrator, repositoryId, spaceId, List.of(spaceId), question,
+                CodeQuestionMode.EXPLAIN_METHOD, 8, null);
+        var resultsAccessor = retrieval.getClass().getDeclaredMethod("results");
+        resultsAccessor.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<CodeSearchResult> results = (List<CodeSearchResult>) resultsAccessor.invoke(retrieval);
+
+        assertThat(results).singleElement().satisfies(result ->
+                assertThat(CodeEvidenceOperationProvenance.from(result))
+                        .anySatisfy(provenance -> {
+                            assertThat(provenance.operationType()).isEqualTo("read_chunk");
+                            assertThat(provenance.claimIds()).containsExactly(claim.claimId());
+                        }));
+        verify(codeRepository).findActiveChunksByIds(
+                eq(repositoryId), eq(List.of(candidate.chunkId())), eq(List.of(spaceId)), eq(spaceId));
+    }
+
+    @Test
     void approvedInitialGraphReadRetainsEveryExecutorBoundedResult() {
         UUID repositoryId = UUID.randomUUID();
         UUID spaceId = UUID.randomUUID();

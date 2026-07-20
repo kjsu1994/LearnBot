@@ -4,6 +4,7 @@ import com.learnbot.dto.CodeSearchResult;
 import com.learnbot.service.RagPipelineService;
 import com.learnbot.service.coderag.model.CodeEvidenceOperationProvenance;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -29,10 +30,21 @@ public final class CodeInitialEvidenceSelector {
         }
 
         int reservation = Math.min(MAX_STRUCTURAL_RESERVATION, Math.max(1, safeLimit / 2));
-        LinkedHashMap<UUID, CodeSearchResult> selected = new LinkedHashMap<>();
-        results.stream()
+        List<CodeSearchResult> structural = results.stream()
                 .filter(result -> isSourceBundleEvidence(operation, result))
+                .toList();
+        List<CodeSearchResult> reserved = new ArrayList<>(structural.stream()
                 .limit(reservation)
+                .toList());
+        if (reservation > 1
+                && reserved.stream().noneMatch(result -> isSourceBoundaryEvidence(operation, result))) {
+            structural.stream()
+                    .filter(result -> isSourceBoundaryEvidence(operation, result))
+                    .findFirst()
+                    .ifPresent(boundary -> reserved.set(reserved.size() - 1, boundary));
+        }
+        LinkedHashMap<UUID, CodeSearchResult> selected = new LinkedHashMap<>();
+        reserved.stream()
                 .forEach(result -> selected.putIfAbsent(result.chunkId(), result));
         for (CodeSearchResult result : results) {
             if (selected.size() >= safeLimit) break;
@@ -51,5 +63,16 @@ public final class CodeInitialEvidenceSelector {
                 .map(CodeEvidenceOperationProvenance::operationType)
                 .anyMatch(type -> "read_source_member".equals(type)
                         || "read_source_boundary".equals(type));
+    }
+
+    private boolean isSourceBoundaryEvidence(
+            RagPipelineService.CodeSearchOperation operation,
+            CodeSearchResult result
+    ) {
+        if (result == null || result.chunkId() == null) return false;
+        return CodeEvidenceOperationProvenance.from(result).stream()
+                .filter(provenance -> Objects.equals(operation.operationId(), provenance.operationId()))
+                .map(CodeEvidenceOperationProvenance::operationType)
+                .anyMatch("read_source_boundary"::equals);
     }
 }

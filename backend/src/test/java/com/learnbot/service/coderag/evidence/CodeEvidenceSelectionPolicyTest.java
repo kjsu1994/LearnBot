@@ -500,6 +500,74 @@ class CodeEvidenceSelectionPolicyTest {
     }
 
     @Test
+    void distinctDirectObservationsCanUseHalfOfTheDefaultAnswerSlate() {
+        List<CodeSearchResult> semantic = List.of(
+                result("src/Overview0.java", 1.0, Map.of()),
+                result("src/Overview1.java", 0.99, Map.of()),
+                result("src/Overview2.java", 0.98, Map.of()),
+                result("src/Overview3.java", 0.97, Map.of()),
+                result("src/Overview4.java", 0.96, Map.of()),
+                result("src/Overview5.java", 0.95, Map.of()));
+        List<CodeSearchResult> observations = List.of(
+                result("src/FlowEntry.java", 0.4, Map.of()),
+                result("src/FlowWorker.java", 0.3, Map.of()),
+                result("src/FlowStore.java", 0.2, Map.of()),
+                result("src/FlowNotifier.java", 0.1, Map.of()));
+        Map<String, CodeEvidenceRetentionPlan.Entry> entries = new java.util.LinkedHashMap<>();
+        for (int index = 0; index < observations.size(); index++) {
+            CodeSearchResult observation = observations.get(index);
+            entries.put(CodeEvidenceId.from(observation), new CodeEvidenceRetentionPlan.Entry(
+                    CodeEvidenceRetentionPlan.Level.PREFERRED,
+                    CodeIntelligenceAuthority.SYNTAX,
+                    Set.of("operation:flow_stage_" + index, "claim:flow"),
+                    CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION));
+        }
+        List<CodeSearchResult> ranked = new ArrayList<>(semantic);
+        ranked.addAll(observations);
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                ranked, semantic, CodeEvidenceRetentionPlan.of(entries), 8);
+
+        assertThat(selected).hasSize(8).containsAll(observations);
+        assertThat(selected.stream().filter(semantic::contains)).hasSize(4);
+    }
+
+    @Test
+    void mixedDirectSourceProtectionUsesAtMostHalfOfASmallSlate() {
+        List<CodeSearchResult> semantic = List.of(
+                result("src/Overview0.java", 1.0, Map.of()),
+                result("src/Overview1.java", 0.99, Map.of()),
+                result("src/Overview2.java", 0.98, Map.of()),
+                result("src/Overview3.java", 0.97, Map.of()));
+        CodeSearchResult firstProof = result("src/FlowEntry.java", 0.4, Map.of());
+        CodeSearchResult secondProof = result("src/FlowWorker.java", 0.3, Map.of());
+        CodeSearchResult firstObservation = result("src/FlowStore.java", 0.2, Map.of());
+        CodeSearchResult secondObservation = result("src/FlowNotifier.java", 0.1, Map.of());
+        CodeEvidenceRetentionPlan plan = CodeEvidenceRetentionPlan.of(Map.of(
+                CodeEvidenceId.from(firstProof), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_entry"), CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF),
+                CodeEvidenceId.from(secondProof), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_worker"), CodeEvidenceRetentionPlan.Basis.DIRECT_PROOF),
+                CodeEvidenceId.from(firstObservation), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_store"), CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION),
+                CodeEvidenceId.from(secondObservation), new CodeEvidenceRetentionPlan.Entry(
+                        CodeEvidenceRetentionPlan.Level.PREFERRED, CodeIntelligenceAuthority.SYNTAX,
+                        Set.of("operation:read_notifier"), CodeEvidenceRetentionPlan.Basis.DIRECT_OBSERVATION)));
+        List<CodeSearchResult> ranked = new ArrayList<>(semantic);
+        ranked.addAll(List.of(firstProof, secondProof, firstObservation, secondObservation));
+
+        List<CodeSearchResult> selected = CodeEvidenceSelectionPolicy.selectFinalEvidence(
+                ranked, semantic, plan, 4);
+
+        assertThat(selected).hasSize(4).contains(firstProof, secondProof);
+        assertThat(selected.stream().filter(semantic::contains)).hasSize(2);
+        assertThat(selected).doesNotContain(firstObservation, secondObservation);
+    }
+
+    @Test
     void typedPlanChangesMembershipButPreservesPresentationRankAndHardLimit() {
         CodeSearchResult semantic = result("src/Semantic.java", 1.0, Map.of());
         CodeSearchResult preferred = result("src/Preferred.java", 0.5, Map.of());

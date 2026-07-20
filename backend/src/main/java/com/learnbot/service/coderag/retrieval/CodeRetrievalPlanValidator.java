@@ -143,11 +143,11 @@ public final class CodeRetrievalPlanValidator {
                 .flatMap(inventory -> inventory.symbols().stream())
                 .filter(this::isTrustedCallableOutline)
                 .map(CodeSymbolOutline::name)
-                .map(this::canonicalSymbol);
+                .map(CodeRetrievalPlanValidator::canonicalSymbol);
         java.util.stream.Stream<String> observedCalls = repositoryMap.navigationHandles().stream()
                 .filter(handle -> handle.kind() == CodeNavigationHandle.Kind.CALL)
                 .map(CodeNavigationHandle::symbol)
-                .map(this::canonicalSymbol);
+                .map(CodeRetrievalPlanValidator::canonicalSymbol);
         return java.util.stream.Stream.concat(inventoryCallables, observedCalls)
                 .filter(symbol -> distinctiveTokens(symbol).size() >= 2)
                 .anyMatch(symbol -> containsExactIdentifier(operation.query(), symbol));
@@ -169,7 +169,7 @@ public final class CodeRetrievalPlanValidator {
         return exact.matcher(query).find();
     }
 
-    private String canonicalSymbol(String value) {
+    static String canonicalSymbol(String value) {
         String symbol = value == null ? "" : value.trim();
         int parameters = symbol.indexOf('(');
         if (parameters >= 0) symbol = symbol.substring(0, parameters);
@@ -299,7 +299,7 @@ public final class CodeRetrievalPlanValidator {
         return matched >= required && matched * 2 > left.size();
     }
 
-    private int matchedTargetTokenCount(Set<String> source, Set<String> target) {
+    static int matchedTargetTokenCount(Set<String> source, Set<String> target) {
         if (source == null || target == null || source.isEmpty() || target.isEmpty()) return 0;
         List<String> sources = source.stream().sorted().toList();
         List<String> targets = target.stream().sorted().toList();
@@ -315,7 +315,7 @@ public final class CodeRetrievalPlanValidator {
     }
 
     /** Maximum one-to-one lexical matching prevents one short prefix from covering many target terms. */
-    private boolean assignTokenMatch(
+    private static boolean assignTokenMatch(
             int sourceIndex,
             List<String> sources,
             List<String> targets,
@@ -336,7 +336,7 @@ public final class CodeRetrievalPlanValidator {
         return false;
     }
 
-    private Set<String> claimBehaviorTokens(RagPipelineService.CodeEvidenceChecklistItem claim) {
+    static Set<String> claimBehaviorTokens(RagPipelineService.CodeEvidenceChecklistItem claim) {
         if (claim == null) return Set.of();
         LinkedHashSet<String> tokens = new LinkedHashSet<>();
         tokens.addAll(distinctiveTokens(claim.action()));
@@ -409,7 +409,7 @@ public final class CodeRetrievalPlanValidator {
                 right.stream().anyMatch(rightToken -> lexicalMatch(leftToken, rightToken)));
     }
 
-    private Set<String> distinctiveTokens(String value) {
+    static Set<String> distinctiveTokens(String value) {
         String split = value == null ? "" : value
                 .replaceAll("([\\p{Ll}\\p{N}])([\\p{Lu}])", "$1 $2")
                 .replaceAll("[^\\p{L}\\p{N}_]+", " ")
@@ -422,7 +422,7 @@ public final class CodeRetrievalPlanValidator {
         return Set.copyOf(tokens);
     }
 
-    private boolean lexicalMatch(String left, String right) {
+    static boolean lexicalMatch(String left, String right) {
         if (left.equals(right)) return true;
         if (left.codePointCount(0, left.length()) < 2 || right.codePointCount(0, right.length()) < 2) return false;
         return left.startsWith(right) || right.startsWith(left);
