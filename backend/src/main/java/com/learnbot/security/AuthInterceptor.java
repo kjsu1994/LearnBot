@@ -22,20 +22,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI();
-        if ("/api/auth/login".equals(path) || "/api/auth/cli-login".equals(path) || "/api/auth/refresh".equals(path)
-                || "/api/auth/cli-device-session/plan".equals(path)
-                || "/api/auth/cli-device-session/create/plan".equals(path)
-                || "/api/auth/cli-device-session/create".equals(path)
-                || "/api/auth/cli-device-session/claim/plan".equals(path)
-                || "/api/auth/cli-device-session/claim-result/plan".equals(path)
-                || "/api/auth/cli-device-session/claim-result".equals(path)) {
-            return true;
-        }
-        if ("/api/local-agents/enrollments".equals(path)
-                || "/api/local-agents/enrollments/exchange".equals(path)) {
-            return true;
-        }
-        if (isLocalAgentTokenEndpoint(path) && hasLocalAgentToken(request)) {
+        if ("/api/auth/login".equals(path) || "/api/auth/refresh".equals(path)) {
             return true;
         }
         String token = extractBearerHeaderToken(request.getHeader("Authorization"));
@@ -55,21 +42,6 @@ public class AuthInterceptor implements HandlerInterceptor {
             return null;
         }
         return authorization.substring("Bearer ".length()).trim();
-    }
-
-    private boolean hasLocalAgentToken(HttpServletRequest request) {
-        String token = request.getHeader("X-Local-Agent-Token");
-        return token != null && !token.isBlank();
-    }
-
-    private boolean isLocalAgentTokenEndpoint(String path) {
-        return "/api/local-agents/heartbeat".equals(path)
-                || "/api/local-agents/ws".equals(path)
-                || "/api/local-agents/self".equals(path)
-                || path.matches("/api/local-agents/enrollments/[^/]+/confirm")
-                || path.matches("/api/local-agents/self/credential-rotations/[^/]+/confirm")
-                || "/api/local-agents/self/credential-rotations".equals(path)
-                || path.startsWith("/api/local-agents/tools/");
     }
 
     private String extractCookie(HttpServletRequest request, String name) {

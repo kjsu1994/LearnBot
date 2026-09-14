@@ -1,4 +1,4 @@
-# Generated for one server by Initialize-LocalAgentLanHttp.ps1.
+# Generated for one server by scripts/deploy/Initialize-LanHttp.ps1.
 # Direct enterprise LAN profile: never trust client-supplied edge headers.
 map $remote_addr $learnbot_client_ip {
     default $remote_addr;

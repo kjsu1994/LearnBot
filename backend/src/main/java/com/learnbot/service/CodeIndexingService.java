@@ -194,7 +194,7 @@ public class CodeIndexingService {
                 resolvedSpaceId,
                 user.id()
         );
-        auditService.log(user, "CODE_LOCAL_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Local code repository was registered for Local Agent work.");
+        auditService.log(user, "CODE_LOCAL_REPOSITORY_CREATED", "CODE_REPOSITORY", record.id(), resolvedSpaceId, "Local code repository was registered for indexing.");
         return record;
     }
 

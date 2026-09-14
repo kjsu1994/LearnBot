@@ -20,7 +20,6 @@ public class LearnBotProperties {
     private Code code = new Code();
     private Document document = new Document();
     private Auth auth = new Auth();
-    private LocalAgent localAgent = new LocalAgent();
     private Transfer transfer = new Transfer();
     private Retention retention = new Retention();
 
@@ -96,13 +95,7 @@ public class LearnBotProperties {
         this.auth = auth;
     }
 
-    public LocalAgent getLocalAgent() {
-        return localAgent;
-    }
 
-    public void setLocalAgent(LocalAgent localAgent) {
-        this.localAgent = localAgent;
-    }
 
     public Transfer getTransfer() {
         return transfer;
@@ -1283,9 +1276,6 @@ public class LearnBotProperties {
         @NotBlank
         private String credentialSecret = "learnbot-local-dev-secret-change-me";
 
-        private boolean serverLocalMutationEnabled = false;
-        private boolean finalResultPublicationEnabled = true;
-        private boolean finalAnswerSaveEnabled = true;
 
         private Context context = new Context();
         private Graph graph = new Graph();
@@ -1370,29 +1360,11 @@ public class LearnBotProperties {
             this.credentialSecret = credentialSecret;
         }
 
-        public boolean isServerLocalMutationEnabled() {
-            return serverLocalMutationEnabled;
-        }
 
-        public void setServerLocalMutationEnabled(boolean serverLocalMutationEnabled) {
-            this.serverLocalMutationEnabled = serverLocalMutationEnabled;
-        }
 
-        public boolean isFinalResultPublicationEnabled() {
-            return finalResultPublicationEnabled;
-        }
 
-        public void setFinalResultPublicationEnabled(boolean finalResultPublicationEnabled) {
-            this.finalResultPublicationEnabled = finalResultPublicationEnabled;
-        }
 
-        public boolean isFinalAnswerSaveEnabled() {
-            return finalAnswerSaveEnabled;
-        }
 
-        public void setFinalAnswerSaveEnabled(boolean finalAnswerSaveEnabled) {
-            this.finalAnswerSaveEnabled = finalAnswerSaveEnabled;
-        }
 
         public Context getContext() {
             return context;
@@ -1883,35 +1855,7 @@ public class LearnBotProperties {
         }
     }
 
-    public static class LocalAgent {
-        private boolean websocketEnabled = false;
-        private boolean patchExecutionReleaseEnabled = true;
-        private boolean approvedExecutionSequenceCreationEnabled = true;
 
-        public boolean isWebsocketEnabled() {
-            return websocketEnabled;
-        }
-
-        public void setWebsocketEnabled(boolean websocketEnabled) {
-            this.websocketEnabled = websocketEnabled;
-        }
-
-        public boolean isPatchExecutionReleaseEnabled() {
-            return patchExecutionReleaseEnabled;
-        }
-
-        public void setPatchExecutionReleaseEnabled(boolean patchExecutionReleaseEnabled) {
-            this.patchExecutionReleaseEnabled = patchExecutionReleaseEnabled;
-        }
-
-        public boolean isApprovedExecutionSequenceCreationEnabled() {
-            return approvedExecutionSequenceCreationEnabled;
-        }
-
-        public void setApprovedExecutionSequenceCreationEnabled(boolean approvedExecutionSequenceCreationEnabled) {
-            this.approvedExecutionSequenceCreationEnabled = approvedExecutionSequenceCreationEnabled;
-        }
-    }
 
     public static class Transfer {
         @NotBlank

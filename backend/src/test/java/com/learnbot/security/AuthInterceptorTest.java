@@ -3,108 +3,38 @@ package com.learnbot.security;
 import com.learnbot.service.AuthService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class AuthInterceptorTest {
-    @Test
-    void cliLoginBypassesAuthenticationSoCliCanEstablishStoredSession() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-login");
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/auth/login", "/api/auth/refresh"})
+    void webSessionEntryPointsRemainPublic(String path) {
+        var auth = mock(AuthService.class);
+        assertThat(new AuthInterceptor(auth).preHandle(new MockHttpServletRequest("POST", path), new MockHttpServletResponse(), new Object())).isTrue();
+        verifyNoInteractions(auth);
+    }
 
-        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
-
-        assertThat(allowed).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/auth/cli-login", "/api/auth/cli-device-session/create", "/api/local-agents/enrollments", "/api/local-agents/self", "/api/local-agents/tools/next", "/api/code/ask", "/api/rag/ask"})
+    void agentHeaderCannotBypassWebAuthentication(String path) {
+        var auth = mock(AuthService.class);
+        var request = new MockHttpServletRequest("POST", path);
+        request.addHeader("X-Local-Agent-Token", "retired-token");
+        assertThatThrownBy(() -> new AuthInterceptor(auth).preHandle(request, new MockHttpServletResponse(), new Object())).isInstanceOf(UnauthorizedException.class);
+        verifyNoInteractions(auth);
     }
 
     @Test
-    void cliDeviceSessionPlanBypassesAuthenticationAsReadOnlyPlan() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-device-session/plan");
-
-        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
-
-        assertThat(allowed).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void cliDeviceSessionCreatePlanBypassesAuthenticationAsReadOnlyPlan() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-device-session/create/plan");
-
-        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
-
-        assertThat(allowed).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void cliDeviceSessionClaimPlanBypassesAuthenticationAsReadOnlyPlan() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-device-session/claim/plan");
-
-        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
-
-        assertThat(allowed).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void cliDeviceSessionClaimResultPlanBypassesAuthenticationAsReadOnlyPlan() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/cli-device-session/claim-result/plan");
-
-        var allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
-
-        assertThat(allowed).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void otherEndpointsStillRequireBearerOrCookieToken() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/auth/me");
-        request.setCookies(new Cookie("other", "token"));
-
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                        interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-                .isInstanceOf(UnauthorizedException.class);
-    }
-
-    @Test
-    void localAgentSelfRevokeAcceptsAgentTokenForControllerAuthentication() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("DELETE", "/api/local-agents/self");
-        request.addHeader("X-Local-Agent-Token", "agent-token");
-
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void enrollmentConfirmationAcceptsPendingCandidateToken() {
-        AuthService authService = mock(AuthService.class);
-        AuthInterceptor interceptor = new AuthInterceptor(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest(
-                "POST", "/api/local-agents/enrollments/" + java.util.UUID.randomUUID() + "/confirm"
-        );
-        request.addHeader("X-Local-Agent-Token", "candidate-token");
-
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-        verify(authService, never()).authenticateToken(org.mockito.ArgumentMatchers.anyString());
+    void ragStillAuthenticatesWebCookie() {
+        var auth = mock(AuthService.class);
+        var request = new MockHttpServletRequest("POST", "/api/code/ask");
+        request.setCookies(new Cookie("learnbot_access_token", "web-token"));
+        assertThat(new AuthInterceptor(auth).preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verify(auth).authenticateToken("web-token");
     }
 }

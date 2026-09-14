@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { compareNonRegression } from './non-regression.mjs';
 
 function readArg(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -12,6 +13,8 @@ function readArg(name, fallback = "") {
 const baselinePath = readArg("--baseline");
 const currentPath = readArg("--current");
 const outputPath = readArg("--output");
+const mode = readArg('--mode', 'absolute');
+if (!['absolute', 'non-regression'].includes(mode)) throw new Error('Unknown comparison mode');
 const maxLatencyIncreaseRatio = Number(readArg("--max-latency-increase-ratio", "0.2"));
 
 if (!baselinePath || !currentPath) {
@@ -27,6 +30,12 @@ const warnings = [];
 validateSchema("baseline", baseline, regressions);
 validateSchema("current", current, regressions);
 
+if (mode === 'non-regression') {
+  const baselineIdentity = readArg('--baseline-identity');
+  const currentIdentity = readArg('--current-identity');
+  if (!baselineIdentity || !currentIdentity) throw new Error('Non-regression comparison requires --baseline-identity and --current-identity');
+  regressions.push(...compareNonRegression(baseline, current, readReport(baselineIdentity), readReport(currentIdentity), maxLatencyIncreaseRatio));
+} else {
 if (current.passed !== true) {
   regressions.push({
     type: "current-report-not-passed",
@@ -70,9 +79,11 @@ for (const [id, baselineCase] of baselineCases) {
   compareCaseMetric(id, baselineCase, currentCase, "followUp", "quality");
   compareCaseLatency(id, baselineCase, currentCase);
 }
+}
 
 const comparison = {
   schema: "learnbot.quality.rag-score-comparison.v1",
+  mode,
   comparedAt: new Date().toISOString(),
   baselineReport: path.resolve(baselinePath),
   currentReport: path.resolve(currentPath),

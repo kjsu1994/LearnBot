@@ -39,7 +39,7 @@ obj/
 **/bin/
 **/obj/
 
-# Local Agent signed release output
+# Archived Local Agent signed release output (not deployed)
 artifacts/local-agent/releases/*
 !artifacts/local-agent/releases/.gitkeep
 artifacts/local-agent/stable/*
@@ -48,7 +48,6 @@ artifacts/local-agent/pilot/*
 !artifacts/local-agent/pilot/.gitkeep
 artifacts/local-agent/trust/*
 !artifacts/local-agent/trust/.gitkeep
-deploy/local-agent-lan-http.generated.inc
 
 # Local runtime data and object-store volume mirrors
 postgres-data/
@@ -69,3 +68,5 @@ learnbot-db*.sql
 .tmp/
 tmp/
 *.tmp
+.env.lan-http
+deploy/lan-http.generated.inc

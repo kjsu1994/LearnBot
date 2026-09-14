@@ -8,7 +8,6 @@ import { CodeWorkspace } from './components/code/CodeWorkspace.jsx';
 import { DocumentWorkspace } from './components/documents/DocumentWorkspace.jsx';
 import { HomePage, LoginScreen, WorkspaceShell } from './components/layout/Layout.jsx';
 import { SavedAnswersWorkspace } from './components/saved/SavedAnswersWorkspace.jsx';
-import { LocalAgentSettings } from './components/local-agent/LocalAgentSettings.jsx';
 import { useAppRoute } from './features/app/useAppRoute.js';
 import { useBusyTasks } from './features/app/useBusyTasks.js';
 import { useCodeRagController } from './features/code/useCodeRagController.js';
@@ -205,36 +204,6 @@ export default function App() {
     codeMode,
     setCodeMode,
     codeAnswer,
-    codeAgentInstruction,
-    setCodeAgentInstruction,
-    codeAgentPlan,
-    codeAgentPatch,
-    codeAgentApplyResult,
-    codeAgentTestResult,
-    codeAgentMutationPolicy,
-    codeAgentLoopPreview,
-    codeAgentLoopTimelines,
-    codeAgentLoopRunnerPreview,
-    codeAgentLoopRunnerToolSelectionPreview,
-    codeAgentLoopRunnerEnqueueResult,
-    codeAgentLoopRunnerReleaseReviewResult,
-    codeAgentLoopRunnerFinalResultPublicationPreview,
-    codeAgentLoopRunnerM8EntryReadiness,
-    codeAgentLoopRunnerQueuedObservationResult,
-    codeAgentLoopRunnerObservationContinuation,
-    codeAgentLocalPatchRequest,
-    codeAgentLocalPatchReadiness,
-    codeAgentLocalPatchDryRunRequest,
-    codeAgentLocalPatchDryRunResult,
-    codeAgentLocalRepositoryObservationRequest,
-    codeAgentLocalRepositoryObservationResult,
-    codeAgentApprovedExecutionFlowInspection,
-    codeAgentValidatedDryRunIntentEligibility,
-    codeAgentValidatedDryRunIntentTransitionPreview,
-    localAgentStatus,
-    localAgentTokens,
-    localAgentPendingApprovals,
-    localAgentDeviceApprovalResult,
     codeConversations,
     codeConversationId,
     codeConversationTurns,
@@ -267,40 +236,6 @@ export default function App() {
     openCodeFile,
     askCode,
     cancelCodeAsk,
-    generateCodeAgentPlan,
-    generateCodeAgentGuide,
-    generateCodeTurnChangeAssist,
-    previewCodeAgentLoop,
-    previewCodeAgentLoopRunner,
-    previewCodeAgentLoopRunnerToolSelection,
-    enqueueCodeAgentLoopRunnerReadOnly,
-    reviewCodeAgentLoopRunnerReleaseGate,
-    previewCodeAgentLoopRunnerFinalResultPublication,
-    previewCodeAgentLoopRunnerM8EntryReadiness,
-    enqueueCodeAgentLoopRunnerSelectedReadOnly,
-    refreshCodeAgentLoopRunnerQueuedObservation,
-    refreshCodeAgentLoopTimelines,
-    generateCodeAgentPatch,
-    prepareCodeAgentLocalPatchRequest,
-    decideCodeAgentLocalPatchApproval,
-    refreshCodeAgentLocalPatchReadiness,
-    queueCodeAgentLocalPatchDryRun,
-    queueCodeAgentReleaseFreshObservations,
-    releaseCodeAgentLocalPatchForExecution,
-    refreshCodeAgentLocalPatchDryRunResult,
-    queueCodeAgentLocalRepositoryObservation,
-    refreshCodeAgentLocalRepositoryObservationResult,
-    inspectCodeAgentApprovedExecutionFlow,
-    inspectCodeAgentValidatedDryRunIntentEligibility,
-    previewCodeAgentValidatedDryRunIntentTransition,
-    refreshLocalAgentStatus,
-    refreshLocalAgentPendingApprovals,
-    refreshLocalAgentTokens,
-    revokeLocalAgentToken,
-    approveLocalAgentDeviceSession,
-    applyCodeAgentPatch,
-    rollbackCodeAgentPatch,
-    runCodeAgentTest,
     loadJobDiagnostics,
     saveCodeAnswer,
     searchCode,
@@ -1012,13 +947,6 @@ export default function App() {
       loading={loading}
     >
 
-        {activeView === 'localAgent' && (
-          <LocalAgentSettings
-            request={request}
-            approvalMode={routePath === routePaths.localAgentConnect}
-          />
-        )}
-
         {activeView === 'code' && (
           <CodeWorkspace
             repoForm={repoForm}
@@ -1046,36 +974,6 @@ export default function App() {
             codeMode={codeMode}
             setCodeMode={setCodeMode}
             codeAnswer={codeAnswer}
-            codeAgentInstruction={codeAgentInstruction}
-            setCodeAgentInstruction={setCodeAgentInstruction}
-            codeAgentPlan={codeAgentPlan}
-            codeAgentPatch={codeAgentPatch}
-            codeAgentApplyResult={codeAgentApplyResult}
-            codeAgentTestResult={codeAgentTestResult}
-            codeAgentMutationPolicy={codeAgentMutationPolicy}
-            codeAgentLoopPreview={codeAgentLoopPreview}
-            codeAgentLoopTimelines={codeAgentLoopTimelines}
-            codeAgentLoopRunnerPreview={codeAgentLoopRunnerPreview}
-            codeAgentLoopRunnerToolSelectionPreview={codeAgentLoopRunnerToolSelectionPreview}
-            codeAgentLoopRunnerEnqueueResult={codeAgentLoopRunnerEnqueueResult}
-            codeAgentLoopRunnerReleaseReviewResult={codeAgentLoopRunnerReleaseReviewResult}
-            codeAgentLoopRunnerFinalResultPublicationPreview={codeAgentLoopRunnerFinalResultPublicationPreview}
-            codeAgentLoopRunnerM8EntryReadiness={codeAgentLoopRunnerM8EntryReadiness}
-            codeAgentLoopRunnerQueuedObservationResult={codeAgentLoopRunnerQueuedObservationResult}
-            codeAgentLoopRunnerObservationContinuation={codeAgentLoopRunnerObservationContinuation}
-            codeAgentLocalPatchRequest={codeAgentLocalPatchRequest}
-            codeAgentLocalPatchReadiness={codeAgentLocalPatchReadiness}
-            codeAgentLocalPatchDryRunRequest={codeAgentLocalPatchDryRunRequest}
-            codeAgentLocalPatchDryRunResult={codeAgentLocalPatchDryRunResult}
-            codeAgentLocalRepositoryObservationRequest={codeAgentLocalRepositoryObservationRequest}
-            codeAgentLocalRepositoryObservationResult={codeAgentLocalRepositoryObservationResult}
-            codeAgentApprovedExecutionFlowInspection={codeAgentApprovedExecutionFlowInspection}
-            codeAgentValidatedDryRunIntentEligibility={codeAgentValidatedDryRunIntentEligibility}
-            codeAgentValidatedDryRunIntentTransitionPreview={codeAgentValidatedDryRunIntentTransitionPreview}
-            localAgentStatus={localAgentStatus}
-            localAgentTokens={localAgentTokens}
-            localAgentPendingApprovals={localAgentPendingApprovals}
-            localAgentDeviceApprovalResult={localAgentDeviceApprovalResult}
             codeConversations={codeConversations}
             codeConversationId={codeConversationId}
             codeConversationTurns={codeConversationTurns}
@@ -1111,40 +1009,6 @@ export default function App() {
             openCodeFile={openCodeFile}
             askCode={askCode}
             cancelCodeAsk={cancelCodeAsk}
-            generateCodeAgentPlan={generateCodeAgentPlan}
-            generateCodeAgentGuide={generateCodeAgentGuide}
-            generateCodeTurnChangeAssist={generateCodeTurnChangeAssist}
-            previewCodeAgentLoop={previewCodeAgentLoop}
-            previewCodeAgentLoopRunner={previewCodeAgentLoopRunner}
-            previewCodeAgentLoopRunnerToolSelection={previewCodeAgentLoopRunnerToolSelection}
-            enqueueCodeAgentLoopRunnerReadOnly={enqueueCodeAgentLoopRunnerReadOnly}
-            reviewCodeAgentLoopRunnerReleaseGate={reviewCodeAgentLoopRunnerReleaseGate}
-            previewCodeAgentLoopRunnerFinalResultPublication={previewCodeAgentLoopRunnerFinalResultPublication}
-            previewCodeAgentLoopRunnerM8EntryReadiness={previewCodeAgentLoopRunnerM8EntryReadiness}
-            enqueueCodeAgentLoopRunnerSelectedReadOnly={enqueueCodeAgentLoopRunnerSelectedReadOnly}
-            refreshCodeAgentLoopRunnerQueuedObservation={refreshCodeAgentLoopRunnerQueuedObservation}
-            refreshCodeAgentLoopTimelines={refreshCodeAgentLoopTimelines}
-            generateCodeAgentPatch={generateCodeAgentPatch}
-            prepareCodeAgentLocalPatchRequest={prepareCodeAgentLocalPatchRequest}
-            decideCodeAgentLocalPatchApproval={decideCodeAgentLocalPatchApproval}
-            refreshCodeAgentLocalPatchReadiness={refreshCodeAgentLocalPatchReadiness}
-            queueCodeAgentLocalPatchDryRun={queueCodeAgentLocalPatchDryRun}
-            queueCodeAgentReleaseFreshObservations={queueCodeAgentReleaseFreshObservations}
-            releaseCodeAgentLocalPatchForExecution={releaseCodeAgentLocalPatchForExecution}
-            refreshCodeAgentLocalPatchDryRunResult={refreshCodeAgentLocalPatchDryRunResult}
-            queueCodeAgentLocalRepositoryObservation={queueCodeAgentLocalRepositoryObservation}
-            refreshCodeAgentLocalRepositoryObservationResult={refreshCodeAgentLocalRepositoryObservationResult}
-            inspectCodeAgentApprovedExecutionFlow={inspectCodeAgentApprovedExecutionFlow}
-            inspectCodeAgentValidatedDryRunIntentEligibility={inspectCodeAgentValidatedDryRunIntentEligibility}
-            previewCodeAgentValidatedDryRunIntentTransition={previewCodeAgentValidatedDryRunIntentTransition}
-            refreshLocalAgentStatus={refreshLocalAgentStatus}
-            refreshLocalAgentPendingApprovals={refreshLocalAgentPendingApprovals}
-            refreshLocalAgentTokens={refreshLocalAgentTokens}
-            revokeLocalAgentToken={revokeLocalAgentToken}
-            approveLocalAgentDeviceSession={approveLocalAgentDeviceSession}
-            applyCodeAgentPatch={applyCodeAgentPatch}
-            rollbackCodeAgentPatch={rollbackCodeAgentPatch}
-            runCodeAgentTest={runCodeAgentTest}
             searchCode={searchCode}
             findReferences={findReferences}
             loading={loading}

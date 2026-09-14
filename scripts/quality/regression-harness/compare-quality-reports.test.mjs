@@ -27,11 +27,11 @@ const baselineReport = {
   },
   qualitySignals: [
     { name: "document-rag-grounding", status: "covered", missingCoverage: [], failingCoverage: [] },
-    { name: "approved-local-agent-flow", status: "covered", missingCoverage: [], failingCoverage: [] },
+    { name: "code-rag-grounding", status: "covered", missingCoverage: [], failingCoverage: [] },
   ],
   results: [
     { name: "backend-focused-quality-regressions", status: "passed", durationSeconds: 10 },
-    { name: "local-agent-approved-execution-flow-contract", status: "passed", durationSeconds: 2 },
+    { name: "code-rag-grounding-contract", status: "passed", durationSeconds: 2 },
   ],
   durationSeconds: 20,
   passed: true,
@@ -70,7 +70,7 @@ try {
     durationSeconds: 27,
     results: [
       { name: "backend-focused-quality-regressions", status: "passed", durationSeconds: 13 },
-      { name: "local-agent-approved-execution-flow-contract", status: "passed", durationSeconds: 2 },
+      { name: "code-rag-grounding-contract", status: "passed", durationSeconds: 2 },
     ],
   }, null, 2)}\n`, "utf8");
 

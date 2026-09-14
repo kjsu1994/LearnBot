@@ -1,0 +1,5 @@
+services:
+  nginx:
+    # Serve the frontend built into the image for LAN deployments.
+    volumes: !override
+      - ./deploy/lan-http.generated.inc:/etc/nginx/conf.d/client-ip-policy.inc:ro

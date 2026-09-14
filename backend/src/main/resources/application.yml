@@ -140,9 +140,6 @@ learnbot:
     top-k: ${LEARNBOT_CODE_TOP_K:10}
     index-threads: ${LEARNBOT_CODE_INDEX_THREADS:2}
     credential-secret: ${LEARNBOT_CODE_CREDENTIAL_SECRET:learnbot-local-dev-secret-change-me}
-    server-local-mutation-enabled: ${LEARNBOT_CODE_SERVER_LOCAL_MUTATION_ENABLED:false}
-    final-result-publication-enabled: ${LEARNBOT_CODE_AGENT_FINAL_RESULT_PUBLICATION_ENABLED:true}
-    final-answer-save-enabled: ${LEARNBOT_CODE_AGENT_FINAL_ANSWER_SAVE_ENABLED:true}
     context:
       enabled: ${LEARNBOT_CODE_CONTEXT_ENABLED:true}
       llm-summary-enabled: ${LEARNBOT_CODE_CONTEXT_LLM_SUMMARY_ENABLED:true}
@@ -208,10 +205,6 @@ learnbot:
     bootstrap-admin-name: ${LEARNBOT_BOOTSTRAP_ADMIN_NAME:런봇 Admin}
     master-login-id: ${LEARNBOT_MASTER_LOGIN_ID:jinsu.kim}
     session-hours: ${LEARNBOT_SESSION_HOURS:12}
-  local-agent:
-    websocket-enabled: ${LEARNBOT_LOCAL_AGENT_WEBSOCKET_ENABLED:false}
-    patch-execution-release-enabled: ${LEARNBOT_LOCAL_AGENT_PATCH_EXECUTION_RELEASE_ENABLED:true}
-    approved-execution-sequence-creation-enabled: ${LEARNBOT_LOCAL_AGENT_APPROVED_EXECUTION_SEQUENCE_CREATION_ENABLED:true}
   transfer:
     export-dir: ${LEARNBOT_EXPORT_DIR:export}
   retention:

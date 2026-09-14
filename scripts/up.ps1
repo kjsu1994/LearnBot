@@ -3,11 +3,19 @@ param(
     [switch]$NoBuild,
     [switch]$Cpu,
     [switch]$Reranker,
-    [switch]$PullOllama
+    [switch]$PullOllama,
+    [switch]$Lan,
+    [string]$ServerLanIp,
+    [ValidateRange(1, 65535)]
+    [int]$Port = 8083
 )
 
 $ErrorActionPreference = "Stop"
 $shouldBuild = $Build -or -not $NoBuild
+$lanDeployment = $null
+if ($Lan -or -not [string]::IsNullOrWhiteSpace($ServerLanIp)) {
+    $lanDeployment = & (Join-Path $PSScriptRoot 'deploy/Initialize-LanHttp.ps1') -ServerLanIp $ServerLanIp -Port $Port | ConvertFrom-Json
+}
 
 if ([string]::IsNullOrWhiteSpace($env:OLLAMA_CONTEXT_LENGTH) -or $env:OLLAMA_CONTEXT_LENGTH -eq "2048" -or $env:OLLAMA_CONTEXT_LENGTH -eq "4096") {
     $env:OLLAMA_CONTEXT_LENGTH = "12288"
@@ -23,6 +31,11 @@ function Invoke-Compose {
     )
 
     $args = @()
+    if ($null -ne $lanDeployment) {
+        if (Test-Path -LiteralPath '.env') { $args += @('--env-file', '.env') }
+        $args += @('--env-file', $lanDeployment.environmentFile)
+        $ComposeFiles += 'docker-compose.lan-http.yml'
+    }
     foreach ($file in $ComposeFiles) {
         $args += @("-f", $file)
     }
