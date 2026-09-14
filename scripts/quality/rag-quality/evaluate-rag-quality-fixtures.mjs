@@ -806,6 +806,9 @@ function normalizeLiveObserved(response, latencyMs, domain) {
   return {
     answer: response?.answer ?? "",
     effectiveQuestion: response?.effectiveQuestion ?? response?.diagnostics?.effectiveQuestion ?? "",
+    // Preserve server failure/repair traces; HTTP 200 can contain a degraded answer.
+    // Diagnostics are audit data only and do not affect scoring.
+    diagnostics: response?.diagnostics ?? [],
     citationIds: uniqueStrings(citationItems.map(citationIdentity)),
     evidence: sourceItems.map((item, index) => ({
       id: citationIdentity(item) || `evidence-${index + 1}`,

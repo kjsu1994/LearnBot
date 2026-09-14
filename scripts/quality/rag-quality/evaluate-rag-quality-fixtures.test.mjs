@@ -109,7 +109,7 @@ const server = http.createServer(async (request, response) => {
     ],
     conversationId: payload.conversationId || "conv-seeded",
     confidence: "high",
-    diagnostics: [],
+    diagnostics: ["answerQualityTrace unavailable=true reason=ServiceUnavailable"],
   }));
 });
 
@@ -183,6 +183,8 @@ try {
   assert.equal(liveFixtures.schema, "learnbot.quality.rag-live-fixtures.v1");
   assert.equal(liveFixtures.liveCapture.caseDelayMs, 0);
   assert.equal(liveFixtures.cases[0].observed.citationIds[0], "doc-security-policy#chunk-1");
+  assert.deepEqual(liveFixtures.cases[0].observed.diagnostics,
+    ["answerQualityTrace unavailable=true reason=ServiceUnavailable"]);
   assert.equal(liveFixtures.cases[2].observed.effectiveQuestion, "What must be recorded from the security approval policy?");
 
   const authResult = await runNode([
